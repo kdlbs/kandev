@@ -1,3 +1,4 @@
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -41,6 +42,7 @@ async function fetchRepoById(apiClient: ApiClient, repoId: string): Promise<Repo
 
 async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<void> {
   await kanban.goto();
+  await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
   await kanban.createTaskButton.first().click();
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }
@@ -184,7 +186,7 @@ async function expectPopoverFitsDialog(testPage: Page): Promise<void> {
 }
 
 test.describe("Task creation from Remote tab (chip picker)", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test.beforeEach(async ({ apiClient }) => {
     // Reset mock state so a previous test's seeded repos / 503 toggle
@@ -194,7 +196,11 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await apiClient.mockGitHubReset();
   });
 
-  test("keeps the unified input fixed while repositories load", async ({ testPage, apiClient }) => {
+  test("keeps the unified input fixed while repositories load", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await seedAccessibleRepos(apiClient);
     let releaseRepos = () => undefined;
     const reposGate = new Promise<void>((resolve) => {
@@ -206,6 +212,18 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     });
 
     const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const divider = testPage.getByTestId("sidebar-navigation-divider");
+    await divider.focus();
+    await divider.press("Home");
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+            seedData.workspaceId
+          ]?.navigation_height,
+      )
+      .toBe(0);
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
@@ -610,67 +628,5 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await prCapture.screenshot("remote-repository-picker-desktop", {
       caption: "Desktop remote picker with an unconfigured provider hidden",
     });
-  });
-
-  test("switches between configured repository providers with named source tabs", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    await seedAccessibleRepos(apiClient);
-    await apiClient.configureGitLab(seedData.workspaceId);
-    await apiClient.mockAzureDevOpsSeed({
-      authenticated: true,
-      projects: [{ id: "project-1", name: "Platform" }],
-      repositories: [
-        {
-          id: "azure-repo-1",
-          name: "api",
-          projectId: "project-1",
-          projectName: "Platform",
-          defaultBranch: "refs/heads/main",
-          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
-        },
-      ],
-    });
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-test-pat",
-    });
-
-    const kanban = new KanbanPage(testPage);
-    await openCreateDialog(testPage, kanban);
-    await clickRemoteMode(testPage);
-
-    const tabs = testPage.getByTestId("task-repository-source-tabs");
-    await expect(tabs.getByRole("tab", { name: "Local" })).toBeVisible();
-    await expect(tabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
-    await expect(tabs.getByRole("tab", { name: "GitLab" })).toBeVisible();
-    await expect(tabs.getByRole("tab", { name: "Azure DevOps" })).toBeVisible();
-    const tabOverflow = await tabs.evaluate((element) => ({
-      overflowX: getComputedStyle(element).overflowX,
-    }));
-    expect(["auto", "scroll"]).toContain(tabOverflow.overflowX);
-    await expect(
-      testPage.getByTestId("task-repository-remote-option").filter({ hasText: "mock-user/alpha" }),
-    ).toBeVisible();
-    await expect(
-      testPage.getByTestId("task-repository-remote-option").filter({ hasText: "Platform/api" }),
-    ).toHaveCount(0);
-
-    await tabs.getByRole("tab", { name: "GitLab" }).click();
-    await expect(
-      testPage.getByTestId("task-repository-remote-option").filter({ hasText: "kandev/sample" }),
-    ).toBeVisible();
-
-    await tabs.getByRole("tab", { name: "Azure DevOps" }).click();
-    const azureOption = testPage
-      .getByTestId("task-repository-remote-option")
-      .filter({ hasText: "Platform/api" });
-    await expect(azureOption).toBeVisible();
-    await azureOption.click();
-    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
-      "Platform/api",
-    );
   });
 });

@@ -16,6 +16,11 @@ Preserve the task brief when a user starts a prepared session through Chat.
 First extend atomic message admission. Then connect composition and dispatch.
 Finally prove transcript visibility on desktop and phone. All work is sequential.
 
+The [recovery follow-up package](../initial-task-brief-after-recovery/plan.md)
+extends first-message preservation to never-prompted ready sessions. This
+completed package's scope and recorded checks remain the CREATED-path evidence;
+the follow-up owns its new recovery tests and results.
+
 Source: [GitHub issue #3615](https://github.com/kdlbs/kandev/issues/3615).
 Investigated revision: `8892920514250dfc9873725f90d736a5cc7e388a`.
 The issue had no comments or image attachments during investigation.

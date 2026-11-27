@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LocalRepository, Repository } from "@/lib/types/http";
 import type {
   DialogFormState,
@@ -14,17 +14,20 @@ import {
   collectExcludedRepoIds,
   collectSelectedRepoIdentities,
   RepoChip,
+  type RepoChipProps,
 } from "@/components/task-create-dialog-workspace-repo-chips";
 import {
   RemoteRepoChip,
   selectedRemoteRepositoryIdentity,
 } from "@/components/task-create-dialog-remote-repo-chip";
 import {
-  inspectedRemoteRepositoryUpdate,
   makeURLChange,
-  remoteRepositoryUpdateNeeded,
   retryRemoteResolution,
 } from "@/components/task-create-dialog-remote-repo-chips";
+import {
+  inspectedRemoteRepositoryUpdate,
+  remoteRepositoryUpdateNeeded,
+} from "@/components/task-create-dialog-remote-repo-identity";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
 import { DesktopMixedRepositoryChips } from "@/components/task-create-dialog-mixed-repository-chips-surfaces";
 import { MobileMixedRepositorySurface } from "@/components/task-create-dialog-mobile-mixed-repository-surface";
@@ -38,9 +41,15 @@ import type { ExecutorSourcePolicy } from "@/components/task-create-dialog-execu
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
 import {
   remoteOriginBranchesForState,
+  isHostRepositorySelection,
   remoteOriginSelectionNeedsRecovery,
 } from "@/components/task-create-dialog-remote-origin-inspection";
 import { useTranslation } from "react-i18next";
+
+type DiscoveryActions = Pick<
+  RepoChipProps,
+  "onOpenDiscoverySettings" | "onAddHomeAndOpenDiscovery"
+>;
 
 export type MixedRepositoryChipsProps = {
   fs: DialogFormState;
@@ -65,6 +74,7 @@ export type MixedRepositoryChipsProps = {
   userSettingsLoaded?: boolean;
   onCreateRepository?: (key: string) => void;
   repositoryCreationOpen?: boolean;
+  discoveryActions?: DiscoveryActions;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
   repositorySets?: TaskRepositorySetsConfig;
@@ -78,9 +88,17 @@ export type MixedRepositoryChipsProps = {
 export function MixedRepositoryChips(props: MixedRepositoryChipsProps) {
   const mobile = useTouchDrawer();
   const selections = props.fs.noRepository ? [] : resolveRepositorySelections(props.fs);
-  const localRows = selections.filter(isLocalSelection).map(stripLocalKind);
-  const remoteRows = selections.filter(isRemoteSelection).map(stripRemoteKind);
-  const accessible = useRemoteRepositories(props.workspaceId ?? "");
+  const localRows = selections.filter(isLocalSelection);
+  const remoteRows = selections.filter(isRemoteSelection);
+  const [pickerOpened, setPickerOpened] = useState(false);
+  const shouldReadProviders = pickerOpened || remoteRows.some((row) => Boolean(row.url));
+  const accessible = useRemoteRepositories(shouldReadProviders ? (props.workspaceId ?? "") : "", {
+    requireProviderReadiness: true,
+  });
+  const onOpenRepositoryPicker = () => {
+    if (pickerOpened) accessible.refresh?.();
+    else setPickerOpened(true);
+  };
 
   useRemoteProviderReadiness(props.fs, accessible);
 
@@ -124,6 +142,7 @@ export function MixedRepositoryChips(props: MixedRepositoryChipsProps) {
       onRemoveLocal={actions.removeLocal}
       onRemoveRemote={actions.removeRemote}
       onRemoveFolder={actions.removeFolder}
+      discoveryActions={props.discoveryActions}
     />
   );
   if (mobile) {
@@ -135,6 +154,7 @@ export function MixedRepositoryChips(props: MixedRepositoryChipsProps) {
         selectionsCount={selections.length}
         selectionRows={selectionRows}
         actions={actions}
+        onOpenRepositoryPicker={onOpenRepositoryPicker}
       />
     );
   }
@@ -147,6 +167,8 @@ export function MixedRepositoryChips(props: MixedRepositoryChipsProps) {
       workspaceId={props.workspaceId}
       remoteOriginMode={props.executorSourcePolicy?.capabilities.requiresCloneableLocalRepository}
       selectionRows={selectionRows}
+      onOpenRepositoryPicker={onOpenRepositoryPicker}
+      selectedLocalRows={localRows}
       freshBranchToggle={props.freshBranchToggle}
       branchLocked={props.branchLocked}
       repositoryLocked={props.repositoryLocked}
@@ -192,6 +214,7 @@ type RepositorySelectionRowsProps = {
   remoteOriginMode?: boolean;
   remoteOriginStates?: Record<string, RepositoryCloneSourceState>;
   onRefreshRemoteOrigins?: () => void;
+  discoveryActions?: DiscoveryActions;
 };
 
 function RepositorySelectionRows({
@@ -222,6 +245,7 @@ function RepositorySelectionRows({
   remoteOriginMode,
   remoteOriginStates,
   onRefreshRemoteOrigins,
+  discoveryActions,
 }: RepositorySelectionRowsProps) {
   return (
     <>
@@ -250,9 +274,12 @@ function RepositorySelectionRows({
               repositoriesRefreshing={repositoriesRefreshing}
               repositoryLocked={repositoryLocked}
               branchLocked={branchLocked}
-              remoteOriginMode={remoteOriginMode}
+              remoteOriginMode={
+                remoteOriginMode && isHostRepositorySelection(selection, repositories)
+              }
               remoteOriginState={remoteOriginStates?.[selection.key]}
               onRefreshRemoteOrigins={onRefreshRemoteOrigins}
+              discoveryActions={discoveryActions}
               onRemove={() => onRemoveLocal(selection.key)}
             />
           );
@@ -310,6 +337,7 @@ type LocalSelectionChipProps = {
   remoteOriginState?: RepositoryCloneSourceState;
   onRefreshRemoteOrigins?: () => void;
   onRemove: () => void;
+  discoveryActions?: DiscoveryActions;
 };
 
 function LocalSelectionChip(props: LocalSelectionChipProps) {
@@ -362,6 +390,7 @@ function LocalSelectionChipRepository({
   branchLocked,
   remoteOriginMode,
   remoteOriginState,
+  discoveryActions,
   onRemove,
   onBranchChange,
 }: LocalSelectionChipProps & { onBranchChange: (value: string) => void }) {
@@ -402,7 +431,8 @@ function LocalSelectionChipRepository({
       }
       onPolicySelected={onPolicySelected}
       showBranchPolicies
-      showDiscoveryControls
+      showDiscoveryControls={Boolean(discoveryActions)}
+      {...discoveryActions}
       onCreateRepository={onCreateRepository ? () => onCreateRepository(row.key) : undefined}
       onRefreshRepositories={onRefreshRepositories}
       repositoriesRefreshing={repositoriesRefreshing}
@@ -584,16 +614,4 @@ function isRemoteSelection(
   selection: TaskRepositorySelection,
 ): selection is Extract<TaskRepositorySelection, { kind: "remote" }> {
   return selection.kind === "remote";
-}
-
-function stripLocalKind(
-  selection: Extract<TaskRepositorySelection, { kind: "local" }>,
-): TaskRepoRow & { kind: "local" } {
-  return selection;
-}
-
-function stripRemoteKind(
-  selection: Extract<TaskRepositorySelection, { kind: "remote" }>,
-): TaskRemoteRepoRow & { kind: "remote" } {
-  return selection;
 }

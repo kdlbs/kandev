@@ -4,6 +4,8 @@ import type {
   ReorderedTaskPosition,
   TaskPendingAction,
   TaskOrigin,
+  TaskCoverage,
+  TaskWorkflowCoverage,
   TaskPriority,
   TaskState as TaskStatus,
   WorkflowProfileSessionEndPolicy,
@@ -32,6 +34,8 @@ export type KanbanStepEvents = {
   on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 /**
@@ -40,7 +44,7 @@ export type KanbanStepEvents = {
  *
  * `status` is the resolution verdict and is only meaningful on `dependsOn`
  * entries: "resolved" (finished successfully), "failed" (FAILED/CANCELLED —
- * halts the chain), or "pending" (anything else, including archived).
+ * halts the chain), or "pending" (unfinished work, whether archived or not).
  */
 export type TaskDependencyRef = {
   id: string;
@@ -50,6 +54,9 @@ export type TaskDependencyRef = {
 };
 
 export type KanbanState = {
+  taskCoverage?: TaskCoverage;
+  /** Ordered membership; tasks is the canonical compatibility projection. */
+  taskIds?: string[];
   workflowId: string | null;
   steps: Array<{
     id: string;
@@ -66,6 +73,7 @@ export type KanbanState = {
     session_target?: WorkflowSessionTarget | null;
     profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
     profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    disable_unclassified_fallback?: boolean;
     complete_task_on_enter?: boolean;
     cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
@@ -77,7 +85,7 @@ export type KanbanState = {
      * pick the right meta surface (review/approval shows multi-agent
      * decisions). Backend never branches on this field.
      */
-    stage_type?: "work" | "review" | "approval" | "custom";
+    stage_type?: "work" | "review" | "approval" | "custom" | "hold";
     /**
      * Last order-revision this step's task order was written at
      * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
@@ -99,7 +107,10 @@ export type KanbanState = {
     workflowStepId: string;
     workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
+    /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+    identifier?: string;
     description?: string;
+    flagNote?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
     origin?: TaskOrigin | string;
@@ -117,6 +128,7 @@ export type KanbanState = {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       branch_policy_id?: string;
       branch_policy_name?: string;
       branch_policy_base_branch?: string;
@@ -130,6 +142,7 @@ export type KanbanState = {
       display_name: string;
       position: number;
     }>;
+    initialWorkspaceLayout?: "repository" | "task_root";
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;
@@ -196,6 +209,8 @@ export type KanbanState = {
     dependsOn?: TaskDependencyRef[];
     /** Direct dependents — the tasks waiting on this one. Not transitive. */
     blocks?: TaskDependencyRef[];
+    /** Symmetric non-blocking relationships. */
+    related?: TaskDependencyRef[];
     /** A launch intent is waiting on dependency resolution. */
     startWhenUnblocked?: boolean;
     isPRReview?: boolean;
@@ -214,11 +229,15 @@ export type KanbanState = {
 };
 
 export type WorkflowSnapshotData = {
+  taskIds?: string[];
+  taskCoverage?: TaskCoverage;
   workflowId: string;
   workflowName: string;
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
   isPlaceholder?: boolean;
+  /** A known-empty failed fetch is retryable after a task-page remount. */
+  fetchFailed?: boolean;
 };
 
 export type KanbanMultiState = {
@@ -262,6 +281,7 @@ export type SidebarArchivedTasksState = {
 };
 
 export type WorkflowsState = {
+  taskWorkflowCoverage?: TaskWorkflowCoverage;
   items: Array<{
     id: string;
     workspaceId: string;
@@ -270,6 +290,8 @@ export type WorkflowsState = {
     prompt?: string;
     sortOrder?: number;
     agent_profile_id?: string;
+    source?: string;
+    source_path?: string;
     hidden?: boolean;
     /**
      * Phase 2 (ADR-0004) UX hint. Read by `<TaskMetaRail>` to choose the
@@ -332,6 +354,8 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   sidebarArchivedTasks: SidebarArchivedTasksState;
+  /** Fresh status projections for bounded sidebar pages, keyed by workspace then task. */
+  sidebarStatusSummaryByWorkspaceId: Record<string, Record<string, TaskStatusSummary>>;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;
@@ -362,7 +386,7 @@ export type KanbanSliceActions = {
   ) => void;
   requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
+  setWorkflows: (workflows: WorkflowsState["items"], coverage?: TaskWorkflowCoverage) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
   /** Automatic task selection that must not invalidate a user navigation revision. */
@@ -398,7 +422,11 @@ export type KanbanSliceActions = {
   ) => void;
   releaseTaskRemoval: (token: string) => void;
   advanceTaskNavigationRevision: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
+  setWorkflowSnapshot: (
+    workflowId: string,
+    data: WorkflowSnapshotData,
+    options?: { stageClaimsReconciled?: boolean },
+  ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
@@ -419,6 +447,13 @@ export type KanbanSliceActions = {
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
   removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
+  /** Retains one live task summary for consumers whose task is not a board row
+   * (for example an ephemeral Quick Chat task). */
+  recordSidebarStatusSummary: (
+    workspaceId: string,
+    taskId: string,
+    summary: TaskStatusSummary,
+  ) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

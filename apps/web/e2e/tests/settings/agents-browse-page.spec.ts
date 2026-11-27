@@ -1,23 +1,14 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
-
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => {
-      setAvailableAgents: (
-        agents: ListAvailableAgentsResponse["agents"],
-        tools?: ListAvailableAgentsResponse["tools"],
-      ) => void;
-    };
-  };
-};
+import { serializeInlineScriptJSON } from "../../helpers/inline-script-json";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { installOpenCodeReinstallFixture } from "./agents-opencode-reinstall-helpers";
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
 // the catalog would show its "everything installed" state with no install
-// cards. Intercept /api/v1/agents/available and return one unavailable agent
-// with an install script so an install card renders.
+// cards. Seed one unavailable agent in the Go-injected boot payload before the
+// SPA mounts, and keep any later catalog refresh on that same fixture.
 const AVAILABLE_AGENTS = {
   agents: [
     {
@@ -51,32 +42,120 @@ const AVAILABLE_AGENTS = {
   total: 1,
 } satisfies ListAvailableAgentsResponse;
 
-async function seedAvailableAgents(page: Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as E2EStoreWindow).__KANDEV_E2E_STORE__));
-  await page.evaluate((response) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge is unavailable");
-    store.getState().setAvailableAgents(response.agents, response.tools);
-  }, AVAILABLE_AGENTS);
-}
-
 test.describe("Agents browse page", () => {
+  test("reinstalls managed OpenCode from its configured card", async ({ testPage }) => {
+    // @covers AC-AGENTS-OPENCODE-V2-001.14
+    const fixture = await installOpenCodeReinstallFixture(testPage);
+    const ws = watchWs(testPage);
+    const subscription = ws.waitForResponse("user.subscribe");
+    await testPage.goto("/settings/agents");
+    await subscription;
+
+    const card = testPage.getByTestId("agent-group-opencode-acp");
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toBeVisible();
+    const reinstall = card.getByTestId("reinstall-opencode-acp");
+    await expect(reinstall).toBeVisible();
+    await expect(reinstall).toHaveAttribute("href", "/settings/agents/browse?agent=opencode-acp");
+
+    await reinstall.click();
+    await expect(testPage).toHaveURL(/\/settings\/agents\/browse\?agent=opencode-acp$/);
+    const installCards = testPage.locator('[data-testid^="install-card-"]');
+    await expect(installCards.first()).toHaveAttribute("data-testid", "install-card-opencode-acp");
+    const installResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/agent-install\/opencode-acp$/,
+    );
+    await testPage.getByTestId("install-button-opencode-acp").click();
+    expect((await installResponse).ok()).toBe(true);
+    await expect.poll(fixture.installRequests).toBe(1);
+    await expect(testPage.getByTestId("install-card-opencode-acp")).toHaveCount(0);
+
+    await testPage.goBack();
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toHaveCount(0);
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+
+    const reloadedSettings = Promise.all([
+      ws.waitForResponse("user.subscribe"),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agents\/discovery$/),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agents\/available$/),
+      waitForHttp(testPage, "GET", /\/api\/v1\/agent-update\/status$/),
+    ]);
+    await testPage.reload();
+    const [, discoveryResponse, availableResponse, runtimeStatusResponse] = await reloadedSettings;
+    expect([discoveryResponse.ok(), availableResponse.ok(), runtimeStatusResponse.ok()]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(fixture.profileMutationRequests()).toBe(0);
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByText("Not installed", { exact: true })).toHaveCount(0);
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+  });
+
+  test("does not offer Reinstall for a native-only OpenCode runtime", async ({ testPage }) => {
+    // @covers AC-AGENTS-OPENCODE-V2-001.14
+    await installOpenCodeReinstallFixture(testPage, { runtimeSource: "native" });
+    await testPage.goto("/settings/agents");
+
+    const card = testPage.getByTestId("agent-group-opencode-acp");
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByText("Saved OpenCode profile", { exact: true })).toBeVisible();
+    await expect(card.getByTestId("reinstall-opencode-acp")).toHaveCount(0);
+  });
+
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
-    await testPage.route("**/api/v1/agents/available**", (route) =>
-      route.fulfill({
-        status: 200,
+    const bootPayloadAssignment = "window.__KANDEV_BOOT_PAYLOAD__=";
+    let bootStateSeeded = false;
+    await testPage.route("**/settings/agents/browse**", async (route) => {
+      const response = await route.fetch();
+      const html = await response.text();
+      const payloadStart = html.indexOf(bootPayloadAssignment);
+      if (payloadStart < 0) throw new Error("Settings shell has no boot payload");
+      const jsonStart = payloadStart + bootPayloadAssignment.length;
+      const scriptEnd = html.indexOf(";</script>", jsonStart);
+      if (scriptEnd < 0) throw new Error("Settings shell boot payload is incomplete");
+      const payload = JSON.parse(html.slice(jsonStart, scriptEnd)) as {
+        initialState?: Record<string, unknown>;
+      };
+      const seededPayload = {
+        ...payload,
+        initialState: {
+          ...payload.initialState,
+          availableAgents: {
+            items: AVAILABLE_AGENTS.agents,
+            tools: [],
+            loading: false,
+            loaded: true,
+          },
+        },
+      };
+      await route.fulfill({
+        response,
+        body: `${html.slice(0, jsonStart)}${serializeInlineScriptJSON(seededPayload)}${html.slice(scriptEnd)}`,
+      });
+      bootStateSeeded = true;
+    });
+    await testPage.route("**/api/v1/agents/available**", async (route) => {
+      await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(AVAILABLE_AGENTS),
-      }),
-    );
-
+      });
+    });
     await testPage.goto("/settings/agents/browse");
-    await seedAvailableAgents(testPage);
+    expect(bootStateSeeded).toBe(true);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
+
     await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // PR #2544 wrapped the section in a collapsible whose heading row was a
@@ -125,10 +204,14 @@ test.describe("Agents browse page", () => {
   test("renders the saved fallback summary after the model badge", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    if (!agent || agent.profiles.length === 0) {
+    const agent = agents.find((candidate) =>
+      candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    const seedProfile = agent?.profiles.find((profile) => profile.id === seedData.agentProfileId);
+    if (!agent || !seedProfile) {
       throw new Error("The E2E fixture must provide a configured agent profile");
     }
 
@@ -140,11 +223,11 @@ test.describe("Agents browse page", () => {
       await testPage.goto("/settings/agents");
       const seededRow = testPage
         .getByTestId("agent-profile-row")
-        .filter({ hasText: agent.profiles[0].name });
+        .filter({ hasText: seedProfile.name });
       await expect(seededRow).toBeVisible({ timeout: 15_000 });
 
       const profile = await apiClient.createAgentProfile(agent.id, profileName, {
-        model: agent.profiles[0].model,
+        model: seedProfile.model,
         fallback_model: fallbackModel,
       });
       profileId = profile.id;

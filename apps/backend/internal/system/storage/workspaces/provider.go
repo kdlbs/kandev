@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -196,6 +197,15 @@ func (p *Provider) eligibleCandidates(
 }
 
 func (p *Provider) quarantine(ctx context.Context, item candidate) (storage.QuarantineEntry, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return storage.QuarantineEntry{}, retentionErr
+	}
+	defer releaseRetention()
+
+	if err := p.protectActiveWorktree(ctx, storage.QuarantineEntry{OriginalPath: item.path}); err != nil {
+		return storage.QuarantineEntry{}, err
+	}
 	if p.config.Store == nil {
 		return storage.QuarantineEntry{}, errors.New("workspace quarantine store is required")
 	}
@@ -378,6 +388,12 @@ func (p *Provider) permanentDelete(
 	confirmation string,
 	force bool,
 ) (storage.QuarantineEntry, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return storage.QuarantineEntry{}, retentionErr
+	}
+	defer releaseRetention()
+
 	if force {
 		if confirmation != storage.QuarantineConfirmationForce {
 			return storage.QuarantineEntry{}, storage.ErrForceDeleteConfirmation
@@ -393,6 +409,9 @@ func (p *Provider) permanentDelete(
 		return storage.QuarantineEntry{}, err
 	}
 	if err := p.validateEntryPaths(entry); err != nil {
+		return entry, err
+	}
+	if err := p.protectActiveWorktree(ctx, entry); err != nil {
 		return entry, err
 	}
 	if !force && p.config.Now().Before(entry.DeleteAfter) {
@@ -416,6 +435,24 @@ func (p *Provider) permanentDelete(
 		return entry, fmt.Errorf("persist workspace deletion: %w", err)
 	}
 	return deleted, nil
+}
+
+func (p *Provider) protectActiveWorktree(ctx context.Context, entry storage.QuarantineEntry) error {
+	inventory, err := p.loadInventory(ctx)
+	if err != nil {
+		return err
+	}
+	protected, err := buildProtectedSet(p.cleanTasksRoot(), Inventory{
+		Complete:      true,
+		WorktreePaths: inventory.WorktreePaths,
+	})
+	if err != nil {
+		return err
+	}
+	if _, active := protected[filepath.Clean(entry.OriginalPath)]; !active {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", storage.ErrConflict, ErrActiveWorktree)
 }
 
 func (p *Provider) Reconcile(ctx context.Context) (ReconcileResult, error) {
@@ -609,88 +646,6 @@ func buildProtectedSet(tasksRoot string, inventory Inventory) (map[string]struct
 		}
 	}
 	return protected, nil
-}
-
-func discoverTaskRoots(tasksRoot string) ([]candidate, []string, error) {
-	entries, err := os.ReadDir(tasksRoot)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	roots := make([]candidate, 0)
-	warnings := make([]string, 0)
-	for _, entry := range entries {
-		path := filepath.Join(tasksRoot, entry.Name())
-		discovered, classified, err := discoverTaskRoot(path, entry)
-		if err != nil {
-			return nil, nil, err
-		}
-		roots = append(roots, discovered...)
-		if entry.IsDir() && !classified {
-			warnings = append(warnings, "unclassified task directory kept: "+path)
-		}
-	}
-	return roots, warnings, nil
-}
-
-func discoverTaskRoot(path string, entry os.DirEntry) ([]candidate, bool, error) {
-	if entry.Type()&os.ModeSymlink != 0 {
-		return nil, false, fmt.Errorf("symlink beneath tasks root: %s", path)
-	}
-	if !entry.IsDir() {
-		return nil, false, nil
-	}
-	owner, marked, err := readOwnershipMarker(path)
-	if err != nil {
-		return nil, false, err
-	}
-	if marked {
-		return []candidate{{path: path, owner: owner}}, true, nil
-	}
-	if looksSemanticTaskDir(entry.Name()) {
-		owner = OwnershipMarker{TaskDirName: entry.Name(), LayoutVersion: LayoutVersionSemantic}
-		return []candidate{{path: path, owner: owner}}, true, nil
-	}
-	return discoverScratchRoots(path, entry.Name())
-}
-
-func discoverScratchRoots(workspacePath, workspaceID string) ([]candidate, bool, error) {
-	children, err := os.ReadDir(workspacePath)
-	if err != nil {
-		return nil, false, err
-	}
-	roots := make([]candidate, 0, len(children))
-	for _, child := range children {
-		childPath := filepath.Join(workspacePath, child.Name())
-		if child.Type()&os.ModeSymlink != 0 {
-			return nil, false, fmt.Errorf("symlink beneath tasks root: %s", childPath)
-		}
-		if !child.IsDir() {
-			continue
-		}
-		owner, marked, err := readOwnershipMarker(childPath)
-		if err != nil {
-			return nil, false, err
-		}
-		if marked && owner.LayoutVersion != LayoutVersionScratch {
-			return nil, false, fmt.Errorf("unexpected nested semantic workspace marker: %s", childPath)
-		}
-		if !marked {
-			owner = OwnershipMarker{
-				TaskID: child.Name(), WorkspaceID: workspaceID,
-				TaskDirName: child.Name(), LayoutVersion: LayoutVersionScratch,
-			}
-		}
-		roots = append(roots, candidate{path: childPath, owner: owner})
-	}
-	return roots, len(roots) > 0, nil
-}
-
-func looksSemanticTaskDir(name string) bool {
-	index := strings.LastIndexByte(name, '_')
-	return index > 0 && len(name[index+1:]) == 3
 }
 
 // directorySizeNoFollow counts files in root while treating nested symlinks as opaque entries.

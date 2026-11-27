@@ -10,8 +10,7 @@ Use `.agents/skills/pr-fixup/SKILL.md` for the workflow. In a user-started
 primary session, handle polling and remediation directly in the same
 conversation; rerun only the affected task-defined check after a fix.
 
-If GitHub access requires approval, surface that gate
-to the user and stop. Do not relaunch polling after approval is denied,
-cancelled, or interrupted; the shared skill's bounded retry behavior applies
-only to actual fetch failures after access was approved. Its helper scripts are
-at `<worktree>/scripts/...`, not under the skill directory.
+If runtime network access to GitHub requires approval, surface that gate and stop.
+Do not relaunch polling after denial, cancellation, or interruption.
+For fork CI authorization, follow the shared skill.
+Its helper scripts are at `<worktree>/scripts/...`, not under the skill directory.

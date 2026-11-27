@@ -13,6 +13,8 @@ package planws
 import (
 	"errors"
 
+	"github.com/kandev/kandev/internal/task/contract"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -48,7 +50,7 @@ func safePlanErrorResponse(msg *ws.Message, err error) (*ws.Message, bool, error
 	case service.PlanErrorVersionRequired, service.PlanErrorTruncationRejected,
 		service.PlanErrorAppendTruncationFlag,
 		service.PlanErrorContentRequired, service.PlanErrorEditTextRequired, service.PlanErrorEditNotFound,
-		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired:
+		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired, service.PlanErrorReadOffsetOutOfRange:
 		code = ws.ErrorCodeValidation
 	case service.PlanErrorVersionConflict, service.PlanErrorRevisionChanged:
 		code = ws.ErrorCodeConflict
@@ -168,6 +170,9 @@ func contentTooLargeResponse(msg *ws.Message, err error) (*ws.Message, bool, err
 // PlanCommentError maps task-plan comment validation, lookup, and conflict failures.
 // A conflict carries the current snapshot so the client can reconcile immediately.
 func PlanCommentError(msg *ws.Message, err error, snapshot interface{}) (*ws.Message, error) {
+	if validation := CommentAttachmentValidationMessage(err); validation != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
+	}
 	if errors.Is(err, service.ErrTaskPlanCommentsChanged) {
 		details := map[string]interface{}{}
 		if snapshot != nil {
@@ -212,6 +217,13 @@ func CreateError(msg *ws.Message, err error) (*ws.Message, error) {
 // because a read that fails below the sentinels is a storage fault with nothing
 // actionable for the caller.
 func GetError(msg *ws.Message, err error) (*ws.Message, error) {
+	if out, matched, mapErr := safePlanErrorResponse(msg, err); matched {
+		return out, mapErr
+	}
+	var invalid *contract.PlanReadValidationError
+	if errors.As(err, &invalid) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalid.Message, nil)
+	}
 	return errorResponse(msg, err, "Failed to get task plan", []mapping{taskIDRequired})
 }
 
@@ -256,4 +268,16 @@ func Error(msg *ws.Message, err error, fallback string) (*ws.Message, error) {
 		return out, mapErr
 	}
 	return errorResponse(msg, err, fallback+": "+err.Error(), allMappings)
+}
+
+// CommentAttachmentValidationMessage returns the safe client error for rejected comment files.
+func CommentAttachmentValidationMessage(err error) string {
+	switch {
+	case errors.Is(err, models.ErrTooManyAttachments), errors.Is(err, models.ErrAttachmentTotalTooLarge), errors.Is(err, models.ErrAttachmentTooLarge):
+		return err.Error()
+	case errors.Is(err, models.ErrAttachmentClaimConflict), errors.Is(err, models.ErrAttachmentNotFound), errors.Is(err, models.ErrAttachmentForbidden), errors.Is(err, models.ErrAttachmentInvalid):
+		return "Comment attachments are unavailable or invalid"
+	default:
+		return ""
+	}
 }

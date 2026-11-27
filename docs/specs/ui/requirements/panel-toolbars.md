@@ -38,6 +38,10 @@ Adjacent panel toolbars must align below their Dockview tab strips.
   Toolbars shall remain outside the content scroll region.
 - **AC-UI-PANEL-TOOLBARS-001.6:** Each toolbar control shall fit within its row
   without clipping, overlapping targets, or document horizontal overflow.
+- **AC-UI-PANEL-TOOLBARS-001.7:** An icon-only action in a panel toolbar shall
+  keep its visible icon centered horizontally and vertically within its target,
+  including when the action changes icon after activation. This applies in
+  desktop and touch contexts.
 
 ## Boundaries
 
@@ -52,3 +56,4 @@ Nested per-file diff headers are content headings, not primary panel toolbars.
 - [Control sizing](control-sizing.md)
 - [Canvas host requirements](../../canvases/requirements/agent-authored-web-apps.md)
 - [Implementation plan](../../../plans/canvas-same-origin-auth/plan.md)
+- [Copy-path alignment repair](../../../plans/files-copy-path-alignment/plan.md)

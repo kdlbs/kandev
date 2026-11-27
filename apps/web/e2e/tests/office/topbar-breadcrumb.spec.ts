@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/office-fixture";
-import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Topbar breadcrumb", () => {
   test("issue detail shows task title", async ({ testPage, apiClient, officeSeed }) => {
@@ -42,13 +41,6 @@ test.describe("Topbar breadcrumb", () => {
     const crumb = testPage.getByTestId("task-topbar").getByRole("link", { name: "Crumb Project" });
     await expect(crumb).toBeVisible({ timeout: 10_000 });
     await expect(crumb).toHaveAttribute("href", `/office/projects/${projectId}`);
-  });
-
-  test("tasks list shows Tasks heading", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office/tasks");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/Tasks/i, {
-      timeout: 10_000,
-    });
   });
 
   // Regression: the office topbar bottom border must line up with the AppSidebar

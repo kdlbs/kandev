@@ -7,13 +7,6 @@ useRegularMode();
 test.describe("First-time setup: timeouts and error handling", () => {
   // Allow one retry for transient cold-start timing issues on first test.
   test.describe.configure({ retries: 1 });
-  test.skip("GitHub branch fetch network failure shows error", async () => {
-    // Skipped after Task 5/8: the top-level `github-url-error` testid no
-    // longer exists. The URL input moved into a per-chip popover and the
-    // branch-fetch failure now surfaces only via the per-chip disabled
-    // branch pill and its tooltip. A future spec can assert that pill
-    // state directly once a stable hook is added.
-  });
 
   test("health indicator shows issues and opens dialog", async ({ testPage, backend }) => {
     // Intercept the health endpoint and return a detection timeout issue

@@ -1,0 +1,25 @@
+{
+  "workspace_id": "df759b8a-44c9-4971-9b0f-849f9e7a4921",
+  "workflow_ids": [
+    "journey-workflow-0",
+    "journey-workflow-1",
+    "journey-workflow-2"
+  ],
+  "tasks": 1000,
+  "targets": [
+    {
+      "task_id": "journey-task-0000",
+      "session_count": 1
+    },
+    {
+      "task_id": "journey-task-0001",
+      "session_count": 8
+    }
+  ],
+  "rows": {
+    "tasks": 1000,
+    "task_sessions": 2005,
+    "task_session_turns": 1800,
+    "task_session_messages": 3600
+  }
+}

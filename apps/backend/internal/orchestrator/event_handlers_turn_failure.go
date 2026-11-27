@@ -1,0 +1,414 @@
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentEventData) {
+	if !validRetainedTurnFailureEvent(data) {
+		return
+	}
+	data = s.withPromptAttemptEvidence(data)
+	if data.DynamicRouteAttempt ||
+		(s.activeContinuationFailureOwns(data.SessionID) && !retainedCapacityFailureOwns(data)) {
+		// Non-capacity continuation failures belong to the existing recovery
+		// owner, which preserves continuation evidence and manual replay
+		// policy. Capacity episodes keep retained-turn settlement so their
+		// retry budget and capacity projection stay intact.
+		s.handleAgentFailed(ctx, data)
+		return
+	}
+	if !s.currentRetainedTurnFailureAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
+		return
+	}
+
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	lock.Lock()
+	guardHeld := true
+	releaseGuard := func() {
+		if guardHeld {
+			lock.Unlock()
+			release()
+			guardHeld = false
+		}
+	}
+	defer func() {
+		releaseGuard()
+	}()
+	if !s.retainedTurnFailureGuardAllows(data) {
+		return
+	}
+	session, task, ok := s.loadRetainedTurnFailureOwner(ctx, data)
+	if !ok {
+		return
+	}
+	if s.handleAutomationOwnedTurnFailure(ctx, task, data, releaseGuard) {
+		return
+	}
+	if task.IsFromOffice {
+		releaseGuard()
+		s.handleAgentFailed(ctx, data)
+		return
+	}
+	if !s.currentRetainedTurnFailureAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
+		return
+	}
+	if s.settleRetainedTurnFailure(ctx, data, session) {
+		settleCtx := withSettledDeliverySessionStateGuardHeld(context.WithoutCancel(ctx))
+		s.settleFailedDeliveryWorkflowOutcome(settleCtx, data)
+		releaseGuard()
+		s.acknowledgeRetainedTurnFailure(data)
+	} else {
+		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",
+			zap.String("session_id", data.SessionID), zap.String("execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
+	}
+}
+
+func retainedCapacityFailureOwns(data watcher.AgentEventData) bool {
+	classified := classifyKanbanFailure(data)
+	return classified != nil && classified.Code == routingerr.CodeModelCapacity
+}
+
+func (s *Service) activeContinuationFailureOwns(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	value, ok := s.transientRetries.Load(sessionID)
+	if !ok {
+		return false
+	}
+	entry, ok := value.(*transientRetryEntry)
+	if !ok || entry == nil || entry.mode != recoveryModeContinue {
+		return false
+	}
+	// Only saved-history continuation acceptance failures used to settle
+	// through handleAgentFailed. Capacity and agent-managed live continuations
+	// keep their retained-turn settlement and refusal reasons.
+	return entry.continuationPolicy == continuationPolicySavedHistoryRestore
+}
+
+func validRetainedTurnFailureEvent(data watcher.AgentEventData) bool {
+	return data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		data.PromptFailureDisposition.Valid() && data.TaskID != "" && data.SessionID != "" &&
+		data.AgentExecutionID != "" && data.PromptGeneration != 0 &&
+		data.OwnerKind == string(agentruntime.ExecutionOwnerTask)
+}
+
+func (s *Service) retainedTurnFailureGuardAllows(data watcher.AgentEventData) bool {
+	return !s.isCancelInFlight(data.SessionID) &&
+		s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID)
+}
+
+func (s *Service) loadRetainedTurnFailureOwner(
+	ctx context.Context,
+	data watcher.AgentEventData,
+) (*models.TaskSession, *models.Task, bool) {
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil || session.TaskID != data.TaskID ||
+		session.State != models.TaskSessionStateRunning ||
+		(session.AgentExecutionID != "" && session.AgentExecutionID != data.AgentExecutionID) {
+		return nil, nil, false
+	}
+	task, err := s.repo.GetTask(ctx, data.TaskID)
+	if err != nil || task == nil || taskArchived(task) {
+		return nil, nil, false
+	}
+	return session, task, true
+}
+
+func (s *Service) handleAutomationOwnedTurnFailure(
+	ctx context.Context,
+	task *models.Task,
+	data watcher.AgentEventData,
+	releaseGuard func(),
+) bool {
+	if task == nil || !models.IsAutomationTaskOrigin(task.Origin) {
+		return false
+	}
+	if s.automationOwnsRetrySession(ctx, data.TaskID, data.SessionID) {
+		// Only the captured terminal turn can release a retry's launch fence.
+		if !s.releaseRetryTurnFailureOwnership(ctx, data) {
+			return true
+		}
+	}
+	// Automation owns terminal turn handling and concurrency-slot release.
+	// Reuse that owner under the identity guard instead of parking the
+	// failure in interactive Chat state.
+	dispatch := s.handleAgentFailedLocked(ctx, data)
+	releaseGuard()
+	s.settleFailedDeliveryWorkflowOutcome(context.WithoutCancel(ctx), data)
+	if dispatch != nil {
+		s.startAgentFailureRecovery(dispatch)
+	}
+	return true
+}
+
+func (s *Service) settleRetainedTurnFailure(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, s.classifyKanbanFailure(data).Code)
+	if s.handleTransientFailure(ctx, data) {
+		// handleTransientFailure has already accepted durable ownership of this
+		// generation. Its timer can finish and retire the entry before this call
+		// returns, so do not re-read the session-wide retry map as an ownership
+		// test here.
+		return true
+	}
+	if priorRetry {
+		data.RecoveryAttemptsStarted = priorStarted
+		data.RecoveryDisposition = recoveryDispositionRefused
+		if priorStop != "" {
+			data.RecoveryDisposition = priorStop
+		}
+		if priorAttempt > 0 {
+			s.resetTransientRetry(data.SessionID)
+		}
+	} else if routingerr.Decide(
+		routingerr.ContextKanban,
+		s.classifyKanbanFailure(data),
+		time.Now().UTC(),
+	) == routingerr.DecisionShortRetry {
+		data.RecoveryDisposition = recoveryDispositionRefused
+	}
+	recoveryReason := ""
+	if data.RecoveryDisposition == recoveryDispositionRefused {
+		recoveryReason = s.continuationRefusalReason(ctx, data)
+	}
+
+	failedTurnID, err := s.markRetainedFailureTurn(ctx, data)
+	if err != nil {
+		s.logger.Warn("failed to mark retained provider turn as failed",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("execution_id", data.AgentExecutionID), zap.Uint64("prompt_generation", data.PromptGeneration),
+			zap.Error(err))
+		return false
+	}
+	inputState, inputOutcome := retainedFailureManagedInputDisposition(data)
+	if err := s.settleManagedInputTurn(
+		ctx, data.TaskID, data.SessionID, failedTurnID, data.AgentExecutionID, inputState, inputOutcome,
+	); err != nil {
+		s.logger.Warn("failed to settle managed input after provider turn failure",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", failedTurnID), zap.Error(err))
+		return false
+	}
+	messageID, err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID, recoveryReason)
+	if err != nil {
+		s.logger.Warn("failed to persist retained provider turn failure",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", failedTurnID), zap.Error(err))
+		return false
+	}
+	if err := s.recordTaskTurnErrorAttention(ctx, data, failedTurnID, messageID); err != nil {
+		s.logger.Warn("failed to record task turn-error attention",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", failedTurnID), zap.Error(err))
+		return false
+	}
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, data.TaskID, data.SessionID, failedTurnID); err != nil {
+		s.logger.Warn("failed to complete retained provider turn",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("turn_id", failedTurnID), zap.Error(err))
+		return false
+	}
+	if _, changed := s.updateTaskSessionStateWithHook(
+		ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false, nil, session,
+	); !changed {
+		return false
+	}
+	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
+	s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	return true
+}
+
+func (s *Service) acknowledgeRetainedTurnFailure(data watcher.AgentEventData) {
+	acknowledger, ok := s.agentManager.(interface {
+		AcknowledgeRetainedPromptFailure(string, uint64) bool
+	})
+	if !ok {
+		s.logger.Warn("agent manager cannot acknowledge retained prompt settlement",
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_id", data.AgentExecutionID))
+		return
+	}
+	if !acknowledger.AcknowledgeRetainedPromptFailure(data.AgentExecutionID, data.PromptGeneration) {
+		s.logger.Debug("retained prompt settlement acknowledgement was stale",
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
+	}
+}
+
+func retainedFailureManagedInputDisposition(
+	data watcher.AgentEventData,
+) (messagequeue.ManagedInputState, string) {
+	if data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved {
+		return messagequeue.ManagedInputStateFailed, "execution_failed_without_observed_effects"
+	}
+	return messagequeue.ManagedInputStateUncertain, "execution_failed_effects_unknown"
+}
+
+func (s *Service) retainedRetryProgress(sessionID string, code routingerr.Code) (bool, int, int, string) {
+	value, ok := s.transientRetries.Load(sessionID)
+	if !ok {
+		return false, 0, 0, ""
+	}
+	entry, ok := value.(*transientRetryEntry)
+	if !ok || entry.retainedRuntime == nil {
+		return false, 0, 0, ""
+	}
+	entry.mu.Lock()
+	attempt, started := entry.attempt, entry.started
+	entry.mu.Unlock()
+	disposition := entry.stopDisposition(s.transientRetryNow())
+	if !entry.policy.windowEndsAt.IsZero() && code != routingerr.CodeModelCapacity {
+		disposition = ""
+	}
+	return true, attempt, started, disposition
+}
+
+func (s *Service) currentRetainedTurnFailureAttempt(sessionID, executionID string, generation uint64) bool {
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	return evidence.evidenceKnown && evidence.executionID == executionID &&
+		evidence.promptGeneration == generation
+}
+
+func (s *Service) markRetainedFailureTurn(ctx context.Context, data watcher.AgentEventData) (string, error) {
+	turnID := data.TurnID
+	if turnID == "" {
+		var err error
+		turnID, err = s.peekActiveTurnID(ctx, data.SessionID)
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := s.verifyExpectedTurnOwnership(ctx, data.SessionID, turnID); err != nil {
+		return "", err
+	}
+	if turnID == "" || s.turnService == nil {
+		return turnID, nil
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, data.SessionID, turnID, map[string]interface{}{
+		models.TurnMetaKeyErrorTerminated: true,
+	}); err != nil {
+		return "", err
+	}
+	return turnID, nil
+}
+
+func (s *Service) persistRetainedTurnFailureMessage(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	turnID string,
+	recoveryReason string,
+) (string, error) {
+	if s.messageCreator == nil {
+		return "", fmt.Errorf("turn failure message creator is unavailable")
+	}
+	message := retainedTurnFailureMessage(data)
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message))
+	metadata := map[string]interface{}{
+		"variant":           "error",
+		"scope":             "turn",
+		"failure_scope":     "turn",
+		"failure_code":      string(classified.Code),
+		"recovery_actions":  false,
+		"runtime_retained":  true,
+		"session_id":        data.SessionID,
+		"task_id":           data.TaskID,
+		"execution_id":      data.AgentExecutionID,
+		"prompt_generation": data.PromptGeneration,
+		"attempts_started":  data.RecoveryAttemptsStarted,
+	}
+	if data.RecoveryDisposition != "" {
+		metadata["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if data.RecoveryDisposition == recoveryDispositionRefused && recoveryReason != "" {
+		metadata["recovery_reason"] = recoveryReason
+	}
+	if turnID != "" {
+		metadata["turn_id"] = turnID
+	}
+	if data.AgentID != "" {
+		metadata["agent_id"] = data.AgentID
+	}
+	if data.ProviderError != nil && data.ProviderError.Valid() {
+		metadata["provider_error"] = data.ProviderError
+	}
+	messageID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf(
+		"session-turn-failure:%s:%s:%d", data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	))).String()
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, data.TaskID, message, data.SessionID,
+		string(v1.MessageTypeStatus), turnID, metadata, false,
+	); err != nil {
+		return "", err
+	}
+	return messageID, nil
+}
+
+// TaskTurnErrorRecorder persists the bounded task-owned attention pointer for
+// the latest manual failed interactive turn.
+type TaskTurnErrorRecorder interface {
+	RecordTaskTurnErrorAttention(ctx context.Context, taskID string, value models.TaskTurnError) (bool, error)
+}
+
+func (s *Service) recordTaskTurnErrorAttention(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	turnID, messageID string,
+) error {
+	if s.turnErrorRecorder == nil {
+		return nil
+	}
+	occurredAt := time.Now().UTC()
+	if reader, ok := s.messageCreator.(SessionMessageTimestampReader); ok {
+		if persisted, found := reader.SessionMessageCreatedAt(ctx, messageID); found {
+			occurredAt = persisted
+		}
+	}
+	_, err := s.turnErrorRecorder.RecordTaskTurnErrorAttention(ctx, data.TaskID, models.TaskTurnError{
+		StampValue:  messageID,
+		SessionID:   data.SessionID,
+		ExecutionID: data.AgentExecutionID,
+		TurnID:      turnID,
+		MessageID:   messageID,
+		OccurredAt:  occurredAt,
+		Message:     retainedTurnFailureMessage(data),
+	})
+	return err
+}
+
+func retainedTurnFailureMessage(data watcher.AgentEventData) string {
+	message := data.ErrorMessage
+	if data.ProviderError != nil && data.ProviderError.Valid() {
+		message = data.ProviderError.Message
+	}
+	message = streams.SanitizeProviderMessage(message)
+	if strings.TrimSpace(message) == "" {
+		return defaultAgentFailedMessage
+	}
+	return message
+}

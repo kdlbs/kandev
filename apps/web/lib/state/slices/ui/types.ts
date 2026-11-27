@@ -1,9 +1,11 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
+  SidebarDisclosureContext,
   SidebarSliceState,
   SidebarTaskRowPresentation,
   SidebarView,
@@ -16,6 +18,7 @@ import type {
   ThreadViewSliceState,
   ThreadView,
 } from "./thread-view-types";
+import type { RuntimeUpdateSummaryMember } from "@/lib/types/backend";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -68,7 +71,7 @@ export type MobileSessionCorePanel =
   | "files"
   | "terminal"
   | "review"
-  | "prompt-history";
+  | "background-work";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -118,6 +121,14 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickChatOpeningPayload = {
+  message: string;
+  clientMessageId?: string;
+  attachments?: MessageAttachment[];
+};
+
+export type QuickChatInitialPrompt = string | QuickChatOpeningPayload;
+
 export type QuickChatSelection = Partial<Record<QuickChatSessionKind, string>>;
 
 export type QuickChatSelectionByWorkspace = Record<string, QuickChatSelection>;
@@ -160,7 +171,11 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
-  initialPrompt?: string;
+  /** Idempotency key for browser-owned Quick Chat creation. */
+  creationId?: string;
+  /** The accepted startup still owns a CREATED/STARTING session. */
+  startupPending?: boolean;
+  initialPrompt?: QuickChatInitialPrompt;
 };
 
 export type QuickChatActiveKind = "conversation" | "terminal";
@@ -175,6 +190,13 @@ export type QuickChatSessionTombstone = {
   tombstonedAt: string;
 };
 
+export type ConfigChatRestartState = {
+  sessionId: string;
+  status: "restarting" | "uncertain";
+  source: "local" | "server";
+  error?: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -187,6 +209,7 @@ export type QuickChatState = {
   lastSettledAtBySession: Record<string, string>;
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
+  configChatRestarts: Record<string, ConfigChatRestartState>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
   /** Optimistic mixed-tab order keyed by workspace until the save settles. */
   tabOrderByWorkspace: Record<string, string[]>;
@@ -223,7 +246,14 @@ export type TaskDeletedNotification = {
 };
 
 export type UpdateAvailableNotification = {
-  version: string;
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
+  version?: string;
   url?: string;
   title: string;
   body: string;
@@ -312,6 +342,7 @@ export type UISliceState = {
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
+  tabletSession: { activeTabBySessionId: Record<string, string> };
   chatInput: ChatInputState;
   transcriptAutoScroll: TranscriptAutoScrollState;
   reviewPRSelection: ReviewPRSelectionState;
@@ -323,7 +354,11 @@ export type UISliceState = {
   taskDeletedNotification: TaskDeletedNotification | null;
   /** Set when the background updates poller reports a newly detected release. */
   updateAvailableNotification: UpdateAvailableNotification | null;
+  updateAvailableNotificationQueue: UpdateAvailableNotification[];
   bottomTerminal: BottomTerminalState;
+  /** Whether every directory browser reveals entries whose name begins with a
+   * dot. A stored user preference, off by default. */
+  directoryBrowserShowHidden: boolean;
   sidebarViews: SidebarSliceState;
   sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
   threadViews: ThreadViewSliceState;
@@ -337,6 +372,8 @@ export type UISliceState = {
   appSidebar: AppSidebarState;
   /** Settings menu shape + open branches (localStorage). */
   settingsMenu: SettingsMenuState;
+  /** Initial image-preview disclosure preference (localStorage). */
+  imagePreviewsExpandedByDefault: boolean;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
   chatMotion: ChatMotionState;
@@ -355,6 +392,7 @@ export type UISliceState = {
 };
 
 export type UISliceActions = {
+  commitImagePreviewsExpandedByDefault: (enabled: boolean) => void;
   setPreviewOpen: (sessionId: string, open: boolean) => void;
   togglePreviewOpen: (sessionId: string) => void;
   setPreviewView: (sessionId: string, view: PreviewViewMode) => void;
@@ -370,11 +408,13 @@ export type UISliceActions = {
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
+  setTabletSessionTab: (sessionId: string, tab: string) => void;
   setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
+  setDirectoryBrowserShowHidden: (showHidden: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
@@ -427,7 +467,14 @@ export type UISliceActions = {
     workspaceId: string,
     state: { pending: boolean; error: string | null },
   ) => void;
-  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
+  setConfigChatRestart: (workspaceId: string, restart: ConfigChatRestartState | null) => void;
+  syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) => void;
+  replaceConfigChatSession: (
+    workspaceId: string,
+    oldSessionId: string,
+    replacement: QuickChatSession,
+  ) => void;
   /** Opens Quick Chat after the requested workspace list becomes authoritative. */
   requestQuickChatOpen: (
     workspaceId: string,
@@ -444,15 +491,23 @@ export type UISliceActions = {
   clearBottomTerminalCommand: () => void;
   setSidebarActiveView: (viewId: string) => void;
   createSidebarView: () => string | null;
+  selectSidebarPluginGrouping: (grouping: {
+    reference: `plugin:${string}:${string}`;
+    label: string;
+  }) => Promise<boolean>;
   updateSidebarDraft: (
     patch: Partial<{
       filters: FilterClause[];
       sort: SortSpec;
       group: GroupKey;
+      groupIndent: boolean;
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;
-  saveSidebarDraftAs: (name: string) => void;
+  saveSidebarDraftAs: (
+    name: string,
+    owner: Pick<SidebarViewDraft, "baseViewId" | "group">,
+  ) => Promise<boolean>;
   saveSidebarDraftOverwrite: () => void;
   discardSidebarDraft: () => void;
   deleteSidebarView: (viewId: string) => void;
@@ -460,6 +515,14 @@ export type UISliceActions = {
   duplicateSidebarView: (viewId: string, name: string) => void;
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
+  waitForSidebarViewSync: (workspaceId: string) => Promise<void>;
+  reconcileSidebarGroupDisclosure: (
+    viewId: string,
+    reference: string,
+    expected: string[],
+    valid: string[],
+    context?: SidebarDisclosureContext,
+  ) => Promise<boolean>;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;

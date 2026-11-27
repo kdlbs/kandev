@@ -24,12 +24,23 @@ type RunConfig struct {
 	// Command is the argv to spawn. First element is the executable, rest
 	// are arguments. No shell expansion.
 	Command []string
+	// Env, when non-nil, is the complete child environment. Nil inherits the
+	// debugger process environment.
+	Env []string
 	// Workdir is the child process cwd. If empty, a fresh kandev-acpdbg-*
 	// temp directory is created and cleaned up on exit.
 	Workdir string
 	// CaptureStderr controls whether child stderr lines are recorded into
 	// the JSONL. Default: false (written to our stderr as plain lines).
 	CaptureStderr bool
+	// ProtocolVersion defaults to 1 when omitted.
+	ProtocolVersion int
+	// ClientCapabilities adds protocol client capabilities to initialize.
+	ClientCapabilities map[string]any
+	// AIRCapabilities advertises the named AIR extension capabilities in the
+	// initialize clientCapabilities._meta. Empty keeps the historical
+	// capabilities with no AIR block.
+	AIRCapabilities []string
 }
 
 // Runner owns a recorder and a spawned child process. Use NewRunner to
@@ -85,6 +96,12 @@ type Runner struct {
 func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, error) {
 	if len(cfg.Command) == 0 {
 		return nil, errors.New("command is empty")
+	}
+	if cfg.ProtocolVersion == 0 {
+		cfg.ProtocolVersion = 1
+	}
+	if cfg.ProtocolVersion != 1 && cfg.ProtocolVersion != 2 {
+		return nil, fmt.Errorf("unsupported ACP protocol version %d", cfg.ProtocolVersion)
 	}
 
 	rec, err := NewRecorder(jsonlPath)
@@ -164,6 +181,9 @@ func startChild(cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.Write
 	//nolint:gosec // the command comes from the agent registry or the user's --exec flag; both are trusted inputs
 	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = workdir
+	if cfg.Env != nil {
+		cmd.Env = cfg.Env
+	}
 	configureProcessTree(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -353,6 +373,12 @@ func (r *Runner) NextOOB(ctx context.Context) (Frame, error) {
 		frame, ok, closed := r.popOOB()
 		if ok {
 			r.wakeNextOOBWaiter()
+			if isHumanQuestionFrame(r.cfg.AgentID, frame) {
+				// Never answer a native question: selecting an offered option
+				// would invent the user's answer. The frame is already recorded,
+				// so stop the capture without writing anything.
+				return frame, ErrHumanQuestionPending
+			}
 			if frame.Method() != "" && frame.ID() != nil {
 				reply := NewMethodNotFound(frame.ID(), frame.Method())
 				_ = r.rec.Sent(reply)
@@ -455,6 +481,7 @@ func (r *Runner) routeResponse(frame Frame) bool {
 
 func (r *Runner) readLoop() {
 	defer r.readLoopWG.Done()
+	defer r.closeOOB()
 	for {
 		frame, err := r.framer.Read()
 		if err != nil {

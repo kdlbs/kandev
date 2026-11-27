@@ -11,13 +11,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/githubhost"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const envGitHubCLIShimDir = githubauth.CredentialCLIShimDirEnv
+
+// githubCLIShimDirPrefix names every directory installGitHubCLIShim creates.
+// The real-gh lookup never returns a gh inside such a directory, whichever
+// agentctl it links to or copies.
+const githubCLIShimDirPrefix = "kandev-github-cli-"
+
+// envGitHubCLIShimDepth is the number of shims above the current process. The
+// shim passes depth+1 to the gh it launches and refuses to run at
+// maxGitHubCLIShimDepth. Nesting below the bound is valid: a gh extension may
+// call gh through a Bash whose BASH_ENV restores the shim directory.
+const envGitHubCLIShimDepth = "KANDEV_GITHUB_CLI_SHIM_DEPTH"
+
+const maxGitHubCLIShimDepth = 8
 
 const windowsOS = "windows"
 
@@ -44,8 +59,19 @@ func runGitHubCLIShim(
 	lookPath githubCLILookPath,
 	runner githubCLICommandRunner,
 ) error {
+	depth, err := githubCLIShimDepth(getenv(envGitHubCLIShimDepth))
+	if err != nil {
+		return err
+	}
 	client, err := newGitHubCLIShimCredentialBrokerClient(ctx, args, getenv, httpClient)
 	if err != nil {
+		return err
+	}
+	host, err := githubhost.Parse(client.request.Host)
+	if err != nil {
+		return fmt.Errorf("invalid authorized GitHub host: %w", err)
+	}
+	if err := validateGitHubCLITargets(args, getenv, client.request, host); err != nil {
 		return err
 	}
 	credential, err := client.resolveWithReissue(ctx)
@@ -53,6 +79,7 @@ func runGitHubCLIShim(
 		return err
 	}
 	realPath := pathWithoutDirectory(getenv("PATH"), shimDir)
+	realPath = pathWithoutGitHubCLIShimDirectories(realPath)
 	executable, err := lookPath("gh", realPath)
 	if err != nil {
 		return fmt.Errorf("find real gh CLI: %w", err)
@@ -63,11 +90,32 @@ func runGitHubCLIShim(
 	}
 	defer func() { _ = os.RemoveAll(configDir) }()
 	childEnv := replaceEnvironment(environ(), map[string]string{
-		"GH_TOKEN":      credential.Password,
-		"GH_CONFIG_DIR": configDir,
-		"PATH":          realPath,
-	}, "GITHUB_TOKEN")
+		host.TokenVariable():  credential.Password,
+		"GH_HOST":             host.String(),
+		"GH_CONFIG_DIR":       configDir,
+		"PATH":                realPath,
+		envGitHubCLIShimDepth: strconv.Itoa(depth + 1),
+	}, "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 	return runner(ctx, executable, args, childEnv, stdin, stdout, stderr)
+}
+
+// githubCLIShimDepth parses the inherited shim depth; the bound is exclusive.
+func githubCLIShimDepth(raw string) (int, error) {
+	depth := 0
+	if raw = strings.TrimSpace(raw); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return 0, fmt.Errorf("invalid %s %q", envGitHubCLIShimDepth, raw)
+		}
+		depth = parsed
+	}
+	if depth >= maxGitHubCLIShimDepth {
+		return 0, fmt.Errorf(
+			"gh shim nested %d times: the gh found on PATH is a Kandev shim, not the GitHub CLI",
+			depth,
+		)
+	}
+	return depth, nil
 }
 
 type githubCLIRepository struct {
@@ -132,25 +180,33 @@ func resolveGitHubCLIRepository(
 }
 
 func githubCLIRepositoryArgument(args []string) (string, bool, error) {
-	for index, arg := range args {
+	var repository string
+	found := false
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
 		if arg == "--" {
 			break
 		}
+		if githubCLIValueFlag(arg) && arg != "-R" && arg != githubCLIRepositoryFlag {
+			index++
+			continue
+		}
 		switch {
-		case arg == "-R" || arg == "--repo":
+		case arg == "-R" || arg == githubCLIRepositoryFlag:
 			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
 				return "", true, fmt.Errorf("GitHub CLI repository argument is empty")
 			}
-			return args[index+1], true, nil
-		case strings.HasPrefix(arg, "--repo="):
-			return strings.TrimPrefix(arg, "--repo="), true, nil
+			index++
+			repository, found = args[index], true
+		case strings.HasPrefix(arg, githubCLIRepositoryFlag+"="):
+			repository, found = strings.TrimPrefix(arg, githubCLIRepositoryFlag+"="), true
 		case strings.HasPrefix(arg, "-R="):
-			return strings.TrimPrefix(arg, "-R="), true, nil
+			repository, found = strings.TrimPrefix(arg, "-R="), true
 		case strings.HasPrefix(arg, "-R") && len(arg) > 2:
-			return strings.TrimPrefix(arg, "-R"), true, nil
+			repository, found = strings.TrimPrefix(arg, "-R"), true
 		}
 	}
-	return "", false, nil
+	return repository, found, nil
 }
 
 func parseGitHubCLIRepository(raw, defaultHost string) (*githubCLIRepository, error) {
@@ -163,7 +219,7 @@ func parseGitHubCLIRepository(raw, defaultHost string) (*githubCLIRepository, er
 		if err != nil || parsed.Hostname() == "" {
 			return nil, fmt.Errorf("GitHub CLI repository %q is invalid", raw)
 		}
-		return repositoryFromHostAndPath(parsed.Hostname(), parsed.Path, raw)
+		return repositoryFromHostAndPath(parsed.Host, parsed.Path, raw)
 	}
 	if before, path, found := strings.Cut(raw, ":"); found && strings.Contains(before, "@") {
 		host := before[strings.LastIndex(before, "@")+1:]
@@ -245,6 +301,17 @@ func pathWithoutDirectory(path, excluded string) string {
 	return strings.Join(filtered, string(os.PathListSeparator))
 }
 
+func pathWithoutGitHubCLIShimDirectories(path string) string {
+	parts := filepath.SplitList(path)
+	filtered := parts[:0]
+	for _, part := range parts {
+		if !isGitHubCLIShimDir(part) {
+			filtered = append(filtered, part)
+		}
+	}
+	return strings.Join(filtered, string(os.PathListSeparator))
+}
+
 func githubCLIShimName() string {
 	if runtime.GOOS == windowsOS {
 		return "gh.exe"
@@ -258,7 +325,7 @@ func isGitHubCLIShimInvocation(argv0 string) bool {
 }
 
 func installGitHubCLIShim(agentctlExecutable, tempRoot string) (string, func(), error) {
-	dir, err := os.MkdirTemp(tempRoot, "kandev-github-cli-")
+	dir, err := os.MkdirTemp(tempRoot, githubCLIShimDirPrefix)
 	if err != nil {
 		return "", nil, fmt.Errorf("create gh shim directory: %w", err)
 	}
@@ -320,7 +387,36 @@ func linkOrCopyExecutable(source, target string) error {
 	return closeErr
 }
 
+// lookPathSkippingShims is lookPathIn, except that it never returns a Kandev gh
+// shim: neither a candidate inside a githubCLIShimDirPrefix directory nor the
+// given executable itself, compared by file identity so links to it are skipped
+// too. self may be empty when the running executable is unknown.
+func lookPathSkippingShims(self string) githubCLILookPath {
+	var selfInfo os.FileInfo
+	if self != "" {
+		if info, err := os.Stat(self); err == nil {
+			selfInfo = info
+		}
+	}
+	return func(file, path string) (string, error) {
+		return lookPathMatching(file, path, func(candidate string, info os.FileInfo) bool {
+			if isGitHubCLIShimDir(filepath.Dir(candidate)) {
+				return false
+			}
+			return selfInfo == nil || !os.SameFile(info, selfInfo)
+		})
+	}
+}
+
+func isGitHubCLIShimDir(dir string) bool {
+	return strings.HasPrefix(filepath.Base(dir), githubCLIShimDirPrefix)
+}
+
 func lookPathIn(file, path string) (string, error) {
+	return lookPathMatching(file, path, func(string, os.FileInfo) bool { return true })
+}
+
+func lookPathMatching(file, path string, accept func(string, os.FileInfo) bool) (string, error) {
 	names := []string{file}
 	if runtime.GOOS == windowsOS && filepath.Ext(file) == "" {
 		names = []string{file + ".exe", file + ".cmd", file + ".bat", file}
@@ -329,7 +425,7 @@ func lookPathIn(file, path string) (string, error) {
 		for _, name := range names {
 			candidate := filepath.Join(directory, name)
 			info, err := os.Stat(candidate)
-			if err == nil && !info.IsDir() && (runtime.GOOS == windowsOS || info.Mode()&0o111 != 0) {
+			if err == nil && !info.IsDir() && (runtime.GOOS == windowsOS || info.Mode()&0o111 != 0) && accept(candidate, info) {
 				return candidate, nil
 			}
 		}

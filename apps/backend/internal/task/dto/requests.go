@@ -25,12 +25,14 @@ type CreateWorkspaceRequest struct {
 }
 
 type UpdateWorkspaceRequest struct {
-	ID                    string
-	Name                  *string
-	Description           *string
-	DefaultExecutorID     *string
-	DefaultEnvironmentID  *string
-	DefaultAgentProfileID *string
+	ID                       string
+	Name                     *string
+	Description              *string
+	DefaultExecutorID        *string
+	DefaultEnvironmentID     *string
+	DefaultAgentProfileID    *string
+	ACPIdleSuspensionEnabled *bool
+	ACPIdleTimeoutMinutes    *int
 }
 
 type DeleteWorkspaceRequest struct {
@@ -281,6 +283,7 @@ type TaskRepositoryInput struct {
 }
 
 type CreateTaskRequest struct {
+	ExecutionGrade string `json:"execution_grade,omitempty"`
 	WorkspaceID    string
 	WorkflowID     string
 	WorkflowStepID string
@@ -291,6 +294,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput
 	Position       int
 	Metadata       map[string]interface{}
+	MCPServerIDs   []string
 
 	// Office extensions
 	AssigneeAgentProfileID string
@@ -303,14 +307,15 @@ type CreateTaskRequest struct {
 }
 
 type UpdateTaskRequest struct {
-	ID           string
-	Title        *string
-	Description  *string
-	Priority     *string
-	State        *v1.TaskState
-	Repositories []TaskRepositoryInput
-	Position     *int
-	Metadata     map[string]interface{}
+	ExecutionGrade *string `json:"execution_grade,omitempty"`
+	ID             string
+	Title          *string
+	Description    *string
+	Priority       *string
+	State          *v1.TaskState
+	Repositories   []TaskRepositoryInput
+	Position       *int
+	Metadata       map[string]interface{}
 }
 
 type DeleteTaskRequest struct {
@@ -356,7 +361,8 @@ type BulkMoveTasksRequest struct {
 }
 
 type BulkMoveTasksResponse struct {
-	MovedCount int `json:"moved_count"`
+	MovedCount   int      `json:"moved_count"`
+	MovedTaskIDs []string `json:"moved_task_ids"`
 }
 
 type TaskCountResponse struct {

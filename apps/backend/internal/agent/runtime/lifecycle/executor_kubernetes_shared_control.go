@@ -52,7 +52,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
-	client := newKubernetesAgentctlClient(r.logger, req, remoteID, token, instanceForward.LocalPort())
+	client := newKubernetesAgentctlClient(r.logger, req, response.ID, token, instanceForward.LocalPort(), response.ScopedMCPRoutes)
 	if err := client.Health(ctx); err != nil {
 		client.Close()
 		_ = instanceForward.Close()
@@ -61,11 +61,12 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 	return client, instanceForward, token, response.Port, nil
 }
 
-func getOrCreateSharedKubernetesInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest, remoteID string) (*agentctl.CreateInstanceResponse, bool, error) {
+func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetesAgentctlInstanceControl, req *ExecutorCreateRequest, remoteID string) (*agentctl.CreateInstanceResponse, bool, error) {
 	request := buildReconnectCreateInstanceRequest(req, remoteID)
+	applyKubernetesDurableJournalPath(request, req)
 	info, err := control.GetInstance(ctx, remoteID)
 	if err == nil {
-		response := &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
+		response := &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 			return nil, false, err
 		}

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -15,8 +16,11 @@ import (
 
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	settingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/portutil"
 	"github.com/kandev/kandev/internal/task/models"
@@ -24,14 +28,35 @@ import (
 )
 
 const (
-	queryValueTrue     = "true"
-	invalidRequestBody = "invalid request body"
+	queryValueTrue                              = "true"
+	invalidRequestBody                          = "invalid request body"
+	sessionConfigurationStatusApplied           = "applied"
+	sessionConfigurationStatusSavedForLaunch    = "saved_for_launch"
+	sessionConfigurationStatusUnconfirmed       = "unconfirmed"
+	sessionConfigurationStatusRejected          = "rejected"
+	sessionConfigurationStatusPersistenceFailed = "persistence_failed"
 )
 
+// SessionModelConfigResolver resolves a candidate model's provider options
+// using the session's effective launch context without mutating the session.
+type SessionModelConfigResolver interface {
+	ResolveSessionModelConfig(context.Context, string, SessionModelConfigRequest) (*settingsdto.AgentModelConfigResponse, error)
+}
+
+type SessionModelConfigRequest struct {
+	Model         string
+	Mode          string
+	ConfigOptions map[string]string
+}
+
 type ProcessHandlers struct {
-	service      *service.Service
-	lifecycleMgr *lifecycle.Manager
-	logger       *logger.Logger
+	service                    *service.Service
+	sessionModelConfigResolver SessionModelConfigResolver
+	lifecycleMgr               *lifecycle.Manager
+	cursorMCPRecovery          cursorMCPRecoveryManager
+	terminalSvc                cursorMCPRecoveryTerminalService
+	cursorMCPRecoveryMu        sync.Mutex
+	logger                     *logger.Logger
 }
 
 func RegisterProcessRoutes(
@@ -44,6 +69,11 @@ func RegisterProcessRoutes(
 		service:      svc,
 		lifecycleMgr: lifecycleMgr,
 		logger:       log.WithFields(zap.String("component", "task-process-handlers")),
+	}
+	if lifecycleMgr != nil {
+		if recovery, ok := any(lifecycleMgr).(cursorMCPRecoveryManager); ok {
+			handlers.cursorMCPRecovery = recovery
+		}
 	}
 	api := router.Group("/api/v1")
 	processes := api.Group("/task-sessions/:id/processes")
@@ -69,9 +99,18 @@ func RegisterProcessRoutes(
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
+	session.POST("/resolve-model-config", handlers.httpResolveSessionModelConfig)
 	session.POST("/authenticate", handlers.httpAuthenticate)
+	session.POST("/mcp/authenticate", handlers.httpAuthenticateCursorMCP)
+	session.POST("/mcp/retry", handlers.httpRetryCursorMCP)
 	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
 	return handlers
+}
+
+// SetTerminalService wires first-class ordinary task terminals used by native
+// Cursor MCP authentication commands.
+func (h *ProcessHandlers) SetTerminalService(terminals cursorMCPRecoveryTerminalService) {
+	h.terminalSvc = terminals
 }
 
 type httpStartProcessRequest struct {
@@ -503,22 +542,82 @@ func (h *ProcessHandlers) denySessionAccess(c *gin.Context, sessionID string) bo
 	return false
 }
 
-func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough bool, apply func() error) error {
+func (h *ProcessHandlers) denySessionExecutionAccess(c *gin.Context, sessionID string) bool {
+	if err := h.service.AuthorizeSessionScope(c.Request.Context(), sessionID, authz.ScopeSessionExec); err != nil {
+		if service.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for this action"})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		}
+		return true
+	}
+	return false
+}
+
+type sessionConfigurationFeedback struct {
+	Status      string `json:"status"`
+	ConfigID    string `json:"config_id,omitempty"`
+	Requested   string `json:"requested"`
+	Effective   string `json:"effective,omitempty"`
+	Confirmed   bool   `json:"confirmed"`
+	ExecutionID string `json:"execution_id,omitempty"`
+}
+
+func newSessionConfigurationFeedback(
+	configID, requested string,
+	result lifecycle.SessionConfigurationResult,
+	live bool,
+) sessionConfigurationFeedback {
+	status := sessionConfigurationStatusSavedForLaunch
+	if live {
+		status = sessionConfigurationStatusUnconfirmed
+		if result.Confirmed {
+			status = sessionConfigurationStatusApplied
+		}
+	}
+	return sessionConfigurationFeedback{
+		Status: status, ConfigID: configID, Requested: requested,
+		Effective: result.Effective, Confirmed: result.Confirmed,
+		ExecutionID: result.ExecutionID,
+	}
+}
+
+func sessionConfigurationSetterErrorStatus(operation string, err error) string {
+	if err == nil {
+		return sessionConfigurationStatusUnconfirmed
+	}
+	var notSent *agentctlclient.RequestNotSentError
+	if errors.As(err, &notSent) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, agentctlclient.ErrAgentStreamNotConnected) {
+		return sessionConfigurationStatusUnconfirmed
+	}
+	if strings.HasPrefix(err.Error(), "set "+operation+" failed:") {
+		return sessionConfigurationStatusRejected
+	}
+	return sessionConfigurationStatusUnconfirmed
+}
+
+func (h *ProcessHandlers) applyIfSessionReady(
+	sessionID string,
+	allowPassthrough bool,
+	apply func() (lifecycle.SessionConfigurationResult, error),
+) (lifecycle.SessionConfigurationResult, bool, error) {
 	execution, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !running {
-		return nil
+		return lifecycle.SessionConfigurationResult{}, false, nil
 	}
 	if !h.lifecycleMgr.WasSessionInitialized(execution.ID) &&
 		(!allowPassthrough || execution.PassthroughProcessID == "") {
-		return nil
+		return lifecycle.SessionConfigurationResult{}, false, nil
 	}
-	if err := apply(); err != nil {
+	result, err := apply()
+	if err != nil {
 		if _, stillRunning := h.lifecycleMgr.GetExecutionBySessionID(sessionID); !stillRunning {
-			return nil
+			return lifecycle.SessionConfigurationResult{}, false, nil
 		}
-		return err
+		return result, true, err
 	}
-	return nil
+	return result, true, nil
 }
 
 // httpSetSessionMode applies the session mode now or records it for the next launch.
@@ -534,26 +633,33 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionReady(sessionID, false, func() error {
-		return h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID)
-	}); err != nil {
+	result, live, err := h.applyIfSessionReady(sessionID, false, func() (lifecycle.SessionConfigurationResult, error) {
+		return h.lifecycleMgr.SetSessionModeBySessionIDWithResult(c.Request.Context(), sessionID, req.ModeID)
+	})
+	if err != nil {
 		h.logger.Error("failed to set session mode",
 			zap.String("session_id", sessionID),
 			zap.String("mode_id", req.ModeID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": err.Error()})
+		feedback := sessionConfigurationFeedback{
+			Status: sessionConfigurationSetterErrorStatus("mode", err), ConfigID: "mode",
+			Requested: req.ModeID, ExecutionID: result.ExecutionID,
+		}
+		c.JSON(500, gin.H{"error": err.Error(), "configuration_result": feedback})
 		return
 	}
+	feedback := newSessionConfigurationFeedback("mode", req.ModeID, result, live)
 	writeCtx := context.WithoutCancel(c.Request.Context())
 	if err := h.service.PersistSessionRuntimeMode(writeCtx, sessionID, req.ModeID); err != nil {
 		h.logger.Error("failed to persist session mode",
 			zap.String("session_id", sessionID),
 			zap.String("mode_id", req.ModeID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
+		feedback.Status = sessionConfigurationStatusPersistenceFailed
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config", "configuration_result": feedback})
 		return
 	}
-	c.JSON(200, gin.H{"ok": true})
+	c.JSON(200, gin.H{"ok": true, "configuration_result": feedback})
 }
 
 // httpSetSessionModel applies the session model now or records it for the next launch.
@@ -569,26 +675,71 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionReady(sessionID, true, func() error {
-		return h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID)
-	}); err != nil {
+	result, live, err := h.applyIfSessionReady(sessionID, true, func() (lifecycle.SessionConfigurationResult, error) {
+		return h.lifecycleMgr.SetSessionModelBySessionIDWithResult(c.Request.Context(), sessionID, req.ModelID)
+	})
+	if err != nil {
 		h.logger.Error("failed to set session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": err.Error()})
+		feedback := sessionConfigurationFeedback{
+			Status: sessionConfigurationSetterErrorStatus("model", err), ConfigID: "model",
+			Requested: req.ModelID, ExecutionID: result.ExecutionID,
+		}
+		c.JSON(500, gin.H{"error": err.Error(), "configuration_result": feedback})
 		return
 	}
+	feedback := newSessionConfigurationFeedback("model", req.ModelID, result, live)
 	writeCtx := context.WithoutCancel(c.Request.Context())
 	if err := h.service.PersistSessionRuntimeModel(writeCtx, sessionID, req.ModelID); err != nil {
 		h.logger.Error("failed to persist session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
+		feedback.Status = sessionConfigurationStatusPersistenceFailed
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config", "configuration_result": feedback})
 		return
 	}
-	c.JSON(200, gin.H{"ok": true})
+	c.JSON(200, gin.H{"ok": true, "configuration_result": feedback})
+}
+
+// SetSessionModelConfigResolver wires the settings-owned candidate resolver.
+func (h *ProcessHandlers) SetSessionModelConfigResolver(resolver SessionModelConfigResolver) {
+	h.sessionModelConfigResolver = resolver
+}
+
+// httpResolveSessionModelConfig resolves provider options for a candidate model
+// with the session's launch context. It never mutates the live session.
+func (h *ProcessHandlers) httpResolveSessionModelConfig(c *gin.Context) {
+	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
+	if h.sessionModelConfigResolver == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "model configuration resolution is unavailable"})
+		return
+	}
+	var req struct {
+		Model         string            `json:"model"`
+		Mode          string            `json:"mode,omitempty"`
+		ConfigOptions map[string]string `json:"config_options,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Model) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+		return
+	}
+	response, err := h.sessionModelConfigResolver.ResolveSessionModelConfig(
+		c.Request.Context(), sessionID,
+		SessionModelConfigRequest{Model: req.Model, Mode: req.Mode, ConfigOptions: req.ConfigOptions},
+	)
+	if err != nil {
+		h.logger.Warn("failed to resolve session model configuration",
+			zap.String("session_id", sessionID), zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to resolve model configuration"})
+		return
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // httpSetSessionConfigOption applies an option now or records it for the next launch.
@@ -598,33 +749,53 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID        string `json:"config_id"`
+		Value           string `json:"value"`
+		ExpectedModelID string `json:"expected_model_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionReady(sessionID, false, func() error {
-		return h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value)
-	}); err != nil {
+	result, live, err := h.applyIfSessionReady(sessionID, false, func() (lifecycle.SessionConfigurationResult, error) {
+		if req.ExpectedModelID != "" {
+			return h.lifecycleMgr.SetSessionConfigOptionBySessionIDWithExpectedModelWithResult(
+				c.Request.Context(), sessionID, req.ConfigID, req.Value, req.ExpectedModelID,
+			)
+		}
+		return h.lifecycleMgr.SetSessionConfigOptionBySessionIDWithResult(c.Request.Context(), sessionID, req.ConfigID, req.Value)
+	})
+	if err == nil && req.ExpectedModelID != "" && !live {
+		err = lifecycle.ErrSessionConfigurationModelChanged
+	}
+	if err != nil {
 		h.logger.Error("failed to set session config option",
 			zap.String("session_id", sessionID),
 			zap.String("config_id", req.ConfigID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": err.Error()})
+		feedback := sessionConfigurationFeedback{
+			Status: sessionConfigurationSetterErrorStatus("config option", err), ConfigID: req.ConfigID,
+			Requested: req.Value, ExecutionID: result.ExecutionID,
+		}
+		status := http.StatusInternalServerError
+		if errors.Is(err, lifecycle.ErrSessionConfigurationModelChanged) {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error(), "configuration_result": feedback})
 		return
 	}
+	feedback := newSessionConfigurationFeedback(req.ConfigID, req.Value, result, live)
 	writeCtx := context.WithoutCancel(c.Request.Context())
 	if err := h.service.PersistSessionRuntimeConfigOption(writeCtx, sessionID, req.ConfigID, req.Value); err != nil {
 		h.logger.Error("failed to persist session config option",
 			zap.String("session_id", sessionID),
 			zap.String("config_id", req.ConfigID),
 			zap.Error(err))
-		c.JSON(500, gin.H{"error": "failed to persist session runtime config"})
+		feedback.Status = sessionConfigurationStatusPersistenceFailed
+		c.JSON(500, gin.H{"error": "failed to persist session runtime config", "configuration_result": feedback})
 		return
 	}
-	c.JSON(200, gin.H{"ok": true})
+	c.JSON(200, gin.H{"ok": true, "configuration_result": feedback})
 }
 
 // httpAuthenticate triggers authentication for a given auth method on a running agent.
@@ -645,6 +816,10 @@ func (h *ProcessHandlers) httpAuthenticate(c *gin.Context) {
 			zap.String("session_id", sessionID),
 			zap.String("method_id", req.MethodID),
 			zap.Error(err))
+		if errors.Is(err, acpcompat.ErrTaskAuthenticationDenied) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

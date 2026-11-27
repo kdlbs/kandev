@@ -20,7 +20,11 @@ export function TaskMoveItems({
   isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
-}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask"> & {
+  onChangeWorkflow,
+}: Omit<
+  TaskContextMenuItemsProps,
+  "onRenameTask" | "onArchiveTask" | "onDeleteTask" | "isArchiving"
+> & {
   actingIds: string[];
   actingOnSelection: boolean;
 }) {
@@ -78,16 +82,22 @@ export function TaskMoveItems({
       isMoving={moveOptionsBusy}
       progressByStepId={progressByStepId}
       agentLabelsByProfileId={agentLabelsByProfileId}
-      onSendToWorkflow={(targetWorkflowId, stepId) => {
-        if (actingOnSelection) {
-          runSelectionMove(targetWorkflowId, stepId, "workflow");
-          return;
-        }
-        closeMenu();
-        void moveTasks([task.id], targetWorkflowId, stepId, "workflow").catch(() => {
-          // useTaskWorkflowMove already shows the failure toast.
-        });
-      }}
+      isBulkSelection={actingIds.length > 1}
+      onChangeWorkflow={actingIds.length === 1 ? onChangeWorkflow : undefined}
+      onSendToWorkflow={
+        actingIds.length > 1
+          ? (targetWorkflowId, stepId) => {
+              if (actingOnSelection) {
+                runSelectionMove(targetWorkflowId, stepId, "workflow");
+                return;
+              }
+              closeMenu();
+              void moveTasks([task.id], targetWorkflowId, stepId, "workflow").catch(() => {
+                // useTaskWorkflowMove already shows the failure toast.
+              });
+            }
+          : undefined
+      }
     />
   );
 }

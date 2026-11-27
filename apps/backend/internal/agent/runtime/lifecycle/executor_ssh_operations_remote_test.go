@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -323,6 +324,19 @@ func TestRunSSHCommandAbandonsARunningCommandOnCancellation(t *testing.T) {
 	// test returns, so goleak sees no stragglers.
 	releaseRemote()
 	<-finished
+}
+
+func TestRunSSHCommandAbandonsBlockedSessionOpenOnCancellation(t *testing.T) {
+	server := newFakeSSHServer(t, nil)
+	server.setSilent(true)
+	client := server.dial(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, err := runSSHCommand(ctx, client, "true")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline", err)
+	}
 }
 
 func TestSyncBufferSnapshotsConcurrentWrites(t *testing.T) {

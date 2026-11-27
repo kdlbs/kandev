@@ -27,6 +27,12 @@ var (
 	ErrPermissionOptionNotOffered      = errors.New("permission_option_not_offered")
 	ErrPermissionAuditFailed           = errors.New("permission_audit_failed")
 	ErrPermissionDeliveryFailed        = errors.New("permission_delivery_failed")
+	ErrPermissionHumanInputRequired    = errors.New("human_input_required")
+	// ErrPermissionFinalizationFailed is an internal post-delivery subtype of
+	// ErrPermissionAuditFailed. It keeps the established public audit-failure
+	// classification while letting automatic fallback distinguish uncertain
+	// delivery from a failure before dispatch.
+	ErrPermissionFinalizationFailed = fmt.Errorf("%w", ErrPermissionAuditFailed)
 )
 
 type ResolveAgentPermissionRequest struct {
@@ -36,6 +42,13 @@ type ResolveAgentPermissionRequest struct {
 	PendingID string
 	OptionID  string
 	Source    models.PermissionResolutionSource
+	// AutomaticOnly prevents an automatic resolver from claiming a request that
+	// was already promoted to a person's fallback.
+	AutomaticOnly bool
+	// ActorKind, when set, replaces the kind derived from the context.
+	ActorKind models.PermissionResolutionActorKind
+	// UnattendedTurnID is stored in the audit of an unattended-turn denial.
+	UnattendedTurnID string
 }
 
 type ResolveAgentPermissionResult struct {
@@ -90,9 +103,12 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 	if err != nil {
 		return nil, err
 	}
-	_, option, lookupErr := findPermissionOption(permissions, request)
+	live, option, lookupErr := findPermissionOption(permissions, request)
 	if lookupErr != nil {
 		return nil, s.permissionLookupError(ctx, request, lookupErr)
+	}
+	if request.Source == models.PermissionSourceAutomation && live != nil && live.HumanInput {
+		return nil, ErrPermissionHumanInputRequired
 	}
 	if s.messageCreator == nil {
 		return nil, ErrPermissionAuditFailed
@@ -127,7 +143,7 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 		FinalizedAt: time.Now().UTC(),
 	})
 	if err != nil || finalized.Outcome != models.PermissionFinalized {
-		return nil, ErrPermissionAuditFailed
+		return nil, ErrPermissionFinalizationFailed
 	}
 	s.markSessionRunningAfterPermission(ctx, request.SessionID)
 	return &ResolveAgentPermissionResult{
@@ -149,10 +165,14 @@ func completePermissionResolutionIdentity(request ResolveAgentPermissionRequest)
 
 func (s *Service) claimAgentPermission(ctx context.Context, request ResolveAgentPermissionRequest, option *streams.PermissionChoice) (string, error) {
 	actorUserID, actorKind := permissionAuditActor(ctx)
+	if request.ActorKind != "" {
+		actorKind = request.ActorKind
+	}
 	claimID := uuid.NewString()
 	claim, err := s.claimPermissionWithRetry(ctx, models.PermissionResolutionClaimRequest{
-		TaskID:    request.TaskID,
-		SessionID: request.SessionID,
+		TaskID:        request.TaskID,
+		SessionID:     request.SessionID,
+		AutomaticOnly: request.AutomaticOnly,
 		Audit: models.PermissionResolutionAudit{
 			ClaimID:     claimID,
 			ActorUserID: actorUserID,
@@ -163,6 +183,8 @@ func (s *Service) claimAgentPermission(ctx context.Context, request ResolveAgent
 			OptionID:    option.OptionID,
 			OptionKind:  string(option.Kind),
 			SelectedAt:  time.Now().UTC(),
+
+			UnattendedTurnID: request.UnattendedTurnID,
 		},
 	})
 	if err != nil {
@@ -341,7 +363,7 @@ func (s *Service) finalizePermissionDeliveryFailure(ctx context.Context, request
 		FinalizedAt: time.Now().UTC(),
 	})
 	if finalizeErr != nil || finalized.Outcome != models.PermissionFinalized {
-		return ErrPermissionAuditFailed
+		return ErrPermissionFinalizationFailed
 	}
 	return domainErr
 }
@@ -381,4 +403,70 @@ func (s *Service) markSessionRunningAfterPermission(ctx context.Context, session
 		return
 	}
 	s.setSessionRunning(ctx, session.TaskID, sessionID, session)
+}
+
+// ResolveUnattendedPermission rejects one pending request of a coordinator's
+// unattended turn. It takes the request id and the offered options from the
+// live snapshot entry with the given pending id; a missing entry is success.
+// With a reject option it resolves through ResolveAgentPermission, which
+// restores the session to running; without one it cancels the request and
+// restores the session itself. An already-resolved, stale or claim-in-progress
+// result is success.
+func (s *Service) ResolveUnattendedPermission(ctx context.Context, taskID, sessionID, pendingID, unattendedTurnID string) error {
+	permissions, err := s.ListPendingAgentPermissions(ctx, taskID, sessionID)
+	if err != nil {
+		return err
+	}
+	var live *streams.PendingAgentPermission
+	for i := range permissions {
+		if permissions[i].PendingID == pendingID {
+			live = &permissions[i]
+			break
+		}
+	}
+	if live == nil {
+		return nil
+	}
+	// A provider-native human question is never answered on the user's behalf.
+	// An unattended turn must leave it pending until a person selects an
+	// offered option through the normal permission flow.
+	if live.HumanInput {
+		return nil
+	}
+	request := ResolveAgentPermissionRequest{
+		TaskID: taskID, SessionID: sessionID, RequestID: live.RequestID, PendingID: pendingID,
+		Source:           models.PermissionSourceCoordinatorWake,
+		ActorKind:        models.PermissionActorCoordinatorUnattended,
+		UnattendedTurnID: unattendedTurnID,
+	}
+	if request.OptionID = pickRejectChoice(live.Options); request.OptionID != "" {
+		_, err = s.ResolveAgentPermission(ctx, request)
+	} else if err = s.cancelAgentPermission(ctx, request); err == nil {
+		s.markSessionRunningAfterPermission(ctx, sessionID)
+	}
+	if errors.Is(err, ErrPermissionAlreadyResolved) || errors.Is(err, ErrPermissionStale) ||
+		errors.Is(err, ErrPermissionResolutionInProgress) || errors.Is(err, ErrPermissionNotFound) {
+		return nil
+	}
+	return err
+}
+
+// pickRejectChoice returns the first reject-kind option id, or "" when none is offered.
+func pickRejectChoice(options []streams.PermissionChoice) string {
+	for _, option := range options {
+		if strings.HasPrefix(string(option.Kind), "reject") {
+			return option.OptionID
+		}
+	}
+	return ""
+}
+
+// UnattendedPermissionHandler is called from handlePermissionRequest, after the
+// permission message is stored, for a request agentctl did not auto-approve.
+// activeTurnID is the session turn the request arrived in.
+type UnattendedPermissionHandler func(ctx context.Context, taskID, sessionID, pendingID, activeTurnID string)
+
+// SetUnattendedPermissionHandler installs the handler once at wiring; nil removes it.
+func (s *Service) SetUnattendedPermissionHandler(h UnattendedPermissionHandler) {
+	s.unattendedPermissionHandler = h
 }

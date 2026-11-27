@@ -1,12 +1,13 @@
+import { reconcileTaskWorkflowCoverage } from "@/lib/state/slices/task-workflow-coverage";
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { listWorkflows } from "@/lib/api";
-import type { WorkflowsState } from "@/lib/state/slices";
+import { readJourneyWorkflows } from "@/hooks/journey-metadata-resources";
 import {
   classifyWorkspaceContextReadError,
   isCurrentWorkspaceContext,
   retryAfterMilliseconds,
 } from "@/lib/state/workspace-context";
+import { mapWorkflowItem } from "@/lib/routing/route-bootstrap";
 import type { AppState } from "@/lib/state/store";
 import type { StoreApi } from "zustand";
 import { useForegroundRefresh } from "./use-foreground-refresh";
@@ -16,8 +17,7 @@ import type { WorkspaceContextReadState } from "@/lib/state/slices/kanban/types"
 const WORKSPACE_CONTEXT_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const NOOP_REFRESH = () => {};
 
-type StoreWorkflow = WorkflowsState["items"][number];
-type SetWorkflows = (workflows: StoreWorkflow[]) => void;
+type SetWorkflows = AppState["setWorkflows"];
 
 function canRetryWorkspaceContext(
   readState: WorkspaceContextReadState | undefined,
@@ -80,11 +80,14 @@ function useWorkflowsFetchEffect(
   trackRecovery: boolean,
   retryVersion: number,
 ) {
+  const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
     if (!enabled || !workspaceId) return;
     let cancelled = false;
+    const controller = new AbortController();
     const requestId = trackRecovery ? generateUUID() : undefined;
     const generation = store.getState().workspaceContextGeneration;
+    const overviewRead = store.getState().beginTaskOverviewRead?.();
     if (trackRecovery && typeof store.getState().setWorkspaceContextRead === "function") {
       store
         .getState()
@@ -97,7 +100,7 @@ function useWorkflowsFetchEffect(
           requestId,
         );
     }
-    listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
+    readJourneyWorkflows(store, workspaceId, { includeHidden: true, signal: controller.signal })
       .then((response) => {
         const state = store.getState();
         const staleWorkspaceContext = requireActiveWorkspace
@@ -106,18 +109,11 @@ function useWorkflowsFetchEffect(
         if (cancelled || staleWorkspaceContext) {
           return;
         }
-        const mapped = response.workflows.map((workflow) => ({
-          id: workflow.id,
-          workspaceId: workflow.workspace_id,
-          name: workflow.name,
-          description: workflow.description,
-          prompt: workflow.prompt,
-          sortOrder: workflow.sort_order ?? 0,
-          agent_profile_id: workflow.agent_profile_id,
-          hidden: workflow.hidden,
-          style: workflow.style,
-        }));
-        setWorkflows(mapped);
+        const mapped = response.workflows.map(mapWorkflowItem);
+        setWorkflows(
+          mapped,
+          reconcileTaskWorkflowCoverage(state, response.task_workflow_coverage, overviewRead),
+        );
         if (trackRecovery && typeof state.setWorkspaceContextRead === "function") {
           state.setWorkspaceContextRead(
             "workflows",
@@ -153,9 +149,14 @@ function useWorkflowsFetchEffect(
           retryAfterMilliseconds(error),
           requestId,
         );
+      })
+      .finally(() => {
+        if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
       });
     return () => {
       cancelled = true;
+      controller.abort();
+      if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
       if (
         trackRecovery &&
         requestId &&
@@ -181,6 +182,7 @@ function useWorkflowsFetchEffect(
     store,
     trackRecovery,
     workspaceId,
+    connectionStatus,
   ]);
 }
 

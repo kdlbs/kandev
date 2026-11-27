@@ -23,6 +23,15 @@ const (
 // lifecycle preparer can touch the workspace. It intentionally consults the
 // durable environment inventory rather than a sibling session projection.
 func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) error {
+	return e.validateReuseEnvironmentInventoryWithIdentity(ctx, req, env, true)
+}
+
+func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
+	ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment, preserveCanonicalIdentity bool,
+) error {
+	if env != nil && env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
 		return nil
 	}
@@ -42,20 +51,15 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
-	// Zero recorded rows means the canonical inventory was never captured at
-	// all (for example: a launch whose prepare step failed before writing
-	// any repo rows). That is recoverable — letting this launch through lets
-	// reuseExistingRepositoryWorktrees fall through its own empty-inventory
-	// check and rebuild fresh worktree/repo specs. A non-empty but wrong
-	// inventory below is the guard's actual purpose and must still refuse.
-	if len(rows) == 0 {
-		req.WorkspaceReuseRequired = workspaceReuseAllowed(
-			env,
-			req.ExecutorType,
-			req.WorkspaceReuseRequired,
-			e.taskIsRepoBacked(ctx, req.TaskID),
-		)
-		return nil
+	adoptCheckoutBranchCanonicalSlots(req, rows)
+	if preserveCanonicalIdentity {
+		pinCanonicalWorktreeIdentities(req, env)
+		e.pinCanonicalCloneURLBaseIdentity(req, env)
+	}
+	if len(req.Repositories) > 0 {
+		specs = req.Repositories
+	} else if spec, ok := topLevelLaunchRepoSpec(req); ok {
+		specs = []RepoSpec{spec}
 	}
 	for _, spec := range specs {
 		if got := canonicalInventoryMatches(spec, rows, req.UseWorktree); got != 1 {
@@ -64,6 +68,83 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 		}
 	}
 	return nil
+}
+
+// adoptCheckoutBranchCanonicalSlots binds a worktree launch whose requested
+// checkout branch is already held by a preserved canonical worktree to that
+// row's branch slot. Git admits a branch in only one worktree, so the row is
+// the only checkout the request can name. A slot is adopted only when the
+// spec has no exact canonical match, exactly one active row of the same
+// repository holds the branch, the adopted identity matches that row alone,
+// and no other spec of the launch already matches it. Returns whether any
+// identity changed.
+func adoptCheckoutBranchCanonicalSlots(req *LaunchAgentRequest, rows []*models.TaskEnvironmentRepo) bool {
+	if !req.UseWorktree {
+		return false
+	}
+	if len(req.Repositories) == 0 {
+		spec, ok := topLevelLaunchRepoSpec(req)
+		if !ok {
+			return false
+		}
+		slug, ok := checkoutBranchCanonicalSlot(spec, nil, rows)
+		if ok {
+			req.BranchIdentitySlug = slug
+		}
+		return ok
+	}
+	changed := false
+	for index := range req.Repositories {
+		slug, ok := checkoutBranchCanonicalSlot(req.Repositories[index], siblingRepoSpecs(req.Repositories, index), rows)
+		if ok {
+			req.Repositories[index].BranchIdentitySlug = slug
+			changed = true
+		}
+	}
+	return changed
+}
+
+func siblingRepoSpecs(specs []RepoSpec, index int) []RepoSpec {
+	siblings := make([]RepoSpec, 0, len(specs)-1)
+	siblings = append(siblings, specs[:index]...)
+	return append(siblings, specs[index+1:]...)
+}
+
+func checkoutBranchCanonicalSlot(spec RepoSpec, siblings []RepoSpec, rows []*models.TaskEnvironmentRepo) (string, bool) {
+	if spec.CheckoutBranch == "" || len(matchingCanonicalEnvironmentRepoRows(spec, rows, true)) != 0 {
+		return "", false
+	}
+	var holder *models.TaskEnvironmentRepo
+	for _, row := range rows {
+		if !checkoutBranchHolderMatches(row, spec) {
+			continue
+		}
+		if holder != nil {
+			return "", false
+		}
+		holder = row
+	}
+	if holder == nil || worktree.SanitizeBranchSlug(holder.BranchSlug) == "" {
+		return "", false
+	}
+	adopted := spec
+	adopted.BranchIdentitySlug = holder.BranchSlug
+	if matched := matchingCanonicalEnvironmentRepoRows(adopted, rows, true); len(matched) != 1 || matched[0] != holder {
+		return "", false
+	}
+	for _, sibling := range siblings {
+		for _, row := range matchingCanonicalEnvironmentRepoRows(sibling, rows, true) {
+			if row == holder {
+				return "", false
+			}
+		}
+	}
+	return holder.BranchSlug, true
+}
+
+func checkoutBranchHolderMatches(row *models.TaskEnvironmentRepo, spec RepoSpec) bool {
+	return canonicalEnvironmentRepoRowEligible(row, true) && row.RepositoryID == spec.RepositoryID &&
+		row.WorktreeBranch == spec.CheckoutBranch && row.WorkspaceRelativePath == spec.WorkspaceRelativePath
 }
 
 // claimSharedTaskEnvironmentTaskDirName records the first stable task-root
@@ -110,7 +191,16 @@ func currentTaskDirName(env *models.TaskEnvironment) string {
 }
 
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
-	matches := 0
+	return len(matchingCanonicalEnvironmentRepoRows(spec, rows, useWorktree))
+}
+
+// matchingCanonicalEnvironmentRepoRows returns every canonical environment
+// row that satisfies spec's repository/branch identity, shared by
+// canonicalInventoryMatches (admission count) and callers that need the
+// matched row itself, such as the row-scoped post-repair attestation lookup
+// for an already-valid inventory (see attestedWorkspaceInventoryRowsReceipt).
+func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) []*models.TaskEnvironmentRepo {
+	var matched []*models.TaskEnvironmentRepo
 	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)
 	// A non-worktree launch with no expected branch slug is not "legacy data
 	// with unknown branch" — it is a local/local_pc resume, where
@@ -129,12 +219,103 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
-		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
+		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath || !canonicalEnvironmentRepoRowEligible(row, useWorktree) {
 			continue
 		}
-		matches++
+		matched = append(matched, row)
 	}
-	return matches
+	return matched
+}
+
+func canonicalEnvironmentRepoRowEligible(row *models.TaskEnvironmentRepo, useWorktree bool) bool {
+	return row != nil && row.DeletedAt == nil && row.Status != taskEnvironmentRepoStatusFailed &&
+		row.Status != taskEnvironmentRepoStatusDeleted && row.Status != models.TaskEnvironmentRepoStatusDetached &&
+		(!useWorktree || row.WorktreeID != "")
+}
+
+// pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated
+// resume attached to the exact worktrees selected by its session. Repository
+// branch settings can change independently of that durable selection; the
+// relocation action preserves the existing branch and files.
+func pinDirtyCloneRelocationToSelectedWorktrees(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) {
+	if !worktree.DirtyCloneRelocationAllowed(ctx) || req == nil || session == nil || env == nil ||
+		!req.UseWorktree || !req.WorkspaceReuseRequired {
+		return
+	}
+	if len(req.Repositories) == 0 {
+		row := selectedDirtyCloneRelocationWorktree(session, env, req.RepositoryID)
+		if row == nil {
+			return
+		}
+		req.WorktreeID = row.WorktreeID
+		req.BranchIdentitySlug = row.BranchSlug
+		return
+	}
+	for index := range req.Repositories {
+		row := selectedDirtyCloneRelocationWorktree(session, env, req.Repositories[index].RepositoryID)
+		if row == nil {
+			continue
+		}
+		req.Repositories[index].WorktreeID = row.WorktreeID
+		req.Repositories[index].BranchIdentitySlug = row.BranchSlug
+	}
+}
+
+func selectedDirtyCloneRelocationWorktree(
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	repositoryID string,
+) *models.TaskEnvironmentRepo {
+	selectedID, ok := selectedDirtyCloneRelocationWorktreeID(session, repositoryID)
+	if !ok {
+		return nil
+	}
+	return activeDirtyCloneRelocationWorktree(env, repositoryID, selectedID)
+}
+
+func selectedDirtyCloneRelocationWorktreeID(session *models.TaskSession, repositoryID string) (string, bool) {
+	if session == nil || repositoryID == "" {
+		return "", false
+	}
+	selectedID := ""
+	for _, row := range session.Worktrees {
+		if row == nil || row.RepositoryID != repositoryID || row.WorktreeID == "" {
+			continue
+		}
+		if selectedID != "" && selectedID != row.WorktreeID {
+			return "", false
+		}
+		selectedID = row.WorktreeID
+	}
+	return selectedID, selectedID != ""
+}
+
+func activeDirtyCloneRelocationWorktree(
+	env *models.TaskEnvironment,
+	repositoryID string,
+	selectedID string,
+) *models.TaskEnvironmentRepo {
+	if env == nil {
+		return nil
+	}
+	var selected *models.TaskEnvironmentRepo
+	for _, row := range env.Repos {
+		if row == nil || row.RepositoryID != repositoryID || row.WorktreeID != selectedID ||
+			row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed ||
+			row.Status == taskEnvironmentRepoStatusDeleted {
+			continue
+		}
+		if selected != nil {
+			return nil
+		}
+		selected = row
+	}
+	return selected
 }
 
 // reuseExistingEnvironment carries forward worktree, container, sandbox, and
@@ -176,6 +357,9 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 
 	if env.TaskDirName != "" && req.UseWorktree {
 		req.TaskDirName = env.TaskDirName
+	}
+	if env.WorkspaceLayout != "" {
+		req.WorkspaceLayout = env.WorkspaceLayout
 	}
 	// SSH uses the remote task directory as an environment-scoped attachment
 	// handle. It is distinct from the per-session agentctl directory and must
@@ -240,7 +424,11 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 // executor. Clearing it makes local execution fall back to RepositoryPath and
 // makes worktree execution materialize through its normal preparer.
 func prepareExecutorTransition(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
-	if req == nil || env == nil || env.ExecutorType == "" || env.ExecutorType == req.ExecutorType {
+	if req == nil || env == nil || req.ExecutorType == "" {
+		return false
+	}
+	environmentType, known := env.EffectiveExecutorType()
+	if !known || string(environmentType) == req.ExecutorType {
 		return false
 	}
 	req.WorkspacePath = ""
@@ -273,6 +461,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if !req.UseWorktree {
 		return
 	}
+	pinCanonicalWorktreeIdentities(req, env)
 	repoSpecs := req.Repositories
 	usingTopLevelRepo := false
 	if len(repoSpecs) == 0 {
@@ -388,6 +577,10 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 	if req.RepositoryID == "" {
 		return RepoSpec{}, false
 	}
+	branchIdentity := req.BranchIdentitySlug
+	if branchIdentity == "" {
+		branchIdentity = topLevelBranchIdentitySlug(req)
+	}
 	return RepoSpec{
 		TaskRepositoryID:           req.TaskRepositoryID,
 		CheckoutOptions:            req.CheckoutOptions,
@@ -396,6 +589,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RepositoryURL:              req.RepositoryURL,
 		RepoName:                   req.RepoName,
 		BaseBranch:                 req.BaseBranch,
+		BaseBranchFallbackPolicy:   req.BaseBranchFallbackPolicy,
 		IntegrationRef:             req.IntegrationRef,
 		DefaultBranch:              req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
@@ -410,7 +604,8 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
 		RemoteRefState:             req.RemoteRefState,
 		CopyFiles:                  req.CopyFiles,
-		BranchIdentitySlug:         topLevelBranchIdentitySlug(req),
+		BranchIdentitySlug:         branchIdentity,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 	}, true
 }
 
@@ -591,12 +786,17 @@ func executorRunningMatchesEnvironment(running *models.ExecutorRunning, env *mod
 }
 
 func applyExecutorRunningMetadata(req *LaunchAgentRequest, running *models.ExecutorRunning) {
+	runtimeEnvironmentID, _ := running.Metadata[lifecycle.MetadataKeyTaskEnvironmentID].(string)
+	if req.TaskEnvironmentID != "" && runtimeEnvironmentID != "" && runtimeEnvironmentID != req.TaskEnvironmentID {
+		return
+	}
+	// A workspace can be shared across task sessions, but native execution
+	// identity is valid only for the exact non-empty session that created it.
 	requestIsKubernetes := models.ExecutorType(req.ExecutorType) == models.ExecutorTypeKubernetes
 	runningIsKubernetes := running.Runtime == agentruntime.RuntimeKubernetes
-	mayReuseExecution := true
+	mayReuseExecution := req.SessionID != "" && running.SessionID == req.SessionID
 	if requestIsKubernetes || runningIsKubernetes {
-		mayReuseExecution = requestIsKubernetes && runningIsKubernetes &&
-			req.SessionID != "" && running.SessionID == req.SessionID
+		mayReuseExecution = mayReuseExecution && requestIsKubernetes && runningIsKubernetes
 	}
 	if running.AgentExecutionID != "" && req.PreviousExecutionID == "" && mayReuseExecution {
 		req.PreviousExecutionID = running.AgentExecutionID

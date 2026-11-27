@@ -10,13 +10,16 @@ export {
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 export { createGitLabSlice, defaultGitLabState } from "./gitlab/gitlab-slice";
-export { createAzureDevOpsSlice, defaultAzureDevOpsState } from "./azure-devops/azure-devops-slice";
 export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
 export { createAuthSlice, defaultAuthState } from "./auth/auth-slice";
 export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
+export {
+  createCoordinatorsSlice,
+  defaultCoordinatorsState,
+} from "./coordinators/coordinators-slice";
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 export { createReviewSlice, defaultReviewState } from "./review/review-slice";
@@ -54,12 +57,6 @@ export type {
   TaskMRsState,
 } from "./gitlab/types";
 export type {
-  AzureDevOpsSlice,
-  AzureDevOpsSliceState,
-  AzureDevOpsSliceActions,
-  AzureDevOpsTaskPullRequestsState,
-} from "./azure-devops/types";
-export type {
   JiraSlice,
   JiraSliceState,
   JiraSliceActions,
@@ -88,10 +85,15 @@ export type {
   AutomationRunsState,
 } from "./automations/types";
 export type {
+  CoordinatorsSlice,
+  CoordinatorsSliceState,
+  CoordinatorsSliceActions,
+  CoordinatorsState,
+} from "./coordinators/types";
+export type {
   SystemSlice,
   SystemSliceState,
   SystemSliceActions,
-  SystemBackupsState,
   SystemJobsMap,
 } from "./system/types";
 export type {

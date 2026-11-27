@@ -4,9 +4,25 @@ import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
 import { cn } from "./lib/utils";
+import { ModalDrawerContentContext } from "./modal-drawer-context";
+import { ModalToastOutlet } from "./modal-toast-outlet";
+
+const DrawerModalContext = React.createContext(true);
 
 function Drawer({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
+  return (
+    <DrawerModalContext.Provider value={props.modal !== false}>
+      <DrawerPrimitive.Root data-slot="drawer" {...props} />
+    </DrawerModalContext.Provider>
+  );
+}
+
+function DrawerNested({ ...props }: React.ComponentProps<typeof DrawerPrimitive.NestedRoot>) {
+  return (
+    <DrawerModalContext.Provider value={props.modal !== false}>
+      <DrawerPrimitive.NestedRoot {...props} />
+    </DrawerModalContext.Provider>
+  );
 }
 
 function DrawerTrigger({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
@@ -40,8 +56,10 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  toastOutlet = true,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & { toastOutlet?: boolean }) {
+  const modal = React.useContext(DrawerModalContext);
   return (
     <DrawerPortal data-slot="drawer-portal">
       <DrawerOverlay />
@@ -54,7 +72,10 @@ function DrawerContent({
         {...props}
       >
         <div className="bg-muted mx-auto mt-4 hidden h-1.5 w-[100px] shrink-0 rounded-full group-data-[vaul-drawer-direction=bottom]/drawer-content:block bg-muted mx-auto hidden shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
-        {children}
+        <ModalDrawerContentContext.Provider value={modal}>
+          {children}
+          {toastOutlet && modal && <ModalToastOutlet />}
+        </ModalDrawerContentContext.Provider>
       </DrawerPrimitive.Content>
     </DrawerPortal>
   );
@@ -114,6 +135,7 @@ function DrawerDescription({
 
 export {
   Drawer,
+  DrawerNested,
   DrawerPortal,
   DrawerOverlay,
   DrawerTrigger,

@@ -1,5 +1,43 @@
 import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-repositories";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
+import type { RepositoryInspection } from "@/lib/plugins/types";
+
+/**
+ * Row fields that a provider inspection of a pasted URL settles: the verified
+ * descriptor, the canonical clone URL, and (when the row has no branch yet)
+ * the inspected head or default branch.
+ */
+export function inspectedRemoteRepositoryUpdate(
+  inspection: RepositoryInspection,
+  row: TaskRemoteRepoRow,
+): Partial<TaskRemoteRepoRow> {
+  return {
+    remoteUrl: inspection.cloneUrl,
+    provider: inspection.providerId,
+    providerHost: inspection.providerHost,
+    providerScope: inspection.providerScope,
+    providerRepoId: inspection.repositoryId,
+    providerOwner: inspection.ownerOrProject,
+    providerName: inspection.repositoryName,
+    fullName: `${inspection.ownerOrProject}/${inspection.repositoryName}`,
+    prNumber: inspection.pullRequest?.number,
+    prBaseBranch: inspection.baseBranch,
+    prHeadBranch: inspection.headBranch,
+    ...(!row.branch && (inspection.headBranch || inspection.defaultBranch)
+      ? { branch: inspection.headBranch || inspection.defaultBranch }
+      : {}),
+  };
+}
+
+/** True when applying `update` would change at least one field of `row`. */
+export function remoteRepositoryUpdateNeeded(
+  row: TaskRemoteRepoRow,
+  update: Partial<TaskRemoteRepoRow>,
+): boolean {
+  return Object.entries(update).some(
+    ([key, value]) => row[key as keyof TaskRemoteRepoRow] !== value,
+  );
+}
 
 export function selectedRemoteRepositoryIdentity(row: TaskRemoteRepoRow): string | undefined {
   if (row.provider && row.providerRepoId) return `${row.provider}:id:${row.providerRepoId}`;
@@ -41,12 +79,7 @@ function remoteSSHRepositoryIdentity(value: string): string | undefined {
   if (github) return githubRepositoryIdentity(github[1], github[2]);
 
   const gitlab = value.match(/^git@gitlab\.com:([^\s]+?)(?:\.git)?\/?$/i);
-  if (gitlab) return `gitlab:${gitlab[1]}`;
-
-  const azure = value.match(
-    /^git@ssh\.dev\.azure\.com:v3\/([^/\s]+)\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i,
-  );
-  return azure ? `azure_devops:${azure[1]}/${azure[2]}/${azure[3]}` : undefined;
+  return gitlab ? `gitlab:${gitlab[1]}` : undefined;
 }
 
 function remoteHTTPSRepositoryIdentity(url: URL): string | undefined {
@@ -64,10 +97,6 @@ function remoteHTTPSRepositoryIdentity(url: URL): string | undefined {
         ? `gitlab:${repositorySegments.map(stripGitSuffix).join("/")}`
         : undefined;
     }
-    case "dev.azure.com":
-      return segments.length >= 4 && segments[2]?.toLowerCase() === "_git"
-        ? `azure_devops:${segments[0]}/${segments[1]}/${stripGitSuffix(segments[3])}`
-        : undefined;
     default:
       return undefined;
   }

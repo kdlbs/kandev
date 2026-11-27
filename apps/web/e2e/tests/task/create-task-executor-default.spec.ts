@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -63,6 +64,7 @@ async function saveTaskCreatePreference(
 async function openCreateTask(testPage: import("@playwright/test").Page) {
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
+  await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
   await kanban.createTaskButton.first().click();
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }

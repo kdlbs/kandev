@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/models"
@@ -39,8 +41,8 @@ import (
 // session (the turn-complete path dies with the process), leaving
 // task_sessions stuck in STARTING/RUNNING forever on tasks that were never
 // archived. Every tick, stale STARTING/RUNNING sessions with no live
-// in-memory execution backing them return to WAITING_FOR_INPUT for lazy
-// recovery.
+// in-memory execution and no exact pending remote owner return to
+// WAITING_FOR_INPUT for lazy recovery.
 //
 // Both passes follow the exact periodic-sweep shape StartAutoArchiveLoop
 // already uses and re-invoke the same finalize transitions; as long as the
@@ -57,6 +59,9 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
+				s.runTurnChangeRetentionSweep(ctx, now)
+				s.runTurnChangePreservationRetry(ctx)
+				s.runTurnHistoryDeletionCleanup(ctx)
 			}
 		}
 	}()
@@ -110,7 +115,7 @@ func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
 const orphanedSessionGraceAllowance = 5 * time.Minute
 
 // orphanedSessionGracePeriod is how stale a STARTING/RUNNING session's last
-// write must be before the sweep may consider it unbacked. A session in those
+// write must be before the sweep may consider it stale. A session in those
 // states whose row is fresher than one full launch budget can still belong to
 // an in-flight launch whose execution has not reached the in-memory store
 // yet, so the sweep leaves it alone.
@@ -131,7 +136,8 @@ type orphanedSessionRepository interface {
 
 // runOrphanedSessionReconciliation is pass 2 of the reconciliation loop: it
 // returns stale STARTING/RUNNING sessions of unarchived tasks to
-// WAITING_FOR_INPUT when no live in-memory execution backs them. An
+// WAITING_FOR_INPUT when no live in-memory execution or pending remote owner
+// backs them. An
 // interrupted turn is settled without a completion event, so the same
 // conversation remains available for lazy recovery. Sessions backed by a
 // live execution — including survivors re-tracked by startup recovery — are
@@ -194,6 +200,15 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 				zap.Time("deadline", deadline))
 			return
 		}
+		pending, err := s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("orphaned-session reconciliation: failed to inspect pending remote owner; skipping session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if pending {
+			continue
+		}
 		// Re-check liveness at the moment of the write, not just at the
 		// candidate read: a launch that raced the grace window since the read
 		// must not be recovered. The staleBefore predicate inside the recovery
@@ -226,9 +241,18 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 				zap.Error(err))
 			continue
 		}
-		// The turn read above can take long enough for a replacement
-		// execution to register. Re-check immediately before the guarded write
-		// so a live successor keeps ownership of the session.
+		pending, err = s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("orphaned-session reconciliation: failed to recheck pending remote owner; skipping session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if pending {
+			continue
+		}
+		// The pending-owner lookup can complete as an owner attaches. Read
+		// liveness after it so that a newly registered execution keeps the
+		// session instead of being settled from the earlier snapshot.
 		if s.executionLivenessChecker.HasLiveExecution(session.ID) {
 			continue
 		}
@@ -255,6 +279,46 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 			zap.String("session_id", session.ID),
 			zap.String("previous_state", string(session.State)))
 	}
+}
+
+func (s *Service) pendingRemoteRecoveryForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.pendingRemoteRecoveryChecker == nil || sessionID == "" {
+		return false, nil
+	}
+	if s.executors == nil {
+		return false, errors.New("executor repository is unavailable")
+	}
+	row, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read executor owner: %w", err)
+	}
+	if row == nil || row.AgentExecutionID == "" {
+		return false, nil
+	}
+	return s.pendingRemoteRecoveryChecker(sessionID, row.AgentExecutionID), nil
+}
+
+func (s *Service) pendingRemoteRecoverySessions(
+	ctx context.Context,
+	sessions []*models.TaskSession,
+) (map[string]struct{}, error) {
+	pending := make(map[string]struct{})
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		isPending, err := s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("session %s: %w", session.ID, err)
+		}
+		if isPending {
+			pending[session.ID] = struct{}{}
+		}
+	}
+	return pending, nil
 }
 
 // captureRecoveryExecutorSnapshot records the executor identity observed with
@@ -495,26 +559,26 @@ func (s *Service) clearRecoverySettlement(ctx context.Context, session *models.T
 	return err
 }
 
-type interruptedTaskMetadataSetter interface {
-	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+type interruptedTaskSessionSetter interface {
+	SetTaskInterruptedSessionIfNotArchived(
+		ctx context.Context,
+		taskID, sessionID string,
+		marker models.InterruptedSessionMarker,
+	) (bool, error)
 }
 
-type interruptedTaskMetadataAbsentSetter interface {
-	SetTaskMetadataKeyIfAbsentNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
-}
-
-// interruptedTaskMetadataRecoverySetter adds the session recovery generation
+// interruptedTaskSessionRecoverySetter adds the session recovery generation
 // to the marker write. The task row is updated only while the recovered
 // session still owns its WAITING_FOR_INPUT generation and its settlement token
 // is present. This closes the gap between the in-memory ownership check and
 // the task metadata write when a successor starts concurrently.
-type interruptedTaskMetadataRecoverySetter interface {
-	SetTaskMetadataKeyIfRecoveryCurrent(
+type interruptedTaskSessionRecoverySetter interface {
+	SetTaskInterruptedSessionIfRecoveryCurrent(
 		ctx context.Context,
 		taskID, sessionID string,
 		expectedSessionUpdatedAt time.Time,
-		expectedRecoveryToken, key string,
-		value interface{},
+		expectedRecoveryToken string,
+		marker models.InterruptedSessionMarker,
 	) (bool, error)
 }
 
@@ -523,40 +587,42 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 		return false, nil
 	}
 	settlement, hasSettlement := models.LoadInterruptedRecoverySettlement(recovered.Metadata)
-	// The concrete SQLite task repository owns the archive-atomic metadata CAS.
-	// Keep this optional so focused task-service users and test repositories
-	// without the newer marker primitive remain compatible.
-	_, ok := s.tasks.(interruptedTaskMetadataSetter)
+	setter, ok := s.tasks.(interruptedTaskSessionSetter)
 	if !ok {
 		return false, errors.New("task repository does not support recovery interruption markers")
 	}
-	value := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
+	token := uuid.NewString()
 	expectedUpdatedAt := recovered.UpdatedAt
 	if hasSettlement && !settlement.RecoveredUpdatedAt.IsZero() {
 		expectedUpdatedAt = settlement.RecoveredUpdatedAt
 	}
+	if hasSettlement && settlement.Token != "" {
+		token = settlement.Token
+	}
+	marker := models.InterruptedSessionMarker{
+		IncarnationID: recovered.QueueIncarnationID,
+		InterruptedAt: now.Format(time.RFC3339Nano),
+		Token:         token,
+	}
+	if marker.IncarnationID == "" {
+		return false, errors.New("recovered session has no interruption incarnation")
+	}
 	var changed bool
 	var err error
-	if recoverySetter, supported := s.tasks.(interruptedTaskMetadataRecoverySetter); supported && hasSettlement {
-		changed, err = recoverySetter.SetTaskMetadataKeyIfRecoveryCurrent(
+	if recoverySetter, supported := s.tasks.(interruptedTaskSessionRecoverySetter); supported && hasSettlement {
+		changed, err = recoverySetter.SetTaskInterruptedSessionIfRecoveryCurrent(
 			ctx,
 			recovered.TaskID,
 			recovered.ID,
 			expectedUpdatedAt,
 			settlement.Token,
-			models.MetaKeyInterruptedAt,
-			value,
+			marker,
 		)
-	} else if absentSetter, supported := s.tasks.(interruptedTaskMetadataAbsentSetter); supported {
-		changed, err = absentSetter.SetTaskMetadataKeyIfAbsentNotArchived(ctx, recovered.TaskID, models.MetaKeyInterruptedAt, value)
 	} else {
-		// A plain archive guard does not protect a recovery marker from a
-		// newer interruption arriving between the ownership check and this write.
-		// Fail closed when the adapter lacks either generation-safe primitive.
-		s.logger.Warn("skipping recovery interruption marker without generation-safe setter",
-			zap.String("task_id", recovered.TaskID),
-			zap.String("session_id", recovered.ID))
-		return false, errors.New("task repository does not support generation-safe recovery interruption markers")
+		changed, err = setter.SetTaskInterruptedSessionIfNotArchived(
+			ctx, recovered.TaskID, recovered.ID, marker,
+		)
 	}
 	if err != nil {
 		return false, err
@@ -573,4 +639,32 @@ func (s *Service) markTaskInterrupted(ctx context.Context, recovered *models.Tas
 	// without a reload.
 	s.PublishTaskUpdated(ctx, task)
 	return changed, nil
+}
+
+func (s *Service) runTurnChangePreservationRetry(ctx context.Context) {
+	if s.turnChangePreservationRetrier == nil {
+		return
+	}
+	result, err := s.turnChangePreservationRetrier.RetryPending(ctx)
+	if err != nil {
+		s.logger.Warn("turn-change preservation retry failed", zap.Error(err))
+	}
+	if result.Ready > 0 || result.Settled > 0 {
+		s.logger.Info("turn-change preservation retry settled work",
+			zap.Int("retried", result.Retried), zap.Int("ready", result.Ready),
+			zap.Int("settled", result.Settled), zap.Int("waiting", result.Waiting))
+	}
+}
+
+func (s *Service) runTurnHistoryDeletionCleanup(ctx context.Context) {
+	if s.turnHistoryCleanup == nil {
+		return
+	}
+	count, err := s.turnHistoryCleanup.CleanupDeletionIntents(ctx)
+	if err != nil {
+		s.logger.Warn("turn history deletion cleanup failed", zap.Error(err))
+	}
+	if count > 0 {
+		s.logger.Info("turn history deletion cleanup removed owned refs", zap.Int64("refs", count))
+	}
 }

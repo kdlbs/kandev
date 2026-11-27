@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ComponentProps } from "react";
-
-vi.mock("./changes-panel-file-row", () => ({
-  FileRow: ({ file }: { file: { path: string } }) => <li data-testid="file-row">{file.path}</li>,
-  BulkActionBar: () => null,
-  DefaultActionButtons: () => null,
-}));
 
 vi.mock("./commit-row", () => ({
   CommitRow: ({ commit, isLatest }: { commit: { commit_sha: string }; isLatest: boolean }) => (
@@ -16,53 +10,15 @@ vi.mock("./commit-row", () => ({
   ),
 }));
 
-vi.mock("@/hooks/use-multi-select", () => ({
-  useMultiSelect: () => ({
-    selectedPaths: new Set<string>(),
-    isSelected: () => false,
-    handleClick: vi.fn(),
-    clearSelection: vi.fn(),
-  }),
-}));
+import { CommitsSection, PRFilesSection } from "./changes-panel-timeline";
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (
-    selector: (state: { userSettings: { changesPanelLayout: "flat" | "tree" } }) => unknown,
-  ) => selector({ userSettings: { changesPanelLayout: "flat" } }),
-}));
-
-import { FileListSection, CommitsSection, PRFilesSection } from "./changes-panel-timeline";
-
-const REPO_HEADER_TID = "changes-repo-header";
 const COMMIT_ROW_TID = "commit-row";
 const COMMITS_SECTION_TOGGLE_TID = "commits-section-collapse-toggle";
 const ARIA_EXPANDED = "aria-expanded";
 
 afterEach(cleanup);
 
-type Props = ComponentProps<typeof FileListSection>;
 type CommitProps = ComponentProps<typeof CommitsSection>;
-
-const baseProps: Omit<Props, "files" | "variant" | "actionLabel" | "onAction"> = {
-  pendingStageFiles: new Set(),
-  onOpenDiff: vi.fn(),
-  onEditFile: vi.fn(),
-  onStage: vi.fn(),
-  onUnstage: vi.fn(),
-  onDiscard: vi.fn(),
-};
-
-function file(path: string, repo?: string): Props["files"][number] {
-  return {
-    path,
-    status: "modified",
-    staged: false,
-    plus: 1,
-    minus: 0,
-    oldPath: undefined,
-    repositoryName: repo,
-  };
-}
 
 function commit(sha: string, message: string, repo?: string): CommitProps["commits"][number] {
   return {
@@ -80,97 +36,6 @@ function commit(sha: string, message: string, repo?: string): CommitProps["commi
     repository_name: repo,
   };
 }
-
-describe("FileListSection — multi-repo grouping", () => {
-  it("renders a flat file list (no per-repo header) for single-repo workspaces", () => {
-    // Single-repo: drop the redundant per-repo sub-header above a flat file
-    // list. Action buttons (Stage all / Commit / Unstage all) move up to the
-    // section header so they remain accessible.
-    render(
-      <FileListSection
-        {...baseProps}
-        variant="unstaged"
-        actionLabel="Stage all"
-        onAction={() => undefined}
-        onRepoAction={() => undefined}
-        files={[file("a.ts"), file("b.ts")]}
-      />,
-    );
-    expect(screen.queryAllByTestId(REPO_HEADER_TID)).toHaveLength(0);
-    expect(screen.getAllByTestId("file-row")).toHaveLength(2);
-    // Section-level action button is still rendered.
-    expect(screen.getByTestId("repo-group-action").textContent).toContain("Stage all");
-  });
-
-  it("renders one header per repo when 2+ repos are present", () => {
-    render(
-      <FileListSection
-        {...baseProps}
-        variant="unstaged"
-        actionLabel="Stage all"
-        onAction={() => undefined}
-        files={[
-          file("src/app.tsx", "frontend"),
-          file("src/api.ts", "frontend"),
-          file("handlers/task.go", "backend"),
-        ]}
-      />,
-    );
-    const headers = screen.getAllByTestId(REPO_HEADER_TID);
-    expect(headers).toHaveLength(2);
-    expect(headers[0].textContent).toContain("frontend");
-    expect(headers[0].textContent).toContain("2");
-    expect(headers[1].textContent).toContain("backend");
-    expect(headers[1].textContent).toContain("1");
-  });
-
-  it("shows a header for a single named repo too", () => {
-    render(
-      <FileListSection
-        {...baseProps}
-        variant="unstaged"
-        actionLabel="Stage all"
-        onAction={() => undefined}
-        files={[file("a.ts", "only-repo")]}
-      />,
-    );
-    expect(screen.getByTestId(REPO_HEADER_TID).textContent).toContain("only-repo");
-  });
-
-  it("collapses one repo independently when its header is clicked", () => {
-    render(
-      <FileListSection
-        {...baseProps}
-        variant="unstaged"
-        actionLabel="Stage all"
-        onAction={() => undefined}
-        files={[
-          file("src/app.tsx", "frontend"),
-          file("src/api.ts", "frontend"),
-          file("handlers/task.go", "backend"),
-        ]}
-      />,
-    );
-
-    expect(screen.getAllByTestId("file-row")).toHaveLength(3);
-
-    const groups = screen.getAllByTestId("changes-repo-group");
-    const frontendGroup = groups.find(
-      (g) => g.getAttribute("data-repository-name") === "frontend",
-    )!;
-    const frontendHeader = within(frontendGroup).getByTestId(REPO_HEADER_TID);
-
-    fireEvent.click(frontendHeader);
-
-    // frontend's two rows hidden, backend's one row still visible
-    expect(screen.getAllByTestId("file-row")).toHaveLength(1);
-    expect(frontendHeader.getAttribute(ARIA_EXPANDED)).toBe("false");
-
-    fireEvent.click(frontendHeader);
-    expect(screen.getAllByTestId("file-row")).toHaveLength(3);
-    expect(frontendHeader.getAttribute(ARIA_EXPANDED)).toBe("true");
-  });
-});
 
 describe("CommitsSection", () => {
   it("renders the commits section header collapsed by default", () => {

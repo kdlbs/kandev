@@ -228,7 +228,7 @@ func TestSendPermissionNotificationSendsImmediatelyWhenAttachedAndRoomAvailable(
 		updatesCh: make(chan adapter.AgentEvent, 1),
 		logger:    newTestLogger(t),
 	}
-	m.MarkAttached()
+	m.AttachStream("s1")
 	pending := newPendingPermissionForNotificationTest(m)
 
 	m.sendPermissionNotification(pending)
@@ -301,7 +301,7 @@ func TestWaitForExitParksTheExitErrorEventOnAFullChannel(t *testing.T) {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
 
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 

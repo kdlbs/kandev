@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
@@ -12,6 +13,102 @@ import (
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.5
+func TestKeywordAccountContextSeparatesLiteralCredentialHomes(t *testing.T) {
+	profile := &agentsettingsmodels.AgentProfile{
+		ID: "concrete-profile", AgentID: "concrete", Enabled: true,
+		EnvVars: []agentsettingsmodels.ProfileEnvVar{{Key: "HOME", Value: "/accounts/first"}},
+	}
+	r := NewProfileExecutionResolver(&dynamicResolverTestProfiles{concrete: profile}, dynamic.NewEngine(), true)
+	r.SetKeywordContextEnabled(true)
+	r.SetCredentialBindingResolver(dynamic.NewCredentialBindingResolver([]byte("test-installation")))
+	first := r.ProviderKeywordContext(context.Background(), profile.ID)
+	profile.EnvVars[0].Value = "/accounts/second"
+	second := r.ProviderKeywordContext(context.Background(), profile.ID)
+	if first.AccountID != "" && first.AccountID == second.AccountID {
+		t.Fatal("different literal launch homes share an account suspension identity")
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-002.5
+func TestKeywordAccountBindingUsesSessionContextAndSharesKnownAccounts(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "first", AgentID: "family", Model: "model-a", Enabled: true},
+		bound:    &agentsettingsmodels.AgentProfile{ID: "same-account", AgentID: "family", Model: "model-b", Enabled: true},
+		office:   &agentsettingsmodels.AgentProfile{ID: "unknown-account", AgentID: "family", Model: "model-c", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{
+			{ExecutionProfileID: "first", Enabled: true},
+			{ExecutionProfileID: "same-account", Enabled: true},
+			{ExecutionProfileID: "unknown-account", Enabled: true},
+		},
+	}
+	r := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+	r.SetCredentialBindingResolver(dynamic.NewCredentialBindingResolver([]byte("test-installation")))
+	calls := 0
+	r.SetKeywordCredentialBindingResolver(func(_ context.Context, sessionID string, profile *agentsettingsmodels.AgentProfile, _ string) dynamic.CredentialBindingDescriptor {
+		calls++
+		if sessionID != "session" || profile.ID == "unknown-account" {
+			return dynamic.CredentialBindingDescriptor{}
+		}
+		return dynamic.CredentialBindingDescriptor{
+			AgentFamilyID: "family", AuthenticationMethod: "subscription",
+			CredentialSourceKind: "agent_credentials", CredentialLocator: "known-home",
+			ExecutorNamespace: "local", AuthorizationScope: "agent_runtime",
+		}
+	})
+	if got := r.ProviderKeywordContext(ctx, "first", "session"); got.AccountID != "" || calls != 0 {
+		t.Fatal("OFF consulted launch credential context")
+	}
+	off, err := r.LoadDynamicProfileForSession(ctx, "session", "dynamic")
+	if err != nil || calls != 0 || off.Candidates[0].KeywordAccountID != "" {
+		t.Fatal("OFF candidate loader consulted launch credential context")
+	}
+	r.SetKeywordContextEnabled(true)
+	if got := r.ProviderKeywordContext(ctx, "first"); got.AccountID != "" || calls != 0 {
+		t.Fatal("sessionless context inferred an account")
+	}
+	first := r.ProviderKeywordContext(ctx, "first", "session")
+	second := r.ProviderKeywordContext(ctx, "same-account", "session")
+	unknown := r.ProviderKeywordContext(ctx, "unknown-account", "session")
+	if first.AccountID == "" || first.AccountID != second.AccountID || unknown.AccountID != "" {
+		t.Fatal("known shared binding or unknown isolation was lost")
+	}
+	first.Enabled, first.Diagnostic = true, true
+	failure := routingerr.Classify(routingerr.Input{
+		Phase: routingerr.PhasePromptSend, KeywordContext: first, Stderr: "API Error: balance insufficient",
+	})
+	if failure.Keyword == nil || failure.Keyword.Scope != "account" {
+		t.Fatalf("known account limit not classified at account scope: %+v", failure)
+	}
+	selected, err := r.Resolve(ctx, "session", "dynamic", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := r.NewConductor(nil).RouteAfterFailure(ctx, "session", "dynamic", "first", selected.Generation, failure)
+	if err != nil || decision.ExecutionProfileID != "unknown-account" {
+		t.Fatalf("same-account sibling was not skipped by actual conductor: %+v, %v", decision, err)
+	}
+}
+
+func TestKeywordAccountContextRejectsIncompleteLaunchBinding(t *testing.T) {
+	profile := &agentsettingsmodels.AgentProfile{ID: "candidate", AgentID: "family"}
+	r := NewProfileExecutionResolver(&dynamicResolverTestProfiles{concrete: profile}, dynamic.NewEngine(), true)
+	r.SetKeywordContextEnabled(true)
+	r.SetCredentialBindingResolver(dynamic.NewCredentialBindingResolver([]byte("test-installation")))
+	r.SetKeywordCredentialBindingResolver(func(context.Context, string, *agentsettingsmodels.AgentProfile, string) dynamic.CredentialBindingDescriptor {
+		return dynamic.CredentialBindingDescriptor{
+			AgentFamilyID: "family", AuthenticationMethod: "subscription",
+			CredentialSourceKind: "agent_credentials", CredentialLocator: "known-home",
+		}
+	})
+	if got := r.ProviderKeywordContext(context.Background(), profile.ID, "session"); got.AccountID != "" || got.Tier != "" {
+		t.Fatal("missing executor namespace established account context")
+	}
+}
 
 func TestResolveRouteActionRejectsManualRetryAfterRecoveryClaim(t *testing.T) {
 	ctx := context.Background()
@@ -93,6 +190,178 @@ func TestResolveRouteActionReclaimsRetryingRouteAfterRestart(t *testing.T) {
 	}
 }
 
+// TestResolveExecutionFollowsOfficeBinding reproduces the Office defect where
+// a CEO row inherits agent_id=dynamic but has no dynamic profile of its own.
+// The binding names the dynamic profile that owns the route, while the Office
+// ID stays the logical profile.
+func TestResolveExecutionFollowsOfficeBinding(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		logical: &agentsettingsmodels.AgentProfile{
+			ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+		},
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "dynamic-profile",
+		},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	result, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, "")
+	if err != nil {
+		t.Fatalf("Resolve office profile: %v", err)
+	}
+	if result.LogicalProfileID != "ceo-office" || result.ExecutionProfileID != "concrete-profile" {
+		t.Fatalf("result = %+v, want logical ceo-office concrete concrete-profile", result)
+	}
+}
+
+func TestResetCircuitFailuresRespectsDynamicRoutingFlag(t *testing.T) {
+	ctx := context.Background()
+	engine := dynamic.NewEngine()
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, engine, true)
+	execution, err := resolver.Resolve(ctx, "session-reset", "dynamic-profile", 0, "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	key := dynamic.ResourceKey(dynamic.ScopeProfile, "concrete-profile")
+	engine.Circuits().OpenFailure(key, dynamic.FailureOpen{Code: routingerr.CodeRateLimited, Now: time.Now()})
+	if got := engine.Circuits().Snapshots()[0].Failures; got != 1 {
+		t.Fatalf("test circuit history was not established: %d", got)
+	}
+
+	resolver.SetEnabled(false)
+	cleared, err := resolver.ResetCircuitFailures(ctx, "session-reset", "dynamic-profile", execution.ExecutionProfileID, execution.Generation)
+	if err != nil || cleared {
+		t.Fatalf("disabled ResetCircuitFailures = (%v, %v), want no mutation", cleared, err)
+	}
+	if got := engine.Circuits().Snapshots()[0].Failures; got != 1 {
+		t.Fatalf("disabled routing reset failure count to %d", got)
+	}
+
+	resolver.SetEnabled(true)
+	cleared, err = resolver.ResetCircuitFailures(ctx, "session-reset", "dynamic-profile", execution.ExecutionProfileID, execution.Generation)
+	if err != nil {
+		t.Fatalf("enabled ResetCircuitFailures: %v", err)
+	}
+	if !cleared || engine.Circuits().Snapshots()[0].Failures != 0 {
+		t.Fatalf("enabled routing did not reset failure count: cleared=%v snapshots=%+v", cleared, engine.Circuits().Snapshots())
+	}
+}
+
+// TestResolveExecutionFailsClosedWhenOfficeBindingDisabled covers the disabled
+// bound profile: the binding still names a dynamic profile with a live route
+// document, but that profile is no longer enabled, so resolution fails closed
+// instead of launching through its candidates.
+func TestResolveExecutionFailsClosedWhenOfficeBindingDisabled(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "disabled-dynamic",
+		},
+		bound:    &agentsettingsmodels.AgentProfile{ID: "disabled-dynamic", AgentID: agents.DynamicAgentID, Enabled: false},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "disabled-dynamic", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "disabled-dynamic", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
+		t.Fatal("Resolve succeeded with a disabled office binding")
+	}
+}
+
+func TestResolveExecutionFailsClosedWhenOfficeBindingMissing(t *testing.T) {
+	ctx := context.Background()
+	profiles := &dynamicResolverTestProfiles{
+		logical: &agentsettingsmodels.AgentProfile{
+			ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+		},
+		office: &agentsettingsmodels.AgentProfile{
+			ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+			ExecutionAgentProfileID: "deleted-dynamic-profile",
+		},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+	}
+	resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+
+	if _, err := resolver.Resolve(ctx, "session-office", "ceo-office", 0, ""); err == nil {
+		t.Fatal("Resolve succeeded with a dangling office binding")
+	}
+}
+
+func TestResolveExecutionFailsClosedWhenBoundDynamicSourceUnavailable(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*agentsettingsmodels.AgentProfile, *agentsettingsmodels.AgentProfile)
+	}{
+		{
+			name:   "disabled",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.Enabled = false },
+		},
+		{
+			name: "deleted",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) {
+				deletedAt := time.Now().UTC()
+				source.DeletedAt = &deletedAt
+			},
+		},
+		{
+			name: "foreign workspace",
+			mutate: func(source, office *agentsettingsmodels.AgentProfile) {
+				source.WorkspaceID = "ws-foreign"
+				office.WorkspaceID = "ws-office"
+			},
+		},
+		{
+			name:   "wrong profile family",
+			mutate: func(source, _ *agentsettingsmodels.AgentProfile) { source.AgentID = "concrete-agent" },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &agentsettingsmodels.AgentProfile{
+				ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true,
+			}
+			office := &agentsettingsmodels.AgentProfile{
+				ID: "ceo-office", AgentID: agents.DynamicAgentID, Enabled: true,
+				ExecutionAgentProfileID: source.ID,
+			}
+			tc.mutate(source, office)
+			profiles := &dynamicResolverTestProfiles{
+				logical: source, office: office,
+				concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+				dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: source.ID, Version: 1},
+				routes: []agentsettingsmodels.DynamicAgentRoute{{
+					DynamicProfileID: source.ID, ExecutionProfileID: "concrete-profile", Enabled: true,
+				}},
+			}
+			resolver := NewProfileExecutionResolver(profiles, dynamic.NewEngine(), true)
+			if _, err := resolver.Resolve(context.Background(), "session-office", office.ID, 0, ""); err == nil {
+				t.Fatal("Resolve succeeded with an unavailable bound dynamic source")
+			}
+		})
+	}
+}
+
 type singleRouteStateLoader struct {
 	state dynamic.RouteState
 }
@@ -145,16 +414,22 @@ type dynamicResolverTestProfiles struct {
 	store.Repository
 	store.DynamicProfileRepository
 	logical  *agentsettingsmodels.AgentProfile
+	office   *agentsettingsmodels.AgentProfile
+	bound    *agentsettingsmodels.AgentProfile
 	concrete *agentsettingsmodels.AgentProfile
 	dynamic  *agentsettingsmodels.DynamicAgentProfile
 	routes   []agentsettingsmodels.DynamicAgentRoute
 }
 
 func (p *dynamicResolverTestProfiles) GetAgentProfile(_ context.Context, id string) (*agentsettingsmodels.AgentProfile, error) {
-	switch id {
-	case p.logical.ID:
+	switch {
+	case p.bound != nil && id == p.bound.ID:
+		return p.bound, nil
+	case p.logical != nil && id == p.logical.ID:
 		return p.logical, nil
-	case p.concrete.ID:
+	case p.office != nil && id == p.office.ID:
+		return p.office, nil
+	case p.concrete != nil && id == p.concrete.ID:
 		return p.concrete, nil
 	default:
 		return nil, errors.New("profile not found")

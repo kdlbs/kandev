@@ -4,6 +4,8 @@ import { appendToQueue, queueMessage } from "@/lib/api/domains/queue-api";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import {
+  appendCommentAttachmentMarker,
+  commentAttachmentsForDelivery,
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
@@ -29,7 +31,7 @@ import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
 
 /**
@@ -64,6 +66,7 @@ function formatSingleComment(comment: Comment): string {
         lines.push("```");
       }
       lines.push(`> ${fc.text}`);
+      appendCommentAttachmentMarker(lines, fc);
       lines.push("", "---", "");
       return lines.join("\n");
     }
@@ -388,7 +391,7 @@ async function refreshPrimarySessionProjection(
   const stateAtRequestStart = storeApi.getState();
   const sessionsAtRequestStart = listedTaskSessions(stateAtRequestStart, taskId);
   const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
     stateAtRequestStart,
     taskId,
   );
@@ -411,7 +414,7 @@ async function refreshPrimarySessionProjection(
       (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
     );
     const sessions = [...fetchedSessions, ...sessionsAddedDuringLoad];
-    storeApi.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
+    storeApi.getState().setTaskSessionsForTask(taskId, sessions, hydrationEpochsAtRequestStart);
     const primary = sessions.find((candidate) => candidate.is_primary);
     applyTaskPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
     applySessionPrimaryProjection(taskId, primary?.id ?? null, primary?.state, storeApi);
@@ -477,6 +480,8 @@ async function runSessionComment({
   const inputMode = deriveSessionInputMode(activeSession, queuedCount);
   const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
   const content = formatSingleComment(comment);
+  const attachments = commentAttachmentsForDelivery([comment]);
+  const attachmentPayload = attachments.length > 0 ? { attachments } : {};
 
   if (inputMode === "unavailable") {
     throw new Error("Session is not available for input");
@@ -485,21 +490,27 @@ async function runSessionComment({
     if (!activeSession?.queue_incarnation_id) {
       throw new Error("Session is not available for input");
     }
-    await appendToQueue(
-      buildQueuePayload(
-        sessionId,
-        taskId,
-        activeSession.queue_incarnation_id,
-        content,
-        planModeEnabled,
-      ),
+    const queuePayload = buildQueuePayload(
+      sessionId,
+      taskId,
+      activeSession.queue_incarnation_id,
+      content,
+      planModeEnabled,
     );
+    if (attachments.length > 0) {
+      await queueMessage({ ...queuePayload, client_queue_id: generateUUID(), attachments });
+    } else {
+      await appendToQueue(queuePayload);
+    }
   } else {
     const client = getWebSocketClient();
     if (!client) throw new Error("WebSocket client unavailable");
     const created = await client.request<Message | undefined>(
       "message.add",
-      buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
+      {
+        ...buildMessagePayload(sessionId, taskId, content, planModeEnabled, comment),
+        ...attachmentPayload,
+      },
       10000,
     );
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
@@ -520,6 +531,7 @@ async function runSessionComment({
  */
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const walkthroughRuns = useRef(new Map<string, Promise<{ queued: boolean }>>());
   const storeApi = useAppStoreApi();
   const pendingPlanCommentAdmissionRef = useRef<{ key: string; id: string } | null>(null);
 
@@ -545,8 +557,26 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       }
       if (!sessionId) return { queued: false };
       try {
+        if (comment.source === "walkthrough") {
+          const stored = useCommentsStore.getState().byId[comment.id];
+          if (comment.status === "sent" || stored?.status === "sent") {
+            return { queued: false };
+          }
+          const existing = walkthroughRuns.current.get(comment.id);
+          if (existing) return await existing;
+          const submission = runSessionComment({
+            comment,
+            sessionId,
+            taskId,
+            storeApi,
+            markCommentsSent,
+          });
+          walkthroughRuns.current.set(comment.id, submission);
+          return await submission;
+        }
         return await runSessionComment({ comment, sessionId, taskId, storeApi, markCommentsSent });
       } catch (error) {
+        walkthroughRuns.current.delete(comment.id);
         console.error("Failed to send comment to agent:", error);
         throw error;
       }

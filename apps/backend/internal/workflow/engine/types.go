@@ -28,6 +28,11 @@ const (
 	TriggerOnHeartbeat         Trigger = "on_heartbeat"
 	TriggerOnBudgetAlert       Trigger = "on_budget_alert"
 	TriggerOnAgentError        Trigger = "on_agent_error"
+
+	// PR lifecycle triggers, raised by the orchestrator when the PR poller
+	// reports a state change for a pull request linked to the task.
+	TriggerOnPRMerged Trigger = "on_pr_merged"
+	TriggerOnPRClosed Trigger = "on_pr_closed"
 )
 
 // ActionKind identifies a typed workflow action.
@@ -190,20 +195,28 @@ type QueueRunAction struct {
 type ClearDecisionsAction struct{}
 
 // QueueRunForEachParticipantAction fans out QueueRun against every step
-// participant matching the configured role. Declared but not yet wired.
+// participant matching the configured role.
+//
+// SkipDecided, when true, drops every seat holding a non-superseded decision
+// at the step from the fan-out (REQ-OFFICE-GATE-COMMENT-001). It defaults to
+// false, preserving the step-entry fan-out's "wake everyone" behaviour.
 type QueueRunForEachParticipantAction struct {
-	Role    string
-	Reason  string
-	Payload map[string]any
+	Role        string
+	Reason      string
+	Payload     map[string]any
+	SkipDecided bool
 }
 
 // EnsureParticipantSeatAction declares the role that must hold a
 // decision-required seat somewhere in the task's workflow before fan-out
 // runs. Role is read from the action config's "role" key by CompileStep. An
 // empty or unrecognized Role is a runtime condition the callback reports and
-// skips, not a build-time compile failure.
+// skips, not a build-time compile failure. ExcludeAuthorProvider is read from
+// "exclude_author_provider"; the engine does not act on it. Office routing
+// applies it when dispatching the seat's runs.
 type EnsureParticipantSeatAction struct {
-	Role string
+	Role                  string
+	ExcludeAuthorProvider bool
 }
 
 // CreateChildTaskAction defines a "spawn a child task" action. The new
@@ -259,14 +272,7 @@ func ValidParticipantRole(role string) bool {
 // ValidStageType reports whether the supplied string matches the schema's
 // CHECK constraint for workflow_steps.stage_type.
 func ValidStageType(stage string) bool {
-	switch wfmodels.StageType(stage) {
-	case wfmodels.StageTypeWork,
-		wfmodels.StageTypeReview,
-		wfmodels.StageTypeApproval,
-		wfmodels.StageTypeCustom:
-		return true
-	}
-	return false
+	return wfmodels.StageType(stage).IsValid()
 }
 
 // ValidWorkflowStyle reports whether the supplied string matches the schema's
@@ -307,6 +313,8 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 		TriggerOnHeartbeat:         compileGenericActions(step.Events.OnHeartbeat),
 		TriggerOnBudgetAlert:       compileGenericActions(step.Events.OnBudgetAlert),
 		TriggerOnAgentError:        compileGenericActions(step.Events.OnAgentError),
+		TriggerOnPRMerged:          compileGenericActions(step.Events.OnPRMerged),
+		TriggerOnPRClosed:          compileGenericActions(step.Events.OnPRClosed),
 	}
 	return StepSpec{
 		ID:         step.ID,
@@ -513,7 +521,9 @@ func readQueueRunConfig(config map[string]any) *QueueRunAction {
 }
 
 // readQueueRunForEachParticipantConfig reads the role/reason/payload for a
-// queue_run_for_each_participant action.
+// queue_run_for_each_participant action. skip_decided is read only as a
+// boolean; a missing key, false, or any non-boolean value all leave it off
+// (AC-OFFICE-GATE-COMMENT-005.3).
 func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEachParticipantAction {
 	if config == nil {
 		return &QueueRunForEachParticipantAction{}
@@ -521,10 +531,12 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 	role, _ := config["role"].(string)
 	reason, _ := config["reason"].(string)
 	payload, _ := config["payload"].(map[string]any)
+	skipDecided, _ := config["skip_decided"].(bool)
 	return &QueueRunForEachParticipantAction{
-		Role:    role,
-		Reason:  reason,
-		Payload: payload,
+		Role:        role,
+		Reason:      reason,
+		Payload:     payload,
+		SkipDecided: skipDecided,
 	}
 }
 
@@ -537,7 +549,10 @@ func readEnsureParticipantSeatConfig(config map[string]any) *EnsureParticipantSe
 		return &EnsureParticipantSeatAction{}
 	}
 	role, _ := config["role"].(string)
-	return &EnsureParticipantSeatAction{Role: role}
+	return &EnsureParticipantSeatAction{
+		Role:                  role,
+		ExcludeAuthorProvider: wfmodels.ExcludesAuthorProvider(config),
+	}
 }
 
 // readSessionMode reads the target mode for a set_session_mode action from its

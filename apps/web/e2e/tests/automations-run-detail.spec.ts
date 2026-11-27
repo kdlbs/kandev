@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
+import { expectControlHeight } from "../helpers/control-sizing";
+import { watchWs } from "../helpers/causal-waits";
 import { AutomationsPage } from "../pages/automations-page";
 
 /**
@@ -61,33 +63,22 @@ async function seedOpenRun(apiClient: ApiClient, seed: Seed, name: string) {
     name,
     workflowId: seed.workflowId,
     workflowStepId: seed.startStepId,
-    prompt: STANDING_INSTRUCTION,
+    prompt: "/sleep 30",
     agentProfileId: seed.agentProfileId,
+    repositoryIds: [seed.repositoryId],
   });
-  const task = await apiClient.createTaskWithAgent(
-    seed.workspaceId,
-    `${name} — running task`,
-    seed.agentProfileId,
-    {
-      description: "/sleep 30",
-      workflow_id: seed.workflowId,
-      workflow_step_id: seed.startStepId,
-      repository_ids: [seed.repositoryId],
-    },
-  );
-  await apiClient.setTaskOrigin(task.id, "automation_run");
+  const fired = await apiClient.triggerAutomationManual(automation.id);
+  expect(fired.run_task_id).toBeTruthy();
+  const task = await apiClient.getTask(fired.run_task_id!);
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        return sessions.find((session) => session.id === task.session_id)?.state;
+        return sessions.some((session) => session.state === "RUNNING");
       },
       { timeout: 30_000 },
     )
-    .toBe("RUNNING");
-  const run = await apiClient.seedAutomationRun(automation.id, "task_created", task.id);
-  expect(run.session_id).not.toBe("");
-  expect(run.turn_id).not.toBe("");
+    .toBe(true);
   return { automation, task };
 }
 
@@ -130,12 +121,19 @@ test.describe("Automation exact-run controls", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const { automation } = await seedOpenRun(apiClient, seedData, "Exact Stop");
     await openRunView(testPage, automation.id);
 
     const stop = testPage.getByRole("button", { name: "Stop current run" });
     await expect(stop).toBeVisible({ timeout: 15_000 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    await expectControlHeight(stop, 24);
+    await prCapture.screenshot("desktop-compact-stop", {
+      caption: "Automation Stop action with compact desktop sizing",
+    });
     await stop.click();
 
     await expect(testPage.getByTestId("run-group-completed")).toBeVisible({ timeout: 15_000 });
@@ -309,6 +307,59 @@ test.describe("Automation run composer", () => {
     // The picker is not merely disabled: a control that talks to a process that
     // no longer exists must not be on screen looking operable.
     await expect(testPage.getByTestId("toolbar-item-model")).toHaveCount(0);
+  });
+});
+
+test.describe("Automation schedule trigger recovery", () => {
+  test("turns on a disabled schedule from Run detail and keeps its saved definition", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedRunWithConversation(apiClient, seedData, "Schedule Recovery");
+    const future = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const cronExpression = `17 3 ${future.getUTCDate()} ${future.getUTCMonth() + 1} *`;
+    const trigger = await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+      enabled: false,
+    });
+    const watcher = watchWs(testPage);
+    await openRunView(testPage, automation.id);
+
+    const rail = testPage.getByTestId("runs-rail");
+    await rail.getByTestId("run-detail-toggle").click();
+    const nextRun = rail.getByTestId("run-detail-next-run");
+    await expect(nextRun).toContainText("Schedule trigger is switched off");
+    const scheduleUpdate = watcher.waitForResponse("automation.trigger.update", {
+      requestWhere: (payload) => payload.id === trigger.id,
+    });
+    await rail.getByTestId("enable-schedule-action").click();
+    await scheduleUpdate;
+    await expect(nextRun).not.toContainText("Schedule trigger is switched off", {
+      timeout: 15_000,
+    });
+    await expect(nextRun).not.toContainText("No schedule");
+
+    const saved = await apiClient.wsRequest<{
+      triggers: Array<{ id: string; enabled: boolean; config: Record<string, unknown> }>;
+    }>("automation.get", { id: automation.id });
+    expect(saved.triggers.find((entry) => entry.id === trigger.id)).toMatchObject({
+      id: trigger.id,
+      enabled: true,
+      config: { cron_expression: cronExpression, timezone: "UTC" },
+    });
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("runs-rail")).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId("runs-rail").getByTestId("run-detail-toggle").click();
+    await expect(
+      testPage.getByTestId("runs-rail").getByTestId("enable-schedule-action"),
+    ).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("runs-rail").getByTestId("run-detail-next-run"),
+    ).not.toContainText("Schedule trigger is switched off");
   });
 });
 

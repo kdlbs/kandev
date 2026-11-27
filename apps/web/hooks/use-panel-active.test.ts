@@ -1,11 +1,29 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import type { DockviewPanelApi } from "dockview-react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { DockviewApi, DockviewPanelApi } from "dockview-react";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { usePanelActive } from "./use-panel-active";
+
+const livePanels = new Map<string, DockviewPanelApi>();
+let previousApi: DockviewApi | null;
+beforeEach(() => {
+  previousApi = useDockviewStore.getState().api;
+  useDockviewStore.setState({
+    api: {
+      getPanel: (id: string) => {
+        const api = livePanels.get(id);
+        return api ? { api } : undefined;
+      },
+    } as DockviewApi,
+  });
+});
 
 afterEach(() => {
   cleanup();
+  for (const id of panelPortalManager.ids()) panelPortalManager.release(id);
+  livePanels.clear();
+  useDockviewStore.setState({ api: previousApi });
 });
 
 type FakePanelApi = {
@@ -61,16 +79,12 @@ function acquirePanel(
   // reads/calls is implemented. Unchecked cast is intentional here — the
   // full interface has 30+ unrelated members no test in this file exercises.
   const dockviewApi = handle.fakeApi as unknown as DockviewPanelApi;
+  livePanels.set(panelId, dockviewApi);
   panelPortalManager.acquire(panelId, "chat", {}, dockviewApi);
   return handle;
 }
 
 describe("usePanelActive", () => {
-  afterEach(() => {
-    // Release any panels acquired by a test so state doesn't leak across cases.
-    for (const id of panelPortalManager.ids()) panelPortalManager.release(id);
-  });
-
   it("returns false before a portal entry/api has been registered for the panel", () => {
     const { result } = renderHook(() => usePanelActive("panel-unregistered"));
     expect(result.current).toBe(false);
@@ -125,6 +139,53 @@ describe("usePanelActive", () => {
     panelPortalManager.release(PANEL_ID);
     rerender({ id: PANEL_ID });
     expect(result.current).toBe(false);
+  });
+});
+
+describe("layout-owned panel visibility", () => {
+  it("does not expose a transiently selected tab while layout restoration rebuilds panels", () => {
+    const restoring = useDockviewStore.getState().isRestoringLayout;
+    const panel = acquirePanel("restoring-neighbor", false);
+    const { result } = renderHook(() => usePanelActive("restoring-neighbor"));
+    try {
+      act(() => {
+        useDockviewStore.setState({ isRestoringLayout: true });
+        panel.fireVisibilityChange(true);
+      });
+      expect(result.current).toBe(false);
+      act(() => {
+        panel.fireVisibilityChange(false);
+        useDockviewStore.setState({ isRestoringLayout: false });
+      });
+      expect(result.current).toBe(false);
+      act(() => panel.fireVisibilityChange(true));
+      expect(result.current).toBe(true);
+    } finally {
+      act(() => useDockviewStore.setState({ isRestoringLayout: restoring }));
+    }
+  });
+
+  it("keeps a parked portal unreadable when its disposed API still reports visibility", () => {
+    const restoring = useDockviewStore.getState().isRestoringLayout;
+    const panelId = "parked-neighbor";
+    const panel = acquirePanel(panelId, true);
+    const { result } = renderHook(() => usePanelActive(panelId));
+    expect(result.current).toBe(true);
+    try {
+      act(() => {
+        useDockviewStore.setState({ isRestoringLayout: true });
+        livePanels.delete(panelId);
+        panel.fireVisibilityChange(true);
+      });
+      act(() => useDockviewStore.setState({ isRestoringLayout: false }));
+      expect(result.current).toBe(false);
+      act(() => {
+        acquirePanel(panelId, true);
+      });
+      expect(result.current).toBe(true);
+    } finally {
+      act(() => useDockviewStore.setState({ isRestoringLayout: restoring }));
+    }
   });
 
   it("rebinds to the new panel api when Dockview remounts (replaces) an existing portal entry", () => {

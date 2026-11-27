@@ -6,7 +6,7 @@ import { IconCheck, IconClipboard, IconDownload, IconExternalLink } from "@table
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
-import { InstallAgentCard } from "@/components/settings/install-agent-card";
+import { InstallAgentCard, canInstallAgent } from "@/components/settings/install-agent-card";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
@@ -55,6 +55,46 @@ function CopyButton({
   );
 }
 
+function InstallGuidance({
+  agent,
+  copiedValue,
+  onCopy,
+}: {
+  agent: AvailableAgent;
+  copiedValue: string | null;
+  onCopy: (text: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (agent.install_script) {
+    return (
+      <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
+        <code className="flex-1 truncate">{agent.install_script}</code>
+        <CopyButton text={agent.install_script} copiedValue={copiedValue} onCopy={onCopy} />
+      </div>
+    );
+  }
+  if (agent.supports_local_install) {
+    return (
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">{t("agents:localInstallHint")}</p>
+        {agent.name === "antigravity-acp" && (
+          <a
+            href="https://antigravity.google/docs/cli"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center gap-1 text-xs text-primary underline underline-offset-4 cursor-pointer"
+            data-testid="antigravity-cli-setup-guide"
+          >
+            <IconExternalLink className="h-3 w-3" />
+            {t("agents:antigravityCLISetupGuide")}
+          </a>
+        )}
+      </div>
+    );
+  }
+  return null;
+}
+
 function InstallCard({
   agent,
   copiedValue,
@@ -73,14 +113,7 @@ function InstallCard({
       agent={agent}
       job={job}
       onInstall={onInstall}
-      scriptSlot={
-        agent.install_script ? (
-          <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
-            <code className="flex-1 truncate">{agent.install_script}</code>
-            <CopyButton text={agent.install_script} copiedValue={copiedValue} onCopy={onCopy} />
-          </div>
-        ) : null
-      }
+      scriptSlot={<InstallGuidance agent={agent} copiedValue={copiedValue} onCopy={onCopy} />}
     />
   );
 }
@@ -204,7 +237,7 @@ function useInstallAgent(onSuccess: () => Promise<void>) {
 }
 
 /** The install catalogue: every not-yet-installed agent and companion tool. */
-export function AgentInstallCatalog() {
+export function AgentInstallCatalog({ agentHint }: { agentHint?: string }) {
   const { t } = useTranslation();
   const { copiedValue, copy } = useCopyCommand();
   const { items: availableAgents, tools } = useAvailableAgents();
@@ -227,9 +260,16 @@ export function AgentInstallCatalog() {
   const canManage = useIsAdmin();
 
   const notInstalledAgents = useMemo(
-    () => availableAgents.filter((a: AvailableAgent) => !a.available && a.install_script),
+    () => availableAgents.filter((a: AvailableAgent) => !a.available && canInstallAgent(a)),
     [availableAgents],
   );
+  const orderedNotInstalledAgents = useMemo(() => {
+    if (!agentHint) return notInstalledAgents;
+    const preferredAgent = notInstalledAgents.find((agent) => agent.name === agentHint);
+    return preferredAgent
+      ? [preferredAgent, ...notInstalledAgents.filter((agent) => agent.name !== agentHint)]
+      : notInstalledAgents;
+  }, [agentHint, notInstalledAgents]);
   const notInstalledTools = tools.filter((tool: ToolStatus) => !tool.available);
 
   if (notInstalledAgents.length === 0 && notInstalledTools.length === 0) {
@@ -244,7 +284,7 @@ export function AgentInstallCatalog() {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-      {notInstalledAgents.map((agent) => (
+      {orderedNotInstalledAgents.map((agent) => (
         <InstallCard
           key={agent.name}
           agent={agent}

@@ -185,6 +185,16 @@ state or operation semantics.
 - If optional task-list data is still hydrating, the existing task drawer owns
   its loading and recovery states.
 
+## Workspace menu modal ownership
+
+`WorkspaceSwitcher` in `apps/web/components/task/workspace-switcher.tsx` renders
+inside the task picker's existing Sheet or Drawer. Its nested `DropdownMenu`
+is non-modal; the enclosing picker owns the modal boundary. Workspace selection
+retains the existing handler, access checks, and navigation policy. Closing both
+surfaces during navigation must release outside-pointer blocking so users can
+reopen the task picker. The shared-context mobile E2E scenario covers workspace
+switching after reconnect, pointer unlock, and restored task coverage.
+
 ## Persistence and compatibility
 
 No persisted layout, task, session, or user-setting value changes. Adding the

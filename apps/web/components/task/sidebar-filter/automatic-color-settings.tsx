@@ -160,6 +160,7 @@ function AutomaticColorRules({
       {controller.value.rules.length > 0 && (
         <AutomaticColorRuleList
           rules={controller.value.rules}
+          scopeKey={controller.workspaceId ?? "personal"}
           scalarOptions={controller.scalarOptions}
           repositoryOptions={catalog.options}
           repositoryQuery={controller.repositoryQuery}

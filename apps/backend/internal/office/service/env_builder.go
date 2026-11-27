@@ -2,13 +2,14 @@ package service
 
 import (
 	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // buildEnvVars constructs the environment variable map injected into agent
 // sessions before launch. The map includes identity, API access, and wake
 // context variables described in the agent-context spec.
 func (si *SchedulerIntegration) buildEnvVars(
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	jwt, workspaceID string,
 ) map[string]string {

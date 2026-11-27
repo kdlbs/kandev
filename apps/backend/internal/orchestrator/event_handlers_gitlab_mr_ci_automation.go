@@ -187,6 +187,9 @@ func (s *Service) handleTaskMRCIAutoFix(
 		s.markMRAutoFixExhausted(ctx, mr)
 		return true
 	}
+	if isSessionRecoveryRequiredError(err) {
+		return true
+	}
 	if err != nil {
 		s.recordMRAutomationError(ctx, mr, err)
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)

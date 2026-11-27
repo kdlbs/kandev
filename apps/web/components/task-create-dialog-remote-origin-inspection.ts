@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import type { Branch, ExecutorType } from "@/lib/types/http";
+import type { Branch, ExecutorType, Repository } from "@/lib/types/http";
 import type {
   DialogFormState,
   TaskRepositorySelection,
@@ -31,11 +31,12 @@ export function useSelectedRemoteOriginInspection(
   fs: DialogFormState,
   workspaceId: string | null,
   executorType: ExecutorType | string | null | undefined,
+  repositories: Repository[],
 ): RemoteOriginInspection {
   const candidates = useMemo<RepositoryCloneSourceCandidate[]>(
     () =>
       resolveRepositorySelections(fs)
-        .filter(isInspectableLocalSelection)
+        .filter((selection) => isHostRepositorySelection(selection, repositories))
         .map((selection) => ({
           key: selection.key,
           repositoryId: selection.repositoryId,
@@ -47,6 +48,7 @@ export function useSelectedRemoteOriginInspection(
       fs.remoteRepos,
       fs.remoteProviderReadiness,
       fs.useRemote,
+      repositories,
     ],
   );
   const enabled =
@@ -137,10 +139,21 @@ export function remoteOriginSelectionNeedsRecovery(
   );
 }
 
-function isInspectableLocalSelection(
+function isSavedRemoteRepository(
+  repository: Pick<Repository, "local_path" | "provider" | "remote_url">,
+): boolean {
+  return !repository.local_path?.trim() && Boolean(repository.remote_url || repository.provider);
+}
+
+export function isHostRepositorySelection(
   selection: TaskRepositorySelection,
+  repositories: Array<Pick<Repository, "id" | "local_path" | "provider" | "remote_url">>,
 ): selection is Extract<TaskRepositorySelection, { kind: "local" }> {
-  return selection.kind === "local" && Boolean(selection.repositoryId || selection.localPath);
+  if (selection.kind !== "local") return false;
+  if (selection.localPath) return true;
+  if (!selection.repositoryId) return false;
+  const repository = repositories.find((candidate) => candidate.id === selection.repositoryId);
+  return !repository || !isSavedRemoteRepository(repository);
 }
 
 function sameBranches(

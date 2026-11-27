@@ -14,7 +14,6 @@ import {
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
 import { dwell } from "../../helpers/causal-waits";
-import { SessionPage } from "../../pages/session-page";
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -35,9 +34,6 @@ test.describe("Mobile LSP boundaries", () => {
     seedData,
     backend,
   }) => {
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -69,7 +65,7 @@ test.describe("Mobile LSP boundaries", () => {
 
       const viewer = testPage.getByTestId("mobile-file-viewer-panel");
       await expect(viewer).toBeVisible();
-      await expect(viewer.locator(".cm-editor")).toBeVisible();
+      await expect(viewer.locator(".cm-editor, .monaco-editor")).toBeVisible();
       await expect(viewer.getByTestId("lsp-status-button")).toHaveCount(0);
       await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
       await dwell(
@@ -85,7 +81,6 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: initialAutoStart,
         lsp_status_location: initialLocation,
       });
-      await releaseFeature();
     }
   });
 
@@ -181,9 +176,6 @@ test.describe("Mobile LSP boundaries", () => {
     backend,
   }) => {
     test.setTimeout(180_000);
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -228,10 +220,8 @@ test.describe("Mobile LSP boundaries", () => {
 
       await testPage.reload();
       await testPage.setViewportSize({ width: 820, height: 900 });
-      const reopenedSession = new SessionPage(testPage);
-      await reopenedSession.waitForLoad(45_000);
       testPage.setDefaultTimeout(15_000);
-      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+      await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible({ timeout: 45_000 });
       const reopenedFileNode = testPage.locator(
         `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
       );
@@ -262,7 +252,6 @@ test.describe("Mobile LSP boundaries", () => {
         lsp_auto_start_languages: initialAutoStart,
         lsp_status_location: initialLocation,
       });
-      await releaseFeature();
     }
   });
 

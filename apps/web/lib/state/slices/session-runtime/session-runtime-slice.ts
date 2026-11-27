@@ -1,13 +1,27 @@
-import type { StateCreator } from "zustand";
-import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } from "./types";
+import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
+
+import type { SessionRuntimeSlice, SessionRuntimeSliceState } from "./types";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
+import {
+  invalidateGitStatusInventory as invalidateInventoryState,
+  reconcileGitStatusInventory as reconcileInventoryState,
+} from "./git-status-inventory";
 import {
   beginWorkspaceRestoration,
   clearWorkspaceRestoration,
   completeWorkspaceRestoration,
   failWorkspaceRestoration,
 } from "./workspace-restoration";
+import { buildSessionViewActions } from "./session-runtime-view-actions";
+import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
+import { buildBackgroundWorkActions } from "./session-runtime-background-work";
+import { buildSessionConfigurationFeedbackActions } from "./session-configuration-feedback";
+import {
+  buildUserShellActions,
+  migrateUserShellScopes,
+  purgeUserShellEnvironment,
+} from "./user-shells-state";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -20,10 +34,6 @@ function trimTailBytes(value: string, maxBytes: number) {
     return value;
   }
   return value.slice(value.length - maxBytes);
-}
-
-function trimProcessOutput(value: string) {
-  return trimTailBytes(value, maxProcessOutputBytes);
 }
 
 /** Append a chunk to a terminal's output array, dropping the oldest chunks once
@@ -46,13 +56,20 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionMode.bySessionId[sessionId];
   delete state.agentCapabilities.bySessionId[sessionId];
   delete state.sessionModels.bySessionId[sessionId];
+  delete state.configurationFeedback.bySessionId[sessionId];
   delete state.sessionMcpStatus.bySessionId[sessionId];
   delete state.promptUsage.bySessionId[sessionId];
+  delete state.usageInvalidation.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
   delete state.launchWarning.bySessionId[sessionId];
   delete state.sessionPollMode.bySessionId[sessionId];
   delete state.embeddedVscodeSupport.bySessionId[sessionId];
+  delete state.backgroundWork.workloadsBySessionId[sessionId];
+  delete state.backgroundWork.outputWindowsBySessionId[sessionId];
+  delete state.backgroundWork.activeWorkIdBySessionId[sessionId];
+  delete state.backgroundWork.loadingBySessionId[sessionId];
+  delete state.backgroundWork.readGenerationBySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -76,14 +93,16 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.shell.statuses[envKey];
   delete state.gitStatus.byEnvironmentId[envKey];
   delete state.gitStatus.byEnvironmentRepo[envKey];
+  delete state.gitStatusDisplay.byEnvironmentRepo[envKey];
+  delete state.gitStatus.refreshByEnvironmentId?.[envKey];
+  delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
+  delete state.gitStatus.inventoryByEnvironment?.[envKey];
+  delete state.workspaceRootFiles.byEnvironmentId[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
   delete state.gitCheckoutGeneration.byEnvironmentId[envKey];
-  delete state.userShells.byEnvironmentId[envKey];
-  delete state.userShells.dismissedByEnvironmentId[envKey];
-  delete state.userShells.loading[envKey];
-  delete state.userShells.loaded[envKey];
+  purgeUserShellEnvironment(state.userShells, envKey);
   delete state.workspaceRestoration.byEnvironmentId[envKey];
 }
 
@@ -107,7 +126,14 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     activeProcessBySessionId: {},
     devProcessBySessionId: {},
   },
-  gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
+  gitStatus: {
+    byEnvironmentId: {},
+    byEnvironmentRepo: {},
+    refreshByEnvironmentId: {},
+    refreshByEnvironmentRepo: {},
+    inventoryByEnvironment: {},
+  },
+  gitStatusDisplay: { byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   gitCheckoutGeneration: { byEnvironmentId: {} },
@@ -117,19 +143,40 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionMode: { bySessionId: {} },
   agentCapabilities: { bySessionId: {} },
   sessionModels: { bySessionId: {} },
+  configurationFeedback: { bySessionId: {} },
   sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
+  usageInvalidation: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
-  userShells: { byEnvironmentId: {}, dismissedByEnvironmentId: {}, loading: {}, loaded: {} },
+  userShells: {
+    byScope: {},
+    byEnvironmentId: {},
+    dismissedByScope: {},
+    dismissedByEnvironmentId: {},
+    loading: {},
+    loaded: {},
+    listed: {},
+    sharedGeneration: {},
+  },
   prepareProgress: { bySessionId: {} },
   launchWarning: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
+  workspaceRootFiles: { byEnvironmentId: {} },
   workspaceRestoration: { byEnvironmentId: {} },
+  backgroundWork: {
+    workloadsBySessionId: {},
+    outputWindowsBySessionId: {},
+    nextOutputWindowGeneration: 1,
+    activeWorkIdBySessionId: {},
+    loadingBySessionId: {},
+    readGenerationBySessionId: {},
+    nextReadGeneration: 1,
+  },
 };
 
-type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
+export type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
 
 function buildTerminalShellProcessActions(set: ImmerSet) {
   return {
@@ -170,7 +217,7 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
     appendProcessOutput: (processId: string, data: string) =>
       set((draft) => {
         const next = (draft.processes.outputsByProcessId[processId] || "") + data;
-        draft.processes.outputsByProcessId[processId] = trimProcessOutput(next);
+        draft.processes.outputsByProcessId[processId] = trimTailBytes(next, maxProcessOutputBytes);
       }),
     upsertProcessStatus: (status: Parameters<SessionRuntimeSlice["upsertProcessStatus"]>[0]) =>
       set((draft) => {
@@ -242,9 +289,15 @@ function buildSessionCommitActions(set: ImmerSet) {
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
           return;
         }
-        // For amend: only replace HEAD (first entry) if it has the same parent
-        if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
-          existing[0] = commit;
+        // An amend replaces only the leading commit within its repository scope.
+        const repositoryHeadIndex = existing.findIndex(
+          (current) => (current.repository_name ?? "") === (commit.repository_name ?? ""),
+        );
+        if (
+          repositoryHeadIndex >= 0 &&
+          existing[repositoryHeadIndex].parent_sha === commit.parent_sha
+        ) {
+          existing[repositoryHeadIndex] = commit;
           draft.sessionCommits.byEnvironmentId[envKey] = existing;
         } else {
           draft.sessionCommits.byEnvironmentId[envKey] = [commit, ...existing];
@@ -260,76 +313,6 @@ function buildSessionCommitActions(set: ImmerSet) {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
         draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
-      }),
-    bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) =>
-      set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        const byRepository = (draft.gitCheckoutGeneration.byEnvironmentId[envKey] ??= {});
-        const scope = repositoryName ?? "";
-        byRepository[scope] = (byRepository[scope] ?? 0) + 1;
-      }),
-  };
-}
-
-function buildUserShellActions(set: ImmerSet) {
-  return {
-    setUserShells: (
-      environmentId: string,
-      shells: Parameters<SessionRuntimeSlice["setUserShells"]>[1],
-    ) =>
-      set((draft) => {
-        if (!environmentId) return;
-        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
-        draft.userShells.byEnvironmentId[environmentId] = dismissed
-          ? shells.filter((shell) => !dismissed[shell.terminalId])
-          : shells;
-        draft.userShells.loaded[environmentId] = true;
-        draft.userShells.loading[environmentId] = false;
-      }),
-    setUserShellsLoading: (environmentId: string, loading: boolean) =>
-      set((draft) => {
-        if (!environmentId) return;
-        draft.userShells.loading[environmentId] = loading;
-      }),
-    addUserShell: (
-      environmentId: string,
-      shell: Parameters<SessionRuntimeSlice["addUserShell"]>[1],
-    ) =>
-      set((draft) => {
-        if (!environmentId) return;
-        const dismissed = draft.userShells.dismissedByEnvironmentId[environmentId];
-        if (dismissed?.[shell.terminalId]) return;
-        const existing = draft.userShells.byEnvironmentId[environmentId] || [];
-        if (!existing.some((s) => s.terminalId === shell.terminalId)) {
-          draft.userShells.byEnvironmentId[environmentId] = [...existing, shell];
-        }
-      }),
-    removeUserShell: (environmentId: string, terminalId: string) =>
-      set((draft) => {
-        if (!environmentId) return;
-        const dismissed = (draft.userShells.dismissedByEnvironmentId[environmentId] ??= {});
-        dismissed[terminalId] = true;
-        const existing = draft.userShells.byEnvironmentId[environmentId] || [];
-        draft.userShells.byEnvironmentId[environmentId] = existing.filter(
-          (s) => s.terminalId !== terminalId,
-        );
-      }),
-    updateUserShell: (
-      environmentId: string,
-      terminalId: string,
-      patch: Parameters<SessionRuntimeSlice["updateUserShell"]>[2],
-    ) =>
-      set((draft) => {
-        if (!environmentId) return;
-        const existing = draft.userShells.byEnvironmentId[environmentId];
-        if (!existing) return;
-        draft.userShells.byEnvironmentId[environmentId] = existing.map((s) =>
-          s.terminalId === terminalId ? { ...s, ...patch } : s,
-        );
-      }),
-    setSessionPollMode: (sessionId: string, mode: SessionPollMode) =>
-      set((draft) => {
-        draft.sessionPollMode.bySessionId[sessionId] = mode;
       }),
   };
 }
@@ -355,6 +338,10 @@ export function migrateEnvKeyedData(
   };
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
+  migrate(draft.gitStatusDisplay.byEnvironmentRepo);
+  if (draft.gitStatus.refreshByEnvironmentId) migrate(draft.gitStatus.refreshByEnvironmentId);
+  if (draft.gitStatus.refreshByEnvironmentRepo) migrate(draft.gitStatus.refreshByEnvironmentRepo);
+  if (draft.gitStatus.inventoryByEnvironment) migrate(draft.gitStatus.inventoryByEnvironment);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitCheckoutGeneration.byEnvironmentId);
@@ -363,8 +350,7 @@ export function migrateEnvKeyedData(
   migrate(draft.shell.statuses);
   migrate(draft.userShells.byEnvironmentId);
   migrate(draft.userShells.dismissedByEnvironmentId);
-  migrate(draft.userShells.loading);
-  migrate(draft.userShells.loaded);
+  migrateUserShellScopes(draft, sessionId, environmentId);
   const workspaceAttempt = draft.workspaceRestoration.byEnvironmentId[sessionId];
   if (workspaceAttempt) {
     if (!(environmentId in draft.workspaceRestoration.byEnvironmentId)) {
@@ -437,14 +423,61 @@ function buildWorkspaceRestorationActions(set: ImmerSet) {
   };
 }
 
-export const createSessionRuntimeSlice: StateCreator<
-  SessionRuntimeSlice,
-  [["zustand/immer", never]],
-  [],
-  SessionRuntimeSlice
-> = (set) => ({
+function buildGitInventoryActions(set: ImmerSet) {
+  return {
+    invalidateGitStatusInventory: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        invalidateInventoryState(draft, envKey);
+      }),
+    reconcileGitStatusInventory: (
+      environmentId: string,
+      generation: number,
+      scopes: readonly string[],
+    ) => {
+      let applied = false;
+      set((draft) => {
+        applied = reconcileInventoryState(draft, environmentId, generation, scopes);
+      });
+      return applied;
+    },
+  };
+}
+
+function buildGitStatusCleanupActions(set: SliceSet<SessionRuntimeSlice>) {
+  return {
+    clearGitStatus: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        delete draft.gitStatus.byEnvironmentId[envKey];
+        delete draft.gitStatus.byEnvironmentRepo[envKey];
+        delete draft.gitStatusDisplay.byEnvironmentRepo[envKey];
+        delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
+        delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+      }),
+    clearGitRepositoryStatus: (sessionId: string, environmentId: string, repositoryName: string) =>
+      set((draft) => {
+        const keys = new Set(
+          [sessionId, environmentId, draft.environmentIdBySessionId[sessionId]].filter(
+            (key): key is string => Boolean(key),
+          ),
+        );
+        for (const envKey of keys) {
+          delete draft.gitStatus.byEnvironmentRepo[envKey]?.[repositoryName];
+          delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[repositoryName];
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey]?.[repositoryName];
+          if (draft.gitStatus.byEnvironmentId[envKey]?.repository_name === repositoryName) {
+            delete draft.gitStatus.byEnvironmentId[envKey];
+          }
+        }
+      }),
+  };
+}
+
+export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
+  ...buildSessionConfigurationFeedbackActions(set),
   // Returns whether the git state meaningfully changed so callers (the WS
   // handler) can decide to invalidate derived caches without re-running the
   // expensive deep comparison themselves. The comparison walks every file's
@@ -458,16 +491,35 @@ export const createSessionRuntimeSlice: StateCreator<
     });
     return changed;
   },
-  clearGitStatus: (sessionId) =>
+  setGitStatusRefresh: (taskEnvironmentId, repositoryName, refresh) =>
     set((draft) => {
-      const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-      delete draft.gitStatus.byEnvironmentId[envKey];
-      delete draft.gitStatus.byEnvironmentRepo[envKey];
+      if (!taskEnvironmentId) return;
+      if (repositoryName === undefined) {
+        const byEnvironmentId = (draft.gitStatus.refreshByEnvironmentId ??= {});
+        if (refresh) byEnvironmentId[taskEnvironmentId] = refresh;
+        else delete byEnvironmentId[taskEnvironmentId];
+        return;
+      }
+      const byEnvironmentRepo = (draft.gitStatus.refreshByEnvironmentRepo ??= {});
+      const repoMap = (byEnvironmentRepo[taskEnvironmentId] ??= {});
+      if (refresh) repoMap[repositoryName] = refresh;
+      else {
+        delete repoMap[repositoryName];
+        if (Object.keys(repoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[taskEnvironmentId];
+        }
+      }
     }),
+  ...buildGitStatusCleanupActions(set),
   bumpWorkspaceFilesRefresh: (sessionId) =>
     set((draft) => {
       draft.workspaceFilesRefresh.bySessionId[sessionId] =
         (draft.workspaceFilesRefresh.bySessionId[sessionId] ?? 0) + 1;
+    }),
+  setWorkspaceRootFiles: (environmentId, files) =>
+    set((draft) => {
+      if (!environmentId) return;
+      draft.workspaceRootFiles.byEnvironmentId[environmentId] = files;
     }),
   clearLegacyGitStatusEntry: (sessionId) =>
     set((draft) => {
@@ -477,13 +529,27 @@ export const createSessionRuntimeSlice: StateCreator<
       // backend and will never emit another update under the empty key. The
       // per-repo entries (real repo names) are intentionally left in place;
       // they continue to receive fresh status updates from the new trackers.
+      // Refresh failures belong to the same retired scope and must go too, or
+      // a blank repository name keeps the warning visible after every named
+      // repository has recovered.
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
       if (repoMap && "" in repoMap) {
         delete repoMap[""];
       }
+      const refreshRepoMap = draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+      if (refreshRepoMap && "" in refreshRepoMap) {
+        delete refreshRepoMap[""];
+        if (Object.keys(refreshRepoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+        }
+      }
+      delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
+      // The environment-level failure belonged to the retired unnamed root.
+      delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
     }),
+  ...buildGitInventoryActions(set),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;
@@ -492,6 +558,7 @@ export const createSessionRuntimeSlice: StateCreator<
   ...buildWorkspaceRestorationActions(set),
   ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
+  ...buildSessionGitCheckoutActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {
       draft.availableCommands.bySessionId[sessionId] = commands;
@@ -500,49 +567,23 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId, availableModes) =>
+  setSessionMode: (sessionId, modeId, availableModes, requestedModeId, settingsPolicy) =>
     set((draft) => {
       const existing = draft.sessionMode.bySessionId[sessionId];
+      const nextSettingsPolicy =
+        settingsPolicy === "strict" ? undefined : (settingsPolicy ?? existing?.settingsPolicy);
       draft.sessionMode.bySessionId[sessionId] = {
         currentModeId: modeId,
         availableModes: availableModes ?? existing?.availableModes ?? [],
+        requestedModeId,
+        ...(nextSettingsPolicy ? { settingsPolicy: nextSettingsPolicy } : {}),
       };
     }),
   clearSessionMode: (sessionId) =>
     set((draft) => {
       delete draft.sessionMode.bySessionId[sessionId];
     }),
-  setAgentCapabilities: (sessionId, caps) =>
-    set((draft) => {
-      draft.agentCapabilities.bySessionId[sessionId] = caps;
-    }),
-  setSessionModels: (sessionId, data) =>
-    set((draft) => {
-      draft.sessionModels.bySessionId[sessionId] = data;
-    }),
-  setEmbeddedVscodeSupport: (sessionId, supported) =>
-    set((draft) => {
-      draft.embeddedVscodeSupport.bySessionId[sessionId] = supported;
-    }),
-  setSessionMCPStatus: (sessionId, history) =>
-    set((draft) => {
-      draft.sessionMcpStatus.bySessionId[sessionId] = history;
-    }),
-  setPromptUsage: (sessionId, usage) =>
-    set((draft) => {
-      draft.promptUsage.bySessionId[sessionId] = usage;
-    }),
-  setSessionTodos: (sessionId, entries) =>
-    set((draft) => {
-      draft.sessionTodos.bySessionId[sessionId] = entries;
-    }),
-  setLaunchWarning: (sessionId, entry) =>
-    set((draft) => {
-      draft.launchWarning.bySessionId[sessionId] = entry;
-    }),
-  clearLaunchWarning: (sessionId) =>
-    set((draft) => {
-      delete draft.launchWarning.bySessionId[sessionId];
-    }),
+  ...buildSessionViewActions(set),
+  ...buildBackgroundWorkActions(set),
   ...buildUserShellActions(set),
 });

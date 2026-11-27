@@ -40,6 +40,32 @@ eligible target that is already visible in the task group.
 - **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.5:** Desktop sidebar and mobile task-switcher
   presentations shall use the same menu and drag eligibility without changing their existing
   pointer, touch, focus, dismissal, or scrolling behavior.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.6:** When canonical parent changes overlap,
+  each accepted change shall satisfy the canonical parent rules against the relationships current
+  at its mutation boundary. Competing two-task or three-task moves shall not jointly introduce a
+  cycle. Competing child creation and re-parenting shall not jointly bypass the existing Kanban
+  depth check; the current Office depth exception shall remain.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.7:** When an update omits `parent_id`, including
+  an ordinary task edit or workflow snapshot mutation, it shall preserve the current parent and
+  shall not undo workspace-mode normalization committed by another parent change. An explicit
+  empty parent shall un-nest; an explicit unchanged parent shall preserve same-parent semantics.
+  Other requested task fields shall retain their existing update semantics.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.8:** When a canonical parent change loses
+  admission, the rejected mutation shall change none of the task's fields, repository associations,
+  workspace-group membership, materialized workspace, or sessions, and shall produce no successful
+  response or task-update event. An accepted effective parent change shall retain its materialized
+  workspace and group while normalizing `inherit_parent` to `shared_group` before success.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.9:** When ordinary parent deletion overlaps canonical
+  child creation or attachment, either the relationship shall commit while the parent exists and
+  deletion shall account for it, or one operation shall fail without a dangling relationship.
+  A conditional deletion rollback shall not restore a parent that became invalid or overwrite a
+  newer parent assignment. Existing cascade and non-cascade deletion choices shall remain distinct.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.10:** Canonical self, missing, archived,
+  cross-workspace, cycle, and depth rejection shall retain existing error classifications. A
+  malformed cyclic ancestor chain shall fail within a bounded walk without a repair migration.
+  The separate Office dashboard parent surface shall retain its direct-self and existence policy,
+  including its deliberate absence of deeper-cycle and depth rejection; sharing serialization
+  shall not imply that all Office or legacy task relationships are cycle-free.
 
 ## Migrated source detail
 
@@ -95,7 +121,11 @@ No new endpoint. Reuses and extends existing contracts:
   valid-zone target became invalid between render and drop), the UI keeps the task in its original
   tree position, rolls back the optimistic update, and shows a request-error toast.
 - **Persistence failure**: no successful response is returned; the UI rolls back to the original tree.
-- **Concurrent submissions** are safe: setting the same parent twice is idempotent, and the optimistic update is reconciled by the authoritative `task.updated` event.
+- **Concurrent submissions:** canonical hierarchy admission must validate the committed ordering
+  of competing changes, including moves of different tasks. Setting the same parent twice retains
+  its existing semantics, and the optimistic update is reconciled by the authoritative
+  `task.updated` event. Projections may include a later committed mutation; this contract adds no
+  global event revision or event-order guarantee. The separate Office dashboard policy is narrower.
 - **No valid targets**: the drag offers no nest zones; only reorder remains possible.
 
 ## Scenarios
@@ -140,3 +170,5 @@ No new endpoint. Reuses and extends existing contracts:
 
 See the original [drag-and-drop implementation plan](../../../plans/subtask-reparenting-drag-drop/plan.md)
 and the [Nest under candidate correction plan](../../../plans/fix-nest-under-candidates/plan.md).
+The pending [validated hierarchy serialization plan](../../../plans/serialize-validated-task-reparenting/plan.md)
+addresses concurrent canonical mutation admission without changing the existing UI.

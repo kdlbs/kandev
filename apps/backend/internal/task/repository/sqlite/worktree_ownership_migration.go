@@ -48,6 +48,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			status TEXT NOT NULL DEFAULT 'creating',
 			materialization_session_id TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
+			workspace_layout TEXT NOT NULL DEFAULT '',
 			container_id TEXT DEFAULT '',
 			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
 			container_control_auth_token_secret_id TEXT DEFAULT '',
@@ -55,6 +56,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
+			retired_at TIMESTAMP,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`, tableName)
 }
@@ -71,6 +73,7 @@ func finalTaskEnvironmentReposDDL(tableName, refTable string) string {
 			id TEXT PRIMARY KEY,
 			task_environment_id TEXT NOT NULL,
 			repository_id TEXT NOT NULL,
+			workspace_relative_path TEXT NOT NULL DEFAULT '',
 			branch_slug TEXT NOT NULL DEFAULT '',
 			worktree_id TEXT DEFAULT '',
 			worktree_path TEXT DEFAULT '',
@@ -78,7 +81,10 @@ func finalTaskEnvironmentReposDDL(tableName, refTable string) string {
 			worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
 			worktree_integration_ref TEXT NOT NULL DEFAULT '',
 			worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+			worktree_source_clone_path TEXT NOT NULL DEFAULT '',
+			worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 			worktree_branch_compacted_at TIMESTAMP,
+			worktree_origin TEXT NOT NULL DEFAULT 'kandev',
 			position INTEGER DEFAULT 0,
 			error_message TEXT DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'active',
@@ -182,10 +188,10 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 }
 
 func (r *Repository) cutoverLegacyEnvironmentColumns(tx *sqlx.Tx) (map[string]bool, error) {
-	columns := make(map[string]bool, 6)
+	columns := make(map[string]bool, 7)
 	for _, column := range []string{
 		"repository_id", "worktree_id", "worktree_path", "worktree_branch",
-		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id",
+		"container_bootstrap_nonce_secret_id", "container_control_auth_token_secret_id", "retired_at",
 	} {
 		has, err := r.columnExists(tx, "task_environments", column)
 		if err != nil {

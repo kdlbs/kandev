@@ -37,8 +37,16 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	retiredAppStatusBarKey    = "features.appStatusBar"
-	retiredAppStatusBarEnvVar = "KANDEV_FEATURES_APP_STATUS_BAR"
+	keyACPV2                                      = "features.acpV2"
+	envACPV2                                      = "KANDEV_FEATURES_ACP_V2"
+	keyCodexAppServer                             = "features.codexAppServer"
+	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
+	retiredAppStatusBarKey                        = "features.appStatusBar"
+	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey               = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar            = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	retiredProviderInterruptionContinuationKey    = "features.providerInterruptionContinuation"
+	retiredProviderInterruptionContinuationEnvVar = "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -48,24 +56,61 @@ const (
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
+	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
+	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
+	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
+	{key: "features.dynamicCircuitBackoffEscalation", envVar: "KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION"},
+	{key: "features.lspBrowserContinuity", envVar: "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY"},
 }
 
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
-			Key:             "features.lspBrowserContinuity",
-			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
+			Key:             "features.providerKeywordContext",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT",
 			Kind:            KindFeature,
-			Label:           "LSP browser continuity",
-			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
+			Label:           "Provider keyword and context classification",
+			Description:     "Classifies unmatched provider diagnostics using structural signals, keyword groups, and invocation context.",
 			Stability:       StabilityExperimental,
 			RiskLevel:       RiskMedium,
-			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
+			RiskDescription: "May change recovery classification for new provider diagnostics. Existing candidate policies and invocation safety checks still apply.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderKeywordContext },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderKeywordContext = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.integratedControl",
+			EnvVar:          "KANDEV_FEATURES_INTEGRATED_CONTROL",
+			Kind:            KindFeature,
+			Label:           "Integrated control",
+			Description:     "Adds dedicated navigation across authorized workspaces, coordinators, and existing conversations.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Shows existing workspace and coordinator data. Conversation interaction retains native workspace permissions; navigation never starts an agent.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.IntegratedControl },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.IntegratedControl = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.workspaceCollaboration",
+			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
+			Kind:            KindFeature,
+			Label:           "Workspace collaboration",
+			Description:     "Applies workspace grants to native conversation APIs and verified plugin Host callbacks. Disabling restores native permissions and retains saved grants.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Plugin domain callbacks require the current SDK handler context. Unidentified or expired callbacks and grant lookup errors fail closed. Disabling explicitly restores native permissions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -130,8 +175,7 @@ var registrations = []runtimeFlagRegistration{
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
-				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
-				"storage, and permission behavior of the experimental feature.",
+				"can access only explicitly granted Kandev data.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
@@ -164,16 +208,80 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
 			Label:       "Dynamic agent routing",
-			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Description: "Enables dynamic agent profiles, provider-error routing, and shared circuit admission for fixed profiles, using the default circuit backoff ladder.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskHigh,
 			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
-				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+				"Shared resource circuits use a 1-minute to 4-hour backoff ladder, which can delay fixed profiles and dynamic candidates; a later provider reset time can extend it. Account holds require owner release. Enable on a controlled installation.",
 			RestartRequired: true,
 			Mutable:         true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyACPV2,
+			EnvVar:          envACPV2,
+			Kind:            KindFeature,
+			Label:           "ACP v2 preview",
+			Description:     "Use ACP v2 for supported local agents.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "After disabling the preview, reconnect running ACP v2 sessions to send new prompts.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ACPV2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ACPV2 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyCodexAppServer,
+			EnvVar:          envCodexAppServer,
+			Kind:            KindFeature,
+			Label:           "Codex app server",
+			Description:     "Enables native Codex app-server profiles and conversations, separate from Codex ACP.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native Codex conversation and background lifecycle support is experimental. Keep Codex ACP for existing sessions and disable this flag if native sessions behave unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.agentBackgroundWork",
+			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
+			Kind:            KindFeature,
+			Label:           "Agent background work",
+			Description:     "Enables normalized background work tracking, interactive controls, and subagent observation.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Background work lifecycle management and UI inspection are experimental.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.opencodePlugin",
+			EnvVar:          "KANDEV_FEATURES_OPENCODE_PLUGIN",
+			Kind:            KindFeature,
+			Label:           "OpenCode integration plugin",
+			Description:     "Supplies the Kandev integration plugin to supported OpenCode v2 task launches so native background shell outcomes can settle existing jobs.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "The plugin observes native shell terminal facts through a private loopback callback. Enable it only for OpenCode v2 2.2.0 sessions; unsupported versions keep ordinary ACP behavior.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OpenCodePlugin },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OpenCodePlugin = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -213,25 +321,6 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
-			Key:         "features.officeSessionIdentity",
-			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
-			Kind:        KindFeature,
-			Label:       "Office per-agent session identity",
-			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
-			Stability:   StabilityExperimental,
-			RiskLevel:   RiskHigh,
-			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
-				"A live (task_id, agent_profile_id) pair is guarded in-transaction on the office session creation path, not by a table-level constraint; pre-existing duplicate rows are deliberately retained and resolved by selection rather than repaired. " +
-				"The guard relies on SQLite's process-local single-writer pool or PostgreSQL's database task-row lock. Two Kandev processes must not write the same SQLite file. " +
-				"Disabling this toggle and restarting reverts to runner-seat binding and task-active-session decision re-evaluation.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
 			Key:         "features.agentSurvival",
 			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
 			Kind:        KindFeature,
@@ -248,6 +337,75 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinator",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
+			Kind:        KindFeature,
+			Label:       "Workspace coordinators",
+			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Phase 1 only proposes unstarted tasks. With coordinator control enabled, approved resume or move proposals can start an agent on an existing task. " +
+				"A person must approve each proposal. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Coordinator },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Coordinator = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase2",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE2",
+			Kind:        KindFeature,
+			Label:       "Coordinator control",
+			Description: "Adds per-coordinator permissions, watches, standing orders, goals and an activity log on top of workspace coordinators. Requires Workspace coordinators.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Lets a coordinator act on existing tasks once a human grants the matching permission. Every action stays off until " +
+				"granted, and every attempt is recorded in the activity log. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase2 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase3",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE3",
+			Kind:        KindFeature,
+			Label:       "Coordinator autonomy",
+			Description: "Lets a coordinator run unattended within a spend ceiling and decide chosen proposal classes automatically. Requires Workspace coordinators and Coordinator control.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Lets a coordinator start turns and decide proposals without a human present, bounded by a spend ceiling and " +
+				"the permissions granted. Autonomy stays off per coordinator until enabled. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase3 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase3 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase31",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE31",
+			Kind:        KindFeature,
+			Label:       "Coordinator record and measure",
+			Description: "Adds pausing a coordinator, the Projects scope for Watches and the coordinator's read of its own turn history. Turns are recorded whether or not this is on. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Adds controls that stop an unattended coordinator turn and narrow what a coordinator can see and act on by project, " +
+				"plus a read-only turn-history tool. A paused coordinator stays paused and a stored Projects scope stays enforced while the controls are off. " +
+				"Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase31 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase31 = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

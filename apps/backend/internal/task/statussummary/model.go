@@ -22,17 +22,18 @@ const (
 
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes  = 512
-	MaxActiveErrorDetailsBytes  = 4096
-	maxSessionIDBytes           = 256
-	maxTaskRepositoryIDBytes    = 256
-	maxPendingActionBytes       = 128
-	maxActiveErrorStampBytes    = 64
-	maxActiveErrorCategoryBytes = 64
-	maxPullRequestStateBytes    = 64
-	maxPullRequestURLBytes      = 2048
-	maxLaunchQueueIDBytes       = 256
-	maxLaunchQueueReasonBytes   = 64
+	MaxActiveErrorPreviewBytes    = 512
+	MaxActiveErrorDetailsBytes    = 4096
+	maxSessionIDBytes             = 256
+	maxTaskRepositoryIDBytes      = 256
+	maxPendingActionBytes         = 128
+	maxActiveErrorStampBytes      = 64
+	maxActiveErrorCategoryBytes   = 64
+	maxPullRequestStateBytes      = 64
+	maxPullRequestURLBytes        = 2048
+	maxPullRequestRepositoryBytes = 256
+	maxLaunchQueueIDBytes         = 256
+	maxLaunchQueueReasonBytes     = 64
 )
 
 const (
@@ -41,21 +42,33 @@ const (
 	LaunchQueueReasonReplayError          = "replay_error"
 )
 
+// QuotaWaitReasonQuotaLimited is the only reason a quota wait is projected for.
+// A deadline-backed wait caused by any other provider failure keeps its
+// routing-owned presentation instead of being reported as a limit wait.
+const QuotaWaitReasonQuotaLimited = "quota_limited"
+
 // TaskStatusSummary is the complete replacement value delivered to task-list
 // consumers. Revision and UpdatedAt are transport metadata and are ignored by
 // SemanticEqual when deciding whether a projection actually changed.
 type TaskStatusSummary struct {
-	Revision            uint64                 `json:"revision"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	Revision       uint64                 `json:"revision"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	LastActivityAt *time.Time             `json:"last_activity_at,omitempty"`
+	PrimarySession *PrimarySessionSummary `json:"primary_session,omitempty"`
+	// HasRunningSession is authoritative when present. A nil value identifies
+	// summaries written before the task-wide session projection was available.
+	HasRunningSession   *bool               `json:"has_running_session,omitempty"`
+	ForegroundActivity  string              `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                 `json:"active_subagent_count,omitempty"`
+	PendingAction       string              `json:"pending_action,omitempty"`
+	ActiveError         *ActiveErrorSummary `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary `json:"task_error,omitempty"`
+	// TurnError is the bounded task-owned attention pointer for the latest
+	// failed interactive turn. It never blocks the composer and never drives
+	// recovery controls.
+	TurnError   *TurnErrorSummary   `json:"turn_error,omitempty"`
+	Git         *GitSummary         `json:"git,omitempty"`
+	PullRequest *PullRequestSummary `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -64,6 +77,37 @@ type TaskStatusSummary struct {
 	// LaunchQueue is the live task-level projection for automatic session work
 	// waiting on admission. It is independent of the selected transcript.
 	LaunchQueue *LaunchQueueSummary `json:"launch_queue,omitempty"`
+	// CompletionGate is a bounded task-owned progress projection. Detailed
+	// criterion descriptions and evidence remain available from the task API.
+	CompletionGate *CompletionGateSummary `json:"completion_gate,omitempty"`
+	// UnreadSessionIDs lists, sorted, the task's sessions that have an unread
+	// transcript-visible message. The task is unread when it is non-empty.
+	// Omitted when empty.
+	UnreadSessionIDs []string `json:"unread_session_ids,omitempty"`
+	// QuotaWait is the live task-level projection for a session parked on a
+	// provider limit. It carries the reason identity and the instant the limit
+	// lifts, never the policy body or provider payload behind the decision.
+	QuotaWait *QuotaWaitSummary `json:"quota_wait,omitempty"`
+}
+
+// QuotaWaitSummary is the bounded form of one session's deadline-backed limit
+// wait. Deadline is the instant a fresh selection is attempted again, so it is
+// the only time value a consumer needs; it is omitted from no projection because
+// a wait without a deadline is not a wait this projection describes.
+type QuotaWaitSummary struct {
+	SessionID string    `json:"session_id"`
+	Reason    string    `json:"reason"`
+	Deadline  time.Time `json:"deadline"`
+}
+
+// CompletionGateSummary keeps task-list transport bounded while exposing the
+// current criteria revision and blocker counts.
+type CompletionGateSummary struct {
+	Revision      int64 `json:"revision"`
+	CriteriaCount int   `json:"criteria_count"`
+	VerifiedCount int   `json:"verified_count"`
+	BlockerCount  int   `json:"blocker_count"`
+	Blocked       bool  `json:"blocked"`
 }
 
 type LaunchQueueSummary struct {
@@ -77,9 +121,13 @@ type LaunchQueueSummary struct {
 }
 
 type LaunchQueueCapacity struct {
-	InUse      int       `json:"in_use"`
-	Limit      int       `json:"limit"`
-	ObservedAt time.Time `json:"observed_at"`
+	Policy             string         `json:"policy,omitempty"`
+	GradeInUse         map[string]int `json:"grade_in_use,omitempty"`
+	GradeLimits        map[string]int `json:"grade_limits,omitempty"`
+	NeedsConfiguration bool           `json:"needs_configuration,omitempty"`
+	InUse              int            `json:"in_use"`
+	Limit              int            `json:"limit"`
+	ObservedAt         time.Time      `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {
@@ -103,6 +151,17 @@ type ActiveErrorSummary struct {
 	Causes           []models.AgentErrorCause `json:"causes,omitempty"`
 }
 
+// TurnErrorSummary is the compact, task-list-safe projection of one failed
+// interactive turn. Message text is sanitized before it reaches this struct.
+type TurnErrorSummary struct {
+	SessionID  string    `json:"session_id,omitempty"`
+	TurnID     string    `json:"turn_id,omitempty"`
+	MessageID  string    `json:"message_id,omitempty"`
+	Stamp      string    `json:"stamp"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Preview    string    `json:"preview"`
+}
+
 type GitSummary struct {
 	Additions    int `json:"additions,omitempty"`
 	Deletions    int `json:"deletions,omitempty"`
@@ -118,15 +177,29 @@ type GitSummary struct {
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count            int    `json:"count,omitempty"`
-	OpenCount        int    `json:"open_count,omitempty"`
-	Attention        bool   `json:"attention,omitempty"`
-	AutoFixEnabled   bool   `json:"auto_fix_enabled,omitempty"`
-	AutoMergeEnabled bool   `json:"auto_merge_enabled,omitempty"`
-	AggregateState   string `json:"aggregate_state,omitempty"`
-	State            string `json:"state,omitempty"`
-	Number           int    `json:"number,omitempty"`
-	URL              string `json:"url,omitempty"`
+	Count                      int    `json:"count,omitempty"`
+	OpenCount                  int    `json:"open_count,omitempty"`
+	Attention                  bool   `json:"attention,omitempty"`
+	WorkflowApprovalRequired   bool   `json:"workflow_approval_required"`
+	WorkflowApprovalStale      bool   `json:"workflow_approval_stale,omitempty"`
+	WorkflowApprovalPRNumber   int    `json:"workflow_approval_pr_number,omitempty"`
+	WorkflowApprovalRepository string `json:"workflow_approval_repository,omitempty"`
+	AutoFixEnabled             bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled           bool   `json:"auto_merge_enabled,omitempty"`
+	HasMergeConflicts          bool   `json:"has_merge_conflicts,omitempty"`
+	MergeConflictPRNumber      int    `json:"merge_conflict_pr_number,omitempty"`
+	MergeConflictRepository    string `json:"merge_conflict_repository,omitempty"`
+	// CIState is the display-only CI classification for the highest-priority
+	// open pull request. "none" is an explicit clear; an omitted field in a
+	// legacy payload means unknown.
+	CIState        string `json:"ci_state"`
+	CIPRNumber     int    `json:"ci_pr_number,omitempty"`
+	CIRepository   string `json:"ci_repository,omitempty"`
+	CIStale        bool   `json:"ci_stale,omitempty"`
+	AggregateState string `json:"aggregate_state,omitempty"`
+	State          string `json:"state,omitempty"`
+	Number         int    `json:"number,omitempty"`
+	URL            string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -167,10 +240,115 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateActiveError(s.TaskError); err != nil {
 		return err
 	}
+	if err := validateTurnError(s.TurnError); err != nil {
+		return err
+	}
 	if err := validatePullRequest(s.PullRequest); err != nil {
 		return err
 	}
-	return validateLaunchQueue(s.LaunchQueue)
+	if err := validateLaunchQueue(s.LaunchQueue); err != nil {
+		return err
+	}
+	if err := validateUnreadSessionIDs(s.UnreadSessionIDs); err != nil {
+		return err
+	}
+	if err := validateQuotaWait(s.QuotaWait); err != nil {
+		return err
+	}
+	return validateCompletionGate(s.CompletionGate)
+}
+
+func validateTurnError(value *TurnErrorSummary) error {
+	if value == nil {
+		return nil
+	}
+	if value.Stamp == "" {
+		return fmt.Errorf("turn error stamp is required")
+	}
+	if err := validateUTF8Bytes("turn error stamp", value.Stamp, maxActiveErrorStampBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error session", value.SessionID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error turn", value.TurnID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("turn error message", value.MessageID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	return validateUTF8Bytes("turn error preview", value.Preview, MaxActiveErrorPreviewBytes)
+}
+
+// validateUnreadSessionIDs requires bounded, sorted, unique session IDs so the
+// canonical payload is stable for semantic equality.
+func validateUnreadSessionIDs(ids []string) error {
+	for i, id := range ids {
+		if id == "" {
+			return fmt.Errorf("unread session id cannot be empty")
+		}
+		if err := validateUTF8Bytes("unread session id", id, maxSessionIDBytes); err != nil {
+			return err
+		}
+		if i > 0 && ids[i-1] >= id {
+			return fmt.Errorf("unread session ids must be sorted and unique")
+		}
+	}
+	return nil
+}
+
+func validateQuotaWait(wait *QuotaWaitSummary) error {
+	if wait == nil {
+		return nil
+	}
+	if err := validateUTF8Bytes("quota wait session id", wait.SessionID, maxSessionIDBytes); err != nil {
+		return err
+	}
+	if err := validateUTF8Bytes("quota wait reason", wait.Reason, maxLaunchQueueReasonBytes); err != nil {
+		return err
+	}
+	if wait.Reason != QuotaWaitReasonQuotaLimited {
+		return fmt.Errorf("quota wait has unknown reason")
+	}
+	if wait.Deadline.IsZero() {
+		return fmt.Errorf("quota wait deadline is required")
+	}
+	return nil
+}
+
+func validateCompletionGate(gate *CompletionGateSummary) error {
+	if gate == nil {
+		return nil
+	}
+	if gate.Revision < 0 || gate.CriteriaCount < 0 || gate.VerifiedCount < 0 || gate.BlockerCount < 0 {
+		return fmt.Errorf("completion gate counts and revision cannot be negative")
+	}
+	if gate.VerifiedCount > gate.CriteriaCount || gate.BlockerCount > gate.CriteriaCount ||
+		gate.VerifiedCount+gate.BlockerCount != gate.CriteriaCount {
+		return fmt.Errorf("completion gate counts are inconsistent")
+	}
+	if gate.Blocked != (gate.BlockerCount > 0) {
+		return fmt.Errorf("completion gate blocked state is inconsistent")
+	}
+	return nil
+}
+
+// CompletionGateSummaryFromSnapshot maps detailed task-owned gate data to its
+// bounded task-list projection. Evidence and criterion text are never copied.
+func CompletionGateSummaryFromSnapshot(snapshot *models.TaskCompletionGateSnapshot) *CompletionGateSummary {
+	if snapshot == nil || (snapshot.Revision == 0 && len(snapshot.Criteria) == 0) {
+		return nil
+	}
+	blockers := len(snapshot.Blockers)
+	criteria := len(snapshot.Criteria)
+	verified := criteria - blockers
+	if verified < 0 {
+		verified = 0
+	}
+	return &CompletionGateSummary{
+		Revision: snapshot.Revision, CriteriaCount: criteria, VerifiedCount: verified,
+		BlockerCount: blockers, Blocked: blockers > 0,
+	}
 }
 
 func validatePrimarySession(session *PrimarySessionSummary) error {
@@ -220,7 +398,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	if activeError.Phase != "" && activeError.Phase != models.LaunchErrorPhaseBootstrap {
 		return fmt.Errorf("active error has unknown phase")
 	}
-	if !slices.Equal(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
+	if !models.AgentErrorCausesEqual(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
 		return fmt.Errorf("active error has malformed causes")
 	}
 	if activeError.Details != models.NormalizeAgentErrorDetails(activeError.Details, activeError.Causes) {
@@ -233,7 +411,8 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	if pr == nil {
 		return nil
 	}
-	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 {
+	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 || pr.WorkflowApprovalPRNumber < 0 ||
+		pr.MergeConflictPRNumber < 0 || pr.CIPRNumber < 0 {
 		return fmt.Errorf("pull request counts and number cannot be negative")
 	}
 	fields := []struct {
@@ -243,7 +422,11 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	}{
 		{"pull request state", pr.State, maxPullRequestStateBytes},
 		{"pull request aggregate state", pr.AggregateState, maxPullRequestStateBytes},
+		{"pull request CI state", pr.CIState, maxPullRequestStateBytes},
 		{"pull request URL", pr.URL, maxPullRequestURLBytes},
+		{"workflow approval repository", pr.WorkflowApprovalRepository, maxPullRequestRepositoryBytes},
+		{"merge conflict repository", pr.MergeConflictRepository, maxPullRequestRepositoryBytes},
+		{"CI repository", pr.CIRepository, maxPullRequestRepositoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
@@ -311,28 +494,56 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 	return json.Marshal(semanticPayload{
 		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
+		HasRunningSession:   s.HasRunningSession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
 		TaskError:           s.TaskError,
+		TurnError:           s.TurnError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
+		CompletionGate:      s.CompletionGate,
+		UnreadSessionIDs:    s.UnreadSessionIDs,
+		QuotaWait:           s.QuotaWait,
 	})
 }
 
 type semanticPayload struct {
 	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
+	HasRunningSession   *bool                  `json:"has_running_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
 	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
+	TurnError           *TurnErrorSummary      `json:"turn_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
+	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	UnreadSessionIDs    []string               `json:"unread_session_ids,omitempty"`
+	QuotaWait           *QuotaWaitSummary      `json:"quota_wait,omitempty"`
+}
+
+// TurnErrorSummaryFromMetadata projects the current task turn-error attention.
+// An acknowledged record keeps its transcript history but exposes no current
+// attention. The preview is bound separately from the stored 4096-byte message.
+func TurnErrorSummaryFromMetadata(metadata map[string]interface{}) *TurnErrorSummary {
+	value, ok := models.LoadTaskTurnError(metadata)
+	if !ok || value.Acknowledged() {
+		return nil
+	}
+	return &TurnErrorSummary{
+		SessionID:  truncateString(value.SessionID, maxSessionIDBytes),
+		TurnID:     truncateString(value.TurnID, maxSessionIDBytes),
+		MessageID:  truncateString(value.MessageID, maxSessionIDBytes),
+		Stamp:      truncateString(value.StampValue, maxActiveErrorStampBytes),
+		OccurredAt: value.OccurredAt,
+		Preview:    truncateString(value.Message, MaxActiveErrorPreviewBytes),
+	}
 }

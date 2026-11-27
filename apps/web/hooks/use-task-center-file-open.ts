@@ -1,6 +1,14 @@
 "use client";
 
+import {
+  shouldOpenFilePreview,
+  previewFileState,
+  canFindViewerForFileType,
+} from "@/lib/plugins/file-viewer-selection";
+import { useAppStoreApi } from "@/components/state-provider";
+import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
 import { useCallback } from "react";
+import { useTabletFileOpen } from "./domains/session/use-tablet-file-admission";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
@@ -10,7 +18,7 @@ import { t } from "@/lib/i18n";
 type UseTaskCenterFileOpenOptions = {
   activeSessionId: string | null;
   addFileTab: (fileTab: OpenFileTab) => void;
-  toast: (options: { title: string; description: string; variant: "error" }) => void;
+  toast: (options: { title: string; description?: string; variant: "error" }) => void;
 };
 
 export function useTaskCenterFileOpen({
@@ -18,10 +26,29 @@ export function useTaskCenterFileOpen({
   addFileTab,
   toast,
 }: UseTaskCenterFileOpenOptions) {
+  const store = useAppStoreApi();
+  const beginOpen = useTabletFileOpen(activeSessionId);
   return useCallback(
     async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
+      if (isRenameReserved(store, activeSessionId, filePath, repo)) {
+        toast({
+          title: t("task:failedToOpenFile"),
+          variant: "error",
+        });
+        return;
+      }
+      if (shouldOpenFilePreview(filePath)) {
+        addFileTab(previewFileState(filePath, repo));
+        return;
+      }
+      const pending = trackRenameOpen(store, activeSessionId, filePath, repo);
+      const operation = beginOpen({ path: filePath, repo });
+      if (!operation) {
+        pending.dispose();
+        return;
+      }
       try {
         const response: FileContentResponse = await requestFileContent(
           client,
@@ -31,7 +58,8 @@ export function useTaskCenterFileOpen({
         );
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
-        addFileTab({
+        if (!pending.current() || isRenameReserved(store, activeSessionId, filePath, repo)) return;
+        const file: OpenFileTab = {
           path: filePath,
           repo,
           name: fileName,
@@ -41,15 +69,23 @@ export function useTaskCenterFileOpen({
           isDirty: false,
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
-        });
+        };
+        if (operation.current(file)) addFileTab(file);
       } catch (error) {
+        if (canFindViewerForFileType(filePath) && pending.current()) {
+          addFileTab(previewFileState(filePath, repo));
+          return;
+        }
         toast({
           title: t("task:failedToOpenFile"),
           description: error instanceof Error ? error.message : t("task:unknownError"),
           variant: "error",
         });
+      } finally {
+        pending.dispose();
+        operation.finish();
       }
     },
-    [activeSessionId, addFileTab, toast],
+    [activeSessionId, addFileTab, toast, store, beginOpen],
   );
 }

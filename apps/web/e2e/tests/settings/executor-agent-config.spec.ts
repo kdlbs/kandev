@@ -59,7 +59,7 @@ test.describe("portable agent configuration settings", () => {
           .getByRole("checkbox"),
       ).toBeChecked();
 
-      await testPage.getByRole("button", { name: "Mock Codex Not Configured" }).click();
+      await expect(agentTrigger).toHaveAttribute("aria-expanded", "true");
       const authChoice = testPage.getByRole("checkbox", { name: "Copy auth files" }).first();
       await expect(authChoice).toBeVisible();
       await authChoice.click();
@@ -70,7 +70,9 @@ test.describe("portable agent configuration settings", () => {
         .getByRole("button", { name: "Save changes" });
       await expect(saveButton).toBeEnabled();
       await saveButton.click();
-      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible();
 
       const saved = await apiClient.getExecutorProfile(executor.id, profile.id);
       expect(selectedBundleIds(saved.config)).toEqual([MOCK_CODEX_CONFIG_BUNDLE_ID]);

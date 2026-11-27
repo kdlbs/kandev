@@ -49,6 +49,7 @@ type TaskSessionStatusResponse struct {
 	IsAgentRunning          bool   `json:"is_agent_running"`    // Agent process is currently running
 	IsResumable             bool   `json:"is_resumable"`        // Session can be resumed
 	NeedsResume             bool   `json:"needs_resume"`        // Session needs resumption (page reload scenario)
+	IsIdleSuspended         bool   `json:"is_idle_suspended"`   // Workspace policy parked this session
 	AutoResumeAllowed       bool   `json:"auto_resume_allowed"` // Passive inspection may resume this session
 	AutoResumeBlockedReason string `json:"auto_resume_blocked_reason,omitempty"`
 	NeedsWorkspaceRestore   bool   `json:"needs_workspace_restore"` // Session workspace can be restored (terminal state)

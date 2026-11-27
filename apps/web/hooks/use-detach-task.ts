@@ -50,14 +50,19 @@ export function useDetachTask() {
   return { detachTask, detachingTaskId };
 }
 
-export function useTaskDetachDialog(store: StoreApi<AppState>) {
+export function useTaskDetachDialog(
+  store: StoreApi<AppState>,
+  pageTasks: readonly (DetachTarget & { parentTaskId?: string | null })[] = [],
+) {
   const { detachTask, detachingTaskId } = useDetachTask();
   const [detachingTask, setDetachingTask] = useState<DetachTarget | null>(null);
 
   const handleDetachTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task =
+        pageTasks.find((task) => task.id === taskId) ??
+        findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       if (!task?.parentTaskId) return;
       setDetachingTask({
         id: task.id,
@@ -65,7 +70,7 @@ export function useTaskDetachDialog(store: StoreApi<AppState>) {
         workspaceMode: task.workspaceMode,
       });
     },
-    [store],
+    [pageTasks, store],
   );
 
   const handleDetachConfirm = useCallback(async () => {

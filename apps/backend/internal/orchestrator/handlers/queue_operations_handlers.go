@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/authz"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -41,6 +42,9 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	if !h.requiresQueueIdentity() {
 		removed, err := h.cancelAllLegacy(ctx, req.SessionID)
 		if err != nil {
+			if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+				return queueAdmissionErrorResponse(msg)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		h.publishStatus(ctx, req.SessionID)
@@ -70,6 +74,9 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	if err != nil {
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -125,6 +132,8 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
 		case isQueueIdentityError(err):
 			return queueAccessDeniedResponse(msg), nil
+		case errors.Is(err, messagequeue.ErrSessionAdmissionTimeout):
+			return queueAdmissionErrorResponse(msg)
 		default:
 			h.logger.Error("failed to drain queued message", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to drain queued message", nil)
@@ -164,6 +173,11 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
+	if *req.Enabled {
+		if denied := h.authorizeQueueScope(ctx, msg, req.SessionID, authz.ScopeSessionPrompt); denied != nil {
+			return denied, nil
+		}
+	}
 	if h.queueAutoRun == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue Auto-run is unavailable", nil)
 	}
@@ -180,6 +194,9 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 	if err != nil {
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
 		}
 		h.logger.Error("failed to set queue Auto-run", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set queue Auto-run", nil)
@@ -218,11 +235,14 @@ func (h *QueueHandlers) wsSetAutoMerge(ctx context.Context, msg *ws.Message) (*w
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
-	policy, err := controller.SetSessionAutoMerge(ctx, identity, *req.Enabled)
+	result, err := controller.SetSessionAutoMerge(ctx, identity, *req.Enabled)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) ||
 			errors.Is(err, messagequeue.ErrTaskInactive) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
 		}
 		h.logger.Error("failed to set queue Auto-merge", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set queue Auto-merge", nil)
@@ -232,9 +252,10 @@ func (h *QueueHandlers) wsSetAutoMerge(ctx context.Context, msg *ws.Message) (*w
 		fieldTaskID:             identity.TaskID,
 		fieldSessionID:          identity.SessionID,
 		fieldSessionIncarnation: identity.SessionIncarnationID,
-		fieldAutoMergeEnabled:   policy.Enabled,
-		"auto_merge_source":     policy.Source,
-		"auto_merge_revision":   policy.Revision,
+		fieldAutoMergeEnabled:   result.AutoMerge.Enabled,
+		"auto_merge_source":     result.AutoMerge.Source,
+		"auto_merge_revision":   result.AutoMerge.Revision,
+		"compacted_count":       result.CompactedCount,
 	})
 }
 
@@ -325,6 +346,8 @@ func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, 
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowReferenceOverflow, "Combined entity references exceed the message limit", nil)
 	case isQueueIdentityError(err):
 		return queueAccessDeniedResponse(msg), nil
+	case errors.Is(err, messagequeue.ErrSessionAdmissionTimeout):
+		return queueAdmissionErrorResponse(msg)
 	case errors.Is(err, orchestrator.ErrSessionNotPromptable):
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
 	default:
@@ -403,6 +426,9 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 			if errors.Is(err, messagequeue.ErrEntryNotFound) {
 				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
 			}
+			if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+				return queueAdmissionErrorResponse(msg)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		h.publishStatus(ctx, req.SessionID)
@@ -432,6 +458,9 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -621,6 +650,8 @@ func (h *QueueHandlers) mergeIntoAboveError(msg *ws.Message, err error) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeDisabled, "Message merging is disabled", nil)
 	case isQueueIdentityError(err):
 		return queueAccessDeniedResponse(msg), nil
+	case errors.Is(err, messagequeue.ErrSessionAdmissionTimeout):
+		return queueAdmissionErrorResponse(msg)
 	default:
 		h.logger.Error("failed to merge queued message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)
@@ -722,6 +753,9 @@ func (h *QueueHandlers) wsReorder(ctx context.Context, msg *ws.Message) (*ws.Mes
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
 		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
+		}
 		h.logger.Error("failed to reorder queued messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to reorder queued messages", nil)
 	}
@@ -756,7 +790,7 @@ func (h *QueueHandlers) publishStatusSnapshot(ctx context.Context, sessionID str
 	status := h.queueService.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
 		fieldSessionID:  sessionID,
-		"entries":       status.Entries,
+		"entries":       status.ProjectedEntries(),
 		"count":         status.Count,
 		fieldMax:        status.Max,
 		fieldAutoRun:    status.AutoRun,
@@ -818,7 +852,7 @@ func (h *QueueHandlers) publishIdentityStatus(
 		fieldSessionIncarnation: status.SessionIncarnationID,
 		"status_epoch":          status.StatusEpoch,
 		"status_generation":     status.StatusGeneration,
-		"entries":               status.Entries,
+		"entries":               status.ProjectedEntries(),
 		"count":                 status.Count,
 		fieldMax:                status.Max,
 		fieldAutoRun:            status.AutoRun,
@@ -845,9 +879,4 @@ func (h *QueueHandlers) publishIdentityStatus(
 		"queue-handlers",
 		eventData,
 	))
-}
-
-func isQueueIdentityError(err error) bool {
-	return errors.Is(err, messagequeue.ErrSessionIdentityMismatch) ||
-		errors.Is(err, messagequeue.ErrTaskInactive)
 }

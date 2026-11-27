@@ -34,95 +34,118 @@ type richOutputCSVSourceInput struct {
 	Series  []richOutputCSVSeriesInput `json:"series"`
 }
 
-type richOutputCSVBlockInput struct {
-	CSV *richOutputCSVSourceInput `json:"csv,omitempty"`
-}
-
-type richOutputCSVPresentationInput struct {
-	Blocks []richOutputCSVBlockInput `json:"blocks"`
-}
-
 type richOutputResolvedSeries struct {
 	Label  string     `json:"label"`
 	Values []*float64 `json:"values"`
 }
 
 type richOutputResolvedChart struct {
-	BlockIndex int                        `json:"block_index"`
-	Labels     []string                   `json:"labels"`
-	Series     []richOutputResolvedSeries `json:"series"`
+	ElementID string                     `json:"element_id"`
+	Labels    []string                   `json:"labels"`
+	Series    []richOutputResolvedSeries `json:"series"`
 }
 
 type richOutputCSVSnapshot struct {
 	Version        int                       `json:"version"`
-	ResolvedCharts []richOutputResolvedChart `json:"resolved_charts"`
+	CatalogVersion int                       `json:"catalog_version"`
+	ResolvedCharts []richOutputResolvedChart `json:"resolved_charts,omitempty"`
+	ResolvedTables []richOutputResolvedTable `json:"resolved_tables,omitempty"`
 }
 
 func (s *Server) resolveRichOutputCSV(
 	ctx context.Context,
 	args map[string]interface{},
 ) (*richOutputCSVSnapshot, error) {
-	presentation, err := decodeRichOutputCSVInput(args)
+	presentation, err := decodeRichOutputComposition(args)
 	if err != nil {
 		return nil, err
 	}
-	snapshot := &richOutputCSVSnapshot{Version: 1}
+	snapshot := &richOutputCSVSnapshot{Version: 2, CatalogVersion: 1}
 	cache := make(map[string]*streams.FileContentResponse)
-	for blockIndex, block := range presentation.Blocks {
-		if block.CSV == nil {
+	for _, id := range richOutputCSVElementIDs(presentation) {
+		if presentation.Spec.Elements[id].Type == richOutputComponentTable {
+			resolved, resolveErr := s.resolveRichOutputTable(ctx, presentation.Spec.Elements[id], id, cache)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("element %s: %w", id, resolveErr)
+			}
+			if resolved != nil {
+				snapshot.ResolvedTables = append(snapshot.ResolvedTables, *resolved)
+			}
 			continue
 		}
-		response, readErr := s.readRichOutputCSV(ctx, block.CSV, cache)
-		if readErr != nil {
-			return nil, readErr
+		var chart richOutputChartProperties
+		if err := json.Unmarshal(presentation.Spec.Elements[id].Props, &chart); err != nil {
+			return nil, err
 		}
-		resolved, parseErr := parseRichOutputCSV(*block.CSV, response.Content, blockIndex)
+		if chart.CSV == nil {
+			continue
+		}
+		response, readErr := s.readRichOutputCSV(ctx, chart.CSV.Path, chart.CSV.Repo, cache)
+		if readErr != nil {
+			return nil, fmt.Errorf("element %s: %w", id, readErr)
+		}
+		resolved, parseErr := parseRichOutputCSV(*chart.CSV, response.Content, id)
 		if parseErr != nil {
-			return nil, fmt.Errorf("CSV source %s: %w", block.CSV.Path, parseErr)
+			return nil, fmt.Errorf("element %s, CSV source %s: %w", id, chart.CSV.Path, parseErr)
 		}
 		snapshot.ResolvedCharts = append(snapshot.ResolvedCharts, resolved)
 	}
-	if len(snapshot.ResolvedCharts) == 0 {
+	if len(snapshot.ResolvedCharts) == 0 && len(snapshot.ResolvedTables) == 0 {
 		return nil, nil
 	}
-	encoded, err := json.Marshal(snapshot)
+	encoded, err := encodeRichOutputPayload(snapshot)
 	if err != nil || len(encoded) > maxRichOutputPayloadBytes {
-		return nil, fmt.Errorf("normalized CSV chart snapshot exceeds 64 KiB")
+		return nil, fmt.Errorf("normalized CSV snapshot exceeds 64 KiB")
 	}
 	return snapshot, nil
 }
 
-func decodeRichOutputCSVInput(args map[string]interface{}) (richOutputCSVPresentationInput, error) {
+func decodeRichOutputComposition(args map[string]interface{}) (richOutputComposition, error) {
 	encoded, err := json.Marshal(args)
 	if err != nil {
-		return richOutputCSVPresentationInput{}, fmt.Errorf("rich output payload is invalid")
+		return richOutputComposition{}, fmt.Errorf("rich output payload is invalid")
 	}
-	var presentation richOutputCSVPresentationInput
-	if err := json.Unmarshal(encoded, &presentation); err != nil {
-		return richOutputCSVPresentationInput{}, fmt.Errorf("rich output payload is invalid")
+	var input richOutputComposition
+	if err := json.Unmarshal(encoded, &input); err != nil {
+		return richOutputComposition{}, fmt.Errorf("rich output payload is invalid")
 	}
-	return presentation, nil
+	return input, nil
+}
+func richOutputCSVElementIDs(input richOutputComposition) []string {
+	var ids []string
+	var visit func(string)
+	visit = func(id string) {
+		element := input.Spec.Elements[id]
+		if element.Type == richOutputComponentChart || element.Type == richOutputComponentTable {
+			ids = append(ids, id)
+		}
+		for _, child := range element.Children {
+			visit(child)
+		}
+	}
+	visit(input.Spec.Root)
+	return ids
 }
 
 func (s *Server) readRichOutputCSV(
 	ctx context.Context,
-	source *richOutputCSVSourceInput,
+	filePath, repo string,
 	cache map[string]*streams.FileContentResponse,
 ) (*streams.FileContentResponse, error) {
-	cacheKey := source.Repo + "\x00" + source.Path
+	cacheKey := repo + "\x00" + filePath
 	if cached := cache[cacheKey]; cached != nil {
 		return cached, nil
 	}
-	payload := map[string]interface{}{richOutputFieldSessionID: s.sessionID, richOutputFieldPath: source.Path}
-	if source.Repo != "" {
-		payload["repo"] = source.Repo
+	payload := map[string]interface{}{richOutputFieldSessionID: s.sessionID, richOutputFieldPath: filePath}
+	if repo != "" {
+		payload["repo"] = repo
 	}
 	var response streams.FileContentResponse
 	if err := s.backend.RequestPayload(ctx, ws.ActionWorkspaceFileContentGet, payload, &response); err != nil {
-		return nil, fmt.Errorf("could not read CSV source %s: %w", source.Path, err)
+		return nil, fmt.Errorf("could not read CSV source %s: %w", filePath, err)
 	}
 	if response.Error != "" {
-		return nil, fmt.Errorf("could not read CSV source %s: %s", source.Path, response.Error)
+		return nil, fmt.Errorf("could not read CSV source %s: %s", filePath, response.Error)
 	}
 	if response.IsBinary || !utf8.ValidString(response.Content) {
 		return nil, fmt.Errorf("CSV source must be UTF-8 text")
@@ -134,20 +157,17 @@ func (s *Server) readRichOutputCSV(
 	return &response, nil
 }
 
+func newRichOutputCSVReader(content string) *csv.Reader {
+	return csv.NewReader(strings.NewReader(strings.TrimPrefix(content, "\ufeff")))
+}
+
 func parseRichOutputCSV(
 	source richOutputCSVSourceInput,
 	content string,
-	blockIndex int,
+	elementID string,
 ) (richOutputResolvedChart, error) {
-	reader := csv.NewReader(strings.NewReader(content))
-	header, err := reader.Read()
-	if errors.Is(err, io.EOF) {
-		return richOutputResolvedChart{}, fmt.Errorf("CSV source must contain a header row")
-	}
-	if err != nil {
-		return richOutputResolvedChart{}, fmt.Errorf("CSV header is invalid: %w", err)
-	}
-	headerIndexes, err := indexRichOutputCSVHeaders(header)
+	reader := newRichOutputCSVReader(content)
+	headerIndexes, err := readRichOutputCSVHeader(reader)
 	if err != nil {
 		return richOutputResolvedChart{}, err
 	}
@@ -155,8 +175,7 @@ func parseRichOutputCSV(
 	if err != nil {
 		return richOutputResolvedChart{}, err
 	}
-	reader.FieldsPerRecord = len(header)
-	resolved := newRichOutputResolvedChart(source, blockIndex)
+	resolved := newRichOutputResolvedChart(source, elementID)
 	for rowNumber := 2; ; rowNumber++ {
 		record, readErr := reader.Read()
 		if errors.Is(readErr, io.EOF) {
@@ -214,9 +233,9 @@ func resolveRichOutputCSVColumns(
 
 func newRichOutputResolvedChart(
 	source richOutputCSVSourceInput,
-	blockIndex int,
+	elementID string,
 ) richOutputResolvedChart {
-	resolved := richOutputResolvedChart{BlockIndex: blockIndex}
+	resolved := richOutputResolvedChart{ElementID: elementID}
 	for _, input := range source.Series {
 		label := input.Label
 		if label == "" {

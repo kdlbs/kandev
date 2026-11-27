@@ -132,7 +132,7 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.OwnershipGeneration, g.MaterializedPath,
-		g.MaterializedEnvironmentID, g.MaterializedKind, g.OwnedByKandev,
+		g.MaterializedEnvironmentID, g.MaterializedKind, boolToInt(g.OwnedByKandev),
 		g.CleanupPolicy, g.CleanupStatus, g.CleanedAt, g.CleanupError,
 		g.RestoreStatus, g.RestoreError, g.RestoreConfigJSON,
 		g.CreatedAt, g.UpdatedAt)
@@ -216,7 +216,7 @@ func (r *Repository) MarkWorkspaceMaterialized(ctx context.Context, id string, m
 			updated_at = ?
 		WHERE id = ?
 		  AND (materialized_environment_id = '' OR materialized_environment_id = ?)
-	`), m.Path, m.EnvironmentID, m.Kind, m.OwnedByKandev, policy,
+	`), m.Path, m.EnvironmentID, m.Kind, boolToInt(m.OwnedByKandev), policy,
 		m.RestoreConfig, time.Now().UTC(), id, m.EnvironmentID)
 	if err != nil {
 		return err
@@ -314,7 +314,7 @@ func (r *Repository) UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, 
 }
 
 // AddWorkspaceGroupMember inserts a membership row. role defaults to "member"
-// when empty. INSERT OR IGNORE: re-adding the same task is a no-op.
+// when empty. Re-adding the same task is a no-op.
 //
 // Takes the shared task-row lock before writing: office and the task package
 // share the same tasks table through the same SQLite writer pool, so this
@@ -340,12 +340,13 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT OR IGNORE INTO task_workspace_group_members (
+		INSERT INTO task_workspace_group_members (
 			workspace_group_id, task_id, role, created_at
 		)
 		SELECT id, ?, ?, ?
 		FROM task_workspace_groups
 		WHERE id = ? AND cleanup_status IN ('active', 'cleanup_failed')
+		ON CONFLICT(workspace_group_id, task_id) DO NOTHING
 	`), taskID, role, time.Now().UTC(), groupID)
 	if err != nil {
 		return err

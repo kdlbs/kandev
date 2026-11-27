@@ -30,6 +30,11 @@ type PermissionRequestHandler func(ctx context.Context, req *types.PermissionReq
 // cancellation semantics, so it takes no context.
 type CursorTaskHandler func(params json.RawMessage)
 
+// ExtensionNotificationHandler receives inbound ACP extension notifications
+// (methods beginning with "_"). Notifications carry no response, so it takes
+// no context and returns nothing.
+type ExtensionNotificationHandler func(method string, params json.RawMessage)
+
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
 	logger        *zap.Logger
@@ -40,6 +45,7 @@ type Client struct {
 	updateHandler     UpdateHandler
 	permissionHandler PermissionRequestHandler
 	cursorTaskHandler CursorTaskHandler
+	extensionHandler  ExtensionNotificationHandler
 }
 
 // ClientOption configures a Client
@@ -77,6 +83,13 @@ func WithPermissionHandler(h PermissionRequestHandler) ClientOption {
 func WithCursorTaskHandler(h CursorTaskHandler) ClientOption {
 	return func(c *Client) {
 		c.cursorTaskHandler = h
+	}
+}
+
+// WithExtensionNotificationHandler sets the handler for inbound ACP extension notifications.
+func WithExtensionNotificationHandler(h ExtensionNotificationHandler) ClientOption {
+	return func(c *Client) {
+		c.extensionHandler = h
 	}
 }
 
@@ -136,14 +149,11 @@ func (c *Client) RequestPermission(ctx context.Context, p acp.RequestPermissionR
 		zap.String("title", title),
 		zap.Int("num_options", len(p.Options)))
 
-	// No options - cancel
+	// An empty option list is not a decision. Forward it to the handler, which
+	// surfaces it as a pending permission a person can answer; cancelling here
+	// reaches the agent as a refusal the user never saw.
 	if len(p.Options) == 0 {
-		c.logger.Warn("no options available, cancelling permission request")
-		return acp.RequestPermissionResponse{
-			Outcome: acp.RequestPermissionOutcome{
-				Cancelled: &acp.RequestPermissionOutcomeCancelled{},
-			},
-		}, nil
+		c.logger.Warn("permission request carries no options, forwarding for a decision")
 	}
 
 	// Check if we have a permission handler
@@ -254,7 +264,10 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 	}, nil
 }
 
-// autoApprovePermission auto-approves by selecting the first "allow" option
+// autoApprovePermission is the no-handler fallback. It selects the first
+// offered option whose kind is an allow and cancels when none exists, because
+// selecting an unrecognized option by position turns a missing handler into a
+// silent approval or a silent refusal depending on the provider's option order.
 func (c *Client) autoApprovePermission(p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	// Find the first "allow" option
 	var selectedOption *acp.PermissionOption
@@ -266,9 +279,14 @@ func (c *Client) autoApprovePermission(p acp.RequestPermissionRequest) (acp.Requ
 		}
 	}
 
-	// If no allow option, use the first option
 	if selectedOption == nil {
-		selectedOption = &p.Options[0]
+		c.logger.Warn("no allow option offered and no permission handler installed, cancelling",
+			zap.Int("option_count", len(p.Options)))
+		return acp.RequestPermissionResponse{
+			Outcome: acp.RequestPermissionOutcome{
+				Cancelled: &acp.RequestPermissionOutcomeCancelled{},
+			},
+		}, nil
 	}
 
 	c.logger.Info("auto-approving permission request",
@@ -320,6 +338,19 @@ func (c *Client) HandleExtensionMethod(_ context.Context, method string, params 
 }
 
 const cursorTaskMethod = "cursor/task"
+
+// HandleExtensionNotification forwards inbound ACP extension notifications to
+// the registered handler. Without a handler they are ignored, as ACP requires
+// for unknown extension notifications.
+func (c *Client) HandleExtensionNotification(_ context.Context, method string, params json.RawMessage) error {
+	c.mu.RLock()
+	handler := c.extensionHandler
+	c.mu.RUnlock()
+	if handler != nil {
+		handler(method, params)
+	}
+	return nil
+}
 
 // resolvePath resolves a file path, making relative paths relative to the workspace root.
 // It validates that the resolved path stays within the workspace root to prevent path traversal.

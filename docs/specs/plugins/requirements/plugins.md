@@ -32,6 +32,57 @@ Kandev keeps growing external integrations and surface-specific behavior directl
 - **AC-PLUGINS-PLUGINS-001.11:** A plugin shall access Kandev domain data and commands only through documented capability-gated Host contracts. Global MCP, private REST, direct database access, shell access, and prompt or comment text shall not confer plugin authority.
 - **AC-PLUGINS-PLUGINS-001.12:** When a required Host capability or result state is unknown or unsupported, the plugin shall receive a typed unsupported result and shall not fall back to a broader integration path.
 - **AC-PLUGINS-PLUGINS-001.13:** Kandev shall provide a connection-bound way for a plugin to discover supported capability families and approved workspace scope. The context shall describe authority but shall not grant authority. A missing, stale, or revoked context shall not grant authority. The Host shall enforce current approval on every request.
+- **AC-PLUGINS-PLUGINS-001.14:** When a package declares a stable
+  `min_kandev_version`, installation on a stamped Stable or published npm Nightly
+  host shall reject a minimum above the host's version without leaving an
+  installed package version, persisted installation record, registry entry, or
+  activated plugin. A Nightly is a prerelease below the Stable release with the
+  same numeric core; it shall satisfy earlier Stable minimums. Manifest minimums
+  shall retain their existing stable numeric grammar. Empty, development,
+  git-describe, and unknown or malformed development host versions shall retain
+  their compatibility-comparison exemption; independent manifest validation
+  shall still apply.
+- **AC-PLUGINS-PLUGINS-001.15:** When a plugin creates a task with launch
+  profiles (`launch.agent_profile_id`, `launch.executor_profile_id`), Kandev
+  shall reject a profile that does not exist with `InvalidArgument` before it
+  creates a new task, whether or not the plugin asks to start an agent. An exact
+  create retry shall resolve an existing task by external ID before it checks
+  profile availability, so removal of a profile after task creation does not
+  prevent recovery of the committed task. A task created without starting an
+  agent shall keep those profiles for a later start. On a workflow start, a
+  matching task-specific fixed-step profile, step profile, or workflow default
+  takes precedence over the saved agent profile. Kandev shall use the saved
+  agent profile when workflow policy selects no profile.
+- **AC-PLUGINS-PLUGINS-001.16:** When Kandev serves a plugin's frontend bundle
+  or UI asset, the response shall require the browser to revalidate before it
+  reuses a cached copy, and an unchanged file shall revalidate without a body.
+  A reinstall of the same plugin version shall therefore load the new files on
+  the next page load.
+- **AC-PLUGINS-PLUGINS-001.17:** When an authorized plugin creates a task with
+  `project_id` through `CreateTask` or `CreateTaskExact`, Kandev shall persist
+  the selected Office project and return its ID in the task. A plugin shall be
+  able to create a root task in the project.
+- **AC-PLUGINS-PLUGINS-001.18:** A create that specifies a project shall
+  follow the authorization of its create method. Both methods require the
+  manifest task-write capability. Exact create also requires the current
+  task-write approval in the task workspace.
+- **AC-PLUGINS-PLUGINS-001.19:** A new create shall reject a supplied empty
+  project ID. Missing projects and projects in a different workspace shall
+  return the same invalid-project result. Rejected project selection shall
+  leave no task row, creation event, or launch.
+- **AC-PLUGINS-PLUGINS-001.20:** When a plugin omits `project_id`, the existing
+  create permissions, placement defaults, and parent project inheritance shall
+  apply.
+- **AC-PLUGINS-PLUGINS-001.21:** Exact creates shall include an explicit project
+  in the request identity. Reuse of an idempotency key with a different project
+  selection shall return a conflict. Retries shall recover the prior outcome,
+  including requests without a project that predate this field. A committed
+  task recovered by external identity shall retain its stored project.
+- **AC-PLUGINS-PLUGINS-001.22:** For an authorized URL install, Kandev shall
+  return the final result to the waiting client. This includes downloads that
+  complete within their time limit and take longer than the server write
+  timeout. If Kandev installs the package and activation fails, the result
+  shall include the installed plugin record and an activation warning.
 
 ## System design
 

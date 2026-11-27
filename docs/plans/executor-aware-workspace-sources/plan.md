@@ -293,6 +293,11 @@ checks passed. Implementation verification on 2026-09-15:
   and mixed subtasks 1/1.
 - Public documentation and specification validation remain part of the final gate.
 
+The 2026-11-27 base integration verified ordered repository and folder creation,
+saved source restoration, fresh-branch policy selection, and provider availability.
+Focused Go and web tests, scoped Go lint, type checking, localization checks,
+documentation validation, and desktop and mobile task creation flows passed.
+
 The real-container clone transport test is a documented verification gap until a
 reachable credentialed Git fixture exists. No commit or push is implied by this
 document; delivery is handled by the implementation workflow.

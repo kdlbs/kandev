@@ -18,6 +18,7 @@ import (
 // carries no replay fields, so it never persists a deferral itself — it only
 // decides admit/refuse and reports the refusal for its caller to record.
 type seam3Refusal struct {
+	origin     launchOrigin
 	reasonCode string
 	// population, populationKnown and ceiling are the admission decision's own
 	// reading, carried so a caller-side disposition can pass them on to
@@ -83,7 +84,7 @@ func (s *Service) admitSeam3(
 		}, nil
 	}
 	return nil, &seam3Refusal{
-		reasonCode: decision.reasonCode, population: decision.population,
+		origin: origin, reasonCode: decision.reasonCode, population: decision.population,
 		populationKnown: decision.populationKnown, ceiling: decision.ceiling,
 	}
 }
@@ -154,7 +155,7 @@ func (s *Service) deferSeam3QueueDrainRefusal(ctx context.Context, taskID, sessi
 	}
 	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchQueueDrainEnsure, payload, refusal.reasonCode,
-		refusal.population, refusal.populationKnown, refusal.ceiling); err != nil {
+		refusal.population, refusal.populationKnown, refusal.ceiling, refusal.origin); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the workflow queue drain could not be recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String("queued_message_id", queuedMessageID), zap.Error(err))
@@ -200,6 +201,7 @@ func seam3PromptEnsurePayload(
 		"prompt_already_composed":     options.promptAlreadyComposed,
 		"fallback_launch_prompt":      options.fallbackLaunchPrompt,
 		"fallback_retry_prompt":       options.fallbackRetryPrompt,
+		"prompt_reference_context":    options.promptReferenceContext,
 	}
 	if options.ceilingEntryBinding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*options.ceilingEntryBinding)
@@ -225,7 +227,7 @@ func (s *Service) disposeSeam3PromptEnsureRefusal(
 	payload := seam3PromptEnsurePayload(sessionID, prompt, model, planMode, attachments, dispatchOnly, options)
 	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchPromptEnsure, payload, refusal.reasonCode,
-		refusal.population, refusal.populationKnown, refusal.ceiling); err != nil {
+		refusal.population, refusal.populationKnown, refusal.ceiling, refusal.origin); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the prompt could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 		return err
@@ -251,7 +253,7 @@ func (s *Service) classifyEnsureSessionRunningFailureForPrompt(
 		}
 		return err
 	}
-	if errors.Is(err, errSessionAwaitingRuntimeLaunch) {
+	if errors.Is(err, errSessionAwaitingRuntimeLaunch) || isRetryableSessionRecoveryGuardError(err) {
 		return fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
 	}
 	return fmt.Errorf("failed to ensure session is running: %w", err)

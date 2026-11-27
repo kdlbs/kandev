@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/taskdependencies"
@@ -27,6 +28,17 @@ var validPriorities = map[string]struct{}{
 	"high":     {},
 	"medium":   {},
 	"low":      {},
+}
+
+const postCommitSideEffectTimeout = 5 * time.Second
+
+// detachedPostCommitContext keeps committed state side effects ordered even
+// when the request is cancelled immediately after the database commit.
+func detachedPostCommitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), postCommitSideEffectTimeout)
 }
 
 // UpdateTaskPriority sets the priority field. Validates the value against
@@ -135,9 +147,8 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 		}
 		return nil
 	}
-	// Preflight existence so a concurrent parent deletion (or a direct hit on
-	// the endpoint) cannot write a dangling parent_id — mirroring the
-	// canonical resolveParentID guard.
+	// Fail fast on a missing parent. The repository rechecks existence under
+	// shared hierarchy admission before the scalar write.
 	parent, err := s.repo.GetTaskByID(ctx, parentID)
 	if err != nil {
 		return fmt.Errorf("resolve parent task: %w", err)
@@ -582,11 +593,13 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
-	// SuppressStatusActivity is used by the orchestrator when it will publish
-	// the canonical task.state_changed event that owns the activity row. Gate
-	// redirects still log here because they do not publish that event.
-	SuppressStatusActivity bool
+	// Automatic terminal writes must not overwrite a later business-state change.
+	ExpectedCurrentState   string
+	ExpectedWorkflowStepID string
 }
+
+// ErrAutomaticCompletionStale means a newer task state owns the outcome.
+var ErrAutomaticCompletionStale = errors.New("task changed before automatic completion")
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
 // and publishes an office.task.status_changed event so execution policy
@@ -612,10 +625,11 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 	if dbState == "" {
 		return &InvalidTaskStatusError{Status: req.NewStatus}
 	}
-
-	preStatus := ""
-	if exec, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && exec != nil {
-		preStatus = exec.State
+	if s.taskStateWriter == nil {
+		return errors.New("task status writer is not configured")
+	}
+	if s.taskStateChangeEvents == nil {
+		return errors.New("task state change publisher is not configured")
 	}
 
 	expectedStepID := ""
@@ -625,26 +639,23 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		return gateErr
 	}
 
-	if dbState == stateCompleted {
-		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
-		if err != nil {
-			return fmt.Errorf("update task state: %w", err)
-		}
-		if !updated {
-			return &WorkflowStepChangedError{TaskID: req.TaskID}
-		}
-	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
-		return fmt.Errorf("update task state: %w", err)
+	change, err := s.persistTaskStatus(ctx, req, dbState, expectedStepID)
+	if err != nil {
+		return err
 	}
 
-	commentID := s.maybeCreateStatusComment(ctx, req)
-	if !req.SuppressStatusActivity || pendingErr != nil {
-		s.logTaskStatusChangeActivity(ctx, req)
+	postCommitCtx, cancelPostCommit := detachedPostCommitContext(ctx)
+	defer cancelPostCommit()
+	commentID := s.maybeCreateStatusComment(postCommitCtx, req)
+	if change.Changed {
+		s.logTaskStatusChangeActivity(postCommitCtx, req)
+		s.taskStateChangeEvents.PublishCommittedTaskStateChange(postCommitCtx, change, true)
 	}
-	s.publishTaskStatusChanged(ctx, req)
-	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
-	s.runReactivityForStatus(ctx, req, commentID, preStatus)
-	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
+	s.publishTaskStatusChanged(postCommitCtx, req)
+	s.publishCanonicalTaskUpdated(postCommitCtx, req.TaskID)
+	preStatus := string(change.OldState)
+	s.runReactivityForStatus(postCommitCtx, req, commentID, preStatus)
+	s.maybeSupersedeOnRework(postCommitCtx, req.TaskID, preStatus, dbState)
 
 	return gateErr
 }
@@ -707,8 +718,8 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 // through to the approver check exactly like a terminal-step task rather
 // than being redirected forever.
 //
-// The step-position check fails CLOSED, but a lookup error is not the same
-// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// The final-step check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-final step: it aborts the whole update (a plain,
 // non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
 // the caller persists nothing rather than writing a redirect it cannot
 // justify. Only a successful read reporting "not terminal" persists the
@@ -724,11 +735,11 @@ func (s *DashboardService) applyApprovalGate(
 		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
 	}
 	*expectedStepID = currentStepID
-	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	final, hasStep, err := s.repo.IsTaskOnFinalStep(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
 	}
-	if hasStep && !terminal {
+	if hasStep && !final {
 		*dbState = stateInReview
 		*apiStatus = statusInReviewLowercase
 		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}
@@ -1005,12 +1016,17 @@ var sessionCapacityReadHook func(taskID, agentProfileID string)
 // read of runner seats, say — answers a different question, because the
 // projection's last tier deliberately reads runner rows across every step.
 //
-// The seat half reads the effective slate at the task's current step, which
-// already merges template-level rows under per-task precedence and already
-// spans every role. The step scope is load-bearing: seats are keyed
+// The seat half reads the effective slate at the task's current step via
+// ListTaskParticipantsAtCurrentStep, which already merges template-level
+// rows under per-task precedence and already spans every role. The step
+// scope is load-bearing (AC-OFFICE-SESSION-TERM-002.3): seats are keyed
 // (step, task, role, agent) and survive a step change, so an unscoped read
 // would find a seat naming a previous occupant and suppress every future
-// termination for the pair.
+// termination for the pair. This is deliberately NOT
+// ListAllTaskParticipants: that method became workflow-scoped under
+// AC-OFFICE-SEAT-READ-SCOPE-001.1 for the read projections named there (task
+// DTO, inbox, decision authorization, approver gate, review fan-out), a list
+// that does not include this capacity determination.
 //
 // Both reads run on the read pool and take no lock. The determination is not
 // atomic with the mutation that preceded it and does not need to be: each
@@ -1027,7 +1043,7 @@ func (s *DashboardService) retainsTaskCapacity(
 	if exec != nil && exec.AssigneeAgentProfileID == agentProfileID {
 		return capacityRunner, nil
 	}
-	seats, err := s.repo.ListAllTaskParticipants(ctx, taskID)
+	seats, err := s.repo.ListTaskParticipantsAtCurrentStep(ctx, taskID)
 	if err != nil {
 		return capacityNone, fmt.Errorf("read task participant slate: %w", err)
 	}
@@ -1160,7 +1176,7 @@ func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, task
 // comment is a self-comment or the task is closed; resolves @mentions.
 // Best-effort.
 func (s *DashboardService) runReactivityForComment(
-	ctx context.Context, comment *models.TaskComment, engineHandled bool,
+	ctx context.Context, comment *models.TaskComment, skipAssigneeWake bool,
 ) {
 	if s.reactivity == nil || comment == nil || comment.ID == "" {
 		return
@@ -1174,7 +1190,7 @@ func (s *DashboardService) runReactivityForComment(
 			AuthorType: comment.AuthorType,
 			AuthorID:   comment.AuthorID,
 		},
-		SkipAssigneeCommentWake: engineHandled,
+		SkipAssigneeCommentWake: skipAssigneeWake,
 	}
 	if _, err := s.reactivity.ApplyTaskMutation(ctx, comment.TaskID, "", change); err != nil {
 		s.logger.Warn("reactivity pipeline failed (comment)",
@@ -1182,25 +1198,60 @@ func (s *DashboardService) runReactivityForComment(
 	}
 }
 
-func (s *DashboardService) dispatchCommentEngineTrigger(ctx context.Context, comment *models.TaskComment) bool {
+// commentEngineDispatchResult separates "the engine trigger ran a
+// transition/action" (handled) from "the legacy assignee wake must not
+// fire regardless" (suppressAssigneeWake). The two only diverge for a gate
+// comment fan-out failure (ErrCommentFanOutIncomplete): the trigger did not
+// finish successfully, so handled stays false, but falling back to the
+// legacy wake would wake the runner instead of the seats the fan-out was
+// trying (and partly failing) to reach, so suppressAssigneeWake is true.
+type commentEngineDispatchResult struct {
+	handled                       bool
+	suppressAssigneeWake          bool
+	suppressCommentRetry          bool
+	retryWorkflowStepID           string
+	retryWorkflowStepTransitionID int64
+}
+
+func (s *DashboardService) dispatchCommentEngineTrigger(
+	ctx context.Context, comment *models.TaskComment,
+) commentEngineDispatchResult {
 	if s.engineDispatcher == nil || comment == nil || comment.TaskID == "" || comment.ID == "" {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	if s.isSelfComment(ctx, comment) {
-		return false
+		return commentEngineDispatchResult{}
 	}
 	handled, err := s.dispatchCommentEngineTriggerOnce(ctx, comment)
 	if err == nil {
-		return handled
+		return commentEngineDispatchResult{handled: handled}
 	}
 	if errors.Is(err, shared.ErrEngineNoSession) {
-		return false
+		return commentEngineDispatchResult{}
+	}
+	if errors.Is(err, engine.ErrCommentFanOutIncomplete) {
+		s.logger.Warn("gate comment fan-out incomplete, suppressing legacy assignee wake",
+			zap.String("task_id", comment.TaskID),
+			zap.String("comment_id", comment.ID),
+			zap.Error(err))
+		result := commentEngineDispatchResult{suppressAssigneeWake: true}
+		var fanOutErr *engine.CommentFanOutIncompleteError
+		if errors.As(err, &fanOutErr) && fanOutErr.WorkflowStepID != "" {
+			result.retryWorkflowStepID = fanOutErr.WorkflowStepID
+			result.retryWorkflowStepTransitionID = fanOutErr.WorkflowStepTransitionID
+		} else {
+			// An older or alternate dispatcher did not preserve the failed
+			// step identity. Do not let the event subscriber retry against the
+			// task's later current step.
+			result.suppressCommentRetry = true
+		}
+		return result
 	}
 	s.logger.Warn("engine comment trigger failed",
 		zap.String("task_id", comment.TaskID),
 		zap.String("comment_id", comment.ID),
 		zap.Error(err))
-	return false
+	return commentEngineDispatchResult{}
 }
 
 type handledWorkflowEngineDispatcher interface {
@@ -1229,7 +1280,11 @@ func (s *DashboardService) isSelfComment(ctx context.Context, comment *models.Ta
 	return err == nil && fields != nil && fields.AssigneeAgentProfileID == comment.AuthorID
 }
 
-func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *models.TaskComment, engineHandled bool) {
+func (s *DashboardService) publishCommentCreated(
+	ctx context.Context,
+	comment *models.TaskComment,
+	dispatch commentEngineDispatchResult,
+) {
 	if s.eb == nil {
 		return
 	}
@@ -1239,8 +1294,15 @@ func (s *DashboardService) publishCommentCreated(ctx context.Context, comment *m
 		"author_type": comment.AuthorType,
 		"author_id":   comment.AuthorID,
 	}
-	if engineHandled {
+	if dispatch.handled {
 		data["engine_dispatched"] = commentkeys.EngineDispatchedValue
+	}
+	if dispatch.suppressCommentRetry {
+		data["engine_retry_suppressed"] = commentkeys.EngineDispatchedValue
+	}
+	if dispatch.retryWorkflowStepID != "" {
+		data["workflow_step_id"] = dispatch.retryWorkflowStepID
+		data["workflow_step_transition_id"] = strconv.FormatInt(dispatch.retryWorkflowStepTransitionID, 10)
 	}
 	event := bus.NewEvent(events.OfficeCommentCreated, "office-dashboard", data)
 	if err := s.eb.Publish(ctx, events.OfficeCommentCreated, event); err != nil {

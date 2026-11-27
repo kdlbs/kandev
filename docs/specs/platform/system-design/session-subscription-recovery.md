@@ -20,6 +20,10 @@ Platform owns shared session subscription readiness and recovery. This design ex
 ## Registration ordering and ownership
 
 The gateway registers membership before acknowledging `session.subscribe` in `apps/backend/internal/gateway/websocket/client.go`.
+The read pump applies legacy `session.subscribe` and `session.unsubscribe` membership changes in socket order.
+Authorization and membership registration complete before the next membership change begins.
+Initial snapshot loading runs asynchronously after registration; slow Git reads must not block unsubscribe or independent requests.
+Other request handlers retain concurrent dispatch.
 The frontend `WebSocketClient` owns reference counts and a shared readiness promise per session and connection generation.
 `fetchAndStoreMessages` in `use-session-messages.ts` waits for readiness before requesting history.
 This ordering remains mandatory. Recovery must not fetch history ahead of registration.
@@ -56,9 +60,14 @@ The hook result supplies the state to `use-chat-panel-state.ts`, `task-chat-pane
 A successful snapshot alone establishes history initialization, including a successful empty snapshot.
 
 `doFetchMessages` in `use-session-message-fetch.ts` must not clear messages on rejection or mark failed hydration as successful.
-Preserve message reconciliation, prompt-history independence, draft state, and scroll anchoring.
+Preserve message reconciliation, the plugin conversation facade's projection independence, draft state, and scroll anchoring.
 An obsolete response cannot overwrite another session or clear a newer episode's error.
 Partial live messages remain visible while initial reconciliation is pending.
+
+A background reconcile (`doFetchMessages` with `background: true`: the turn-end refresh and core conversation gap recovery) is silent when the session already has messages on screen.
+It skips the hook's loading state, the `loading` and `retrying` history states, and the shared store loading flag, because that flag drives the transcript's inline loading row.
+In-flight bookkeeping counts total and visible fetches separately, so the flag clears when the last visible fetch settles even while a silent one continues.
+A failure still sets `unavailable` and offers Retry, so a stale transcript is never left without notice.
 
 ## Presentation
 
@@ -81,6 +90,14 @@ Use one polite `role="status"` per visible operation and keep Retry's accessible
 Details use a keyboard-accessible disclosure with wrapped text. Do not move focus on automatic progress.
 All new copy uses existing i18n catalogs in five languages, with generated Traditional Chinese variants.
 
+For AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-002.12, `SessionHistoryFeedback` keeps its spinner inside the `aria-hidden` wrapper.
+That wrapper uses `display: flex` to remove the inline grid's baseline space.
+The outer row's existing `align-items: center` then aligns the spinner with the adjacent label.
+Loading and retrying share this markup on desktop, phone, and task preview.
+The correction stays local to `components/task/chat/session-entry-feedback.tsx`.
+Shared spinner CSS, animation, copy, status announcements, and recovery state retain their existing contracts.
+Rendered tests compare the spinner and label centers during loading and retrying, then release history and check successful recovery.
+
 ## Persistence, security, and observability
 
 No database, protocol, public API, or permission changes are required.
@@ -93,3 +110,4 @@ The cause of the observed seven-second delivery delay is unconfirmed. This desig
 
 - [Original ordering repair](../../../plans/session-subscription-recovery/plan.md)
 - [Delayed session entry](../../../plans/session-entry-recovery/plan.md)
+- [Conversation loading alignment](../../../plans/conversation-loading-alignment/plan.md)

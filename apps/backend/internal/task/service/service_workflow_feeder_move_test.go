@@ -51,6 +51,51 @@ func TestService_MoveTaskPromotesMovedTaskFromFeederAndRefreshesResult(t *testin
 	}
 }
 
+func TestService_MoveIntoFeederPromotesQueuedTaskIntoAutoStartStep(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-feeder": {ID: "step-feeder", WorkflowID: "wf-source", Name: "Feeder", Position: 0},
+		"step-auto": {
+			ID: "step-auto", WorkflowID: "wf-source", Name: "Auto start", Position: 1,
+			WIPLimit: 1, PullFromStepID: "step-feeder",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+		},
+		"step-current": {ID: "step-current", WorkflowID: "wf-source", Name: "Current", Position: 2},
+	}})
+	createMoveTask(t, ctx, repo, "task-returning", "wf-source", "step-current", nil)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-queued", WorkspaceID: "ws-1", WorkflowID: "wf-source", WorkflowStepID: "step-feeder",
+		Title: "Queued feeder task", State: v1.TaskStateTODO, QueuedForStepID: "step-auto",
+	}); err != nil {
+		t.Fatalf("CreateTask(queued feeder): %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if _, err := svc.MoveTaskWithOptions(ctx, "task-returning", "wf-source", "step-feeder", 0, MoveTaskOptions{}); err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+
+	promoted, err := repo.GetTask(ctx, "task-queued")
+	if err != nil {
+		t.Fatalf("GetTask(task-queued): %v", err)
+	}
+	if promoted.WorkflowStepID != "step-auto" || !promoted.WIPAdmitted {
+		t.Fatalf("queued feeder task = step %q, admitted %v; want auto-start step and admitted", promoted.WorkflowStepID, promoted.WIPAdmitted)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskMoved {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == "task-queued" && data["to_step_id"] == "step-auto" {
+			return
+		}
+	}
+	t.Fatal("task.moved event for feeder promotion into the auto-start step was not published")
+}
+
 func TestService_MoveTaskWithActiveSessionDefersFeederPullUntilLifecycleCompletes(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -238,7 +283,7 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 	}
 	return admitted, err
 }
-func TestService_MoveTaskReturnsErrorWhenFeederRefreshFails(t *testing.T) {
+func TestService_MoveTaskKeepsCommittedResultWhenFeederRefreshFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
@@ -254,14 +299,49 @@ func TestService_MoveTaskReturnsErrorWhenFeederRefreshFails(t *testing.T) {
 	svc.tasks = &failAfterMoveRefreshTaskRepository{Repository: repo}
 
 	result, err := svc.MoveTask(ctx, "task-feeder-refresh-failure", "wf-source", "step-a", 0)
-	if err == nil {
-		t.Fatalf("MoveTask returned success with an unverified task response: result=%+v", result)
+	if err != nil {
+		t.Fatalf("MoveTask returned error after the move committed: %v", err)
 	}
-	if result != nil {
-		t.Fatalf("MoveTask returned a result alongside refresh error: %+v", result)
+	if result == nil || !result.Committed {
+		t.Fatalf("MoveTask result = %+v, want committed result", result)
+	}
+	if result.Task == nil || result.Task.ID != "task-feeder-refresh-failure" {
+		t.Fatalf("MoveTask committed task = %+v, want task-feeder-refresh-failure", result.Task)
 	}
 
 	stored, err := repo.GetTask(ctx, "task-feeder-refresh-failure")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if stored.WorkflowStepID != "step-b" {
+		t.Fatalf("stored task step = %q, want durable feeder promotion at step-b", stored.WorkflowStepID)
+	}
+}
+
+func TestService_BulkMoveKeepsCommittedTaskIDWhenFeederRefreshFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
+		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
+		"step-b": {
+			ID: "step-b", WorkflowID: "wf-source", Name: "B", Position: 1,
+			WIPLimit: 1, PullFromStepID: "step-a",
+		},
+	}})
+	const taskID = "task-bulk-feeder-refresh-failure"
+	createMoveTask(t, ctx, repo, taskID, "wf-source", "step-c", nil)
+	svc.tasks = &failAfterMoveRefreshTaskRepository{Repository: repo}
+
+	result, err := svc.BulkMoveSelectedTasks(ctx, []string{taskID}, "wf-source", "step-a")
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks returned error after committed move: %v", err)
+	}
+	if result == nil || result.MovedCount != 1 || len(result.MovedTaskIDs) != 1 || result.MovedTaskIDs[0] != taskID {
+		t.Fatalf("BulkMoveSelectedTasks result = %+v, want committed task ID %q", result, taskID)
+	}
+	stored, err := repo.GetTask(ctx, taskID)
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}

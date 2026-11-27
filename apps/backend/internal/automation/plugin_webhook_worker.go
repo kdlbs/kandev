@@ -11,7 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"go.uber.org/zap"
 	"time"
 )
@@ -165,6 +165,7 @@ func (s *Service) admitWebhookReceipt(ctx context.Context, a *Automation, t *Aut
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	s.store.notifyRunRecorded(ctx, a.ID, runID, RunStatusTriggered)
 	r.RunID = runID
 	r.State = "dispatch"
 	return nil

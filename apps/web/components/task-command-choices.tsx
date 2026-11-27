@@ -1,4 +1,5 @@
 import { createElement } from "react";
+import { IconLogicBuffer } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { CommandItem } from "@/lib/commands/types";
 import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
@@ -33,6 +34,7 @@ type ChoiceOptions = {
   linkHandlers: TaskLinkHandlers;
   openMoveOptions: (step: TaskMoveStep) => void;
   moveImmediately: (step: TaskMoveStep) => void;
+  onChangeWorkflow?: () => void;
 };
 
 /**
@@ -175,6 +177,7 @@ export function useTaskMoveChoices({
   stepsByWorkflowId,
   openMoveOptions,
   moveImmediately,
+  onChangeWorkflow,
 }: Omit<ChoiceOptions, "linkHandlers">) {
   const { t } = useTranslation();
   const { currentSteps, targets } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
@@ -198,15 +201,16 @@ export function useTaskMoveChoices({
   const steps = currentSteps
     .filter((step) => step.id !== task.workflowStepId)
     .map((step) => choice(step, task.workflowId!, group));
-  const workflowChoices: CommandItem[] = targets
-    .filter((workflow) => (stepsByWorkflowId[workflow.id]?.length ?? 0) > 0)
-    .map((workflow) => ({
-      id: `task-workflow-${workflow.id}`,
-      label: workflow.name,
-      group: t("task:sendToWorkflow"),
-      children: (stepsByWorkflowId[workflow.id] ?? []).map((step) =>
-        choice(step, workflow.id, workflow.name),
-      ),
-    }));
+  const workflowChoices: CommandItem[] = targets.length
+    ? [
+        {
+          id: "task-change-workflow",
+          label: t("task:changeWorkflow"),
+          group,
+          icon: <IconLogicBuffer className="size-3.5" />,
+          action: onChangeWorkflow,
+        },
+      ]
+    : [];
   return { steps, workflows: workflowChoices };
 }

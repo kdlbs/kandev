@@ -5,19 +5,28 @@
 // See docs/decisions/0007-runtime-feature-flags.md.
 
 export const defaultFeatureFlags = {
+  providerKeywordContext: false,
   // New release toggles start disabled in every frontend state. The SSR layer
   // overwrites this with the backend's effective values after startup.
-  lspBrowserContinuity: false,
   office: false,
+  integratedControl: false,
+  workspaceCollaboration: false,
   auth: false,
   canvases: false,
   multiTenancy: false,
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
-  officeSessionIdentity: false,
   needsYouInbox: false,
   agentSurvival: false,
+  coordinator: false,
+  coordinatorPhase2: false,
+  coordinatorPhase3: false,
+  coordinatorPhase31: false,
+  codexAppServer: false,
+  acpV2: false,
+  agentBackgroundWork: false,
+  opencodePlugin: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

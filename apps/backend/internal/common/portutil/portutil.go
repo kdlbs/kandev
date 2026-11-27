@@ -12,10 +12,11 @@ import (
 // Pattern: $VAR or ${VAR} where VAR contains PORT (with optional prefix/suffix)
 var placeholderRegex = regexp.MustCompile(`\$\{?([A-Z_]*PORT[A-Z0-9_]*)\}?`)
 
-// AllocatePort allocates an available port using OS assignment.
-// This approach is thread-safe and avoids port conflicts.
+// AllocatePort returns an OS-assigned port after releasing its loopback probe.
+// The caller must bind the port; it is not reserved or checked on other interfaces.
+// A wildcard probe can prompt the Windows firewall for each new executable path.
 func AllocatePort() (int, error) {
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, fmt.Errorf("failed to allocate port: %w", err)
 	}

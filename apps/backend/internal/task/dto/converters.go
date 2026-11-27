@@ -10,27 +10,28 @@ import (
 // This is the base conversion without timestamps.
 func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 	result := WorkflowStepDTO{
-		ID:                         step.ID,
-		WorkflowID:                 step.WorkflowID,
-		Name:                       step.Name,
-		Position:                   step.Position,
-		Color:                      step.Color,
-		Prompt:                     step.Prompt,
-		AllowManualMove:            step.AllowManualMove,
-		IsStartStep:                step.IsStartStep,
-		ShowInCommandPanel:         step.ShowInCommandPanel,
-		AutoArchiveAfterHours:      step.AutoArchiveAfterHours,
-		AgentProfileID:             step.AgentProfileID,
-		ProfileSessionStartPolicy:  models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)),
-		ProfileSessionEndPolicy:    models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)),
-		SessionTarget:              wfmodels.CloneWorkflowSessionTarget(step.SessionTarget),
-		WIPLimit:                   step.WIPLimit,
-		PullFromStepID:             step.PullFromStepID,
-		StageType:                  string(step.StageType),
-		AutoAdvanceRequiresSignal:  step.AutoAdvanceRequiresSignal,
-		CancelTriggersTurnComplete: step.CancelTriggersTurnComplete,
-		CompleteTaskOnEnter:        step.CompleteTaskOnEnter,
-		OrderRevision:              step.OrderRevision,
+		ID:                          step.ID,
+		WorkflowID:                  step.WorkflowID,
+		Name:                        step.Name,
+		Position:                    step.Position,
+		Color:                       step.Color,
+		Prompt:                      step.Prompt,
+		AllowManualMove:             step.AllowManualMove,
+		IsStartStep:                 step.IsStartStep,
+		ShowInCommandPanel:          step.ShowInCommandPanel,
+		AutoArchiveAfterHours:       step.AutoArchiveAfterHours,
+		AgentProfileID:              step.AgentProfileID,
+		ProfileSessionStartPolicy:   models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)),
+		ProfileSessionEndPolicy:     models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)),
+		DisableUnclassifiedFallback: step.DisableUnclassifiedFallback,
+		SessionTarget:               wfmodels.CloneWorkflowSessionTarget(step.SessionTarget),
+		WIPLimit:                    step.WIPLimit,
+		PullFromStepID:              step.PullFromStepID,
+		StageType:                   string(step.StageType),
+		AutoAdvanceRequiresSignal:   step.AutoAdvanceRequiresSignal,
+		CancelTriggersTurnComplete:  step.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:         step.CompleteTaskOnEnter,
+		OrderRevision:               step.OrderRevision,
 	}
 	if hasStepEvents(step.Events) {
 		events := &StepEventsDTO{}
@@ -65,6 +66,8 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		events.OnHeartbeat = appendGenericActions(step.Events.OnHeartbeat)
 		events.OnBudgetAlert = appendGenericActions(step.Events.OnBudgetAlert)
 		events.OnAgentError = appendGenericActions(step.Events.OnAgentError)
+		events.OnPRMerged = appendGenericActions(step.Events.OnPRMerged)
+		events.OnPRClosed = appendGenericActions(step.Events.OnPRClosed)
 		result.Events = events
 	}
 	return result
@@ -81,7 +84,9 @@ func hasStepEvents(events wfmodels.StepEvents) bool {
 		len(events.OnApprovalResolved) > 0 ||
 		len(events.OnHeartbeat) > 0 ||
 		len(events.OnBudgetAlert) > 0 ||
-		len(events.OnAgentError) > 0
+		len(events.OnAgentError) > 0 ||
+		len(events.OnPRMerged) > 0 ||
+		len(events.OnPRClosed) > 0
 }
 
 func appendGenericActions(actions []wfmodels.GenericAction) []StepActionDTO {

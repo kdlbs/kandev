@@ -28,7 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // newTestStateStore returns an in-memory-sqlite-backed *state.Store, for
@@ -326,6 +326,28 @@ func TestEnableDisableHandlersTransitionStatus(t *testing.T) {
 	got, _ = svc.Get("kandev-plugin-slack")
 	if got.Status != StatusActive {
 		t.Fatalf("status after enable = %q, want %q", got.Status, StatusActive)
+	}
+}
+
+func TestDisableHandlerWarnsThatRemoteExecutorResourcesMayRemain(t *testing.T) {
+	router, svc := newAdminTestRouter(t)
+	prepareExecutorProviderTestRuntime(t, svc.Runtime().(*fakeRuntime))
+	if _, err := svc.Install(context.Background(), testExecutorProviderPackage(t, "1.0.0", "lambda", []int{1})); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-remote-test/disable", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Disabled                 bool `json:"disabled"`
+		RemoteResourcesMayRemain bool `json:"remote_resources_may_remain"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode disable response: %v", err)
+	}
+	if !response.Disabled || !response.RemoteResourcesMayRemain {
+		t.Fatalf("disable response = %+v; want disabled with remote-resource warning", response)
 	}
 }
 

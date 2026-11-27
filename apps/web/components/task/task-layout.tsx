@@ -1,6 +1,8 @@
 "use client";
 
+import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
 import { memo, useCallback, useState } from "react";
+import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
@@ -12,9 +14,10 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
+import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import type { TaskTopbarRepository } from "./task-page-content-helpers";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
-import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -37,6 +40,7 @@ type TaskLayoutProps = {
   taskTitle?: string;
   /** `owner/repo` (or the repository name) of the task's primary repository. */
   repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
   isRemoteExecutor?: boolean;
@@ -51,16 +55,23 @@ type TaskLayoutProps = {
   onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
+  hasPageLevelFeedback?: boolean;
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
+  const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const [pickerWorkspaceId, setPickerWorkspaceId] = useState(props.workspaceId);
   if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
     setPickerWorkspaceId(props.workspaceId);
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <ResponsiveTaskLayout {...props} />
+      <ClarificationDraftProvider taskId={props.taskId ?? null}>
+        <ResponsiveTaskLayout {...props} />
+      </ClarificationDraftProvider>
+      {props.taskId && (
+        <TaskGraphPanelRequest taskId={props.taskId} usesDockview={usesDesktopWorkbench} />
+      )}
       <ResponsiveTaskPicker
         key={pickerWorkspaceId}
         workspaceId={props.workspaceId}
@@ -81,6 +92,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   defaultLayouts = {},
   taskTitle,
   repositoryLabel,
+  topbarRepository,
   baseBranch,
   worktreeBranch,
   isRemoteExecutor,
@@ -95,6 +107,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   onTaskUnarchived,
   taskCanvases,
   taskCanvasesStatus,
+  hasPageLevelFeedback,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
   const launchErrorContext = useTaskLaunchErrorContext();
@@ -123,6 +136,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
         worktreeBranch={worktreeBranch}
         taskTitle={taskTitle}
         repositoryLabel={repositoryLabel}
+        topbarRepository={topbarRepository}
         isRemoteExecutor={isRemoteExecutor}
         remoteExecutorType={remoteExecutorType}
         remoteExecutorName={remoteExecutorName}
@@ -135,6 +149,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
         taskCanvases={taskCanvases ?? []}
         onOpenCanvas={onOpenCanvas}
         hasSharedTaskError={hasSharedTaskError}
+        hasPageLevelFeedback={hasPageLevelFeedback}
       />
     );
   }
@@ -155,6 +170,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   // Desktop layout - dockview
   return (
     <DockviewDesktopLayout
+      taskId={taskId}
       workspaceId={workspaceId}
       workflowId={workflowId}
       sessionId={sessionId}

@@ -68,11 +68,19 @@ identity. Menu events stop propagation so actions cannot open the diff. Pending
 staging uses the existing per-file pending flag. Discard passes the persistent
 ellipsis trigger as its confirmation anchor, outside the transient menu.
 
+The action menu uses the shared DropdownMenu primitive for touch, keyboard,
+and fine-pointer input. Browser checks wait for finite opening animations
+before measuring or selecting a menu item. Single-file deletion opens its
+confirmation after the menu's focus scope closes. Coarse-pointer file actions
+use the compact Drawer at phone and tablet widths. Fine pointers retain the
+anchored confirmation popover.
+
 This follows the mobile UI language's visible contextual menu pattern and
 the shipped `MobileChangesPanel` full-height content surface. Primary content
 stays inline because scanning files is frequent; temporary action choices
-use the existing bottom menu. No new state, persistence, scroll owner, or
-viewport container is introduced. Fine-pointer desktop composition is retained.
+use the existing bottom menu. The menu's open state is transient and is not
+persisted. No file-list preference, scroll owner, or viewport container is
+introduced. Fine-pointer desktop composition is retained.
 
 ## Responsive composition
 

@@ -13,16 +13,13 @@ requirements:
 
 The task and workflow system owns session recipients and task-session lifecycle.
 Each step owns its recipient and two lifecycle settings. The explicit-target
-extension below is a design for implementation, dated 2026-09-09. Existing
-profile-only behavior remains the compatibility path.
+extension below is dated 2026-09-09; profile-only behavior remains compatible.
 
-The destination step owns session selection. The source step owns session
-retirement. The agent runtime still owns process launch, resume, and stop. The
-task environment remains shared across sessions.
+The destination owns selection; the source owns retirement. Runtime owns
+process launch, resume, and stop. Task environments remain shared.
 
-The workflow engine continues to select transitions and steps. This change does
-not add an action, event, or workflow state. The orchestrator integration must
-carry both source and destination step settings into the session handoff.
+The workflow engine selects transitions and steps; this change adds no action,
+event, or workflow state. The orchestrator handoff carries both step settings.
 
 Conditional original-session settings remain separate. They change one
 session's model settings without switching profiles.
@@ -49,8 +46,8 @@ session's model settings without switching profiles.
   orchestrator session handoff.
 - The destination start setting controls reusable-session lookup.
 - The source end setting controls completion or parking.
-- Completion and stopped handlers consume execution-stamped stop intents. They
-  skip ordinary workflow advancement for the retired execution.
+- Terminal callbacks consume matching stop intents, retire that execution, and
+  skip failure or workflow handling.
 - The workflow step draft and coordinated save path own the profile and both
   lifecycle settings.
 - `WorkflowStepAgentProfileSelector` shows the profile and lifecycle settings
@@ -108,7 +105,8 @@ consumed tombstone remains durable.
 5. If the start setting is `reuse`, select the newest eligible nonterminal
    matching session. Exclude the source session.
 6. If the start setting is `new`, do not perform a reusable-session lookup.
-7. Preflight managed Git credentials for the selected or new destination.
+7. Preflight executor admission, then managed Git credentials, for the
+   selected or new destination (a new one inherits the source's bindings).
 8. Prepare and promote the destination session before source mutation.
 9. If the end setting is `complete`, mark the source `COMPLETED`. Then stop
    its runtime.
@@ -116,8 +114,8 @@ consumed tombstone remains durable.
     Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
 11. Release the source lifecycle guard before runtime stop. If the caller owns
     the guard, schedule the stop after the lifecycle operation returns.
-12. When the old execution emits a callback, consume only its matching stamp.
-    Skip turn completion, transition evaluation, and task-state reconciliation.
+12. Consume only the old execution's stamped intent; treat its stream close as
+    teardown acknowledgement and skip normal terminal processing.
 
 The existing handoff accepts separate policies. Reusable-session lookup accepts
 the destination start setting. Source cleanup accepts the source end setting.
@@ -132,8 +130,11 @@ of the transition.
 
 ## Failure and recovery
 
+[Profile readiness](workflow-profile-readiness.md) defines Dynamic-profile validation and completed-turn recovery after preflight rejection.
+
 Destination preparation and credential validation fail before source mutation.
-The current session remains primary and recoverable.
+The current session remains primary and recoverable; see
+[destination admission](workflow-profile-readiness.md#destination-executor-admission).
 
 If a park intent cannot be persisted, Kandev stops the switch before source
 retirement. It does not change the end setting to `complete`.
@@ -142,11 +143,14 @@ If runtime stop fails after parking is committed, Kandev reports the error and
 retains the stamped intent. A retry can stop the same execution. A delayed
 callback cannot advance the destination step.
 
-A reuse candidate that becomes terminal before promotion is not revived. The
-orchestrator creates a new destination when the start setting is `reuse`.
-Completed sessions remain excluded from automatic workflow reuse. Explicit
-conversation follow-ups use [task completion](task-completion.md) and do not
-promote the historical session or advance the current workflow.
+A reuse candidate that becomes terminal before promotion is not revived. If a
+prepared route has recorded that candidate for the accepted profile entry, the
+orchestrator does not create a replacement for the same entry, even when the
+start setting is `reuse`. A distinct accepted entry may allocate a fresh
+destination under its start setting. Completed sessions remain excluded from
+automatic workflow reuse. Explicit conversation follow-ups use
+[task completion](task-completion.md). They do not promote the historical
+session or advance the current workflow.
 
 Changing a step setting affects later transitions only.
 
@@ -326,58 +330,50 @@ version 2 never bypasses closed-kind or source-reference validation.
 
 ### Initial provenance and entry routing
 
-Deliver initial targeting end to end before source-step targeting. Both remain
-in scope; the plan owns the implementation milestones. The first slice adds
-no per-step binding table. It accepts only `kind: initial`; unknown kinds are
-rejected. The second slice extends the closed union with `kind: step` and
-validates it. Both use portable version 2: an initial-only reader must reject
-the unknown step kind even though it recognizes the envelope version.
+`originalTaskSession` resolves original identity. First-session creation
+atomically saves write-once `workflow_initial_session` metadata with `session_id`
+and logical `agent_profile_id`. The snapshot survives session deletion and
+workflow changes. A replacement cannot acquire the original marker or change
+the snapshot. Task duplication strips it. Historical IDs cannot resolve across tasks.
 
-The original-session marker consumed by `originalTaskSession` remains the
-authority for discovering initial identity. Persist a write-once
-`workflow_initial_session` object in task metadata with `session_id` and logical
-`agent_profile_id`, atomically with first-session creation. This snapshot
-survives deletion of the original session and a task changing workflows.
-The ID remains historical when its session row is absent; never resolve it
-to another task's session. A fresh replacement does not change the snapshot
-or acquire the original marker. Do not copy this metadata into duplicated tasks.
+Older tasks use conservative marker and timestamp resolution. Backfill only
+unambiguous identity. Missing or ambiguous provenance produces a visible error.
+Neither the current primary nor mutable assignment defines the original.
+Before deletion, snapshot the original identity. Without that identity, fresh
+fallback cannot claim to recover the missing profile.
 
-For older tasks without a snapshot, use the existing conservative marker and
-timestamp resolver and persist a snapshot only for an unambiguous result.
-An absent or ambiguous original is a visible resolution error, not permission
-to select the current primary or infer an agent from mutable task assignment.
-Snapshot existing original identity before session deletion; if it cannot be
-resolved, do not claim that later fresh fallback can recover the missing profile.
+Task metadata keeps one bounded `workflow_session_route` for the latest entry:
+operation identity, destination step, target/profile snapshot, source and
+destination session IDs, and phase (`prepared` or `committed`). This retry record
+does not define recipient provenance. Conditional repository operations use
+existing transition and lifecycle serialization. Session insertion and the
+prepared route commit together. Promotion and the committed phase advance
+together. Preflight credentials before these transactions. Runtime calls stay
+outside them. Runtime continuation and source cleanup require separate ownership
+checks.
 
-The first slice also adds a bounded `workflow_session_route` metadata object
-for the current/latest entry: operation identity, destination step, resolved
-target/profile snapshot, source session ID, destination session ID, and phase
-(`prepared` or `committed`). It is a retry record, not recipient provenance.
-Use conditional task-repository operations within the existing transition and
-lifecycle serialization. Fresh session insertion and prepared destination
-recording commit together; promotion and committed phase advance together.
-Preflight external credentials before that transaction; do not hold a database
-transaction while stopping or launching a runtime. Retry continues the recorded
-destination and stamped source cleanup rather than allocating another session.
+Profile destinations reject obsolete entries before replacing the route. A newer
+accepted profile entry may replace an unfinished or committed route; this gate
+does not reconcile the prior runtime. Task deletion removes the route and
+duplication strips it. A deleted or terminal profile destination cannot be
+reused. The same accepted profile entry cannot allocate again when its recorded
+destination is missing, failed, terminal, or has uncertain ownership;
+re-admission is refused. Only a distinct accepted profile entry may allocate a
+fresh destination under its start setting. The fence does not restart a runtime
+or replay a prompt. Explicit initial/step targets keep their separate
+replacement rules.
 
-Reject an obsolete entry against the current transition/entry identity before
-replacing this record. A newer entry cannot overtake an unfinished route without
-reconciliation. Keep the committed record until a newer valid entry replaces it;
-task deletion removes it and task duplication strips it. A deleted recorded
-destination fails that entry visibly instead of creating a second destination
-under the same operation. Test prepared/committed restart and rollback on both
+Test prepared/committed restart and rollback on both
 databases. Extend existing task metadata transaction helpers; do not assume
 unconditional `SetTaskMetadataKey` provides compare-and-set or write-once safety.
 
 ### Source-step bindings
 
-Profile identity alone cannot identify the session selected by a prior step.
-The second slice adds task-owned `task_workflow_session_bindings`, keyed by
-`(task_id, target_key)`, with `workflow_id`, logical `agent_profile_id`, nullable
-`session_id`, and the step-entry operation identity. Target keys are
-`step:<workflow-step-id>`; they are internal and never portable. Initial
-provenance stays in its existing task snapshot, with no table migration or
-duplicate initial row in this slice.
+Task-owned `task_workflow_session_bindings` identifies each source step's
+selected session. Its key is `(task_id, target_key)`. Fields retain `workflow_id`,
+logical `agent_profile_id`, nullable `session_id`, and step-entry identity.
+The internal target key is `step:<workflow-step-id>`. Initial provenance remains
+in the task snapshot.
 
 Each successful entry to a direct-profile step records its selected session
 against that step. This includes keeping the current session and reusing a
@@ -386,6 +382,16 @@ A Review entry targeting Implement reads Implement's binding; Review does not
 rewrite it. If reuse falls back to a new conversation, later Review entries
 still resolve against the source step's binding. This makes the source reference
 literal, not a moving alias for every conversation using its profile.
+
+`handleSpawnSession` sets server-only
+`LaunchSessionRequest.PreserveWorkflowSourceBinding` for every spawn, including
+calls without verified `SpawnOrigin`. `launchStart` carries this value into
+`startTaskOptions`. When true, `startTask` skips its source-binding write.
+The current-step fallback still supplies launch configuration.
+`seam1StartPayload` and `replayCeilingLaunchStart` retain the value as
+`preserve_workflow_source_binding`. An absent value defaults to false.
+Ordinary starts, implicit initial starts, and workflow re-entry retain their
+existing binding behavior. `SpawnOrigin` remains attribution data.
 
 Persist bindings with the routing commit before any entry prompt or source
 retirement. Reuse the existing task transition and step-entry serialization and
@@ -489,6 +495,7 @@ logs include session ID, execution ID, and intent stamp.
 
 ## Implementation plans
 
+- [Spawned-session binding isolation](../../../plans/spawn-session-workflow-binding/plan.md)
 - [Queued session ownership](../../../plans/queued-session-ownership/plan.md)
   records the original parking and admission implementation through the paired
   [inspection and queue design](queued-session-ownership.md). Stop-intent

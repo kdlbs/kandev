@@ -17,19 +17,9 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
-type githubBrokerResolveRequest struct {
-	Lease             string `json:"lease,omitempty"`
-	ReissueCapability string `json:"reissue_capability,omitempty"`
-	TaskID            string `json:"task_id"`
-	SessionID         string `json:"session_id"`
-	RepositoryID      string `json:"repository_id"`
-	Owner             string `json:"owner"`
-	Repo              string `json:"repo"`
-	Host              string `json:"host"`
-	Path              string `json:"path,omitempty"`
-	ProviderID        string `json:"provider_id,omitempty"`
-	ParentProviderID  string `json:"parent_provider_id,omitempty"`
-}
+// githubBrokerResolveRequest is the helper's request shape. The alias makes it
+// the broker wire contract shared with the handler instead of a local copy.
+type githubBrokerResolveRequest = githubauth.CredentialBrokerRequest
 
 type githubBrokerCredential struct {
 	Username string `json:"username"`
@@ -131,8 +121,17 @@ func (c *githubCredentialBrokerClient) resolve(ctx context.Context) (*githubBrok
 
 func (c *githubCredentialBrokerClient) resolveWithReissue(ctx context.Context) (*githubBrokerCredential, error) {
 	credential, err := c.resolve(ctx)
-	if err == nil || !isReissuableLeaseError(err) || strings.TrimSpace(c.request.ReissueCapability) == "" {
+	if err == nil || !isReissuableLeaseError(err) {
 		return credential, err
+	}
+	if strings.TrimSpace(c.request.ReissueCapability) == "" {
+		if isRestartableLeaseError(err) {
+			return nil, fmt.Errorf(
+				"%w. If this session and repository are still authorized, use Restart session to launch a fresh process. If the session is already stopped, use Resume",
+				err,
+			)
+		}
+		return nil, err
 	}
 	if err := c.reissue(ctx); err != nil {
 		return nil, err
@@ -205,6 +204,20 @@ func isReissuableLeaseError(err error) bool {
 	switch brokerErr.code {
 	case "github_credential_lease_invalid", "github_credential_lease_expired", "github_credential_lease_revoked",
 		"git_credential_lease_invalid", "git_credential_lease_expired", "git_credential_lease_revoked":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRestartableLeaseError(err error) bool {
+	var brokerErr *githubBrokerHTTPError
+	if !errors.As(err, &brokerErr) || brokerErr.status != http.StatusUnauthorized {
+		return false
+	}
+	switch brokerErr.code {
+	case "github_credential_lease_invalid", "github_credential_lease_expired",
+		"git_credential_lease_invalid", "git_credential_lease_expired":
 		return true
 	default:
 		return false

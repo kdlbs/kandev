@@ -19,6 +19,11 @@ export type KeyboardShortcutOptions = {
   target?: HTMLElement | Window | null;
 };
 
+function isCompositionEvent(event: KeyboardEvent | React.KeyboardEvent): boolean {
+  const nativeEvent = "nativeEvent" in event ? event.nativeEvent : event;
+  return nativeEvent.isComposing || nativeEvent.keyCode === 229;
+}
+
 /**
  * Hook for handling global keyboard shortcuts
  *
@@ -46,7 +51,7 @@ export function useKeyboardShortcut(
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      if (!enabled) return;
+      if (!enabled || isCompositionEvent(event)) return;
       // Precedence: a capture-phase core dispatcher (`useAppShortcuts`) or a
       // plugin keybinding (`usePluginShortcuts`) may have already handled and
       // prevented this event before this bubble-phase, per-component listener
@@ -107,7 +112,7 @@ export function useKeyboardShortcutHandler(
 
   return useCallback(
     (event: React.KeyboardEvent) => {
-      if (!enabled) return;
+      if (!enabled || isCompositionEvent(event)) return;
 
       if (matchesShortcut(event, shortcut)) {
         if (preventDefault) {

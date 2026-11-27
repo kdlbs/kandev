@@ -60,6 +60,39 @@ func NormalizeLastSeenDisplay(value string) string {
 }
 
 const (
+	// MessageTimeDisplayRelative selects the compact relative transcript label.
+	MessageTimeDisplayRelative = "relative"
+	// MessageTimeDisplayAbsoluteShort selects the regional short date and time.
+	MessageTimeDisplayAbsoluteShort = "absolute_short"
+	// MessageTimeDisplayAbsoluteLong selects the regional long date with seconds.
+	MessageTimeDisplayAbsoluteLong = "absolute_long"
+)
+
+// NormalizeMessageTimeDisplay returns a supported transcript timestamp mode.
+func NormalizeMessageTimeDisplay(value string) string {
+	switch value {
+	case MessageTimeDisplayAbsoluteShort, MessageTimeDisplayAbsoluteLong:
+		return value
+	default:
+		return MessageTimeDisplayRelative
+	}
+}
+
+const (
+	AgentTabCloseBehaviorDeleteSession = "delete_session"
+	AgentTabCloseBehaviorHidePanel     = "hide_panel"
+)
+
+// NormalizeAgentTabCloseBehavior preserves the opt-in panel-hide behavior;
+// omitted and unknown values retain the established delete-session behavior.
+func NormalizeAgentTabCloseBehavior(value string) string {
+	if value == AgentTabCloseBehaviorHidePanel {
+		return value
+	}
+	return AgentTabCloseBehaviorDeleteSession
+}
+
+const (
 	// RoleAdmin unlocks user management and system settings mutation when
 	// authentication is enabled. It does NOT grant visibility into other
 	// users' workspaces (hard privacy isolation).
@@ -122,12 +155,16 @@ type UserSettings struct {
 	PreferredShell                    string                            `json:"preferred_shell"`
 	DefaultEditorID                   string                            `json:"default_editor_id"`
 	EnablePreviewOnClick              bool                              `json:"enable_preview_on_click"`
+	EscapeCancelsAgent                bool                              `json:"escape_cancels_agent"`
 	ChatSubmitKey                     string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
 	ReviewAutoMarkOnScroll            bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive                bool                              `json:"confirm_task_archive"`
 	PreventAutoStartAgentOnOpen       bool                              `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                              `json:"unread_divider"`
+	UnreadTaskDot                     bool                              `json:"unread_task_dot"`
+	UnreadTaskDotHideDelaySeconds     int                               `json:"unread_task_dot_hide_delay_seconds"`
 	AgentGeneratedTaskTitles          bool                              `json:"agent_generated_task_titles"`
+	PromptSuggestions                 bool                              `json:"prompt_suggestions"`
 	AutoFocusNewTasks                 bool                              `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
@@ -136,11 +173,13 @@ type UserSettings struct {
 	ShowTranscriptAutoScrollControl   bool                              `json:"show_transcript_auto_scroll_control"`
 	ShowTodoListPanel                 bool                              `json:"show_todo_list_panel"`
 	ShowTodoListPanelOnlyWhenNotEmpty bool                              `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowTurnChangedFiles              bool                              `json:"show_turn_changed_files"`
 	ShowReleaseNotification           bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
+	MarkdownPreviewByDefault          bool                              `json:"markdown_preview_by_default"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
 	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
@@ -157,11 +196,11 @@ type UserSettings struct {
 	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
 	GitLabSavedPresets                json.RawMessage                   `json:"gitlab_saved_presets"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID             string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel               string                            `json:"default_utility_model"`    // Default model for utility agents
 	DefaultUtilityAgentProfileID      string                            `json:"default_utility_agent_profile_id"`
@@ -171,8 +210,12 @@ type UserSettings struct {
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	MessageTimeDisplay                string                            `json:"message_time_display"`
+	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarFastActionsEnabled         bool                              `json:"sidebar_fast_actions_enabled"`
+	SidebarNewTaskStyle               string                            `json:"sidebar_new_task_style"`
 	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
 	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
@@ -210,13 +253,20 @@ type SavedLayout struct {
 // The payload is stored and returned as-is; the server does not interpret
 // clause values beyond passing them through.
 type SidebarView struct {
-	ID              string                      `json:"id"`
-	Name            string                      `json:"name"`
-	Filters         []SidebarViewClause         `json:"filters"`
-	Sort            SidebarViewSort             `json:"sort"`
-	Group           string                      `json:"group"`
-	CollapsedGroups []string                    `json:"collapsed_groups"`
-	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	ID                      string                          `json:"id"`
+	Name                    string                          `json:"name"`
+	Filters                 []SidebarViewClause             `json:"filters"`
+	Sort                    SidebarViewSort                 `json:"sort"`
+	Group                   string                          `json:"group"`
+	GroupIndent             *bool                           `json:"group_indent,omitempty"`
+	CollapsedGroups         []string                        `json:"collapsed_groups"`
+	TaskRow                 *SidebarTaskRowPresentation     `json:"task_row,omitempty"`
+	GeneratedPluginGrouping *SidebarGeneratedPluginGrouping `json:"generated_plugin_grouping,omitempty"`
+}
+
+type SidebarGeneratedPluginGrouping struct {
+	Reference string `json:"reference"`
+	Name      string `json:"name"`
 }
 
 type SidebarViewClause struct {
@@ -227,16 +277,26 @@ type SidebarViewClause struct {
 }
 
 type SidebarViewSort struct {
+	Key       string                     `json:"key"`
+	Direction string                     `json:"direction"`
+	Color     string                     `json:"color,omitempty"`
+	ThenBy    []SidebarViewSortCriterion `json:"then_by,omitempty"`
+}
+
+type SidebarViewSortCriterion struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+	Color     string `json:"color,omitempty"`
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string                      `json:"base_view_id"`
-	Filters    []SidebarViewClause         `json:"filters"`
-	Sort       SidebarViewSort             `json:"sort"`
-	Group      string                      `json:"group"`
-	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	BaseViewID      string                      `json:"base_view_id"`
+	Filters         []SidebarViewClause         `json:"filters"`
+	Sort            SidebarViewSort             `json:"sort"`
+	Group           string                      `json:"group"`
+	GroupIndent     *bool                       `json:"group_indent,omitempty"`
+	CollapsedGroups []string                    `json:"collapsed_groups,omitempty"`
+	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 // SidebarTaskRowPresentation controls the optional metadata and trailing

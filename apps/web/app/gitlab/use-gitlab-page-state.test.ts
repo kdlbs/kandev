@@ -121,11 +121,17 @@ describe("buildProjectOptionsResetKey", () => {
   it("keeps delimiter-containing query and milestone values distinct", () => {
     const selection: SidebarSelection = { kind: "issue", source: "preset", id: "assigned" };
 
-    const queryWithDelimiter = buildProjectOptionsResetKey(selection, "labels=backend:v1", "Q2");
+    const queryWithDelimiter = buildProjectOptionsResetKey(
+      selection,
+      "labels=backend:v1",
+      "Q2",
+      WORKSPACE_ID,
+    );
     const milestoneWithDelimiter = buildProjectOptionsResetKey(
       selection,
       "labels=backend",
       "v1:Q2",
+      WORKSPACE_ID,
     );
 
     expect(queryWithDelimiter).not.toBe(milestoneWithDelimiter);
@@ -142,6 +148,7 @@ describe("useProjectOptions — ordinary pagination (key unchanged)", () => {
     const { result, rerender } = renderHook(
       (props: { loading: boolean; items: Issue[] }) =>
         useProjectOptions({
+          workspaceId: WORKSPACE_ID,
           selection: SELECTION,
           committedQuery: "",
           milestone: "",

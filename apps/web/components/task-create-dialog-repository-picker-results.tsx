@@ -1,4 +1,4 @@
-import { IconCheck } from "@tabler/icons-react";
+import { AlreadyAddedMarker } from "@/components/picker-controls";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-repositories";
@@ -13,6 +13,7 @@ export type RepositoryPickerLocalChoice = {
   label: string;
   path: string;
   choice: LocalRepositoryChoice;
+  alreadyAdded?: boolean;
 };
 
 export function LocalChoiceList({
@@ -83,7 +84,7 @@ function LocalChoiceButton({
         <span className="truncate">{choice.label}</span>
         {localChoiceDescription(t, choice, state, remoteOriginMode)}
       </span>
-      <IconCheck className="size-4 shrink-0 opacity-0" aria-hidden="true" />
+      {choice.alreadyAdded ? <AlreadyAddedMarker /> : null}
     </button>
   );
 }

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import {
   SettingsTabs,
@@ -15,6 +14,7 @@ import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { LogViewer } from "@/components/settings/system/log-viewer";
 import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
+import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
 import { useRouter } from "@/lib/routing/client-router";
 import { settingsTargetFromHash } from "@/lib/settings-discovery/target";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
@@ -30,7 +30,8 @@ const DATA_LOGS_TARGET_TO_TAB = {
 
 function DatabasePanel() {
   const { t } = useTranslation();
-  const backupDirectory = useAppStore((s) => s.system.database?.backup_directory);
+  const stats = useDatabaseStats();
+  const backupDirectory = stats.database?.backup_directory;
   return (
     <div className="space-y-8">
       <SettingsGroup
@@ -39,7 +40,7 @@ function DatabasePanel() {
         discoveryTargetId={SYSTEM_SETTINGS_TARGETS.database}
         contentClassName="divide-y-0"
       >
-        <DatabaseStatsCard />
+        <DatabaseStatsCard stats={stats} />
       </SettingsGroup>
       <Separator />
       <SettingsGroup

@@ -106,6 +106,25 @@ func TestValidateInheritedWorkspaceRepositorySelectionAcceptsLegacyUnscopedSlot(
 	}
 }
 
+func TestValidateInheritedWorkspaceRepositorySelectionMatchesLocalCheckoutBranch(t *testing.T) {
+	svc, repo, parentID := seedInheritedAdmissionEnvironment(t, "feature-x", models.TaskEnvironmentStatusReady)
+	env, err := repo.GetTaskEnvironmentByTaskID(context.Background(), parentID)
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	env.ExecutorType = string(models.ExecutorTypeLocal)
+	if err := repo.UpdateTaskEnvironment(context.Background(), env); err != nil {
+		t.Fatalf("update environment executor: %v", err)
+	}
+
+	err = svc.ValidateInheritedWorkspaceRepositorySelection(context.Background(), parentID, []TaskRepositoryInput{{
+		RepositoryID: "repo-parent", BaseBranch: "main", CheckoutBranch: "feature/x", InheritedWorkspaceSlot: true,
+	}})
+	if err != nil {
+		t.Fatalf("validation error = %v, want nil for the inherited Local checkout branch", err)
+	}
+}
+
 func seedInheritedAdmissionEnvironment(
 	t *testing.T,
 	branchSlug string,

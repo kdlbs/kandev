@@ -1,5 +1,7 @@
+import { createElement, type PropsWithChildren } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { useSessionRecoveryActions } from "./use-session-recovery-actions";
 import { WebSocketRequestError } from "@/lib/ws/client";
 
@@ -19,6 +21,8 @@ vi.mock("@/lib/services/session-recovery-service", async () => {
 
 const TASK_ID = "t1";
 const SESSION_ID = "s1";
+const stateProviderWrapper = ({ children }: PropsWithChildren) =>
+  createElement(StateProvider, null, children);
 
 describe("useSessionRecoveryActions", () => {
   it("shows the retryable guard message and clears branch details when resume is guard-refused", async () => {
@@ -29,8 +33,9 @@ describe("useSessionRecoveryActions", () => {
         session_id: SESSION_ID,
       }),
     );
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+    const { result } = renderHook(
+      () => useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+      { wrapper: stateProviderWrapper },
     );
 
     await act(async () => {
@@ -40,7 +45,7 @@ describe("useSessionRecoveryActions", () => {
     expect(result.current.guardDetails?.kind).toBe("session_recovery_in_progress");
     expect(result.current.branchDetails).toBeNull();
     expect(result.current.recoveryError?.message).toBe(
-      "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
+      "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
     );
   });
 
@@ -52,8 +57,9 @@ describe("useSessionRecoveryActions", () => {
         session_id: SESSION_ID,
       }),
     );
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+    const { result } = renderHook(
+      () => useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+      { wrapper: stateProviderWrapper },
     );
 
     await act(async () => {
@@ -76,8 +82,9 @@ describe("useSessionRecoveryActions", () => {
         }),
       )
       .mockResolvedValueOnce(undefined);
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+    const { result } = renderHook(
+      () => useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+      { wrapper: stateProviderWrapper },
     );
 
     await act(async () => {
@@ -104,7 +111,7 @@ describe("useSessionRecoveryActions", () => {
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string }) =>
         useSessionRecoveryActions({ taskId: TASK_ID, sessionId }),
-      { initialProps: { sessionId: SESSION_ID } },
+      { initialProps: { sessionId: SESSION_ID }, wrapper: stateProviderWrapper },
     );
 
     await act(async () => {

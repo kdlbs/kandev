@@ -3,6 +3,7 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-SCHEDULER-001
+  - REQ-OFFICE-SCHEDULER-002
 created: 2026-04-25
 owners:
   - cfl
@@ -11,21 +12,17 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-OFFICE-SCHEDULER-001` during migration.
+Office owns autonomous wake admission; shared dispatch remains governed by the
+[global scheduler decision](../../../decisions/2026-08-01-global-run-scheduler-ownership.md).
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-SCHEDULER-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-SCHEDULER-002` | [Assignment wake step eligibility](#assignment-wake-step-eligibility) |
 
 ## Migrated source detail
-
-## Why
-
-Kandev's base task scheduler is reactive: tasks enter the queue only when a user explicitly starts them or sends a prompt. Office adds autonomous agent operation, which requires the system to wake agents on its own when events happen (assignments, comments, blocker resolutions, approvals), on a schedule (routines), and on heartbeat ticks (periodic coordinator checks). Without an autonomous wakeup pipeline, every interaction needs a human to initiate it, and the cost / reliability story (idle skips, rate-limit retries, staleness, recovery) has nowhere to live.
-
-Office supplies autonomous run producers and Office-specific maintenance. The persisted `runs` queue and its single backend-wide consumer are shared workflow infrastructure, not one scheduler per Office workspace. Shared ownership, scoping, and shutdown contract is defined by [run queue](../../tasks/requirements/run-scheduling.md) and [ADR-2026-08-01-global-run-scheduler-ownership](../../../decisions/2026-08-01-global-run-scheduler-ownership.md).
 
 ## What
 
@@ -62,6 +59,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
 | `task_assigned` | An authoritative Office task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
 | `task_blockers_resolved` | All blocking tasks of an assigned task reach `done` | `{task_id, resolved_blocker_ids}` |
+| `task_blocker_failed` | [A held dependent's blocker fails](blocker-terminal-policy.md) | `{blocker_task_id, blocker_state, held_dependent_ids}` |
 | `task_children_completed` | All child tasks of an assigned task reach terminal state | `{task_id}` |
 | `approval_resolved` | An approval requested by this agent is approved/rejected | `{approval_id, status, decision_note}` |
 | `budget_alert` | Budget threshold crossed for a sub-agent (coordinator only) | `{agent_instance_id, budget_pct}` |
@@ -75,14 +73,29 @@ the failure details.
 
 ### Manual status changes (kanban drag-drop)
 
-Office tasks live on the system office workflow and appear on the kanban board. Users can drag them between columns (steps), which emits a `task.moved` event. The office event subscribers handle `task.moved` events for office tasks (identified by `assignee_agent_instance_id != null`) and fire the appropriate wakeups:
+`task/service.MoveTask` commits COMPLETED before the orchestrator terminal consumer,
+whose terminal/approval guards remain intact. Modern `task.moved` carries IDs rather
+than the legacy Office consumer's step names. Complete the resolution route with
+`scheduler.RegisterTaskCompletionSubscriber`, registered once by
+`backendapp.activateOfficeServices` after wiring; subscription failure fails activation.
 
-- Move to "In Progress": `task_assigned` wakeup for the assignee agent.
-- Move to "Done" or "Cancelled": resolve blocker dependencies, fire `task_blockers_resolved` / `task_children_completed` wakeups for affected agents.
-- Move to "In Review": if execution_policy has reviewers, wake reviewer agents.
-- Move from "In Review" back to "In Progress": `comment` wakeup with rejection context for the assignee.
+Accept `task.state_changed` only with nonempty old state other than COMPLETED and
+new state COMPLETED. Re-read the prerequisite: missing, unreadable or no longer
+COMPLETED means no wake; report read failures. FAILED/CANCELLED events do not enter.
+The prerequisite may be Kanban: `validateDependencyPair` permits same-workspace mixed
+identities. Office owns admission for the dependent, not the prerequisite's type.
 
-Non-office tasks (those without `assignee_agent_instance_id`) are ignored by office subscribers.
+Reuse `cascadeBlockersResolved` and `QueueRunCtx`. Its callback admits only authoritative
+Office dependents in the prerequisite's workspace; a runner alone is insufficient.
+Leave other cascade callers and generic Kanban policy unchanged. Existing remaining-
+blocker terminal reads and current runner selection hold partial completion and release
+final completion without a dependent session, launch intent or recovery lookback.
+
+Keep `task_blockers_resolved:<dependent>:<runner>:<BlockerDigest>`: duplicate delivery
+and canonical Dashboard completion followed by its state event converge on one run.
+Preserve the cascade's system actor/root cause, payload and ordinary queue/pause policy;
+no event actor inference or runner/generation mutation. Add no status write, approval
+rerun, session, state, flag, callback registry or retry loop.
 
 ### Coalescing - three layers, one job each
 
@@ -140,7 +153,9 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 - `coalesce_if_active` (default): merge into the existing run. Mark `coalesced`.
 - `always_enqueue` / `always_create`: always proceed.
 
-"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age.
+A routine-source wake coalesces only into an in-flight run for the same routine. If the active run belongs to another routine, the dispatcher creates a fresh run so each routine keeps its own prompt context.
+
+"Active" means the linked task / run is not in a terminal state. A linked task is also inactive when it is archived or missing. The gate checks task state directly and does not release a live task because of its age. A `task_created` run with no linked task is never active either — current code never produces that shape, so a row like it can only be a pre-upgrade fossil (AC-OFFICE-SCHEDULER-001.13); the next dispatch that finds it closes it as `failed` instead of skipping or coalescing into it.
 
 #### Catch-up policy
 
@@ -276,6 +291,37 @@ Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `pars
 
 Office maintenance performs a recovery sweep separately from the shared queue-drain tick. It finds authoritative Office `TODO` tasks created inside the workspace recovery lookback window and dispatches them as `task_assigned` runs only when no queued, claimed, or finished run exists for the task. The task-creation timestamp is bounded by the lookback; matching run rows are not, so a task that already started is never reclassified as unstarted merely because its prior run is old. Failed and cancelled rows do not block recovery. Assignment on an ordinary Kanban task does not imply autonomy.
 
+### Assignment wake step eligibility
+
+`shared.IsAssignmentWakeEligible` gates `service.queueTaskAssignedRun`,
+`SchedulerIntegration.recoverUnstartedTasks` and `scheduler.reactToAssigneeChange`.
+Each producer retains its Office identity check. The step must have
+`HasOnEnterAction(OnEnterAutoStartAgent)`; an empty ID or unknown step (repository
+error, nil getter/result, lookup error) fails open for this condition only. Preserve
+step Info/Warn logs; a known ineligible step refuses. Participant wakes stay separate.
+
+The structural task lookup uses Office repository `ListTaskBlockers` and the
+[blocker policy](blocker-terminal-policy.md#single-classifier) classifier: any known
+unsatisfied blocker refuses; no edges or all satisfied permit. Do not import the task
+service's [dependency policy](../../tasks/system-design/task-dependencies.md).
+
+List errors fail open with Warn. State errors, including missing rows, warn and
+continue: unknown preserves admission unless any known pending blocker is found,
+in either edge order. Add no persisted state, flag, metric or placeholder.
+
+Reactivity interrupts the previous assignee before gating. Preserve runner writes,
+generation/keys, rate/pause/replay and causation. Recovery skips held candidates
+without consuming admitted quota. Onboarding embeds the widened lookup; its creator
+accepts no blockers, and step/keyless behavior stays unchanged.
+
+`task/service.finalizeCreatedTask` persists edges before `TaskCreated`. Keep legacy
+resolution dispatch and existing cascade semantics. The
+[completion bridge](#manual-status-changes-kanban-drag-drop) connects successful
+MoveTask prewrites to that sessionless cascade. Recovery retains its lookback;
+no claim-time atomicity is added. The
+[plan](../../../plans/office-assignment-blocker-admission/plan.md) maps all nine
+AC-OFFICE-SCHEDULER-002 criteria to producer and policy regressions.
+
 Selection:
 
 ```sql
@@ -301,6 +347,10 @@ Per-candidate guards:
 - Skip if agent is paused or stopped.
 - Skip if a wakeup is already queued for this task (prevents duplicates on concurrent ticks).
 - Skip if the agent's invocation budget is exhausted.
+
+The recovery sweep fills its per-tick dispatch quota with eligible tasks. It excludes every
+candidate inspected during the tick before fetching the next batch, so ineligible tasks cannot
+starve later eligible tasks.
 
 Logged: `recovery_dispatch` per dispatched task, `recovery_sweep_complete` summary entry with `dispatched_count` per sweep.
 
@@ -418,16 +468,12 @@ When resuming a task-bound session (same agent, same task, session ID preserved)
 
 ### Subtask sequencing via blockers
 
-Office does not have a separate workflow/template engine for subtask ordering. The agent's instructions (via skills) define how to decompose work and which subtasks to create. Sequencing is enforced through the existing blocker system: the agent creates subtask 2 with `blocked_by: [subtask 1]`.
-
-The scheduler respects blockers: a `task_assigned` wakeup for a blocked task is held until blockers resolve. When a subtask completes:
-1. If `requires_approval=true`: task moves to `in_review`, inbox item created. On user approval, task moves to `done`.
-2. If `requires_approval=false`: task moves directly to `done`.
-3. On reaching `done`: any sibling tasks that had this task as a blocker receive a `task_blockers_resolved` wakeup for their assigned agent.
-
-This creates a natural pipeline: Spec (requires_approval) -> Build (blocked_by Spec) -> Review (blocked_by Build) -> Ship (blocked_by Review). The user only intervenes at approval gates.
-
-The coordinator is woken via `task_children_completed` when all subtasks under a parent reach terminal state.
+Agents sequence subtasks with existing blocker edges, such as `blocked_by: [subtask 1]`.
+[Assignment admission](#assignment-wake-step-eligibility) holds pending work. Approval-required
+completion first enters review; only successful completion releases assigned dependents
+whose other blockers are satisfied under Office policy. The
+[completion bridge](#manual-status-changes-kanban-drag-drop) covers manual moves and converges
+with canonical agent completion. Parent completion remains `task_children_completed`.
 
 ### Pre-execution budget check
 

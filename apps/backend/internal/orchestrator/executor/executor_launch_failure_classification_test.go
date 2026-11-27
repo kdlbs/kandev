@@ -2,12 +2,16 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -36,8 +40,8 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 		Reason: `linked-worktree admin target "/repos/main/.git/worktrees/task-1" is missing`,
 	}
 
-	_, changed := exec.transitionLaunchFailure(
-		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1", recoveryErr,
+	changed, _, _ := exec.transitionLaunchFailure(
+		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1", recoveryErr, nil,
 	)
 	if !changed {
 		t.Fatal("transitionLaunchFailure did not transition the session")
@@ -58,6 +62,23 @@ func TestWorktreeRecoveryFailureIsActionableWithoutRetryActions(t *testing.T) {
 	}
 	if len(errorValue.RecoveryActions) != 0 {
 		t.Fatalf("recovery actions = %#v, want no retry actions", errorValue.RecoveryActions)
+	}
+}
+
+func TestMainCheckoutInspectionTimeoutRemainsRetryable(t *testing.T) {
+	inspectionErr := fmt.Errorf("git inspection timed out: %w", context.DeadlineExceeded)
+	classification := classifyLaunchFailure(inspectionErr)
+	if classification.noRetry {
+		t.Fatal("inspection timeout was classified as a no-retry metadata refusal")
+	}
+	if classification.code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("classification code = %q, want generic launch failure", classification.code)
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	persisted := exec.buildLastAgentError(context.Background(), "task-1", "task-repo-1", inspectionErr)
+	if len(persisted.RecoveryActions) != 1 || persisted.RecoveryActions[0] != models.RecoveryActionRetryLaunch {
+		t.Fatalf("persisted recovery actions = %#v, want ordinary retry action", persisted.RecoveryActions)
 	}
 }
 
@@ -104,6 +125,25 @@ func TestClassifyLaunchFailureUsesWorkspaceCheckoutCategory(t *testing.T) {
 	}
 }
 
+func TestManagedCloneRelocationLaunchFailureOffersOnlyExplicitRecovery(t *testing.T) {
+	classification := classifyLaunchFailure(&worktree.ManagedCloneRelocationRequiredError{TaskID: "task-1"})
+	if classification.code != models.LaunchErrorCategoryManagedCloneRelocationRequired {
+		t.Fatalf("classification code = %q, want managed clone relocation", classification.code)
+	}
+	actions := launchFailureRecoveryActions(classification.code, "", false)
+	if len(actions) != 1 || actions[0] != models.RecoveryActionRelocateAndResume {
+		t.Fatalf("recovery actions = %#v, want explicit relocation only", actions)
+	}
+	value := map[string]interface{}{
+		"message": "workspace needs recovery", "code": classification.code,
+		"recovery_actions": actions, "occurred_at": time.Now().UTC(),
+	}
+	normalized, found := models.LoadLastAgentError(map[string]interface{}{models.SessionMetaKeyLastAgentError: value})
+	if !found || len(normalized.RecoveryActions) != 1 || normalized.RecoveryActions[0] != models.RecoveryActionRelocateAndResume {
+		t.Fatalf("normalized recovery actions = %#v, want explicit relocation", normalized.RecoveryActions)
+	}
+}
+
 func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-1"] = &models.TaskSession{
@@ -111,9 +151,9 @@ func TestTransitionLaunchFailurePersistsTypedErrorAndExactTaskRepository(t *test
 	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 
-	_, changed := exec.transitionLaunchFailure(
+	changed, _, _ := exec.transitionLaunchFailure(
 		context.Background(), "task-1", "session-1", "repo-1", "task-repo-1",
-		errors.Join(errors.New("prepare failed"), worktree.ErrInvalidBaseBranch),
+		errors.Join(errors.New("prepare failed"), worktree.ErrInvalidBaseBranch), nil,
 	)
 	if !changed {
 		t.Fatal("transitionLaunchFailure did not transition the session")
@@ -210,6 +250,75 @@ func TestBuildBootstrapLastAgentErrorUsesSafeCorrelatedProjection(t *testing.T) 
 	}
 }
 
+func TestBuildBootstrapLastAgentErrorProjectsAuthenticationCause(t *testing.T) {
+	failure := &lifecycle.BootstrapFailure{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodeAuthenticationRequired,
+		Detail:    "Agent authentication is required.",
+		SessionFailure: &agentctltypes.SessionOperationFailure{
+			Code:        agentctltypes.SessionOperationFailureCodeAuthenticationRequired,
+			AuthMethods: []streams.AuthMethodInfo{{ID: "cursor_login", Name: "Cursor login"}},
+		},
+		Cause: errors.New("private provider diagnostic"),
+	}
+
+	lastError := (&Executor{}).buildBootstrapLastAgentError(
+		context.Background(), "task-1", "session-1", "execution-1", failure, true,
+	)
+	if lastError.Code != models.LaunchErrorCategoryGenericLaunchFailure {
+		t.Fatalf("outer category = %q, want generic launch failure", lastError.Code)
+	}
+	if lastError.Phase != models.LaunchErrorPhaseBootstrap || lastError.ExecutionID != "execution-1" {
+		t.Fatalf("durable bootstrap identity = %+v", lastError)
+	}
+	if len(lastError.Causes) != 1 || lastError.Causes[0].Operation != models.AgentErrorCauseOperationResume ||
+		lastError.Causes[0].Code != models.AgentErrorCauseCodeAuthenticationRequired ||
+		lastError.Causes[0].Detail != "Agent authentication is required." {
+		t.Fatalf("durable authentication cause = %#v", lastError.Causes)
+	}
+	encoded, err := json.Marshal(lastError)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "cursor_login") || strings.Contains(string(encoded), "private provider diagnostic") {
+		t.Fatalf("durable error should not contain transient methods or raw diagnostics: %s", encoded)
+	}
+}
+
+func TestBuildBootstrapLastAgentErrorProjectsTypedSelectionEvidence(t *testing.T) {
+	promptNotSent := true
+	launchErr := &lifecycle.BootstrapFailure{
+		Code:           models.AgentErrorCauseCodeModelUnavailable,
+		Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+		RequestedModel: "anthropic/claude-opus-4-8",
+		EffectiveModel: "provider-default",
+		PromptNotSent:  &promptNotSent,
+		Cause:          errors.New("provider diagnostic token=must-not-leak"),
+	}
+
+	errorValue := (&Executor{}).buildBootstrapLastAgentError(
+		context.Background(), "task-1", "session-1", "execution-1", launchErr, false,
+	)
+	if len(errorValue.Causes) != 1 {
+		t.Fatalf("bootstrap causes = %#v", errorValue.Causes)
+	}
+	cause := errorValue.Causes[0]
+	if cause.Operation != models.AgentErrorCauseOperationStart ||
+		cause.Code != models.AgentErrorCauseCodeModelUnavailable ||
+		cause.Reason != models.AgentErrorCauseReasonRequestedNotAdvertised ||
+		cause.RequestedModel != "anthropic/claude-opus-4-8" ||
+		cause.EffectiveModel != "provider-default" || cause.PromptNotSent == nil || !*cause.PromptNotSent {
+		t.Fatalf("bootstrap selection cause = %+v", cause)
+	}
+	encoded, err := json.Marshal(errorValue)
+	if err != nil {
+		t.Fatalf("marshal safe bootstrap projection: %v", err)
+	}
+	if strings.Contains(string(encoded), "must-not-leak") || strings.Contains(string(encoded), "token=") {
+		t.Fatalf("bootstrap projection exposed provider diagnostic: %s", encoded)
+	}
+}
+
 func TestBootstrapFailureProjection(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-1"] = &models.TaskSession{
@@ -242,6 +351,7 @@ func TestBootstrapFailureProjection(t *testing.T) {
 		ctx context.Context,
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
+		_ string,
 		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
@@ -314,6 +424,7 @@ func TestBootstrapFailureHistoryRepairRunsAfterAcceptedCommitError(t *testing.T)
 		string,
 		string,
 		models.TaskSessionState,
+		string,
 		string,
 		models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
@@ -404,6 +515,77 @@ func TestBootstrapFailureSuccessorFence(t *testing.T) {
 	current, found := models.LoadLastAgentError(session.Metadata)
 	if !found || current.Stamp() != "successor-stamp" {
 		t.Fatalf("successor error = %+v, found=%t; stale failure replaced it", current, found)
+	}
+}
+
+func TestBootstrapFailureCASMissDoesNotStopSameExecutionRetry(t *testing.T) {
+	const attemptID = "start-attempt-old"
+	repo := newMockRepository()
+	repo.sessions["session-retry"] = &models.TaskSession{
+		ID:               "session-retry",
+		TaskID:           "task-retry",
+		State:            models.TaskSessionStateStarting,
+		AgentExecutionID: "exec-shared",
+		Metadata:         map[string]interface{}{models.SessionMetaKeyAgentStartAttemptID: attemptID},
+	}
+	var stopCalls int
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-shared", nil
+		},
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls++
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	exec.SetOnBootstrapFailureTransition(func(
+		_ context.Context,
+		_, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		expectedStartAttemptID string,
+		_ models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		if expectedStartAttemptID != attemptID {
+			t.Fatalf("attempt ID = %q, want %q", expectedStartAttemptID, attemptID)
+		}
+		// A retry reuses the same execution but advances the durable attempt
+		// identity after the stale attempt's ownership read and before its CAS.
+		repo.mu.Lock()
+		repo.sessions[sessionID].Metadata[models.SessionMetaKeyAgentStartAttemptID] = "start-attempt-new"
+		repo.mu.Unlock()
+		return false, models.TaskSessionStateStarting, nil
+	})
+
+	owned := exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-retry",
+		"session-retry",
+		"exec-shared",
+		errors.New("stale attempt failed"),
+		true,
+		false,
+		attemptID,
+	)
+	if owned {
+		t.Fatal("stale attempt was reported as owner after its failure CAS missed")
+	}
+	if stopCalls != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for the same-execution retry", stopCalls)
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session-retry")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("retry session state = %q, want STARTING", session.State)
+	}
+	if models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != "start-attempt-new" {
+		t.Fatal("retry attempt identity was overwritten")
+	}
+	if _, found := models.LoadLastAgentError(session.Metadata); found {
+		t.Fatal("stale attempt error replaced the retry's session metadata")
 	}
 }
 

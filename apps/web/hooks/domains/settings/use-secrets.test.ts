@@ -15,9 +15,13 @@ const { mockListSecrets, storeState } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api/domains/secrets-api", () => ({ listSecrets: mockListSecrets }));
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
-}));
+vi.mock("@/components/state-provider", () => {
+  const store = { getState: () => storeState };
+  return {
+    useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+    useAppStoreApi: () => store,
+  };
+});
 
 import { filterGlobalSecrets, useSecrets } from "./use-secrets";
 

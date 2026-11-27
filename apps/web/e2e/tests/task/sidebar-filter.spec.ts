@@ -28,10 +28,12 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import type { SidebarTaskColorAutomation } from "../../../lib/task-color-automation-settings";
 
 async function openWithSeed(
   testPage: import("@playwright/test").Page,
@@ -93,6 +95,91 @@ async function taskActivityAt(
   const result = await apiClient.listTasks(workspaceId);
   return result.tasks.find((task) => task.id === taskId)?.status_summary?.last_activity_at ?? null;
 }
+
+async function expectTouchControlsInCard(card: Locator, controls: Locator[]): Promise<void> {
+  await card.scrollIntoViewIfNeeded();
+  const cardBox = await card.boundingBox();
+  expect(cardBox).not.toBeNull();
+  for (const control of controls) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.width).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(controlBox?.y).toBeGreaterThanOrEqual(cardBox!.y);
+    expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  }
+}
+
+test("fine-pointer phone viewport keeps reorder controls touch-sized", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const previousColors = (await apiClient.getUserSettings()).settings
+    .sidebar_task_color_automation as SidebarTaskColorAutomation | undefined;
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const navigation = await apiClient.seedTask(seedData.workspaceId, "Fine pointer phone nav", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const session = new SessionPage(testPage);
+
+  try {
+    await testPage.goto(`/t/${navigation.task_id}`);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(sheet).toBeVisible();
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    const editor = filters.popover;
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId("sidebar-sort-settings-toggle").click();
+    const sortCard = editor.getByTestId("sort-rule-card-0");
+    await expectTouchControlsInCard(sortCard, [
+      editor.getByTestId("sort-rule-handle-0"),
+      editor.getByTestId("sort-rule-more-0"),
+      editor.getByTestId("sort-rule-remove-0"),
+    ]);
+
+    const automaticSettings = editor.getByTestId("automatic-color-settings");
+    await automaticSettings.getByTestId("automatic-color-settings-toggle").click();
+    const addRule = automaticSettings.getByTestId("automatic-color-add-rule");
+    await addRule.scrollIntoViewIfNeeded();
+    await addRule.click();
+    const colorHandle = automaticSettings.locator("[data-testid^='automatic-color-rule-handle-']");
+    const colorRuleId = (await colorHandle.getAttribute("data-testid"))!.replace(
+      "automatic-color-rule-handle-",
+      "",
+    );
+    const colorCard = automaticSettings.getByTestId(`automatic-color-rule-${colorRuleId}`);
+    await expectTouchControlsInCard(colorCard, [
+      colorHandle,
+      automaticSettings.getByTestId(`automatic-color-rule-more-${colorRuleId}`),
+      automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`),
+    ]);
+    await automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`).click();
+
+    const taskRowSettings = editor.getByTestId("task-row-settings");
+    await taskRowSettings.getByTestId("task-row-settings-toggle").click();
+    const detailRow = taskRowSettings.getByTestId("task-row-detail-relative_time");
+    await expectTouchControlsInCard(detailRow, [
+      taskRowSettings.getByTestId("task-row-detail-handle-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-more-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-toggle-relative_time"),
+    ]);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_automation: previousColors ?? { enabled: false, rules: [] },
+    });
+  }
+});
 
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
@@ -337,15 +424,15 @@ test.describe("Sidebar filter — group + sort", () => {
     await expect(headers.first()).toBeVisible();
   });
 
-  test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
+  test("Sort rule direction can be changed", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
     await filters.openSortSettings();
-    const toggle = filters.popover.getByTestId("sort-direction-toggle");
-    const initial = await toggle.getAttribute("data-direction");
-    await toggle.click();
-    const flipped = await toggle.getAttribute("data-direction");
-    expect(flipped).not.toBe(initial);
+    const direction = filters.popover.getByTestId("sort-rule-direction-0");
+    await expect(direction).toHaveAttribute("data-direction", "asc");
+    await direction.click();
+    await testPage.getByTestId("sort-rule-direction-option-0-desc").click();
+    await expect(direction).toHaveAttribute("data-direction", "desc");
   });
 
   test("sorts by last activity, persists, and ignores provider-only refresh", async ({
@@ -513,7 +600,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
     await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
-    await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
+    await expect(filters.popover.getByTestId("sort-rule-direction-0")).toHaveAttribute(
       "data-direction",
       "asc",
     );
@@ -627,6 +714,16 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.setClauseTextValue(0, "foo");
     await filters.saveAs("My View");
     await filters.expectActiveViewChip("My View");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        const saved = settings.sidebar_views_by_workspace[seedData.workspaceId];
+        return (
+          saved.views.some((view) => view.name === "My View" && view.id === saved.active_view_id) &&
+          (saved.draft ?? null) === null
+        );
+      })
+      .toBe(true);
 
     await testPage.reload();
     const session2 = new SessionPage(testPage);
@@ -761,6 +858,56 @@ test.describe("Sidebar filter — repository dimension (#1213)", () => {
 });
 
 test.describe("Sidebar filter — task-row presentation", () => {
+  test("hides change-request status with Nothing", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const title = "Desktop hidden PR status";
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [title]);
+    const tasks = await apiClient.listTasks(seedData.workspaceId);
+    const task = tasks.tasks.find((candidate) => candidate.title === title)!;
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 903,
+      pr_url: "https://github.com/testorg/testrepo/pull/903",
+      pr_title: "Desktop hidden status",
+      head_branch: "feature/hidden-status",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: title });
+    const icon = row.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toBeVisible();
+    await filters.open();
+    await filters.openTaskRowSettings();
+    await filters.setTaskRowTrailing("Nothing");
+    await expect(icon).toHaveCount(0);
+    await filters.saveAs("Hidden PR status");
+    await filters.expectActiveViewChip("Hidden PR status");
+    await filters.close();
+    await prCapture.screenshot("desktop-hidden-pr-status", {
+      caption: "Desktop sidebar with PR status hidden",
+    });
+    await row.hover();
+    await expect(row.getByRole("button", { name: "Task actions" })).toBeVisible();
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(icon).toHaveCount(0);
+    await filters.open();
+    await filters.openTaskRowSettings();
+    await filters.setTaskRowTrailing("Git changes");
+    await expect(icon).toBeVisible();
+  });
+
   test("previews, saves, discards, and reloads task row presentation with compact trailing content", async ({
     testPage,
     apiClient,
@@ -835,6 +982,20 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await expect
       .poll(() => filters.taskRowDetailOrder())
       .toEqual(["pull_request_number", "relative_time", "repository"]);
+    const relativeTimeMore = filters.taskRowSettings.getByTestId(
+      "task-row-detail-more-relative_time",
+    );
+    const relativeTimeMoreBox = await relativeTimeMore.boundingBox();
+    const relativeTimeHandleBox = await relativeTimeHandle.boundingBox();
+    expect(relativeTimeMoreBox?.height).toBe(28);
+    expect(relativeTimeMoreBox?.width).toBe(28);
+    expect(relativeTimeHandleBox?.height).toBe(28);
+    expect(relativeTimeHandleBox?.width).toBe(28);
+    await relativeTimeMore.click();
+    await testPage.getByTestId("task-row-detail-more-relative_time-move-up").click();
+    await expect
+      .poll(() => filters.taskRowDetailOrder())
+      .toEqual(["relative_time", "pull_request_number", "repository"]);
     await filters.toggleTaskRowDetail("repository");
     await expect(row.getByTestId("sidebar-task-repository")).toHaveCount(0);
 
@@ -856,15 +1017,27 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await filters.saveAs("Compact task rows");
     await filters.expectActiveViewChip("Compact task rows");
 
-    const savedSettings = await apiClient.getUserSettings();
-    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
-      .views as Array<{
+    type SavedView = {
+      id: string;
       name?: string;
       task_row?: { details_enabled?: boolean };
-    }>;
-    expect(savedViews.find((view) => view.name === "Compact task rows")?.task_row).toMatchObject({
-      details_enabled: false,
-    });
+    };
+    const readSavedView = async () => {
+      const savedSettings = await apiClient.getUserSettings();
+      const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+        .views as SavedView[];
+      return savedViews.find((view) => view.name === "Compact task rows");
+    };
+    await expect
+      .poll(async () => (await readSavedView())?.task_row ?? null, {
+        timeout: 10_000,
+        message: "Waiting for saved task-row settings to persist",
+      })
+      .toMatchObject({
+        details_enabled: false,
+      });
+    const savedView = await readSavedView();
+    expect(savedView).toBeDefined();
 
     await filters.setTaskRowTrailing("Relative time");
     await filters.saveOverwrite();
@@ -872,7 +1045,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
     const secondTrailingTime = secondRow.getByTestId("sidebar-task-trailing-time");
     await expect(trailingTime).toBeVisible();
     await expect(secondTrailingTime).toBeVisible();
-    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator('[aria-hidden="true"]')).not.toContainText(/ago|yesterday/i);
     await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const [timeBox, secondTimeBox] = await Promise.all([
       trailingTime.boundingBox(),
@@ -912,6 +1085,12 @@ test.describe("Sidebar filter — task-row presentation", () => {
       })
       .toBe(true);
 
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return settings.sidebar_views_by_workspace[seedData.workspaceId].active_view_id;
+      })
+      .toBe(savedView!.id);
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
     const reloadedFilters = new SidebarFilterPopoverPage(testPage);

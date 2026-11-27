@@ -1,13 +1,18 @@
 "use client";
 
 import { useCallback } from "react";
+import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { useRepositoryBranchData } from "@/components/task-create-dialog-repository-branch-data";
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
-import { remoteOriginBranchesForState } from "@/components/task-create-dialog-remote-origin-inspection";
+import {
+  isHostRepositorySelection,
+  remoteOriginBranchesForState,
+} from "@/components/task-create-dialog-remote-origin-inspection";
 
 type MobileRepositoryBranchHydratorsProps = {
   rows: TaskRepoRow[];
+  repositories: Repository[];
   fs: DialogFormState;
   workspaceId: string | null;
   isLocalExecutor: boolean;
@@ -20,6 +25,7 @@ type MobileRepositoryBranchHydratorsProps = {
 
 export function MobileRepositoryBranchHydrators({
   rows,
+  repositories,
   fs,
   workspaceId,
   isLocalExecutor,
@@ -41,7 +47,9 @@ export function MobileRepositoryBranchHydrators({
           onRowBranchChange={onRowBranchChange}
           lastUsedBranch={lastUsedBranch}
           userSettingsLoaded={userSettingsLoaded}
-          remoteOriginMode={remoteOriginMode}
+          remoteOriginMode={
+            remoteOriginMode && isHostRepositorySelection({ kind: "local", ...row }, repositories)
+          }
           remoteOriginState={remoteOriginStates?.[row.key]}
         />
       ))}
@@ -51,7 +59,7 @@ export function MobileRepositoryBranchHydrators({
 
 type MobileRepositoryBranchHydratorProps = Omit<
   MobileRepositoryBranchHydratorsProps,
-  "rows" | "remoteOriginStates"
+  "rows" | "repositories" | "remoteOriginStates"
 > & {
   row: TaskRepoRow;
   remoteOriginState?: RepositoryCloneSourceState;

@@ -4,15 +4,20 @@ title: "Responsive work-item detail"
 status: completed
 wave: 13
 depends_on:
-  [
-    "19-browse-preferences",
-    "20-work-item-detail",
-    "21-work-item-mutations",
-    "22-task-work-item-links",
-    "23-provider-presets",
-  ]
+  - "19-browse-preferences"
+  - "20-work-item-detail"
+  - "21-work-item-mutations"
+  - "22-task-work-item-links"
+  - "23-provider-presets"
 plan: "plan.md"
-spec: "../../specs/integrations/requirements/azure-devops-integration.md"
+requirements:
+  - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.5
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.7
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.19
+system_design:
+  - ../../specs/integrations/system-design/azure-devops-integration-02.md
 ---
 
 # Task 27: Responsive Work-Item Detail
@@ -128,3 +133,38 @@ frontend interaction model.
 
 Report responsive compositions, RED/GREEN commands, rendered desktop/mobile
 inspection, files changed, risks, and update task/plan status.
+
+## Delayed mutation completion correction (2026-10-27)
+
+The SDK PR's Azure phone test timed out behind a reopened detail drawer,
+then passed on retry. The failed attempt has no trace, so its exact callback
+order remains unproven. A controlled real PATCH response proves the source
+defect independently: Move, Close, then deliver success. The original parent
+callback reopens detail. A test-only response wait would hide this user race.
+
+Use an opening owner in the existing detail hook, separate from read refresh
+generation. Capture it before assignment/Move and guard the complete local
+completion chain, including errors and busy state. Remove the duplicated
+Move item state and its late continuation. Keep the
+existing assignment endpoint; merge its receipt through the scoped board owner
+so success still updates that board after Close.
+Protect board success, rollback and error from later context changes. Do not
+change gestures, action count, timeout, provider payload or permissions.
+
+Deferred regressions cover Close, another item, reopening the same item,
+workspace change, stale failure and a successful current opening. Preserve
+all original phone assertions and add the held-response interleaving. Run the
+existing detail/board hook and component tests, full typecheck/scoped lint,
+fresh production build, and desktop/phone Azure E2E with retries disabled.
+Public docs need no new instructions: this restores documented Close and
+selection behavior. Current-head CI remains a separate delivery gate.
+
+Controlled real-response RED proves completion-driven reopening independently
+of the untraced original attempt. Latest phone validation passes three held
+Move-response cases with retries disabled. The complete desktop Azure and
+profile spec selection passes six cases. Thirty focused unit/component tests,
+full typecheck, zero-warning scoped lint, and documentation/specification
+checks pass. Deferred scope/revision cases prove old success/error cannot
+replace a newer context or revision. Plan/work-order frontmatter is normalized
+without changing existing statuses or dependency order. Hooks, current-main
+integration and new-head CI remain required.

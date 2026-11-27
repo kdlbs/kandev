@@ -1,5 +1,5 @@
 /**
- * Host-runtime bindings for the public `@kandev/plugin-sdk` contract.
+ * Host-runtime bindings for the public `@kdlbs/plugin-sdk` contract.
  * Provider-facing shapes come from the standalone SDK; this module adds only
  * concrete React/Zustand compatibility needed inside the Kandev web app.
  */
@@ -7,22 +7,46 @@ import type * as ReactType from "react";
 import type { StoreApi } from "zustand";
 import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AppState } from "@/lib/state/store";
-import type * as PluginSDK from "@kandev/plugin-sdk";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
+import type * as PluginSDK from "@kdlbs/plugin-sdk";
+import type { PluginUIApi } from "@kdlbs/plugin-sdk";
 export type {
+  PluginActionElement,
+  PluginActionEvent,
+  PluginActionEventHandler,
+  PluginActionFocusEvent,
+  PluginActionGroupProps,
+  PluginActionKeyboardEvent,
+  PluginActionMouseEvent,
+  PluginActionPointerEvent,
+  PluginActionProps,
+  PluginActionRef,
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
   ChatTopBarSlotProps,
+  PluginComposerCapability,
+  PluginComposerSlotProps,
+  PluginComposerSubmitResult,
+  PluginComposerSurface,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
   PluginNavSection,
+  PluginTaskCreatedHandler,
+  PluginTaskCreatedIdentity,
   PluginUIApi,
-} from "@kandev/plugin-sdk";
-export type { PluginIcon } from "@kandev/plugin-sdk";
+  RegisterPluginTaskCreatedHandler,
+  NotificationFormatterBinding,
+  NotificationFormatterChoice,
+  NotificationFormatterSlotProps,
+} from "@kdlbs/plugin-sdk";
+export type { PluginIcon } from "@kdlbs/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
+export type FileViewerRegistration = PluginSDK.FileViewerRegistration;
+export type FileViewerProps = PluginSDK.FileViewerProps;
+
 export interface ActivePlugin {
+  fileViewers?: import("@/lib/types/plugins").PluginFileViewerDeclaration[];
   id: string;
   name: string;
   bundleUrl: string;
@@ -41,10 +65,8 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links, "sidebar-footer" as an icon button in the
-   * sidebar footer's icon row and as a labelled row in the phone menu's
-   * Utilities group (subject to the footer's inline budget — an over-budget
-   * item is reached through the footer's overflow menu instead), "settings"
+   * first-party integration links, "sidebar-footer" as a labelled item in the
+   * desktop footer's utilities menu and the phone menu's Utilities group, "settings"
    * accepted but rendered on no surface.
    */
   section?: PluginSDK.PluginNavSection;
@@ -294,7 +316,7 @@ export type PluginPresentation = "desktop" | "mobile";
 /**
  * Props forwarded to every plugin component registered for the
  * `chat-submit-decoration` slot. Canonical host counterpart of the
- * `@kandev/plugin-sdk` export of the same name; the two are pinned together by
+ * `@kdlbs/plugin-sdk` export of the same name; the two are pinned together by
  * `sdk-contract.test.ts`.
  *
  * These are kandev session ids. Resolving them to an agent/ACP transcript id
@@ -320,32 +342,6 @@ export type ChatSubmitDecorationSlotProps = {
   /** True when plan mode is on (the button sends a plan request). */
   planModeEnabled: boolean;
 };
-
-export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
-
-export type PluginComposerSubmitResult =
-  | { status: "submitted" }
-  | { status: "blocked"; reason?: string }
-  | { status: "unavailable" };
-
-export interface PluginComposerCapability {
-  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
-  focus(): { status: "focused" | "unavailable" };
-  submit(): Promise<PluginComposerSubmitResult>;
-}
-
-export interface PluginComposerSlotProps {
-  surface: PluginComposerSurface;
-  presentation: PluginPresentation;
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null;
-  sessionIds: string[];
-  disabled: boolean;
-  submittable: boolean;
-  disabledReason?: string;
-  composer: PluginComposerCapability;
-}
 
 /** Props passed to a `TaskPanelRegistration.Component`. */
 export type PluginTaskPanelProps = PluginSDK.PluginTaskPanelProps;
@@ -396,6 +392,7 @@ export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
 export type TaskFilterRegistration = PluginSDK.TaskFilterRegistration;
 
 /** A plugin-provided, client-side facet for sorting and grouping `/tasks`. */
+export type TaskListFacetContext = PluginSDK.TaskListFacetContext;
 export type TaskListFacetRegistration = PluginSDK.TaskListFacetRegistration;
 export type TaskListFacetValue = PluginSDK.TaskListFacetValue;
 

@@ -1,8 +1,20 @@
 "use client";
 
-import { IconArchive, IconLoader, IconSubtask, IconTrash, IconUnlink } from "@tabler/icons-react";
+import {
+  IconAlertCircleOff,
+  IconArchive,
+  IconHierarchy3,
+  IconLoader,
+  IconPencil,
+  IconSubtask,
+  IconTrash,
+  IconUnlink,
+} from "@tabler/icons-react";
+import { useOpenTaskGraph } from "@/hooks/domains/task/use-open-task-graph";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 import { useTranslation } from "react-i18next";
+import { useTaskTurnError } from "@/hooks/use-task-turn-error";
+import type { TaskSwitcherItem } from "./task-switcher-types";
 
 export function TaskArchiveItem({
   taskId,
@@ -34,6 +46,28 @@ export function TaskArchiveItem({
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
       <IconArchive className="mr-2 h-4 w-4" />
       {t("task:archive")}
+    </ContextMenuItem>
+  );
+}
+
+export function TaskShowInGraphItem({
+  task,
+  disabled,
+}: {
+  task: { id: string; isArchived?: boolean; workflowId?: string };
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { showInGraph } = useOpenTaskGraph();
+  if (task.isArchived) return null;
+  return (
+    <ContextMenuItem
+      data-testid="task-context-show-in-graph"
+      disabled={disabled}
+      onSelect={() => showInGraph(task.id, task.workflowId)}
+    >
+      <IconHierarchy3 className="mr-2 h-4 w-4" />
+      {t("task:taskGraphShowInGraph")}
     </ContextMenuItem>
   );
 }
@@ -84,6 +118,31 @@ export function TaskDetachItem({
   );
 }
 
+// Dismisses only the durable failed-turn attention. A visible runtime error
+// keeps its own separate recovery/dismissal affordance.
+export function TaskTurnErrorDismissItem({
+  task,
+  disabled,
+}: {
+  task: { id: string; turnError?: { stamp: string } | null };
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { dismiss, pendingStamp } = useTaskTurnError();
+  if (!task.turnError?.stamp) return null;
+  const stamp = task.turnError.stamp;
+  return (
+    <ContextMenuItem
+      data-testid="task-context-dismiss-turn-error"
+      disabled={disabled || pendingStamp === stamp}
+      onSelect={() => void dismiss(task.id, stamp)}
+    >
+      <IconAlertCircleOff className="mr-2 h-4 w-4" />
+      {t("task:dismissTurnError")}
+    </ContextMenuItem>
+  );
+}
+
 export function TaskDeleteItem({
   taskId,
   isDeleting,
@@ -113,5 +172,24 @@ export function TaskDeleteItem({
         {t("task:delete")}
       </ContextMenuItem>
     </>
+  );
+}
+
+export function TaskRenameItem({
+  task,
+  disabled,
+  onRenameTask,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!onRenameTask) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
+      <IconPencil className="mr-2 h-4 w-4" />
+      {t("task:rename")}
+    </ContextMenuItem>
   );
 }

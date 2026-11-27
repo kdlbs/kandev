@@ -37,6 +37,8 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
@@ -2178,6 +2180,7 @@ type mockSessionLauncher struct {
 	mu         sync.Mutex
 	req        *orchestrator.LaunchSessionRequest
 	requests   []*orchestrator.LaunchSessionRequest
+	launchErr  error
 	called     chan struct{}
 	calls      chan struct{}
 	calledOnce sync.Once
@@ -2204,7 +2207,7 @@ func (m *mockSessionLauncher) LaunchSession(ctx context.Context, req *orchestrat
 		Success:   true,
 		TaskID:    req.TaskID,
 		SessionID: "session-1",
-	}, nil
+	}, m.launchErr
 }
 
 func (m *mockSessionLauncher) getRequest() *orchestrator.LaunchSessionRequest {
@@ -2222,6 +2225,9 @@ func (m *mockSessionLauncher) PromptTask(context.Context, string, string, string
 func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
 	return nil, nil
 }
+func (m *mockSessionLauncher) StartCreatedSessionForPeerMessage(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error) {
+	return nil, nil
+}
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
@@ -2230,6 +2236,9 @@ func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string
 }
 func (m *mockSessionLauncher) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
+}
+func (m *mockSessionLauncher) QueueUserPromptWithReceipt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) (string, error) {
+	return "", nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
@@ -2375,6 +2384,45 @@ func TestLaunchAutoStartTask_PreservesContextValuesWithoutCallerCancellation(t *
 
 	assert.Equal(t, "request-1", capturedValue)
 	assert.NoError(t, capturedErr)
+}
+
+func TestLaunchAutoStartTask_SupersededWorkflowSwitchDoesNotRecordFailure(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo := newTestTaskService(t)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "workspace-auto-start-switch", Name: "Auto start switch", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-auto-start-switch", WorkspaceID: "workspace-auto-start-switch",
+		Title: "Switch during launch", Description: "test", State: v1.TaskStateInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+
+	launcher := newMockSessionLauncher()
+	launcher.launchErr = &executor.SessionStateSwitchedError{
+		SessionID: "source-session", State: models.TaskSessionStateWaitingForInput,
+	}
+	core, observed := observer.New(zap.InfoLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: taskSvc, sessionLauncher: launcher, logger: log.WithFields()}
+	h.launchAutoStartTask(ctx, &models.Task{
+		ID: "task-auto-start-switch", WorkspaceID: "workspace-auto-start-switch",
+	}, mcpAutoStartConfig{AgentProfileID: "profile-1", ExecutorID: models.ExecutorIDWorktree})
+
+	select {
+	case <-launcher.called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LaunchSession was not called within timeout")
+	}
+	require.Eventually(t, func() bool {
+		return observed.FilterMessage("MCP task auto-start yielded to a workflow session switch").Len() == 1
+	}, 2*time.Second, 5*time.Millisecond)
+	task, err := taskSvc.GetTask(ctx, "task-auto-start-switch")
+	require.NoError(t, err)
+	assert.NotContains(t, task.Metadata, models.MetaKeyAutoStartError)
+	assert.NotContains(t, task.Metadata, models.MetaKeyAutoStartFailed)
 }
 
 func TestResolveTaskRepositories_ExplicitRepos(t *testing.T) {
@@ -2655,6 +2703,7 @@ func TestHandleCreateTask_InheritParentRejectsUnmatchedMaterializedRepository(t 
 		"title":            "Child",
 		"description":      "do the thing",
 		"parent_id":        parentID,
+		"workspace_mode":   "inherit_parent",
 		"repositories":     []map[string]interface{}{{"repository_id": "repo-parent", "base_branch": "main"}},
 		"agent_profile_id": "profile-1",
 		"start_agent":      false,
@@ -2696,6 +2745,7 @@ func TestHandleCreateTask_InheritParentRejectsUnmatchedBaseBranchOverride(t *tes
 		"title":            "Child",
 		"description":      "do the thing",
 		"parent_id":        parentID,
+		"workspace_mode":   "inherit_parent",
 		"base_branch":      "main",
 		"agent_profile_id": "profile-1",
 		"start_agent":      false,
@@ -2747,7 +2797,7 @@ func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing
 
 	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
 	require.True(t, ok, "MCP subtasks should persist a workspace policy by default")
-	assert.Equal(t, "inherit_parent", workspaceMeta["mode"], "MCP subtasks should reuse the parent's materialized workspace by default")
+	assert.Equal(t, "new_workspace", workspaceMeta["mode"], "MCP subtasks should use a separate workspace by default")
 }
 
 func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
@@ -2967,17 +3017,19 @@ func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
 	require.NoError(t, err)
 
 	rootResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		Title:       "Root office task",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		Title:        "Root office task",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	root := rootResult.Task
 	require.NoError(t, err)
 	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		ParentID:    root.ID,
-		Title:       "Office subtask",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		ParentID:     root.ID,
+		Title:        "Office subtask",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	child := childResult.Task
 	require.NoError(t, err)
@@ -3302,6 +3354,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	payload := map[string]interface{}{
 		"session_id": sess.ID,
 		"task_id":    task.ID,
+		"retry_key":  "conn-dedup/int64:1",
 		"questions": []map[string]interface{}{
 			{"prompt": "What colour?", "options": []map[string]interface{}{
 				{"label": "Red", "description": "R"},
@@ -3330,6 +3383,15 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(store.ListPending()) == 1
 	}, time.Second, 5*time.Millisecond)
+	questions := []clarification.Question{{
+		ID: "q1", Prompt: "What colour?", Options: []clarification.Option{
+			{ID: "q1_opt1", Label: "Red", Description: "R"},
+			{ID: "q1_opt2", Label: "Blue", Description: "B"},
+		},
+	}}
+	if got, want := store.ListPending()[0].PendingID, clarification.PendingIDForRequest(sess.ID, "conn-dedup/int64:1", questions, ""); got != want {
+		t.Fatalf("pending ID = %q, want transport retry identity %q", got, want)
+	}
 	store.CancelSession(sess.ID)
 	wg.Wait()
 

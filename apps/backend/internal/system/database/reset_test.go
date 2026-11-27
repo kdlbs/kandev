@@ -164,7 +164,7 @@ func TestFactoryReset_DeletesDeliveryLedgerActivationKeys(t *testing.T) {
 	}
 }
 
-func TestFactoryReset_WaitsForDatabaseWorkersBeforeMaintenance(t *testing.T) {
+func TestDeliveryRetentionQuiescence(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 
 	quiesceStarted := make(chan struct{})

@@ -1,17 +1,38 @@
+import type { Route } from "@playwright/test";
+import type { ApiClient } from "../../helpers/api-client";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { seedStaleRuntimeConfigWithoutSettlement } from "../../helpers/session-store";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
+async function waitForOpeningModelTurn(apiClient: ApiClient, taskId: string, sessionId: string) {
+  await waitForAgentMessage(
+    apiClient,
+    sessionId,
+    "This is a simple mock response for e2e testing.",
+    30_000,
+  );
+  await waitForSessionState(apiClient, {
+    taskId,
+    sessionId,
+    expectedState: "WAITING_FOR_INPUT",
+    timeout: 30_000,
+    message: "initial model-selector turn must settle before interaction",
+  });
+}
+
 /**
  * Verifies the chat-input model selector's failure path:
- * when the backend rejects a model change, the UI shows a toast carrying the
- * backend error message and the trigger label reverts to the previous model.
+ * when a model request fails without structured outcome evidence, the UI
+ * shows unconfirmed feedback and keeps the last confirmed trigger label.
  *
  * mock-agent exposes "model" as a config option, so changing the model goes
  * through POST /set-config-option. Agents without a model config option use
  * POST /set-model — both routes are stubbed for resilience.
  */
 test.describe("Chat model selector — RPC failure", () => {
-  test("shows error toast and reverts trigger label when model change fails", async ({
+  test("shows inline uncertainty and keeps the confirmed trigger label", async ({
     testPage,
     apiClient,
     seedData,
@@ -27,6 +48,8 @@ test.describe("Chat model selector — RPC failure", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
 
@@ -35,13 +58,19 @@ test.describe("Chat model selector — RPC failure", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     await expect
-      .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const baseline = sessions[0]?.metadata?.acp_config_baseline as
-          | Record<string, string>
-          | undefined;
-        return baseline?.effort;
-      })
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+          const baseline = sessions[0]?.metadata?.acp_config_baseline as
+            | Record<string, string>
+            | undefined;
+          return baseline?.effort;
+        },
+        {
+          timeout: 30_000,
+          message: "Waiting for the initial session's persisted ACP config baseline",
+        },
+      )
       .toBe("medium");
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
@@ -76,13 +105,17 @@ test.describe("Chat model selector — RPC failure", () => {
     await expect(smartRow).toBeVisible({ timeout: 5_000 });
     await smartRow.click();
 
-    const toast = testPage
-      .getByTestId("toast-message")
-      .filter({ hasText: "Failed to change model" });
-    await expect(toast).toBeVisible({ timeout: 5_000 });
-    await expect(toast).toContainText(backendErrorMessage);
+    const feedback = session
+      .activeChat()
+      .locator(".chat-message-list")
+      .getByTestId("session-configuration-feedback");
+    await expect(feedback).toBeVisible({ timeout: 5_000 });
+    await expect(feedback).toHaveAttribute("role", "status");
+    await expect(feedback).toContainText("Could not confirm");
+    await expect(feedback).toContainText(backendErrorMessage);
+    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
 
-    // After revert the trigger label should match the original (model + extras).
+    // An ambiguous failure cannot replace the trigger's last confirmed label.
     await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
     await expect(trigger).not.toContainText("Mock Smart");
   });
@@ -103,6 +136,8 @@ test.describe("Chat model selector — RPC failure", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
 
@@ -129,16 +164,19 @@ test.describe("Chat model selector — RPC failure", () => {
       firstSettled = resolve;
     });
     let callCount = 0;
-    await testPage.route("**/set-config-option", async (route) => {
+    const configRoute = async (route: Route) => {
       callCount += 1;
       if (callCount === 1) {
         await firstHeld;
-        await route.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "stale failure" }),
-        });
-        firstSettled?.();
+        try {
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "stale failure" }),
+          });
+        } finally {
+          firstSettled?.();
+        }
         return;
       }
       return route.fulfill({
@@ -146,22 +184,30 @@ test.describe("Chat model selector — RPC failure", () => {
         contentType: "application/json",
         body: JSON.stringify({ ok: true }),
       });
-    });
+    };
+    await testPage.route("**/set-config-option", configRoute);
 
-    await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    // Re-open and pick again — second request will succeed. mock-agent only
-    // ships two models (Mock Fast / Mock Smart), so we go back to Mock Fast.
-    await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+    try {
+      await trigger.click();
+      await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+      await expect.poll(() => callCount).toBe(1);
+      // The picker stays open so the newer selection can succeed while the
+      // first request is held. The mock exposes only these two models.
+      const newerSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+        predicate: (response) => response.ok(),
+      });
+      await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+      await newerSaved;
 
-    // Now release the first (stale) request — its 500 rejection should be
-    // swallowed (no toast).
-    releaseFirst?.();
-    await firstSettledPromise;
-    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
-    // Trigger should still reflect the newer (successful) selection.
-    await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
+      releaseFirst?.();
+      await firstSettledPromise;
+      await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+      await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
+    } finally {
+      releaseFirst?.();
+      if (callCount > 0) await firstSettledPromise;
+      await testPage.unroute("**/set-config-option", configRoute);
+    }
   });
 });
 
@@ -192,6 +238,8 @@ test.describe("Chat model selector — persistence", () => {
     );
     if (!task.session_id) throw new Error("expected an auto-started session");
 
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -209,7 +257,7 @@ test.describe("Chat model selector — persistence", () => {
     });
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const metadata = sessions.find((item) => item.id === task.session_id)?.metadata;
         const runtime = metadata?.runtime_config as { model?: string } | undefined;
         const selector = metadata?.acp_model_state as
@@ -333,7 +381,7 @@ test.describe("Chat model selector — persistence", () => {
 
       await expect
         .poll(async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
           const metadata = sessions[0]?.metadata;
           const runtime = metadata?.runtime_config as
             | { config_options?: Record<string, string> }
@@ -401,6 +449,9 @@ test.describe("Chat model selector — persistence", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -409,7 +460,7 @@ test.describe("Chat model selector — persistence", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const baseline = sessions[0]?.metadata?.acp_config_baseline as
           | Record<string, string>
           | undefined;
@@ -438,7 +489,7 @@ test.describe("Chat model selector — persistence", () => {
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const runtime = sessions[0]?.metadata?.runtime_config as
           | { model?: string; config_options?: Record<string, string> }
           | undefined;
@@ -456,7 +507,7 @@ test.describe("Chat model selector — persistence", () => {
     await testPage.getByRole("button", { name: "Low", exact: true }).click();
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const runtime = sessions[0]?.metadata?.runtime_config as
           | { config_options?: Record<string, string> }
           | undefined;
@@ -480,7 +531,7 @@ test.describe("Chat model selector — persistence", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const metadata = sessions[0]?.metadata;
         const runtime = metadata?.runtime_config as
           | { config_options?: Record<string, string> }
@@ -525,6 +576,9 @@ test.describe("Chat model selector — popover open/close behavior", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("model selector task has no session identity");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -542,14 +596,98 @@ test.describe("Chat model selector — popover open/close behavior", () => {
 
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
 
-    // The trigger label updates optimistically — wait for that so we know the
-    // selection round-tripped through the handler.
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+          const runtime = sessions.find((candidate) => candidate.id === task.session_id)?.metadata
+            ?.runtime_config as { model?: string } | undefined;
+          return runtime?.model;
+        },
+        { timeout: 5_000 },
+      )
+      .toBe("mock-smart");
 
     // Popover must still be open so the user can also pick an effort level
     // without re-opening. The effort row is rendered only while PopoverContent
     // is mounted (Radix unmounts it on close).
     const updatedEffortTrigger = testPage.getByTestId("config-option-trigger-effort");
     await expect(updatedEffortTrigger).toBeVisible();
+  });
+});
+
+/**
+ * Verifies a resumed session whose persisted runtime config still names option
+ * keys the current agent never advertises, with no settlement marker. The
+ * advertised catalog must keep the model and effort controls usable, and a
+ * model change must send only the explicit advertised choice.
+ */
+test.describe("Chat model selector — stale runtime config", () => {
+  test("stale runtime config without settlement keeps advertised controls usable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Model Selector Stale Config Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    const seeded = await seedStaleRuntimeConfigWithoutSettlement(testPage, task.session_id);
+    expect(seeded.configOptionsSettled).toBe(false);
+    expect(seeded.staleKeyValues).toEqual({ context: "200k", reasoning_effort: "high" });
+    expect(seeded.advertisedConfigOptionCount).toBeGreaterThan(0);
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+
+    const configRequests: string[] = [];
+    await testPage.route("**/set-config-option", async (route) => {
+      const body = route.request().postDataJSON() as { config_id?: string };
+      if (body.config_id) configRequests.push(body.config_id);
+      await route.continue();
+    });
+    await testPage.route("**/set-model", async (route) => {
+      await route.continue();
+    });
+
+    await trigger.click();
+    const modelListbox = testPage.getByRole("listbox");
+    const smartOption = modelListbox.getByRole("option", { name: /Mock Smart/ });
+    await expect(smartOption).toBeVisible({ timeout: 5_000 });
+    await smartOption.click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+        const runtime = sessions.find((item) => item.id === task.session_id)?.metadata
+          ?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 5_000 });
+    await effortTrigger.click();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+
+    expect(configRequests).toEqual(["model"]);
   });
 });

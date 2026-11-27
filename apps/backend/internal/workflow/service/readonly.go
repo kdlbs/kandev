@@ -19,18 +19,23 @@ var ErrWorkflowReadOnly = errors.New("workflow is managed by GitHub sync and is 
 // wording for the same restriction.
 var ErrWorkflowWorkspaceReadOnly = errors.New("this workspace is managed by Improve Kandev and is read-only")
 
-// EnsureWorkflowMutable returns ErrWorkflowReadOnly when the workflow's
-// definition is owned by workflow sync (source == "github"), and
-// ErrWorkflowWorkspaceReadOnly when the workflow lives in the read-only
-// Improve Kandev workspace. UI-facing mutation paths (step CRUD, template
-// application) call this before writing.
-//
-// The guard fails open when the workflow or workspace can't be resolved: its
-// only job is to block GitHub-managed workflows and improve-workspace
-// workflows, the underlying mutation surfaces real not-found errors itself,
-// and callers like the MCP handlers operate on workflows the wired provider
-// may not track.
+// EnsureWorkflowMutable applies task-domain authorization and returns
+// ErrWorkflowReadOnly or ErrWorkflowWorkspaceReadOnly when policy blocks a write.
+// Standalone services use the provider fallback when no task-domain checker is wired.
 func (s *Service) EnsureWorkflowMutable(ctx context.Context, workflowID string) error {
+	if s.workflowMutationPolicyChecker != nil {
+		synced, workspaceReadOnly, err := s.workflowMutationPolicyChecker(ctx, workflowID)
+		if err != nil {
+			return err
+		}
+		if synced {
+			return ErrWorkflowReadOnly
+		}
+		if workspaceReadOnly {
+			return ErrWorkflowWorkspaceReadOnly
+		}
+		return nil
+	}
 	if s.workflowProvider == nil {
 		return nil
 	}
@@ -48,4 +53,38 @@ func (s *Service) EnsureWorkflowMutable(ctx context.Context, workflowID string) 
 		}
 	}
 	return nil
+}
+
+// EnsureWorkspaceMutable applies task-domain policy before an import writes
+// workflows and steps into a workspace.
+func (s *Service) EnsureWorkspaceMutable(ctx context.Context, workspaceID string) error {
+	if s.workspaceMutationPolicyChecker != nil {
+		readOnly, err := s.workspaceMutationPolicyChecker(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if readOnly {
+			return ErrWorkflowWorkspaceReadOnly
+		}
+		return nil
+	}
+	if s.workspaceProvider == nil {
+		return nil
+	}
+	workspace, err := s.workspaceProvider.GetWorkspace(ctx, workspaceID)
+	if err == nil && workspace != nil && workspace.IsImproveKandev() {
+		return ErrWorkflowWorkspaceReadOnly
+	}
+	return nil
+}
+
+// SetWorkflowMutationReadOnlyChecker wires mutation policy from the task
+// domain, which owns workflow workspace permissions.
+func (s *Service) SetWorkflowMutationReadOnlyChecker(checker func(context.Context, string) (bool, bool, error)) {
+	s.workflowMutationPolicyChecker = checker
+}
+
+// SetWorkspaceMutationReadOnlyChecker wires workspace policy for imports.
+func (s *Service) SetWorkspaceMutationReadOnlyChecker(checker func(context.Context, string) (bool, error)) {
+	s.workspaceMutationPolicyChecker = checker
 }

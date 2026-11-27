@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
@@ -27,6 +28,8 @@ async function setupMobileContextTask(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  git.exec("git checkout main");
+  git.exec("git pull --ff-only origin main");
   git.createFile(`${directoryPath}/nested.txt`, "mobile directory content\n");
   git.createFile(filePath, "mobile file content\n");
   searchResultPaths.forEach((searchResultPath) =>
@@ -34,6 +37,7 @@ async function setupMobileContextTask(
   );
   git.stageAll();
   git.commit(`add mobile chat context fixture ${suffix}`);
+  git.pushMainWithRetry();
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -46,6 +50,26 @@ async function setupMobileContextTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+  let workspacePath = "";
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        return (
+          environment?.status === "ready" &&
+          workspacePath !== "" &&
+          fs.existsSync(path.join(workspacePath, filePath)) &&
+          fs.existsSync(path.join(workspacePath, directoryPath, "nested.txt"))
+        );
+      },
+      {
+        timeout: 30_000,
+        message: `Waiting for ${filePath} and ${directoryPath} in the task worktree`,
+      },
+    )
+    .toBe(true);
+
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -71,6 +95,7 @@ test.describe("Mobile file tree chat context", () => {
     );
 
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
     const directoryNode = session.fileTreeNode(directoryPath);
     await expect(directoryNode).toBeVisible({ timeout: 15_000 });
 

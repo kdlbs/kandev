@@ -9,8 +9,10 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 const casTaskID = "task-metadata-cas"
@@ -223,12 +225,48 @@ func runRecoveryMarkerCASContract(t *testing.T, repo *Repository) {
 func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
+	if _, err := messagequeue.NewSQLiteRepository(repo.db, repo.db); err != nil {
+		t.Fatalf("initialize queued message schema: %v", err)
+	}
+	activityAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?
+	`), activityAt, activityAt, casTaskID); err != nil {
+		t.Fatalf("seed stable task activity: %v", err)
+	}
 	task, err := repo.GetTask(ctx, casTaskID)
 	if err != nil {
 		t.Fatalf("load task generation: %v", err)
 	}
+	if !task.UpdatedAt.Equal(activityAt) {
+		t.Fatalf("task updated_at before clear = %s, want %s", task.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityReconstruction(t, ctx, repo, activityAt, "before clear")
+	assertCompletedMarkerClearPreservesActivity(t, ctx, repo, activityAt)
+	assertTaskEditAfterRecoveryAdvancesActivity(t, ctx, repo, activityAt)
+	assertStaleManualMoveClearRefused(t, ctx, repo, activityAt)
+	if _, err := repo.RemoveTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecycleCompleted); err != nil {
+		t.Fatalf("remove newer completed marker: %v", err)
+	}
+	assertPendingOnlyMarkerRetained(t, ctx, repo)
+}
 
-	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, task.UpdatedAt)
+func assertManualMoveActivityReconstruction(t *testing.T, ctx context.Context, repo *Repository, expected time.Time, when string) {
+	t.Helper()
+	activityByTask, err := repo.LoadTaskLastActivity(ctx, []string{casTaskID})
+	if err != nil {
+		t.Fatalf("load task activity %s: %v", when, err)
+	}
+	if !activityByTask[casTaskID].Equal(expected) {
+		t.Fatalf("reconstructed activity %s = %s, want %s", when, activityByTask[casTaskID], expected)
+	}
+}
+
+// A completed marker is internal recovery state, so clearing it must leave
+// both the task activity source and its reconstruction input unchanged.
+func assertCompletedMarkerClearPreservesActivity(t *testing.T, ctx context.Context, repo *Repository, activityAt time.Time) {
+	t.Helper()
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, activityAt)
 	if err != nil {
 		t.Fatalf("clear manual move markers: %v", err)
 	}
@@ -244,12 +282,80 @@ func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
 	if _, preserved := metadataValue(t, repo, "other_key"); !preserved {
 		t.Fatal("atomic clear removed unrelated task metadata")
 	}
+	afterClear, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("reload task after marker clear: %v", err)
+	}
+	if !afterClear.UpdatedAt.Equal(activityAt) {
+		t.Fatalf("task updated_at after marker clear = %s, want unchanged %s", afterClear.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityReconstruction(t, ctx, repo, activityAt, "after marker clear")
+	cleared, err = repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, activityAt)
+	if err != nil {
+		t.Fatalf("repeat clear without completion marker: %v", err)
+	}
+	if cleared {
+		t.Fatal("completed marker clear succeeded after the marker was absent")
+	}
+}
 
+func assertTaskEditAfterRecoveryAdvancesActivity(t *testing.T, ctx context.Context, repo *Repository, activityAt time.Time) {
+	t.Helper()
+	task, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("load task before genuine edit: %v", err)
+	}
+	task.Title = "genuine task edit"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task after recovery: %v", err)
+	}
+	editedTask, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("reload edited task: %v", err)
+	}
+	if !editedTask.UpdatedAt.After(activityAt) {
+		t.Fatalf("task updated_at after a genuine edit = %s, want later than %s", editedTask.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityAdvanced(t, ctx, repo, activityAt, "after genuine edit")
+}
+
+func assertManualMoveActivityAdvanced(t *testing.T, ctx context.Context, repo *Repository, previous time.Time, when string) {
+	t.Helper()
+	activityByTask, err := repo.LoadTaskLastActivity(ctx, []string{casTaskID})
+	if err != nil {
+		t.Fatalf("reconstruct task activity %s: %v", when, err)
+	}
+	if !activityByTask[casTaskID].After(previous) {
+		t.Fatalf("reconstructed activity %s = %s, want later than %s", when, activityByTask[casTaskID], previous)
+	}
+}
+
+// The timestamp remains the generation guard when a newer move reuses the
+// completed marker's boolean value.
+func assertStaleManualMoveClearRefused(t *testing.T, ctx context.Context, repo *Repository, oldGeneration time.Time) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
+		t.Fatalf("seed newer completed marker: %v", err)
+	}
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, oldGeneration)
+	if err != nil {
+		t.Fatalf("clear newer generation with stale snapshot: %v", err)
+	}
+	if cleared {
+		t.Fatal("stale recovery generation cleared a newer completed marker")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecycleCompleted); !present {
+		t.Fatal("stale recovery generation removed the newer completed marker")
+	}
+}
+
+func assertPendingOnlyMarkerRetained(t *testing.T, ctx context.Context, repo *Repository) {
+	t.Helper()
 	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecyclePending,
 		map[string]interface{}{"from_step_id": "new-source"}); err != nil {
 		t.Fatalf("seed pending-only marker: %v", err)
 	}
-	cleared, err = repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, time.Now().UTC())
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("clear pending-only markers: %v", err)
 	}
@@ -288,7 +394,6 @@ func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 	runMetadataNoActiveSessionContract(t, repo)
 	runInterruptedMarkerCASContract(t, repo)
 	runRecoveryMarkerCASContract(t, repo)
-	runManualMoveLifecycleMarkerContract(t, repo)
 }
 
 // The JSON patch and its presence predicate are written per dialect, so SQLite
@@ -307,6 +412,232 @@ func TestPostgresSetTaskMetadataKeyIfPresent(t *testing.T) {
 	runMetadataNoActiveSessionContract(t, repo)
 	runInterruptedMarkerCASContract(t, repo)
 	runRecoveryMarkerCASContract(t, repo)
+}
+
+func TestTaskInterruptionRepository(t *testing.T) {
+	repo := newRepoForMetadataCASTests(t)
+	seedMetadataCASTask(t, repo, map[string]interface{}{})
+	runTaskInterruptionRepositoryContract(t, repo)
+}
+
+func TestPostgresTaskInterruptionRepository(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo := newPostgresMetadataCASRepo(t, db)
+	seedMetadataCASTask(t, repo, map[string]interface{}{})
+	runTaskInterruptionRepositoryContract(t, repo)
+}
+
+func runTaskInterruptionRepositoryContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	first := models.InterruptedSessionMarker{
+		IncarnationID: "inc-1",
+		InterruptedAt: "2026-11-25T10:00:00Z",
+		Token:         "token-1",
+	}
+	second := models.InterruptedSessionMarker{
+		IncarnationID: "inc-2",
+		InterruptedAt: "2026-11-25T11:00:00Z",
+		Token:         "token-2",
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-1", TaskID: casTaskID, QueueIncarnationID: first.IncarnationID,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-2", TaskID: casTaskID, QueueIncarnationID: second.IncarnationID,
+	}))
+	staleIncarnation := first
+	staleIncarnation.IncarnationID = "stale-incarnation"
+	changed, err := repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", staleIncarnation)
+	require.NoError(t, err)
+	require.False(t, changed, "an interruption must match the current session incarnation")
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "deleted-session", first)
+	require.NoError(t, err)
+	require.False(t, changed, "an interruption must not be written after its session is deleted")
+	assertTaskInterruption(t, repo, nil, "")
+
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", first)
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-2", second)
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", models.InterruptedSessionMarker{
+		IncarnationID: first.IncarnationID,
+		InterruptedAt: "2026-11-25T12:00:00Z",
+		Token:         first.Token,
+	})
+	require.NoError(t, err)
+	require.False(t, changed, "a duplicate interruption episode must keep its original time")
+	assertTaskInterruption(t, repo, map[string]models.InterruptedSessionMarker{
+		"session-1": first,
+		"session-2": second,
+	}, second.InterruptedAt)
+
+	replacement := models.InterruptedSessionMarker{
+		IncarnationID: first.IncarnationID,
+		InterruptedAt: "2026-11-25T12:00:00Z",
+		Token:         "replacement-token",
+	}
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, casTaskID, "session-1", replacement)
+	require.NoError(t, err)
+	require.True(t, changed, "a distinct interruption episode in the same incarnation must rotate its token")
+	assertTaskInterruption(t, repo, map[string]models.InterruptedSessionMarker{
+		"session-1": replacement,
+		"session-2": second,
+	}, replacement.InterruptedAt)
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", first.IncarnationID, first.Token, "")
+	require.NoError(t, err)
+	require.False(t, changed, "an old callback cannot clear the rotated interruption token")
+	assertTaskInterruption(t, repo, map[string]models.InterruptedSessionMarker{
+		"session-1": replacement,
+		"session-2": second,
+	}, replacement.InterruptedAt)
+
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", first.IncarnationID, "stale-token", "")
+	require.NoError(t, err)
+	require.False(t, changed)
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", "old-incarnation", replacement.Token, "")
+	require.NoError(t, err)
+	require.False(t, changed)
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, casTaskID, "session-1", replacement.IncarnationID, replacement.Token, "")
+	require.NoError(t, err)
+	require.True(t, changed)
+	assertTaskInterruption(t, repo, map[string]models.InterruptedSessionMarker{"session-2": second}, second.InterruptedAt)
+
+	deleted, err := repo.DeleteTaskSessionWithAttachments(ctx, &models.TaskSession{
+		ID: "session-2", TaskID: casTaskID, QueueIncarnationID: second.IncarnationID,
+	})
+	require.NoError(t, err)
+	require.Empty(t, deleted)
+	assertTaskInterruption(t, repo, nil, "")
+
+	recoveryAt := time.Now().UTC()
+	recoverySettlement := models.InterruptedRecoverySettlement{
+		Token:              "interruption-recovery-token",
+		ExpectedState:      models.TaskSessionStateRunning,
+		RecoveredUpdatedAt: recoveryAt,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-recovery", TaskID: casTaskID,
+		QueueIncarnationID: "recovery-incarnation",
+		State:              models.TaskSessionStateWaitingForInput,
+		UpdatedAt:          recoveryAt,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRecoverySettlementPending: recoverySettlement,
+		},
+	}))
+	recoverySession, err := repo.GetTaskSession(ctx, "session-recovery")
+	require.NoError(t, err)
+	recoveryMarker := models.InterruptedSessionMarker{
+		IncarnationID: recoverySession.QueueIncarnationID,
+		InterruptedAt: "2026-11-25T12:00:00Z",
+		Token:         "interruption-recovery-token",
+	}
+	changed, err = repo.SetTaskInterruptedSessionIfRecoveryCurrent(
+		ctx, casTaskID, recoverySession.ID, recoverySession.UpdatedAt,
+		recoverySettlement.Token, recoveryMarker,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, recoverySession.ID, models.TaskSessionStateStarting, ""))
+	changed, err = repo.SetTaskInterruptedSessionIfRecoveryCurrent(
+		ctx, casTaskID, recoverySession.ID, recoverySession.UpdatedAt,
+		recoverySettlement.Token, models.InterruptedSessionMarker{
+			IncarnationID: recoverySession.QueueIncarnationID,
+			InterruptedAt: "2026-11-25T13:00:00Z",
+			Token:         "stale-recovery-token",
+		},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "a successor session state must block a stale interruption write")
+	assertTaskInterruption(t, repo, map[string]models.InterruptedSessionMarker{
+		"session-recovery": recoveryMarker,
+	}, recoveryMarker.InterruptedAt)
+
+	legacyTaskID := "task-interruption-legacy"
+	legacyTask := &models.Task{ID: legacyTaskID, WorkspaceID: "ws-cas", WorkflowID: "wf-cas", Title: "Legacy"}
+	require.NoError(t, repo.CreateTask(ctx, legacyTask))
+	legacyTimestamp := "2026-11-24T10:00:00Z"
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, legacyTaskID, models.MetaKeyInterruptedAt, legacyTimestamp))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "legacy-session", TaskID: legacyTaskID, QueueIncarnationID: "legacy-incarnation",
+	}))
+	changed, err = repo.SetTaskInterruptedSessionIfNotArchived(ctx, legacyTaskID, "legacy-session", models.InterruptedSessionMarker{
+		IncarnationID: "legacy-incarnation",
+		InterruptedAt: "2026-11-25T10:00:00Z",
+		Token:         "legacy-scoped-token",
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+	task, err := repo.GetTask(ctx, legacyTaskID)
+	require.NoError(t, err)
+	require.Equal(t, legacyTimestamp, task.Metadata[models.MetaKeyLegacyInterruptedAt])
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, legacyTaskID, "legacy-session", "legacy-incarnation", "legacy-scoped-token", "")
+	require.NoError(t, err)
+	require.True(t, changed)
+	task, err = repo.GetTask(ctx, legacyTaskID)
+	require.NoError(t, err)
+	require.Equal(t, legacyTimestamp, task.Metadata[models.MetaKeyInterruptedAt])
+	changed, err = repo.ResolveTaskInterruptedSession(ctx, legacyTaskID, "healthy-session", "healthy-incarnation", "", legacyTimestamp)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assertTaskInterruptionForID(t, repo, legacyTaskID, nil, "")
+}
+
+func assertTaskInterruption(
+	t *testing.T,
+	repo *Repository,
+	want map[string]models.InterruptedSessionMarker,
+	wantProjection string,
+) {
+	t.Helper()
+	assertTaskInterruptionForID(t, repo, casTaskID, want, wantProjection)
+}
+
+func assertTaskInterruptionForID(
+	t *testing.T,
+	repo *Repository,
+	taskID string,
+	want map[string]models.InterruptedSessionMarker,
+	wantProjection string,
+) {
+	t.Helper()
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	got, _, err := models.LoadInterruptedSessionMarkers(task.Metadata)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	if wantProjection == "" {
+		_, present := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, present)
+		return
+	}
+	require.Equal(t, wantProjection, task.Metadata[models.MetaKeyInterruptedAt])
+}
+
+// TestClearManualMoveLifecycleMarkersPreservesActivitySQLite covers
+// AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9 for SQLite.
+func TestClearManualMoveLifecycleMarkersPreservesActivitySQLite(t *testing.T) {
+	repo := newRepoForMetadataCASTests(t)
+	seedMetadataCASTask(t, repo, map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
+	})
+	runManualMoveLifecycleMarkerContract(t, repo)
+}
+
+// TestClearManualMoveLifecycleMarkersPreservesActivityPostgres covers
+// AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9 for PostgreSQL.
+func TestClearManualMoveLifecycleMarkersPreservesActivityPostgres(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo := newPostgresMetadataCASRepo(t, db)
+	seedMetadataCASTask(t, repo, map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
+	})
 	runManualMoveLifecycleMarkerContract(t, repo)
 }
 

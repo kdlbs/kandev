@@ -6,6 +6,7 @@ import {
 import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type {
   ForegroundActivity,
+  InitialWorkspaceLayout,
   TaskPendingAction,
   TaskOrigin,
   TaskPriority,
@@ -34,7 +35,9 @@ export type TaskLike = {
   workflow_step_id?: string;
   workflow_agent_overrides?: WorkflowAgentOverrides;
   title?: string;
+  identifier?: string;
   description?: string | null;
+  flag_note?: string;
   autopilot?: boolean;
   position?: number;
   state?: TaskState;
@@ -45,6 +48,7 @@ export type TaskLike = {
     repository_id: string;
     base_branch?: string;
     checkout_branch?: string;
+    workspace_relative_path?: string;
     branch_policy_id?: string;
     branch_policy_name?: string;
     branch_policy_base_branch?: string;
@@ -59,6 +63,7 @@ export type TaskLike = {
     position: number;
   }>;
   repository_id?: string;
+  initial_workspace_layout?: InitialWorkspaceLayout;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
@@ -98,6 +103,7 @@ export type TaskLike = {
   blocked_reason?: string | null;
   depends_on?: TaskDependencyRef[] | null;
   blocks?: TaskDependencyRef[] | null;
+  related?: TaskDependencyRef[] | null;
   start_when_unblocked?: boolean;
   metadata?: Record<string, unknown> | null;
   archived_at?: string | null;
@@ -166,6 +172,7 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
     repository_id: r.repository_id,
     base_branch: r.base_branch ?? "",
     checkout_branch: r.checkout_branch,
+    workspace_relative_path: r.workspace_relative_path,
     branch_policy_id: r.branch_policy_id,
     branch_policy_name: r.branch_policy_name,
     branch_policy_base_branch: r.branch_policy_base_branch,
@@ -222,12 +229,16 @@ function runnerMutabilityProjection(source: TaskLike) {
 function dependencyProjection(
   source: TaskLike,
 ): Partial<
-  Pick<KanbanTask, "blocked" | "blockedReason" | "dependsOn" | "blocks" | "startWhenUnblocked">
+  Pick<
+    KanbanTask,
+    "blocked" | "blockedReason" | "dependsOn" | "blocks" | "related" | "startWhenUnblocked"
+  >
 > {
   const mentionsDependencies =
     source.blocked !== undefined ||
     source.depends_on !== undefined ||
     source.blocks !== undefined ||
+    source.related !== undefined ||
     source.start_when_unblocked !== undefined;
   if (!mentionsDependencies) return {};
   return {
@@ -235,6 +246,7 @@ function dependencyProjection(
     blockedReason: source.blocked_reason ?? undefined,
     dependsOn: source.depends_on ?? [],
     blocks: source.blocks ?? [],
+    related: source.related ?? [],
     startWhenUnblocked: source.start_when_unblocked ?? false,
   };
 }
@@ -280,7 +292,9 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     workflowAgentOverrides: source.workflow_agent_overrides,
     title: source.title ?? "",
+    identifier: source.identifier ?? undefined,
     description: source.description ?? undefined,
+    ...(source.flag_note === undefined ? {} : { flagNote: source.flag_note }),
     autopilot: source.autopilot,
     priority: source.priority,
     origin: source.origin,
@@ -289,6 +303,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositoryId: pickRepositoryId(source),
     repositories: pickRepositories(source),
     workspaceFolders: pickWorkspaceFolders(source),
+    initialWorkspaceLayout: source.initial_workspace_layout,
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),

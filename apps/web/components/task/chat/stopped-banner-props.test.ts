@@ -4,6 +4,13 @@ import { buildStoppedBannerProps } from "./chat-input-container";
 import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { useComposerProps } from "./use-composer-props";
 
+vi.mock("./use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({
+    promptSuggestion: null,
+    onPromptSuggestionDismiss: () => {},
+  }),
+}));
+
 function composerArgs(errorMessage: string) {
   return {
     panelState: {
@@ -40,6 +47,8 @@ function composerArgs(errorMessage: string) {
       handleAddContextFile: vi.fn(),
     } as never,
     composerWorkspaceId: "workspace-1",
+    workspaceResolutionFailed: false,
+    onRetryWorkspaceResolution: vi.fn(),
     isMoving: false,
     implementPlanHandler: undefined,
     executor: { unavailable: false },
@@ -53,6 +62,36 @@ function composerArgs(errorMessage: string) {
 }
 
 describe("stopped-session error propagation", () => {
+  it("shows uncertain delivery recovery for a waiting session", () => {
+    expect(
+      shouldRenderStoppedSessionBanner({
+        isFailed: false,
+        isCompleted: false,
+        executorUnavailable: false,
+        uncertainDelivery: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps uncertain delivery visible when a task launch card also owns an error", () => {
+    expect(
+      shouldRenderStoppedSessionBanner({
+        isFailed: true,
+        isCompleted: false,
+        executorUnavailable: false,
+        launchErrorOwned: true,
+        uncertainDelivery: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldHideChatInputForLaunchError({
+        isFailed: true,
+        launchErrorOwned: true,
+        uncertainDelivery: true,
+      }),
+    ).toBe(false);
+  });
+
   it("gives the task launch card ownership of a failed session", () => {
     expect(
       shouldRenderStoppedSessionBanner({

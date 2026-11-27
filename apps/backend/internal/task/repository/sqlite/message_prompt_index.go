@@ -137,9 +137,9 @@ func (r *Repository) HasUserPromptHistory(ctx context.Context, sessionID string)
 // claim writes a zero-valued reservation marker; the later visible fallback
 // message then receives prompt ordinal 1 without making the reservation itself
 // an empty transcript row.
-func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error) {
-	if sessionID == "" {
-		return false, fmt.Errorf("session ID is required")
+func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error) {
+	if sessionID == "" || incarnationID == "" {
+		return false, fmt.Errorf("session ID and incarnation ID are required")
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -148,6 +148,15 @@ func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID s
 	defer func() { _ = tx.Rollback() }()
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
+	}
+	var sessionExists bool
+	if err := tx.GetContext(ctx, &sessionExists, r.db.Rebind(
+		`SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ? AND queue_incarnation_id = ?)`,
+	), sessionID, incarnationID); err != nil {
+		return false, fmt.Errorf("check fallback session: %w", err)
+	}
+	if !sessionExists {
+		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)

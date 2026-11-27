@@ -62,7 +62,7 @@ test.describe("Review findings navigator on mobile", () => {
     await mobileChangesButton.tap();
     await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 15_000 });
     await expect(
-      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
     ).toBeVisible({
       timeout: 30_000,
     });

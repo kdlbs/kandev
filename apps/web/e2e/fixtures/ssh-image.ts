@@ -61,9 +61,39 @@ if [ -f /authorized_keys.extra ]; then
   chmod 600 /home/kandev/.ssh/authorized_keys
 fi
 
+# A remote Docker host shares the machine's network namespace so that
+# container ports published on its loopback are reachable through the SSH
+# forward. Published-port mapping does not apply there, so the port is chosen
+# here instead. Defaults to 22 for every other caller.
+SSHD_PORT="\${SSHD_PORT:-22}"
+
+# A remote Docker host creates containers on a daemon that resolves mount
+# sources against its OWN filesystem. In production the SSH host and the
+# daemon host are the same machine, so a path like ~/.kandev means the same
+# thing to both. In the e2e fixture the daemon is the machine and the SSH host
+# is a container, so the two only agree if the home directory is mounted at an
+# identical absolute path on both sides. KANDEV_REMOTE_HOME names that path.
+if [ -n "\${KANDEV_REMOTE_HOME:-}" ]; then
+  mkdir -p "$KANDEV_REMOTE_HOME"
+  usermod -d "$KANDEV_REMOTE_HOME" kandev
+  cp -a /home/kandev/.ssh "$KANDEV_REMOTE_HOME/.ssh" 2>/dev/null || true
+  chown -R kandev:kandev "$KANDEV_REMOTE_HOME"
+  chmod 700 "$KANDEV_REMOTE_HOME/.ssh" 2>/dev/null || true
+  chmod 600 "$KANDEV_REMOTE_HOME/.ssh/authorized_keys" 2>/dev/null || true
+fi
+
+# A mounted docker socket keeps the host's ownership, so the SSH user needs a
+# group with that GID to read it. Without this the daemon step fails with a
+# permission error, which is a real cause but not the one under test.
+if [ -S /var/run/docker.sock ]; then
+  SOCK_GID="$(stat -c %g /var/run/docker.sock)"
+  addgroup -g "$SOCK_GID" dockersock 2>/dev/null || true
+  addgroup kandev "$(getent group "$SOCK_GID" | cut -d: -f1)" 2>/dev/null || true
+fi
+
 # Run sshd in the foreground so docker logs and exit-codes propagate.
 mkdir -p /var/run/sshd /var/empty
-exec /usr/sbin/sshd -D -e
+exec /usr/sbin/sshd -D -e -p "$SSHD_PORT"
 `;
 
 const DOCKERFILE = `FROM alpine:3.20
@@ -87,6 +117,10 @@ RUN apk add --no-cache \\
     # directory" (the kernel can't find /lib64/ld-linux-x86-64.so.2).
     gcompat \\
     libstdc++ \\
+    # The remote Docker executor runs 'docker system dial-stdio' on this
+    # host to reach a daemon. Harmless for the SSH specs, which never
+    # invoke it.
+    docker-cli \\
  # Alpine sshd_config sets AllowTcpForwarding no, which makes sshd reject
  # every direct-tcpip channel request — exactly what the SSH executor's
  # local port forward needs. Override to yes via a config.d drop-in.
@@ -113,8 +147,10 @@ RUN apk add --no-cache \\
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
 RUN rm -f /usr/local/bin/npx
 COPY managed-runtime-npx.sh /usr/local/bin/npx
+COPY managed-runtime-npm.sh /usr/local/bin/npm
 RUN chmod +x /usr/local/bin/mock-agent
 RUN chmod +x /usr/local/bin/npx
+RUN chmod +x /usr/local/bin/npm
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -159,6 +195,10 @@ export function buildE2ESSHImage(): void {
     fs.copyFileSync(
       path.resolve(__dirname, "managed-runtime-npx.sh"),
       path.join(ctxDir, "managed-runtime-npx.sh"),
+    );
+    fs.copyFileSync(
+      path.resolve(__dirname, "managed-runtime-npm.sh"),
+      path.join(ctxDir, "managed-runtime-npm.sh"),
     );
     execFileSync("docker", ["build", "-t", SSH_E2E_IMAGE_TAG, ctxDir], {
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",

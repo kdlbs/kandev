@@ -46,8 +46,11 @@ vi.mock("./sleep-inhibition-settings", () => ({
 }));
 vi.mock("./todo-list-panel-settings", () => ({ TodoListPanelSettings: () => null }));
 vi.mock("./unread-divider-settings", () => ({ UnreadDividerSettings: () => null }));
+vi.mock("./unread-task-dot-settings", () => ({ UnreadTaskDotSettings: () => null }));
 vi.mock("./system/message-queue-settings", () => ({
   MessageQueueSettingsContent: () => <div data-testid="message-queue" />,
+}));
+vi.mock("./system/use-message-queue-settings-draft", () => ({
   useMessageQueueSettingsDraft: () => runtimeMocks.queue,
 }));
 vi.mock("./system/session-capacity-settings", () => ({
@@ -57,6 +60,7 @@ vi.mock("./system/use-session-capacity-settings", () => ({
   useSessionCapacitySettings: () => runtimeMocks.session,
 }));
 
+import { StateProvider } from "@/components/state-provider";
 import { TaskBehaviorSettings } from "./task-behavior-settings";
 
 beforeEach(() => {
@@ -84,10 +88,15 @@ vi.mock("@/hooks/domains/settings/use-settings-tab", async () => {
 vi.mock("./settings-save-provider", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./settings-save-provider")>()),
   useSettingsSaveCoordinator: () => ({ contributorStates: [] }),
+  useSettingsSaveContributor: vi.fn(),
 }));
 describe("TaskBehaviorSettings tabs", () => {
   it("starts in Tasks and reveals expanded runtime through a visible tab", () => {
-    render(<TaskBehaviorSettings />);
+    render(
+      <StateProvider>
+        <TaskBehaviorSettings />
+      </StateProvider>,
+    );
     expect(
       screen
         .getByRole("tab", { name: "settings:taskBehaviorTabTasks" })
@@ -103,11 +112,28 @@ describe("TaskBehaviorSettings tabs", () => {
   });
   it("does not steal the active tab when runtime loading fails", () => {
     runtimeMocks.queue.loadFailed = true;
-    render(<TaskBehaviorSettings />);
+    render(
+      <StateProvider>
+        <TaskBehaviorSettings />
+      </StateProvider>,
+    );
     expect(
       screen
         .getByRole("tab", { name: "settings:taskBehaviorTabTasks" })
         .getAttribute("aria-selected"),
     ).toBe("true");
   });
+});
+
+// @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.10
+it("exposes the labelled Agent close preference in Conversation", () => {
+  render(
+    <StateProvider>
+      <TaskBehaviorSettings />
+    </StateProvider>,
+  );
+  fireEvent.keyDown(screen.getByRole("tab", { name: "settings:taskBehaviorTabConversation" }), {
+    key: "Enter",
+  });
+  expect(screen.getByRole("combobox", { name: "settings:agentTabCloseButton" })).not.toBeNull();
 });

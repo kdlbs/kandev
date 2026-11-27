@@ -18,6 +18,7 @@ import { canUsePortForwarding, isPortForwardingEnabled } from "./port-forwarding
 
 export type PortForwardingToggleOptions = {
   openDialogOnEnable?: boolean;
+  preserveDialogOpen?: boolean;
 };
 
 export type PortForwardingVisibility = {
@@ -75,6 +76,7 @@ export function PortForwardingVisibilityProvider({
   const lastServerValueRef = useRef(persistedEnabled);
   const pendingServerValueRef = useRef<boolean | null>(null);
   const requestRef = useRef(0);
+  const openGenerationRef = useRef(0);
 
   const canToggle = !isArchived && canUsePortForwarding({ sessionId, isAgentctlReady });
 
@@ -104,20 +106,21 @@ export function PortForwardingVisibilityProvider({
   }, [isUpdating, persistedEnabled, taskKey]);
 
   useEffect(() => {
-    if (!canToggle) setDialogOpen(false);
-  }, [canToggle]);
+    openGenerationRef.current += 1;
+    setDialogOpen(false);
+  }, [canToggle, sessionId]);
 
   const togglePortForwarding = useCallback(
     async (options?: PortForwardingToggleOptions) => {
       if (!taskId || !canToggle || isUpdating) return;
       const previousEnabled = enabled;
       const nextEnabled = !enabled;
-      const requestId = requestRef.current + 1;
-      requestRef.current = requestId;
+      const requestId = ++requestRef.current;
+      const openGeneration = openGenerationRef.current;
 
       setEnabled(nextEnabled);
       setIsUpdating(true);
-      if (!nextEnabled) setDialogOpen(false);
+      if (!nextEnabled && !options?.preserveDialogOpen) setDialogOpen(false);
 
       try {
         await updateTaskPortForwarding(taskId, nextEnabled);
@@ -125,7 +128,11 @@ export function PortForwardingVisibilityProvider({
         pendingServerValueRef.current = nextEnabled;
         lastServerValueRef.current = nextEnabled;
         setEnabled(nextEnabled);
-        if (nextEnabled && options?.openDialogOnEnable) setDialogOpen(true);
+        const shouldOpen =
+          nextEnabled &&
+          options?.openDialogOnEnable &&
+          openGeneration === openGenerationRef.current;
+        if (shouldOpen) setDialogOpen(true);
       } catch {
         if (requestRef.current !== requestId) return;
         setEnabled(previousEnabled);

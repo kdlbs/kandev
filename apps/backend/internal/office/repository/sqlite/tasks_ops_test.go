@@ -78,39 +78,6 @@ func TestGetTaskWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestUpdateTaskState(t *testing.T) {
-	repo := newSearchTestRepo(t)
-	ctx := context.Background()
-
-	insertTask(t, repo, ctx, "us-1", "ws-1", "Title", "", "KAN-1")
-	insertTask(t, repo, ctx, "us-2", "ws-1", "Other", "", "KAN-2")
-
-	if err := repo.UpdateTaskState(ctx, "us-1", "IN_PROGRESS"); err != nil {
-		t.Fatalf("UpdateTaskState: %v", err)
-	}
-	row, err := repo.GetTaskByID(ctx, "us-1")
-	if err != nil {
-		t.Fatalf("GetTaskByID: %v", err)
-	}
-	if row.Status != "IN_PROGRESS" {
-		t.Errorf("state = %q, want IN_PROGRESS", row.Status)
-	}
-	// The neighbouring row keeps its state.
-	if other, err := repo.GetTaskByID(ctx, "us-2"); err != nil {
-		t.Fatalf("GetTaskByID(us-2): %v", err)
-	} else if other.Status != "TODO" {
-		t.Errorf("us-2 state = %q, want the untouched TODO", other.Status)
-	}
-
-	err = repo.UpdateTaskState(ctx, "missing", "COMPLETED")
-	if err == nil {
-		t.Fatal("UpdateTaskState(missing) = nil error, want not-found")
-	}
-	if !strings.Contains(err.Error(), "task not found: missing") {
-		t.Errorf("error = %q, want it to name the task", err)
-	}
-}
-
 func TestUpdateTaskPriorityAndProjectID(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
@@ -167,6 +134,9 @@ func TestUpdateTaskPriorityAndProjectID(t *testing.T) {
 func TestUpdateTaskParentID_NormalisesInheritParentWorkspace(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks(id,workspace_id,title) VALUES ('new-parent','ws-1','Parent')`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, parent_id, title, metadata, created_at, updated_at) VALUES
@@ -227,6 +197,9 @@ func TestUpdateTaskParentID_NormalisesInheritParentWorkspace(t *testing.T) {
 func TestUpdateTaskParentID_SameParentIsANoOpForWorkspaceMode(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
+	if _, err := repo.ExecRaw(ctx, `INSERT INTO tasks(id,workspace_id,title) VALUES ('parent-1','ws-1','Parent')`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO tasks (id, workspace_id, parent_id, title, metadata, created_at, updated_at)

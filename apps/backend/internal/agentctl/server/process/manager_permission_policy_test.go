@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func TestInjectedKandevPermissionPolicy(t *testing.T) {
@@ -163,22 +165,79 @@ func TestInjectedKandevPermissionPolicyCoversServerTools(t *testing.T) {
 	}
 }
 
+func TestAntigravityQualifiedKandevNamesRequireKnownUnambiguousInventory(t *testing.T) {
+	const toolName = "mcp__kandev__update_task_plan_kandev"
+	tests := []struct {
+		name        string
+		inventory   []string
+		known       bool
+		wantApprove bool
+	}{
+		{name: "unknown inventory", wantApprove: false},
+		{name: "native kandev registration", inventory: []string{"kandev"}, known: true, wantApprove: false},
+		{name: "known unique registration", known: true, wantApprove: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
+			manager.cfg.AgentType = acpcompat.AntigravityAgentID
+			manager.cfg.AuthPolicy = &acpcompat.AuthPolicy{
+				RuntimeVariant: acpcompat.AntigravityRuntimeCLI,
+			}
+			manager.antigravityMCPNamesKnown = test.known
+			manager.antigravityMCPNames = test.inventory
+			manager.builtinCatalog = func() map[mcpprofile.PackageID][]string {
+				return map[mcpprofile.PackageID][]string{
+					mcpprofile.PackageCore: {"update_task_plan_kandev"},
+				}
+			}
+
+			_, approved := manager.autoApproveInjectedKandevPermission(&adapter.PermissionRequest{
+				ToolName: permissionStringPtr(toolName),
+				Options: []adapter.PermissionOption{{
+					OptionID: "allow-once",
+					Kind:     streams.PermissionOptionKindAllowOnce,
+				}},
+			})
+			if approved != test.wantApprove {
+				t.Fatalf("qualified request approved = %t, want %t", approved, test.wantApprove)
+			}
+		})
+	}
+}
+
 func TestInjectedKandevPolicyRunsAfterBlanketApproval(t *testing.T) {
 	m := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
 	m.cfg.AutoApprovePermissions = true
+	m.updatesCh = make(chan adapter.AgentEvent, 1)
+	m.pendingPermissions = make(map[string]*PendingPermission)
 	toolName := "mcp__kandev__update_task_plan_kandev"
-	response, err := m.handlePermissionRequest(context.Background(), &adapter.PermissionRequest{
-		ToolName: &toolName,
-		Options: []adapter.PermissionOption{
-			{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
-			{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
-		},
-	})
-	if err != nil {
-		t.Fatalf("handlePermissionRequest returned error: %v", err)
+	type result struct {
+		response *adapter.PermissionResponse
+		err      error
 	}
-	if response == nil || response.OptionID != "allow-always" {
-		t.Fatalf("blanket response = %+v, want first offered allow-always", response)
+	resultCh := make(chan result, 1)
+	go func() {
+		response, err := m.handlePermissionRequest(context.Background(), &adapter.PermissionRequest{
+			ToolName: &toolName,
+			Options: []adapter.PermissionOption{
+				{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
+				{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
+			},
+		})
+		resultCh <- result{response, err}
+	}()
+	event := <-m.updatesCh
+	if event.AutoApprovedOptionID != "allow-always" || event.AutoApprovedOptionKind != string(streams.PermissionOptionKindAllowAlways) || event.AutoApprovalSource != streams.PermissionDecisionSourceAutoApprove || !event.AutoApprovalPending {
+		t.Fatalf("auto-approved decision = (%q, %q, %q), want allow-always with kind and source metadata", event.AutoApprovedOptionID, event.AutoApprovedOptionKind, event.AutoApprovalSource)
+	}
+	if _, err := m.ResolvePermission(event.RequestID, event.PendingID, "allow-always"); err != nil {
+		t.Fatal(err)
+	}
+	got := <-resultCh
+	if got.err != nil || got.response == nil || got.response.OptionID != "allow-always" {
+		t.Fatalf("blanket response = %+v, %v", got.response, got.err)
 	}
 }
 
@@ -229,6 +288,50 @@ func TestInjectedKandevPermissionPolicyRejectsUntrustedRequests(t *testing.T) {
 				t.Fatalf("approved = %v, response = %+v, want %v", approved, response, test.wantApproved)
 			}
 		})
+	}
+}
+
+func TestInjectedKandevPermissionPolicyUsesConfiguredMCPHost(t *testing.T) {
+	cfg, err := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !injectedKandevMCPConfigured(cfg) {
+		t.Fatal("generated configured-host MCP endpoints were not recognized as injected")
+	}
+
+	cfg.McpServers = []config.McpServerConfig{{
+		Name: "kandev", Type: "http", URL: "http://localhost:43210/mcp",
+	}}
+	if injectedKandevMCPConfigured(cfg) {
+		t.Fatal("localhost URL was trusted when the injected endpoint targets another host")
+	}
+}
+
+func TestBuiltinMCPInstanceApprovalMatchesExactScopedEndpoints(t *testing.T) {
+	cfg, err := (&config.Config{}).NewInstanceConfig(43210, &config.InstanceOverrides{InstanceID: "exec-1", ScopedMCPRoutes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := injectedKandevPermissionManager(t, cfg.McpServers)
+	m.cfg.InstanceID = cfg.InstanceID
+	m.cfg.ScopedMCPRoutes = cfg.ScopedMCPRoutes
+	m.cfg.MCPHost = cfg.MCPHost
+	toolName := "mcp__kandev__update_task_plan_kandev"
+	request := &adapter.PermissionRequest{ToolName: &toolName, Options: []adapter.PermissionOption{
+		{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
+		{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
+	}}
+	response, approved := m.autoApproveInjectedKandevPermission(request)
+	if !approved || response == nil || response.OptionID != "allow-once" {
+		t.Fatalf("scoped request = %+v, approved = %v; want allow-once approval", response, approved)
+	}
+
+	for _, forgedURL := range []string{"http://localhost:43210/mcp", "http://localhost:43210/i/other/mcp"} {
+		m.cfg.McpServers = []config.McpServerConfig{{Name: "kandev", Type: "http", URL: forgedURL}}
+		if response, approved := m.autoApproveInjectedKandevPermission(request); approved || response != nil {
+			t.Fatalf("forged endpoint %q approved with response %+v", forgedURL, response)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 // The TOGGLE_SIDEBAR shortcut lives on a global app-root listener (useAppShortcuts),
@@ -39,6 +40,9 @@ async function expectShortcutTogglesSidebar(page: Page, sidebar: Locator): Promi
 
   await page.keyboard.press(`${MODIFIER}+b`);
   await expect(sidebar).toHaveAttribute("data-collapsed", initial);
+  // The collapsed state updates before the width transition completes. Wait
+  // for that transition before a later measurement captures the next toggle.
+  await waitForFiniteAnimations(sidebar);
 }
 
 type SidebarToggleFrame = {
@@ -116,7 +120,13 @@ async function captureSidebarToggleFrames(
           : (transitionDurationsMs[widthTransitionIndex % transitionDurationsMs.length] ?? 0);
       const frames = [readFrame()];
       button.click();
-      const sampleUntil = performance.now() + 400;
+      const expectedCollapsed = label === "Collapse sidebar" ? "true" : "false";
+      const deadline = performance.now() + 5_000;
+      const transitionPending = () =>
+        panel.dataset.collapsed !== expectedCollapsed ||
+        panel
+          .getAnimations()
+          .some((animation) => animation.pending || animation.playState === "running");
       do {
         // rAF callbacks run before ResizeObserver delivery and paint. Hop through
         // a timer so each measurement reflects geometry the user actually saw.
@@ -124,7 +134,10 @@ async function captureSidebarToggleFrames(
           requestAnimationFrame(() => setTimeout(resolve, 0));
         });
         frames.push(readFrame());
-      } while (performance.now() < sampleUntil);
+        if (performance.now() > deadline) {
+          throw new Error(`Sidebar ${label} animation did not settle`);
+        }
+      } while (transitionPending());
       return { frames, widthTransitionDurationMs, transitionProperties };
     },
     { label: buttonLabel, paneTarget: target },

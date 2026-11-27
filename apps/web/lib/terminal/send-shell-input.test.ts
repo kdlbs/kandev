@@ -10,7 +10,8 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 // Imported after the mock so it picks up the mocked module.
-const { sendShellInput } = await import("./send-shell-input");
+const { sendShellInput, sendShellArrow, sendActiveTerminalInput } =
+  await import("./send-shell-input");
 
 const SESSION = "sess-1";
 
@@ -19,6 +20,61 @@ beforeEach(() => {
   clientFactory = () => ({ send: sendMock });
   useShellModifiersStore.getState().reset();
   setActiveTerminalSender(null);
+});
+
+describe("mobile shell arrows", () => {
+  it("uses the current active terminal mode for each arrow without rewriting native input", () => {
+    const sender = vi.fn();
+    let application = false;
+    setActiveTerminalSender(sender, SESSION, () => application);
+    for (const [key, final] of [
+      ["up", "A"],
+      ["down", "B"],
+      ["right", "C"],
+      ["left", "D"],
+    ] as const) {
+      sendShellArrow(SESSION, key);
+      expect(sender).toHaveBeenLastCalledWith(`\x1b[${final}`);
+      application = true;
+      sendShellArrow(SESSION, key);
+      expect(sender).toHaveBeenLastCalledWith(`\x1bO${final}`);
+      application = false;
+    }
+    application = true;
+    sendShellInput(SESSION, "\x1b[A");
+    expect(sender).toHaveBeenLastCalledWith("\x1b[A");
+    sendShellInput(SESSION, "paste\x1b[A");
+    expect(sender).toHaveBeenLastCalledWith("paste\x1b[A");
+  });
+
+  it("uses normal fallback for a missing, mismatched, or failing sender", () => {
+    sendShellArrow(SESSION, "up");
+    expect(lastFrameData()).toBe("\x1b[A");
+    const sender = vi.fn(() => {
+      throw new Error("closed");
+    });
+    setActiveTerminalSender(sender, "other", () => true);
+    sendShellArrow(SESSION, "left");
+    expect(sender).not.toHaveBeenCalled();
+    expect(lastFrameData()).toBe("\x1b[D");
+    setActiveTerminalSender(sender, SESSION, () => true);
+    useShellModifiersStore.getState().toggleCtrl();
+    sendShellArrow(SESSION, "right");
+    expect(sender).toHaveBeenCalledWith("\x1bOC");
+    expect(lastFrameData()).toBe("\x1b[C");
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
+  });
+
+  it("preserves modifiers when the fallback client is unavailable and keeps sticky state", () => {
+    clientFactory = () => null;
+    useShellModifiersStore.getState().toggleShift();
+    sendShellArrow(SESSION, "up");
+    expect(useShellModifiersStore.getState().shift.latched).toBe(true);
+    useShellModifiersStore.getState().toggleShift();
+    setActiveTerminalSender(vi.fn(), SESSION, () => true);
+    sendShellArrow(SESSION, "down");
+    expect(useShellModifiersStore.getState().shift.sticky).toBe(true);
+  });
 });
 
 function lastFrameData(): string | undefined {
@@ -111,5 +167,35 @@ describe("sendShellInput", () => {
         payload: { session_id: SESSION, data: "ls" },
       });
     });
+  });
+});
+
+describe("agent terminal input", () => {
+  it("never falls back to shell input when the agent socket is absent", () => {
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(false);
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+  });
+  it("preserves modifiers when a disconnected sender refuses input", () => {
+    const sender = vi.fn(() => false);
+    setActiveTerminalSender(sender, SESSION);
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(false);
+    expect(sender).toHaveBeenCalledWith("\x03");
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+  });
+  it("applies modifiers once and keeps input in the active agent session", () => {
+    const sender = vi.fn(() => true);
+    setActiveTerminalSender(sender, SESSION);
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput("another-session", "c")).toBe(false);
+    expect(sender).not.toHaveBeenCalled();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(true);
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(sender).toHaveBeenCalledWith("\x03");
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
   });
 });

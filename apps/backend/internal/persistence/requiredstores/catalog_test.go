@@ -10,15 +10,15 @@ func TestCatalog(t *testing.T) {
 
 	wantIDs := map[string]struct{}{
 		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
-		"azure-devops": {}, "canvas": {}, "delivery": {}, "editor": {},
+		"canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
-		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
+		"organizations": {}, "plugin-command-receipts": {}, "plugin-instance-state": {}, "plugin-instances": {},
 		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
 		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},
 		"schema-meta": {}, "secrets": {}, "sentry": {}, "storage": {}, "system-settings": {},
 		"task": {}, "task-share": {}, "telemetry-contract": {}, "terminal": {},
-		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {},
+		"user": {}, "utility": {}, "workflow": {}, "workflow-sync": {}, "prompt-sync": {},
 	}
 	seen := make(map[string]struct{}, len(catalog))
 	for _, descriptor := range catalog {
@@ -54,6 +54,70 @@ func TestCatalog(t *testing.T) {
 	if second[0].ID == "changed" || second[0].RequiredTables[0] == "changed" {
 		t.Fatal("Catalog() exposes mutable internal data")
 	}
+}
+
+func TestAgentSettingsRequiresProfileOrderTables(t *testing.T) {
+	for _, descriptor := range Catalog() {
+		if descriptor.ID != "agent-settings" {
+			continue
+		}
+		required := map[string]bool{}
+		for _, table := range descriptor.RequiredTables {
+			required[table] = true
+		}
+		for _, table := range []string{"agents", "agent_profiles", "agent_profile_orders"} {
+			if !required[table] {
+				t.Errorf("agent-settings required tables omit %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("agent-settings descriptor not found")
+}
+
+func TestTaskCatalogIncludesDurableSessionTables(t *testing.T) {
+	var task Descriptor
+	for _, descriptor := range Catalog() {
+		if descriptor.ID == "task" {
+			task = descriptor
+			break
+		}
+	}
+	if task.ID == "" {
+		t.Fatal("task descriptor is missing")
+	}
+	want := map[string]struct{}{
+		"harness_session_generations": {}, "session_restore_attempts": {},
+		"session_continuation_snapshots": {}, "session_recovery_blocks": {},
+		"agent_delivery_submissions": {}, "agent_delivery_inbox": {},
+		"agent_delivery_cursors": {}, "agent_delivery_effects": {},
+		"agent_delivery_cleanup_jobs": {}, "agent_delivery_retention_state": {},
+	}
+	for _, table := range task.RequiredTables {
+		delete(want, table)
+	}
+	if len(want) != 0 {
+		t.Fatalf("task descriptor is missing durable tables: %v", want)
+	}
+}
+
+func TestNotificationCatalogIncludesWebPushTables(t *testing.T) {
+	for _, descriptor := range Catalog() {
+		if descriptor.ID != "notification" {
+			continue
+		}
+		got := make(map[string]bool, len(descriptor.RequiredTables))
+		for _, table := range descriptor.RequiredTables {
+			got[table] = true
+		}
+		for _, table := range []string{"webpush_vapid_keys", "webpush_subscriptions"} {
+			if !got[table] {
+				t.Errorf("notification descriptor omits %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("notification descriptor is missing")
 }
 
 func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
@@ -107,5 +171,47 @@ func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 				t.Fatal("ValidateCatalog() error = nil, want error")
 			}
 		})
+	}
+}
+
+func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
+	want := []string{
+		"coordinator_wakes", "coordinator_unattended_turns", "coordinator_unattended_denials",
+		"coordinator_class_changes", "coordinator_class_reviews", "coordinator_pending_changes",
+	}
+	for _, d := range Catalog() {
+		if d.ID != "coordinator" {
+			continue
+		}
+		have := map[string]bool{}
+		for _, table := range d.RequiredTables {
+			have[table] = true
+		}
+		for _, table := range want {
+			if !have[table] {
+				t.Errorf("coordinator entry is missing required table %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("coordinator entry not found in the catalog")
+}
+
+func TestBuiltinMCPPolicyTablesAreRequired(t *testing.T) {
+	expected := map[string]string{"task": "task_builtin_mcp_preferences", "agent-settings": "workspace_builtin_mcp_policies"}
+	for _, descriptor := range Catalog() {
+		table, applicable := expected[descriptor.ID]
+		if !applicable {
+			continue
+		}
+		found := false
+		for _, actual := range descriptor.RequiredTables {
+			if actual == table {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s does not probe required policy table %s", descriptor.ID, table)
+		}
 	}
 }

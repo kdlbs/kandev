@@ -34,7 +34,15 @@ func workspaceSourcesNeedManagedRoot(req *LaunchRequest) bool {
 	if req == nil || len(req.WorkspaceFolders) == 0 {
 		return false
 	}
-	return len(req.RepoSpecs())+len(req.WorkspaceFolders) > 1
+	return req.WorkspaceLayout != workspaceLayoutCurrentRoot && req.WorkspaceLayout != workspaceLayoutKandevDirectory &&
+		len(req.RepoSpecs())+len(req.WorkspaceFolders) > 1
+}
+
+func workspaceSourceLinkLayout(layout string, repositoryCount int, folders []WorkspaceFolderSpec) string {
+	if layout == "" && len(folders) > 0 && repositoryCount+len(folders) > 1 {
+		return workspaceLayoutTaskRoot
+	}
+	return layout
 }
 
 // workspaceLinkOwner uses the scratch marker's task ID when a legacy or local
@@ -132,6 +140,9 @@ func (m *Manager) resolveManagedWorkspaceRoot(
 		return resolvedPath
 	}
 	if req.UseWorktree && prepResult != nil && prepResult.WorkspacePath != "" {
+		if launchUsesTaskRoot(req) {
+			return prepResult.WorkspacePath
+		}
 		return filepath.Dir(prepResult.WorkspacePath)
 	}
 	return m.resolveScratchWorkspace(ctx, req)
@@ -143,15 +154,17 @@ func (m *Manager) reconcileWorkspaceSourcesForLaunch(
 	workspacePath string,
 ) error {
 	owner := workspaceLinkOwner(req.TaskID, req.TaskDirName)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
+	if err := reconcileWorkspaceSourcesAtLayout(ctx, workspacePath, req.WorkspaceLayout, req.WorkspaceFolders, owner); err != nil {
 		return err
 	}
 	if !workspaceRepositoryLinksSupported(req.ExecutorType) {
 		return nil
 	}
-	return reconcileWorkspaceRepositories(
-		workspacePath,
-		workspaceRepositorySpecsFromLaunch(req),
+	repositories := workspaceRepositorySpecsFromLaunch(req)
+	layout := workspaceSourceLinkLayout(req.WorkspaceLayout, len(repositories), req.WorkspaceFolders)
+	return reconcileWorkspaceRepositoriesAtLayout(
+		workspacePath, layout,
+		repositories,
 		m.logger,
 		owner,
 	)

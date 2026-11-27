@@ -13,6 +13,6 @@
   "emptyTitleUnnamedWorkspace": "此工作区中没有任何失败事项。",
   "emptyDescription": "失败的任务会显示在此处以供排查,永远不会计入侧边栏的总数。",
   "errorTitle": "无法加载失败的任务",
-  "errorDescription": "加载此工作区中失败的任务时出错,系统将自动重试。",
+  "errorDescription": "无法加载失败的任务。Kandev 将自动重试。",
   "truncatedNotice": "仅显示最先出现的失败任务,还有更多等待处理。"
 }

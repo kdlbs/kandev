@@ -12,6 +12,7 @@ import {
   IconMenu2,
   IconMessageCircle,
   IconTerminal2,
+  IconHierarchy3,
   IconTimeline,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -40,6 +41,7 @@ import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { SurfaceAction } from "@/components/actions/surface-action";
 import type { ComponentProps, ReactNode, RefObject } from "react";
 
 type KanbanHeaderProps = {
@@ -63,6 +65,7 @@ type ViewToggleItem = {
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
   { value: "kanban", icon: IconLayoutKanban, labelKey: "kanban:kanban" },
   { value: "pipeline", icon: IconTimeline, labelKey: "kanban:pipeline" },
+  { value: "graph", icon: IconHierarchy3, labelKey: "kanban:graph" },
   { value: "threads", icon: IconColumns, labelKey: "kanban:threads" },
   { value: "list", icon: IconList, labelKey: "kanban:list" },
 ];
@@ -186,29 +189,27 @@ function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="icon-lg"
+      <SurfaceAction
+        surface="topbar"
+        presentation="mobile"
+        label={t("sidebar:quickTerminal")}
+        icon={<IconTerminal2 className="h-4 w-4" />}
         onClick={handleOpenQuickTerminal}
-        className="!size-11 cursor-pointer"
-        aria-label={t("sidebar:quickTerminal")}
         data-testid="tablet-quick-terminal-button"
-      >
-        <IconTerminal2 className="h-4 w-4" />
-      </Button>
-      <Button
-        variant="outline"
-        size="icon-lg"
+      />
+      <SurfaceAction
+        surface="topbar"
+        presentation="mobile"
+        label={quickChatLabel}
+        icon={
+          <span className="relative flex">
+            <IconMessageCircle className="h-4 w-4" />
+            <QuickChatActivityIndicator activity={quickChatActivity} />
+          </span>
+        }
         onClick={handleOpenQuickChat}
-        className="!size-11 cursor-pointer"
-        aria-label={quickChatLabel}
         data-testid="tablet-quick-chat-button"
-      >
-        <span className="relative flex">
-          <IconMessageCircle className="h-4 w-4" />
-          <QuickChatActivityIndicator activity={quickChatActivity} />
-        </span>
-      </Button>
+      />
     </>
   );
 }

@@ -63,4 +63,18 @@ describe("getWorkspaceId", () => {
       }),
     ).toBeNull();
   });
+
+  it("keeps the selected terminal workspace mounted while the dialog is dismissed", () => {
+    expect(
+      getWorkspaceId({
+        sessions,
+        terminalTabs,
+        isOpen: false,
+        activeKind: "terminal",
+        activeSessionId: "session-b",
+        activeTerminalTabId: "terminal-a",
+        activeWorkspace: "ws-b",
+      }),
+    ).toBe("ws-a");
+  });
 });

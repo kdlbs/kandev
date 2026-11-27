@@ -3,7 +3,8 @@ package service
 import (
 	"math"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/shared"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -13,7 +14,7 @@ import (
 // persisting on that task's metadata. AC-OFFICE-RUN-CAUSATION-001.17: the
 // system writes this itself from the server-side run record, never from
 // creating-agent input.
-func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
+func carrierMetadataFromRun(run *runsmodels.Run) map[string]interface{} {
 	return carrierMetadataFromRunWithActor(run, run.ActorKind, run.ActorID)
 }
 
@@ -21,14 +22,14 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 // the agent that performs the task action. The run actor can be a user or a
 // system actor that started the session, which is different from the agent
 // executing the current turn.
-func carrierMetadataFromRunForAgent(run *models.Run, agentID string) map[string]interface{} {
+func carrierMetadataFromRunForAgent(run *runsmodels.Run, agentID string) map[string]interface{} {
 	if agentID == "" {
 		return carrierMetadataFromRun(run)
 	}
-	return carrierMetadataFromRunWithActor(run, models.ActorKindAgent, agentID)
+	return carrierMetadataFromRunWithActor(run, runsmodels.ActorKindAgent, agentID)
 }
 
-func carrierMetadataFromRunWithActor(run *models.Run, actorKind models.ActorKind, actorID string) map[string]interface{} {
+func carrierMetadataFromRunWithActor(run *runsmodels.Run, actorKind runsmodels.ActorKind, actorID string) map[string]interface{} {
 	return map[string]interface{}{
 		taskmodels.MetaKeyOfficeCarrierCausationID:    run.ChainCausationID,
 		taskmodels.MetaKeyOfficeCarrierCausationDepth: run.CausationDepth,
@@ -47,18 +48,18 @@ func carrierMetadataFromRunWithActor(run *models.Run, actorKind models.ActorKind
 // on the source run; callers that know an agent is performing the action use
 // carrierFromRunForAgent so the acting agent is recorded separately from the
 // source run's original actor.
-func carrierFromRun(run *models.Run) TaskBoundaryCarrier {
+func carrierFromRun(run *runsmodels.Run) TaskBoundaryCarrier {
 	return carrierFromRunWithActor(run, run.ActorKind, run.ActorID)
 }
 
-func carrierFromRunForAgent(run *models.Run, agentID string) TaskBoundaryCarrier {
+func carrierFromRunForAgent(run *runsmodels.Run, agentID string) TaskBoundaryCarrier {
 	if agentID == "" {
 		return carrierFromRun(run)
 	}
-	return carrierFromRunWithActor(run, models.ActorKindAgent, agentID)
+	return carrierFromRunWithActor(run, runsmodels.ActorKindAgent, agentID)
 }
 
-func carrierFromRunWithActor(run *models.Run, actorKind models.ActorKind, actorID string) TaskBoundaryCarrier {
+func carrierFromRunWithActor(run *runsmodels.Run, actorKind runsmodels.ActorKind, actorID string) TaskBoundaryCarrier {
 	return TaskBoundaryCarrier{
 		CausationID:    run.ChainCausationID,
 		CausationDepth: run.CausationDepth,
@@ -103,7 +104,7 @@ type TaskBoundaryCarrier struct {
 	CreatingRunID  string
 	HumanRooted    bool
 	RoutineID      string
-	ActorKind      models.ActorKind
+	ActorKind      runsmodels.ActorKind
 	ActorID        string
 }
 
@@ -258,12 +259,12 @@ func carrierNonNegativeInt(metadata map[string]interface{}, key string) (int, bo
 	return int(f), true
 }
 
-func carrierActorKindValue(metadata map[string]interface{}, key string) models.ActorKind {
+func carrierActorKindValue(metadata map[string]interface{}, key string) runsmodels.ActorKind {
 	s, ok := carrierTypedString(metadata, key)
 	if !ok {
 		return ""
 	}
-	kind := models.ActorKind(s)
+	kind := runsmodels.ActorKind(s)
 	if !kind.Valid() {
 		carrierInvalid(key, "unrecognized")
 		return ""

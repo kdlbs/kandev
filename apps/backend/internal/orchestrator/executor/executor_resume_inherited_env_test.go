@@ -85,12 +85,45 @@ func TestPrepareResumeRepositorySettings_RejectsInheritedExecutorMismatch(t *tes
 		ExecutorType: string(models.ExecutorTypeLocalDocker),
 	}
 
-	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req)
+	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req, ResumeOptions{})
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("prepareResumeRepositorySettings() error = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
 	if session.TaskEnvironmentID != "env-parent" {
 		t.Fatalf("session TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
+func TestPrepareResumeRepositorySettings_RejectsCanonicalChildExecutorMismatch(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.taskEnvironments["env-child"] = &models.TaskEnvironment{
+		ID:           "env-child",
+		TaskID:       "task-child",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	task := &v1.Task{
+		ID:          "task-child",
+		WorkspaceID: "ws-1",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "inherit_parent"},
+		},
+	}
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            task.ID,
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-child",
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       task.ID,
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+	}
+
+	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req, ResumeOptions{})
+	if !errors.Is(err, models.ErrWorkspaceExecutorMismatch) {
+		t.Fatalf("prepareResumeRepositorySettings() error = %v, want ErrWorkspaceExecutorMismatch", err)
 	}
 }
 

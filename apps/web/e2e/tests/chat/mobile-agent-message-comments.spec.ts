@@ -1,11 +1,11 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import {
-  openSeededAgentReply,
+  openSeededWaitingAgentReply,
   openSeededQuickChatReply,
   SELECTED_REPLY_TEXT,
   selectAgentReplyText,
-  waitForAgentSessionInput,
 } from "./agent-message-comments-helpers";
 
 async function expectTouchTarget(locator: Locator) {
@@ -33,6 +33,23 @@ async function expectDrawerContained(page: Page, drawer: Locator) {
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
+async function expectCommentInUtilityRow(chat: Locator, trigger: Locator) {
+  const controls = chat.getByTestId("chat-status-bar-right-controls");
+  // The comment action joins the transcript utility icons instead of adding a row.
+  await expect(controls.getByTestId("agent-message-comment-trigger")).toHaveCount(1);
+  const triggerBox = await trigger.boundingBox();
+  const utilityBox = await controls
+    .locator("button:visible")
+    .filter({ hasNot: chat.page().getByTestId("agent-message-comment-trigger") })
+    .first()
+    .boundingBox();
+  if (!triggerBox || !utilityBox) throw new Error("Expected measurable comment and utility icons");
+  expect(
+    Math.abs(triggerBox.y + triggerBox.height / 2 - (utilityBox.y + utilityBox.height / 2)),
+  ).toBeLessThanOrEqual(2);
+  expect(triggerBox.width).toBeLessThanOrEqual(48);
+}
+
 test.describe("Agent message comments on mobile", () => {
   test("opens the native drawer and Run sends the comment immediately", async ({
     testPage,
@@ -40,20 +57,24 @@ test.describe("Agent message comments on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { task, body } = await openSeededAgentReply(
+    const { task, body } = await openSeededWaitingAgentReply(
       testPage,
       apiClient,
       seedData,
       "Mobile Agent Message Comments",
     );
 
-    // Run sends directly only when the session is ready for input. The seeded
-    // reply can be visible before the backend reports that state on mobile.
-    await waitForAgentSessionInput(apiClient, task.id, task.session_id!);
+    // The fixture seeds a completed agent turn in a waiting session, so Run
+    // sends directly and does not depend on mock-agent completion timing.
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
+    const chat = body.locator('xpath=ancestor::*[@data-testid="session-chat"][1]');
+    const commentTrigger = chat.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
     await expectTouchTarget(commentTrigger);
+    await expectCommentInUtilityRow(chat, commentTrigger);
+    expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
+      SELECTED_REPLY_TEXT,
+    );
     await commentTrigger.click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
@@ -66,6 +87,22 @@ test.describe("Agent message comments on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await drawer.getByTestId("agent-message-comment-input").fill("Run with this correction.");
+    const attachmentTrigger = drawer.getByTestId("comment-attachment-trigger");
+    await expectTouchTarget(attachmentTrigger);
+    await attachmentTrigger.tap();
+    const manager = testPage.getByTestId("comment-attachment-manager");
+    await expect(manager).toBeVisible();
+    await expectTouchTarget(manager.getByRole("button", { name: "Add files" }));
+    const attachmentId = await attachCommentFile(testPage, drawer, "reply-note.txt");
+    await expect(manager.getByTestId("comment-attachment-row")).toHaveAttribute(
+      "data-status",
+      "ready",
+    );
+    await testPage.keyboard.press("Escape");
+    await expect(manager).toBeHidden();
+    await expect(drawer.getByTestId("agent-message-comment-input")).toHaveValue(
+      "Run with this correction.",
+    );
     await runButton.click();
 
     await expect(drawer).not.toBeVisible({ timeout: 15_000 });
@@ -78,7 +115,9 @@ test.describe("Agent message comments on mobile", () => {
               message.author_type === "user" &&
               message.content.includes("### Agent Message Comments") &&
               message.content.includes(SELECTED_REPLY_TEXT) &&
-              message.content.includes("Run with this correction."),
+              message.content.includes("Run with this correction.") &&
+              Array.isArray(message.metadata?.attachments) &&
+              message.metadata.attachments.some((file) => file.attachment_id === attachmentId),
           );
         },
         { timeout: 20_000 },
@@ -100,7 +139,7 @@ test.describe("Agent message comments on mobile", () => {
     );
 
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
-    await testPage.getByTestId("agent-message-comment-trigger").click();
+    await dialog.getByTestId("agent-message-comment-trigger").click();
     const drawer = testPage.getByTestId("agent-message-comment-drawer");
     await expect(drawer).toBeVisible();
     const input = drawer.getByTestId("agent-message-comment-input");

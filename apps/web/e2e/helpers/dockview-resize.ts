@@ -7,6 +7,24 @@ import { dwell } from "./causal-waits";
 
 export const WIDE_VIEWPORT = { width: 1600, height: 900 };
 
+/** Prepare the real workspace used by layout cases without running a prompt. */
+export async function prepareLayoutTask(apiClient: ApiClient, seedData: SeedData, title: string) {
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    prepare_session: true,
+    agent_profile_id: seedData.agentProfileId,
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const sessionId = task.session_id;
+  if (!sessionId) throw new Error(`${title} did not prepare a session`);
+  const { sessions } = await apiClient.listTaskSessions(task.id);
+  const prepared = sessions.find((entry) => entry.id === sessionId);
+  expect(prepared?.state).toBe("CREATED");
+  expect(prepared?.task_environment_id).toBeTruthy();
+  return { ...task, session_id: sessionId };
+}
+
 /** Open a fresh task at the given (or wide-default) viewport and wait for
  *  the desktop dockview layout to settle. Shared by every pane-resize spec. */
 export async function openWideTask(
@@ -17,21 +35,15 @@ export async function openWideTask(
   viewport: { width: number; height: number } = WIDE_VIEWPORT,
 ): Promise<SessionPage> {
   await page.setViewportSize(viewport);
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const task = await prepareLayoutTask(apiClient, seedData, title);
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForDockviewReady();
+  const { sessions } = await apiClient.listTaskSessions(task.id);
+  const prepared = sessions.find((entry) => entry.id === task.session_id);
+  expect(prepared?.state).toBe("CREATED");
+  expect(prepared?.task_environment_id).toBeTruthy();
   return session;
 }
 

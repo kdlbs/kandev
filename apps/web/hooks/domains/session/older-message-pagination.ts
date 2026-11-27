@@ -1,3 +1,4 @@
+import { captureActiveTurnWindowObservation } from "@/lib/state/slices/session/turn-actions";
 import type { useAppStoreApi } from "@/components/state-provider";
 import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger } from "@/lib/debug/log";
@@ -30,9 +31,9 @@ const inFlightBySession = new Map<string, SessionFlights>();
 
 /**
  * Shared per-session older-message coordinator. All older-message consumers —
- * the panel sentinel, the native transcript sentinel, automatic backfill, and
- * the last-prompt/drain preloads — route through here so one (sessionId,
- * cursor) request serves every caller with the first caller's limit, no
+ * the native transcript sentinel, automatic backfill, and the last-prompt/drain
+ * preloads — route through here so one (sessionId, cursor) request serves every
+ * caller with the first caller's limit, no
  * duplicate request or merge can be issued for one cursor, and `isLoadingMore`
  * cannot be cleared mid-flight by another consumer.
  *
@@ -46,8 +47,9 @@ const inFlightBySession = new Map<string, SessionFlights>();
 /**
  * Returns the in-flight older-page request for (sessionId, cursor), or null
  * when none is pending. Callers use this BEFORE their local loading guards so
- * a concurrent caller (panel sentinel during transcript loading or automatic
- * backfill) joins the existing promise instead of skipping or duplicating.
+ * a concurrent caller (automatic backfill during transcript loading or a
+ * last-prompt preload) joins the existing promise instead of skipping or
+ * duplicating.
  */
 export function joinOlderMessages(
   sessionId: string,
@@ -104,10 +106,13 @@ async function performRequest(
   store: SessionMessageStore,
 ): Promise<OlderPageResult> {
   debug("older page: requesting", { sessionId, before: cursor, limit });
+  const turnWindowObservation = captureActiveTurnWindowObservation(store.getState(), sessionId);
+  const turnHydrationEpoch = turnWindowObservation.reconcileEpoch;
   const response = await listTaskSessionMessages(sessionId, {
     limit,
     before: cursor,
     sort: "desc",
+    include_turns: true,
   });
   const ordered = [...(response.messages ?? [])].reverse();
   // After reversing, ordered[0] is the oldest message in this batch. A
@@ -136,6 +141,17 @@ async function performRequest(
       hasMore,
       oldestCursor: newOldestCursor,
     });
+    if (response.turn_coverage) {
+      store
+        .getState()
+        .mergeTurnsWindow(
+          sessionId,
+          response.turns ?? [],
+          response.turn_coverage,
+          turnHydrationEpoch,
+          turnWindowObservation,
+        );
+    }
   }
   return {
     count: ordered.length,

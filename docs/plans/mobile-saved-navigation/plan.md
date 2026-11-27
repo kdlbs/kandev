@@ -12,6 +12,14 @@ legacy_specs: []
 
 # Mobile saved navigation
 
+## Successor
+
+[Navigation hierarchy](../navigation-hierarchy/plan.md) deliberately proposes
+replacing this package's tasks-before-tools order while preserving saved
+visibility, relative tool order, setup, and plugin deduplication. The completed
+results below describe the earlier requirement. New work and updated order
+assertions belong to the successor package.
+
 ## Overview
 
 Restore the phone menu hierarchy after the first sidebar customization. The user

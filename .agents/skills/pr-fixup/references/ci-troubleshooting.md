@@ -257,16 +257,16 @@ scripts/pr-state --summary <PR>
 
 Only debug code if the rerun fails with an actual lint, test, or build error.
 
-**E2E container setup failures:** If an E2E Containers shard fails during setup
-before tests run, check for dependency or registry failures. Patterns such as
-`packages.microsoft.com ... 403 Forbidden`, `docker/login-action@v3`,
-`Error response from daemon: Get "https://ghcr.io/v2/"`, `ghcr.io/token`,
-`docker buildx imagetools inspect`, `Could not resolve an immutable digest`,
-`ghcr.io/kdlbs/kandev-ci:runtime-latest`, `context deadline exceeded`, or
-`Client.Timeout exceeded while awaiting headers` are infrastructure/package-
-registry issues, not app or test failures.
-If GitHub rejects `gh run rerun <run-id> --failed` while the workflow is still
-active, wait for the workflow/report job to finish and retry.
+**E2E setup failures:** If an E2E job fails before Playwright, inspect the exact
+job endpoint/annotations and verify named artifacts with
+`gh api repos/<owner>/<repo>/actions/runs/<run-id>/artifacts` and
+`gh run download <run-id> --name <artifact> --dir <tmp>`. `Failed to
+ListArtifacts` or intermediary HTTP 403 is artifact transport/setup failure,
+not a test flake; inspect the workflow download retry contract and keep a
+persistent failure blocked. After a workflow fix, require a fresh exact-head
+run. Container setup errors such as `packages.microsoft.com ... 403`,
+`ghcr.io/token`, or daemon timeouts are likewise infrastructure; wait for an
+active workflow to finish before retrying a rejected `gh run rerun --failed`.
 
 **Third-party action pnpm auto-install failures:** If an action detects pnpm
 and fails with `ERR_PNPM_ADDING_TO_ROOT`, inspect the pinned action bundle and
@@ -312,89 +312,14 @@ The artifact JSONL may start with `go: downloading ...` or other non-JSON
 preamble lines; skip those lines when parsing so the recorded test name can be
 reproduced exactly.
 
-## E2E Failures
-
-If any failing check is an E2E test:
-
-1. Read the `/e2e` skill for debugging guidance, test patterns, and commands.
-2. Identify the exact failing spec/test from logs before changing code.
-3. Fix the root cause; never increase timeouts to hide flakes.
-4. Run the exact failed spec/title locally before a full shard. CI logs hide
-   in-DOM React render errors that often show up in
-   `e2e/test-results/<test>/error-context.md`.
-
-If a failed E2E action leaves the browser on a detail route, inspect the
-rendered confirmation dialog and recent interaction-contract changes before
-changing router code or increasing route waits. A new intentional confirmation
-dialog is a navigation gate: update the test to assert and confirm the dialog
-instead of altering navigation to bypass it.
-
-Before attributing an E2E failure to product code, compare the failed run SHA
-and `checks_head_sha` with local `HEAD`. PR workflows may test GitHub's
-synthetic merge commit, so reproduce the exact base-plus-head merge (or checked
-merge ref) with CI environment, retries disabled, and the same shard/order;
-verify the checkout SHA before interpreting the result.
-
-If a focused reproduction reports `No tests found`, a title mismatch, or a 404
-for a workflow or API path, first verify the checked-out test title and compare
-the PR with the authoritative current base: record `base_head_oid`, the merge
-base, and `git diff <base>...HEAD`. An old branch can make an apparent product
-failure disappear because the fix and updated test already landed on the base.
-If the fix is already upstream, update the branch only with authorization and
-invalidate all prior exact-head CI evidence.
-
-When a shard is cancelled and aggregate E2E/report gates fail, treat the
-aggregate failures as cascading until the concrete shard is inspected. Identify
-the cancelled job and timeout, run its exact manifest-selected shard without
-retry masking, then rerun the failed workflow jobs once. Classify it as
-infrastructure only if the timeout repeats without an assertion failure.
-
-Useful focused commands:
+PostgreSQL repository cohorts use `postgres-repository-<cohort>` artifacts. If
+a cohort log names only the package or omits the failing test, download the
+matching artifact and search `results.jsonl`:
 
 ```bash
-scripts/run-quiet build -- make build-backend build-web
-scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e:raw -- tests/path/to/failing.spec.ts'
-scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e:raw -- tests/path/to/failing.spec.ts -g "exact failing test title"'
+gh run download <run-id> --name postgres-repository-<cohort> --dir <temp>
+rg -n '"Action":"fail"' <temp>
 ```
 
-An isolated pass does not invalidate a CI failure, and a spec outside the PR
-diff remains part of fixup scope. Re-run it with retries disabled under CI
-resource limits and preserve the failed shard's ordering. If that exposes a
-race, stale state, or interaction leak, fix it and stress the smallest
-reproducing sequence before running the full affected shard. Never use a
-failed-job rerun as a substitute for explaining and fixing a valid test failure.
-
-When a UI copy rename is intentional, search E2E specs for old visible text
-before debugging deeper. Prefer updating assertions to the new label while
-keeping stable routes unchanged when route compatibility is intentional.
-
-For repeated failures, do not dismiss them as flaky. Compare per-shard runtime
-against recent `main` runs and reproduce the exact failing spec locally. A
-shard that is much slower on the PR than on `main`, or cancelled exactly at the
-job timeout boundary, usually indicates real test failures plus retries.
-
-For pending E2E matrix shards, inspect the workflow once for a compact list
-instead of repeatedly dumping the full checks table:
-
-```bash
-gh run view <run-id> --json status,conclusion,jobs \
-  --jq '{status, conclusion, remaining: [.jobs[] | select(.status != "completed" or .conclusion != "success") | {name, status, conclusion}]}'
-```
-
-For an explicit user requirement that an E2E run contain no flakes or retries,
-run the deterministic blob audit after the exact-head E2E merge report
-completes. Download the matching artifacts first:
-
-```bash
-gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>
-python3 scripts/playwright-blob-audit <tmp>
-```
-
-It recursively reads `report-*.zip` and `report.jsonl` artifacts, reports
-attempts, retry attempts, `onTestEnd` status counts, and results with errors,
-and exits nonzero for retries, errors, parse failures, or unexpected statuses.
-Do not make this extra artifact audit part of ordinary PR fixup; a normal green
-aggregate check is sufficient unless the no-flakes requirement is explicit. A
-nonzero audit keeps the PR from being called clean or flake-free. When a
-comparable baseline audit exists, report the PR-versus-baseline retry/error delta;
-shared baseline flakes are evidence, not permission to call the PR flake-free.
+For E2E-specific triage, load
+[E2E failure triage](e2e-failure-triage.md).

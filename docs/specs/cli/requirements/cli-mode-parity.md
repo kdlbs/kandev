@@ -2,7 +2,7 @@
 status: draft
 system: cli
 created: 2026-05-16
-updated: 2026-09-09
+updated: 2026-09-26
 owners:
   - cfl
 ---
@@ -56,8 +56,9 @@ command.
 For Pi, structured chat and inference use
 `npx --yes --prefer-offline pi-acp@<effective-version>`, while CLI passthrough
 launches the globally installed `pi` executable. The effective version comes
-from the operator selection or the reviewed Kandev default, `0.0.33`. Kandev's
-Pi install action runs
+from the operator selection or the reviewed Kandev default, whose exact version
+is maintained in the [managed npm runtime catalogue](../../../../apps/backend/internal/agent/agents/managed_npm_runtime_versions.json).
+Kandev's Pi install action runs
 `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`, and agent
 discovery treats a `pi` executable on the Kandev process `PATH` that passes its
 non-interactive `--version` check as the installation signal.

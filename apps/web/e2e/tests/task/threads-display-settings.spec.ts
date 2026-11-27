@@ -75,7 +75,7 @@ test("saves, discards, copies and reloads both presentation choices without chan
   try {
     await testPage.setViewportSize({ width: 1440, height: 1100 });
     for (const name of ["A display settings", "B display settings", "C display settings"]) {
-      await startPresentationThread(testPage, apiClient, seedData, name);
+      await startPresentationThread(apiClient, seedData, name);
     }
     await seedThreadPresentation(apiClient, { layout: "columns" });
     await testPage.goto("/threads");
@@ -166,7 +166,7 @@ test("synchronizes another client and retries the latest rejected rapid presenta
   let secondContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     await testPage.setViewportSize({ width: 1440, height: 1100 });
-    await startPresentationThread(testPage, apiClient, seedData, "Synchronized display");
+    await startPresentationThread(apiClient, seedData, "Synchronized display");
     await seedThreadPresentation(apiClient, { layout: "columns" });
     await testPage.goto("/threads");
     secondContext = await browser.newContext({

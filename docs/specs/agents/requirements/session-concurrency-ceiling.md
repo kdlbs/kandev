@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-09-15
+updated: 2026-11-26
 owners:
   - kandev
 ---
@@ -10,10 +11,18 @@ owners:
 
 ## Overview
 
-An operator can opt into a shared ceiling for new automatic starts. The ceiling
-is disabled by default and preserves explicit user actions and accepted work.
+An operator can enable a shared ceiling for automatic starts and new message
+turns. The ceiling is disabled by default. Explicit execution controls retain
+their override, and admitted work keeps its capacity.
 This contract belongs to the agent system because it
 controls admission of agent executions. Tasks own their durable deferral data.
+
+This contract extends the delivered launch contract with message-turn admission.
+The [message-turn package](../../../plans/idle-session-message-capacity/plan.md)
+records the compatibility change from
+[issue #4998](https://github.com/kdlbs/kandev/issues/4998). Ordinary message
+turns now wait at the enabled ceiling while explicit execution controls keep
+their override.
 
 The disabled default, Settings opt-in, live application, and queue explanation
 are implemented. Delivery and verification are recorded in the
@@ -25,8 +34,12 @@ are implemented. Delivery and verification are recorded in the
   state, including launches admitted in the current process.
 - **Deferred launch:** A durable task record that contains the complete launch
   kind and payload for an automatic request that the ceiling refused.
-- **Manual origin:** A direct user action. It can use a manual override when the
-  ceiling is full.
+- **Manual override:** Capacity admission requested through an explicit Start,
+  Resume, Send Now, or legacy Run next control. Ordinary message submission
+  follows requirement 003, including messages from a user.
+- **Message turn:** New orchestrated work requested through chat, a message API,
+  an agent message, or an automatic prompt queue. Warm runtime readiness does
+  not establish capacity admission for that new work.
 
 ## Requirements
 
@@ -43,8 +56,11 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-001.1:** When an automatic launch would exceed the
   configured ceiling, the system shall refuse the launch and persist its kind,
   replay payload, origin, reason, and enqueue time on the task.
-- **AC-AGENTS-SESSION-CEILING-001.2:** When a manual launch would exceed the
-  ceiling, the system shall admit it and record that it used a manual override.
+- **AC-AGENTS-SESSION-CEILING-001.2:** Under the automatic-only policy, when a
+  manual launch would exceed the ceiling, the system shall admit it and record
+  that it used a manual override. Under the all-execution policy, manual launches
+  shall follow the configured total and grade limits. Ordinary message
+  submission shall follow requirement 003.
 - **AC-AGENTS-SESSION-CEILING-001.3:** The ceiling shall count sessions in
   `STARTING` and `RUNNING` state together with in-flight reservations, and shall
   release a reservation only after its launch reaches a counted state or fails.
@@ -53,7 +69,10 @@ bounded instance capacity, so that one installation does not overload its host.
   caller shall receive an explicit conflict so it retains ownership.
 - **AC-AGENTS-SESSION-CEILING-001.5:** A retry sweep shall replay deferred
   launches by their stored kind. It shall preserve a record when capacity is
-  still full or replay fails for a non-ceiling reason.
+  still full or replay fails for a non-ceiling reason, except for the
+  permanent failures in AC-AGENTS-SESSION-CEILING-001.11 and
+  AC-AGENTS-SESSION-CEILING-001.12. The log entry for a preserved non-ceiling
+  failure shall name its cause.
 - **AC-AGENTS-SESSION-CEILING-001.6:** A callback from an older execution shall
   not release or confirm a reservation held by a successor execution for the
   same session.
@@ -69,6 +88,36 @@ bounded instance capacity, so that one installation does not overload its host.
   trigger retry of eligible ceiling-deferred launches without losing their
   payload, entry ownership, or original queue time. Disabling shall not stop the
   retry mechanism or bypass workflow WIP and task eligibility checks.
+- **AC-AGENTS-SESSION-CEILING-001.10:** A newly created automation task shall
+  have one initial-start owner before feeder publication. Workflow auto-start
+  shall yield until definitive admission or termination releases that exact
+  owner. Continuations shall preserve the existing ownership identity. Restart,
+  lease expiry, unknown acknowledgement and failed Stop shall not release
+  unresolved durable retry ownership or authorize generic replay.
+  When the ceiling refuses the start of an
+  admitted automation run, the system shall keep the run open, holding its
+  concurrency slot, and keep its task and deferred start. The replayed start
+  shall bind its session and turn to that run, regardless of workflow-step
+  auto-start eligibility. A replay that fails for a non-ceiling reason, or a
+  dropped start, shall fail the run; a replay whose session launched but could
+  not be bound shall also stop that session. A start whose run is no longer
+  open shall be dropped without launching. This includes a record that
+  AC-AGENTS-SESSION-CEILING-001.5 preserved after its replay failed the run,
+  so the next sweep drops it instead of replaying it. If the task is deleted
+  while its start waits, the unbound run shall fail and release its concurrency
+  slot.
+- **AC-AGENTS-SESSION-CEILING-001.11:** When a replayed launch fails validation
+  of its built agent or continue command, the sweep shall drop the record with
+  a launch-invalid reason instead of preserving it. A later pass would build the
+  same command and leave another failed session. Wrapping the command-validation
+  error shall not change this disposition. A transient failure whose message
+  only mentions validation shall still be preserved.
+- **AC-AGENTS-SESSION-CEILING-001.12:** When a record's workflow entry can never
+  become valid, the sweep shall drop it as superseded. This covers a legacy
+  `start` with no recipient session, a binding that cannot be derived or is
+  incomplete, an unrouted entry whose step now routes sessions, and a task with
+  no durable entry identity. A failed step, transition, or task read during that
+  check shall preserve the record for a later pass.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 
@@ -87,7 +136,8 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-002.3:** Enabling or lowering the ceiling shall
   preserve running sessions and already admitted launches. Later automatic
   launches shall wait until capacity permits them. Manual starts retain their
-  existing override behavior.
+  override only under the automatic-only policy. Under the all-execution policy,
+  they shall follow its configured limits.
 - **AC-AGENTS-SESSION-CEILING-002.4:** An explicit valid environment override
   shall take precedence over the saved setting. Settings shall show the effective
   value and its source and prevent changes while this override applies. Removing
@@ -102,13 +152,104 @@ bounded instance capacity, so that one installation does not overload its host.
   have touch targets of at least 44px and no document horizontal overflow. Labels,
   help, validation, and state messages shall be localized and keyboard accessible.
 - **AC-AGENTS-SESSION-CEILING-002.7:** The section shall explain that the ceiling
-  limits automatic starts, manual starts can exceed it, and workflow WIP is a
-  separate limit. The default maximum offered after enabling shall not activate
+  limits automatic starts and new message turns across all workspaces.
+  It shall name the explicit execution controls that can exceed the limit and
+  distinguish workflow WIP. The default maximum offered after enabling shall not activate
   the ceiling before the user saves.
+
+### REQ-AGENTS-SESSION-CEILING-003: Bound message turns
+
+**Intent:** Operators can submit messages without implementing a separate
+capacity check or queue.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-003.1:** With the ceiling enabled, a new message
+  turn shall require capacity even when its runtime is already ready.
+  A full or unreadable population shall leave eligible input pending without
+  provider dispatch. The rule shall apply to UI, message API, agent-message,
+  and automatic queue delivery paths.
+- **AC-AGENTS-SESSION-CEILING-003.2:** Concurrent message turns and launches
+  shall share the population in criterion 001.3. A bounded admission shall
+  reserve its slot before work starts. Nested startup, readiness, and stale
+  callbacks shall not release the slot of a pending or successor turn.
+  One session shall count once across these reservations and counted states.
+- **AC-AGENTS-SESSION-CEILING-003.3:** Accepted pending input shall retain its
+  recipient, order, content, model, mode, attachments, references, attribution,
+  and delivery identity. A capacity refusal shall not duplicate transcript
+  messages or processed workflow triggers. A failed admission shall not claim
+  success or clear an unsaved draft.
+- **AC-AGENTS-SESSION-CEILING-003.4:** Capacity release, an increased limit, or
+  a disabled limit shall request retry through the existing capacity worker.
+  Eligible pending messages shall progress without another submission.
+  Auto-run OFF, clarification, WIP, cancellation, recovery, and ownership
+  barriers shall retain their authority. Repeated refusal shall not create an
+  immediate retry loop.
+- **AC-AGENTS-SESSION-CEILING-003.5:** Two pending conversations of one task
+  shall remain independent. Work in one conversation shall not erase or
+  redirect input accepted for its sibling. Among eligible message waits,
+  higher task priority shall run first, then earlier enqueue time.
+- **AC-AGENTS-SESSION-CEILING-003.6:** Backend restart shall preserve accepted
+  queue contents without starting an agent solely to deliver those messages.
+  Later authorized session activity shall restore eligibility under the
+  [resume queue contract](../../tasks/requirements/resume-prompt-queue.md).
+- **AC-AGENTS-SESSION-CEILING-003.7:** Existing session eligibility shall remain
+  in force. An explicitly supported completed-session follow-up shall wait
+  without launching at full capacity. Failed and cancelled targets shall retain
+  their existing rejection. A stale recipient or failed ownership read shall
+  not authorize a replacement session.
+- **AC-AGENTS-SESSION-CEILING-003.8:** Desktop and phone chat shall show accepted
+  pending input through the existing prompt queue. The agent-message tool shall
+  report a queued outcome when delivery waits. A disabled ceiling shall retain
+  current message behavior, including an unreadable population. Explicit
+  execution overrides and accepted-turn continuations shall retain their
+  existing admission and audit behavior.
+
+- **AC-AGENTS-SESSION-CEILING-003.9:** When Send accepts a message into the
+  queue because session capacity is unavailable, desktop and phone chat shall
+  explain the reason in a yellow composer warning, even with the queue collapsed.
+  The warning shall include the effective session limit when available.
+  The notice shall explain automatic delivery when enabled and how to resume
+  it when Auto-run is off. A user shall never need to resend accepted input.
+- **AC-AGENTS-SESSION-CEILING-003.10:** The notice shall remain available
+  across reload and session navigation while a matching entry is pending.
+  It shall clear when the last matching entry leaves the queue. Ordinary
+  queued input, rejected sends and sibling sessions shall not trigger it.
+
+### REQ-AGENTS-SESSION-CEILING-005: Opt into total and execution-grade limits
+
+**Intent:** Administrators can explicitly include manual task launches in a
+shared total and per-grade capacity policy without changing automatic-only defaults.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-005.1:** The absent setting remains disabled with
+  the automatic-only policy. The optional all-execution policy applies the total
+  and configured grade limits together; the grade-limit map shall contain no
+  more than 64 entries. Saving settings preserves admitted work.
+- **AC-AGENTS-SESSION-CEILING-005.2:** Profiles and tasks accept explicit grade
+  names. An empty value is unconfigured. A task's nonempty grade overrides its
+  selected logical profile's grade. Prepared profiles preserve the value, and
+  admission freezes it on the session rather than rereading later edits.
+  Message turns check both limits before warm dispatch or cold resume and
+  retain that grade on their tickets through nested launches.
+- **AC-AGENTS-SESSION-CEILING-005.3:** Missing configuration and unknown admitted
+  grades remain distinguishable from zero usage. Reservations and persisted
+  active sessions are counted once under the existing admission owner lock.
+- **AC-AGENTS-SESSION-CEILING-005.4:** All-policy deferred launches replay in
+  arrival order. A selected workflow destination retains its identity through
+  admission and rechecks capacity if that selection loses its promotion.
+- **AC-AGENTS-SESSION-CEILING-005.5:** Settings expose total and grade limits;
+  queue status exposes the same admission snapshot, including unavailable and
+  stale observations. This policy does not change workflow WIP limits.
 
 ## Out of scope
 
 - Per-workspace or per-user ceilings.
-- Changing workflow WIP limits or imposing a hard limit on manual launches.
+- Changing workflow WIP limits or changing manual-launch behavior under the
+  default automatic-only policy.
 - A new release toggle, YAML setting, or automatic CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.
+- A separate message-capacity setting or a new release toggle.
+- Direct terminal keystrokes and provider input within an already admitted turn.
+- A global priority guarantee across launch, automation, and message queues.

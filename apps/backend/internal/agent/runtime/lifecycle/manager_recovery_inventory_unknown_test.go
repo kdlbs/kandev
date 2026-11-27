@@ -27,8 +27,8 @@ func TestManagerStartUnreadableRecoveryInventoryStopsNothing(t *testing.T) {
 	// Two live instances that WOULD each be stopped as a record-less orphan
 	// if an unreadable inventory were passed on as an empty one.
 	control.listInstances = []*agentctlclient.InstanceInfo{
-		{ID: "instance-1", SessionID: "session-1"},
-		{ID: "instance-2", SessionID: "session-2"},
+		{ID: "instance-1", Port: 41001, SessionID: "session-1", LeaseGeneration: 0, ListenerActive: false},
+		{ID: "instance-2", Port: 41001, SessionID: "session-2", LeaseGeneration: 9, ListenerActive: false},
 	}
 
 	mgr := newLivenessTestManager(t, control)
@@ -45,6 +45,58 @@ func TestManagerStartUnreadableRecoveryInventoryStopsNothing(t *testing.T) {
 	defer control.mu.Unlock()
 	if len(control.deleted) != 0 {
 		t.Fatalf("deleted = %v, want none: an unreadable recovery inventory must not make live instances look record-less", control.deleted)
+	}
+}
+
+func TestRecoveryLeaseDiagnosticsAreNonAuthoritative(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "live-instance", Port: 41001, SessionID: "live-session", Status: "running", LeaseGeneration: 0, ListenerActive: false},
+		{ID: "waiting-instance", Port: 41001, SessionID: "waiting-session", Status: "running", LeaseGeneration: 12, ListenerActive: false},
+		{ID: "stale-instance", Port: 41001, SessionID: "stale-session", Status: "running", LeaseGeneration: 13, ListenerActive: true},
+	}
+	exec := control.executor(t)
+	records := []*models.ExecutorRunning{
+		{SessionID: "live-session", AgentExecutionID: "live-instance", Status: "RUNNING"},
+		{SessionID: "waiting-session", AgentExecutionID: "waiting-instance", Status: "WAITING_FOR_INPUT"},
+		{SessionID: "terminal-session", AgentExecutionID: "terminal-instance", Status: "COMPLETED"},
+	}
+
+	recovered, err := exec.RecoverInstances(context.Background(), records)
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	recoveredIDs := make(map[string]struct{}, len(recovered))
+	for _, inst := range recovered {
+		recoveredIDs[inst.InstanceID] = struct{}{}
+	}
+	for _, protected := range []string{"live-instance", "waiting-instance"} {
+		if _, ok := recoveredIDs[protected]; !ok {
+			t.Errorf("protected instance %q was not recovered; diagnostics and duplicate ports are not cleanup authority", protected)
+		}
+	}
+
+	control.mu.Lock()
+	deleted := append([]string(nil), control.deleted...)
+	control.mu.Unlock()
+	if len(deleted) != 1 || deleted[0] != "stale-instance" {
+		t.Fatalf("deleted instances = %v, want only the stale instance sharing the numeric port", deleted)
+	}
+
+	probe := newStandaloneControlServer(t, true)
+	probe.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "live-instance", Port: 41001, SessionID: "live-session", LeaseGeneration: 0, ListenerActive: false},
+		{ID: "waiting-instance", Port: 41001, SessionID: "waiting-session", LeaseGeneration: 0, ListenerActive: false},
+	}
+	probe.listInstancesErr = true
+	probeExec := probe.executor(t)
+	if recovered, err := probeExec.RecoverInstances(context.Background(), records[:2]); err != nil || len(recovered) != 0 {
+		t.Fatalf("RecoverInstances after failed instance probe = %v, %v; want no result and no error", recovered, err)
+	}
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	if len(probe.deleted) != 0 {
+		t.Fatalf("failed instance probe deleted %v, want no cleanup", probe.deleted)
 	}
 }
 

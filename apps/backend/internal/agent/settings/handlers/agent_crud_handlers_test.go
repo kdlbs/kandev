@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -72,17 +73,20 @@ func seedProfile(repo *fakeSettingsRepo, id, agentID, name, workspaceID string) 
 // wantProfileDTO is the DTO the seeded profile is expected to serialize to.
 func wantProfileDTO(id, agentID, name, billingType string) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:               id,
-		AgentID:          agentID,
-		Kind:             "concrete",
-		Name:             name,
-		AgentDisplayName: "Display",
-		Model:            "model-a",
-		CLIFlags:         []dto.CLIFlagDTO{},
-		Enabled:          true,
-		BillingType:      billingType,
-		CreatedAt:        fixedSettingsTime,
-		UpdatedAt:        fixedSettingsTime,
+		ID:                     id,
+		AgentID:                agentID,
+		Kind:                   "concrete",
+		Name:                   name,
+		AgentDisplayName:       "Display",
+		Model:                  "model-a",
+		CLIFlags:               []dto.CLIFlagDTO{},
+		MCPSelectionMode:       dto.MCPSelectionModeInherit,
+		MCPSelectedServers:     []string{},
+		CopilotSelectedPlugins: []string{},
+		Enabled:                true,
+		BillingType:            billingType,
+		CreatedAt:              fixedSettingsTime,
+		UpdatedAt:              fixedSettingsTime,
 	}
 }
 
@@ -342,6 +346,36 @@ func TestDeleteAgentEndpoint(t *testing.T) {
 // caching header, and separates "no such agent" from "agent has no logo" —
 // both 404s, but only one of them means the agent is unknown.
 func TestGetAgentLogoEndpoint(t *testing.T) {
+	t.Run("serves Antigravity light and dark logo assets", func(t *testing.T) {
+		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
+		antigravity := agents.NewAntigravityACP()
+		if err := reg.Register(antigravity); err != nil {
+			t.Fatalf("register Antigravity: %v", err)
+		}
+
+		for _, tc := range []struct {
+			name    string
+			variant string
+			logo    agents.LogoVariant
+		}{
+			{name: "default light", logo: agents.LogoLight},
+			{name: "light", variant: "light", logo: agents.LogoLight},
+			{name: "dark", variant: "dark", logo: agents.LogoDark},
+		} {
+			path := "/api/v1/agents/antigravity-acp/logo"
+			if tc.variant != "" {
+				path += "?variant=" + tc.variant
+			}
+			response := doSettingsRequest(router, http.MethodGet, path, "")
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, body = %s", tc.name, response.Code, response.Body.String())
+			}
+			if !bytes.Equal(response.Body.Bytes(), antigravity.Logo(tc.logo)) {
+				t.Errorf("%s logo does not match the registered Antigravity asset", tc.name)
+			}
+		}
+	})
+
 	t.Run("serves the light logo by default and the dark variant on request", func(t *testing.T) {
 		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
 		registerTestTUIAgent(t, reg, "logo-agent", 1)
@@ -403,6 +437,9 @@ func TestPreviewAgentCommandEndpoint(t *testing.T) {
 			Supported:     true,
 			Command:       []string{"greywall", "--", "preview-agent-binary", "--verbose"},
 			CommandString: "greywall -- preview-agent-binary --verbose",
+			// The preview names where the flags land. This request is not a
+			// passthrough profile, so they reach the launched bridge process.
+			FlagDestination: dto.FlagDestinationACPBridge,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("preview = %#v, want %#v", got, want)

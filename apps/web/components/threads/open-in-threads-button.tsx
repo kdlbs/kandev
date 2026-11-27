@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 
 /** Matches the sibling icon-only controls in the chat status row. */
 const STATUS_ROW_BUTTON_CLASS =
-  "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+  "h-6 w-6 max-md:h-11 max-md:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
 
 const THREADS_PATHNAME = "/threads";
 

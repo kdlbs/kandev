@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconArrowRight, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -79,7 +79,6 @@ function applyRouteActionResult(session: TaskSession, result: RouteActionResult)
     route_retry_ordinal: result.retry_ordinal,
     route_deadline: result.deadline,
     route_pending_outcome: result.pending_outcome,
-    updated_at: new Date().toISOString(),
   };
 }
 
@@ -197,19 +196,24 @@ function DynamicRouteRecoveryActions({
 
 export function DynamicRouteRecovery({ session }: { session: TaskSession | null }) {
   const [pendingAction, setPendingAction] = useState<RouteAction | null>(null);
-  const updateSession = useAppStore((state) => state.setTaskSession);
+  const store = useAppStoreApi();
 
   const handleAction = useCallback(
     async (action: RouteAction) => {
       if (!session) return;
+      const before = store.getState().taskSessions.items[session.id];
+      if (!before) return;
       setPendingAction(action);
-      const result = await applyRouteAction(session, action);
+      const result = await applyRouteAction(before, action);
       setPendingAction(null);
-      if (result) {
-        updateSession(applyRouteActionResult(session, result));
-      }
+      const current = store.getState().taskSessions.items[session.id];
+      if (!result || !current) return;
+      // Action replies have no revision within a generation. A later session
+      // projection owns that generation, including a retry that already failed.
+      if (current !== before && (current.route_generation ?? -1) >= result.route_generation) return;
+      store.getState().setTaskSession(applyRouteActionResult(current, result));
     },
-    [session, updateSession],
+    [session, store],
   );
 
   const visible =

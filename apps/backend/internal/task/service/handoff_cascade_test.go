@@ -789,6 +789,55 @@ func TestUnarchiveTaskTree_RestoresCleanupAfterMutationFailure(t *testing.T) {
 	}
 }
 
+type archiveOperationsRecordingCleanupCoordinator struct {
+	*recordingCleanupCoordinator
+	operationsByTask map[string][]string
+	cancelledTasks   []string
+}
+
+func (c *archiveOperationsRecordingCleanupCoordinator) CancelArchiveTaskResourceCleanupWithOperations(
+	ctx context.Context,
+	taskID string,
+) ([]string, error) {
+	c.cancelledTasks = append(c.cancelledTasks, taskID)
+	operations := c.operationsByTask[taskID]
+	for _, operationID := range operations {
+		if err := c.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+			return operations, err
+		}
+	}
+	return operations, nil
+}
+
+func TestUnarchiveTaskTreeRestoresEveryCancelledArchiveOperationAfterMutationFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addArchivedTask("root", "", "ws-1", "cascade-1")
+	repo := newCascadeRepo(tasks)
+	repo.unarchiveErr = errors.New("unarchive unavailable")
+	archiveOperation := "cascade_archive:cascade-1:root"
+	reclaimOperation := "archive_reclaim:root:worktree:archive-generation"
+	coordinator := &archiveOperationsRecordingCleanupCoordinator{
+		recordingCleanupCoordinator: &recordingCleanupCoordinator{},
+		operationsByTask:            map[string][]string{"root": {archiveOperation, reclaimOperation}},
+	}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	_, err := svc.UnarchiveTaskTree(context.Background(), "root")
+	if err == nil {
+		t.Fatal("UnarchiveTaskTree unexpectedly succeeded")
+	}
+	if len(coordinator.cancelledTasks) != 1 || coordinator.cancelledTasks[0] != "root" {
+		t.Fatalf("task-wide cleanup cancellations = %v, want root", coordinator.cancelledTasks)
+	}
+	if len(coordinator.cancelled) != 2 || coordinator.cancelled[0] != archiveOperation || coordinator.cancelled[1] != reclaimOperation {
+		t.Fatalf("cancelled operations = %v, want archive and reclaim jobs", coordinator.cancelled)
+	}
+	if len(coordinator.restored) != 2 || coordinator.restored[0] != archiveOperation || coordinator.restored[1] != reclaimOperation {
+		t.Fatalf("restored operations = %v, want archive and reclaim jobs", coordinator.restored)
+	}
+}
+
 func TestArchiveTaskTree_ReleasesGroupMemberships(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
@@ -1084,10 +1133,6 @@ func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string)
 	}
 	delete(r.base.tasks, id)
 	return task.WorkflowStepID, nil
-}
-
-func (r *fakeDeleteRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
-	panic("DeleteExpiredQuickChatTask should not be used by delete cascade tests")
 }
 
 type deleteErrorCascadeRepo struct {
@@ -1672,7 +1717,7 @@ func TestCleanupWorkspaceGroupsWaitsForActiveExecutions(t *testing.T) {
 	}
 	sessions.mu.Lock()
 	if sessions.checks < 2 {
-		t.Errorf("HasExecutorRunningRow called %d times, want >= 2", sessions.checks)
+		t.Errorf("HasActiveExecutorRunningRow called %d times, want >= 2", sessions.checks)
 	}
 	sessions.mu.Unlock()
 	if got := groups.cleanupStatuses["group-owned"]; got != orchmodels.WorkspaceCleanupStatusCleaned {
@@ -1768,7 +1813,7 @@ func (f *flippingActiveSessionReader) GetTask(context.Context, string) (*models.
 	return nil, nil
 }
 
-func (f *flippingActiveSessionReader) HasExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
+func (f *flippingActiveSessionReader) HasActiveExecutorRunningRow(_ context.Context, sessionID string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if sessionID != f.sessionID {

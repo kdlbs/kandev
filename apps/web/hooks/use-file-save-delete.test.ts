@@ -55,6 +55,7 @@ function seedOpenFile(state: Partial<FileEditorState> = {}) {
         originalContent: "v1",
         originalHash: "h:2",
         isDirty: true,
+        instanceId: Symbol(),
         ...state,
       },
     ],
@@ -66,6 +67,7 @@ function renderActions() {
     const activeSessionIdRef = useRef<string | null>(SESSION_ID);
     const params: SaveDeleteParams = {
       activeSessionIdRef,
+      activeEditorVisitRef: useRef<symbol | null>(Symbol()),
       updateFileState: vi.fn(),
       setSavingFiles: vi.fn(),
       toast: vi.fn(),

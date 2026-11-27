@@ -64,8 +64,18 @@ func loadManagedNPMRuntimeVersions() {
 			managedNPMRuntimeVersionsErr = fmt.Errorf("managed runtime defaults contain an empty package")
 			return
 		}
-		if _, err := managedruntime.ParseStableVersion(version); err != nil {
+		parsed, err := managedruntime.ParseStableVersion(version)
+		if err != nil {
 			managedNPMRuntimeVersionsErr = fmt.Errorf("managed runtime default %q for %q: %w", version, packageName, err)
+			return
+		}
+		if expectedMajor, restricted := managedruntime.ExpectedMajorForPackage(packageName); restricted && parsed.Major() != expectedMajor {
+			managedNPMRuntimeVersionsErr = fmt.Errorf(
+				"managed runtime default %q for %q does not match reviewed major %d",
+				version,
+				packageName,
+				expectedMajor,
+			)
 			return
 		}
 	}

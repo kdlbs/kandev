@@ -76,3 +76,10 @@ func TestNewBootID_ReturnsHexEncodedBytes(t *testing.T) {
 		t.Fatalf("BootID = %q, want 32 lowercase hex chars", got)
 	}
 }
+
+func TestNewServiceWithBootIDPreservesSharedIdentity(t *testing.T) {
+	service := NewServiceWithBootID("version", "commit", "time", "backend-boot-42")
+	if got := service.Info().BootID; got != "backend-boot-42" {
+		t.Fatalf("BootID = %q, want shared backend identity", got)
+	}
+}

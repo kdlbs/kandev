@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IconBox, IconFolder } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/components/state-provider";
 import { listDirectory, type DirectoryListing } from "@/lib/api/domains/fs-api";
 import {
   isTauriWebview,
@@ -207,15 +208,27 @@ export function useDirectoryListing(open: boolean, value: string) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestGeneration = useRef(0);
+  // One shared preference, so every directory browser in the application agrees
+  // on whether hidden directories are revealed.
+  const showHidden = useAppStore((state) => state.directoryBrowserShowHidden);
+  // Read through a ref so the reveal stays out of `load`'s identity: browsing
+  // does not commit a value, and a new `load` would reset the browser to `value`
+  // and throw away wherever the user had descended to.
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
+  const browsedPath = useRef<string | null>(null);
+  const listedVisibility = useRef<boolean | null>(null);
 
   const load = useCallback(
-    async (path: string) => {
+    async (path: string, { preserveListing = false }: { preserveListing?: boolean } = {}) => {
       const generation = ++requestGeneration.current;
+      browsedPath.current = path;
+      listedVisibility.current = showHiddenRef.current;
       setLoading(true);
       setError(null);
-      setListing(null);
+      if (!preserveListing) setListing(null);
       try {
-        const nextListing = await listDirectory(path);
+        const nextListing = await listDirectory(path, { includeHidden: showHiddenRef.current });
         if (generation !== requestGeneration.current) return;
         setListing(nextListing);
       } catch (err) {
@@ -235,6 +248,7 @@ export function useDirectoryListing(open: boolean, value: string) {
     // last-browsed directory instead of their picked folder (or the root).
     if (!open) {
       requestGeneration.current++;
+      browsedPath.current = null;
       setListing(null);
       setLoading(false);
       setError(null);
@@ -245,6 +259,16 @@ export function useDirectoryListing(open: boolean, value: string) {
       requestGeneration.current++;
     };
   }, [open, load, value]);
+
+  useEffect(() => {
+    // A display-only preference change re-lists the directory already on screen
+    // instead of the chosen one. The visibility guard keeps the first load from
+    // firing a second identical request. Keep the current listing while it
+    // refreshes so the path remains selectable and keyed toolbar state survives.
+    if (!open || browsedPath.current === null) return;
+    if (listedVisibility.current === showHidden) return;
+    void load(browsedPath.current, { preserveListing: true });
+  }, [open, showHidden, load]);
 
   return { listing, loading, error, load };
 }

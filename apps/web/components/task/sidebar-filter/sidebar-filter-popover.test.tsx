@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
@@ -19,6 +19,7 @@ const VIEW: SidebarView = {
   filters: [],
   sort: { key: "state", direction: "asc" },
   group: "repository",
+  groupIndent: true,
   collapsedGroups: [],
   taskRow: {
     detailsEnabled: true,
@@ -143,7 +144,63 @@ describe("SidebarFilterPopover task-row editor", () => {
     await waitFor(() => expect(document.activeElement).toBe(deleteButton));
     expect(state.deleteSidebarView).not.toHaveBeenCalled();
   });
+});
 
+describe("SidebarFilterPopover keyboard cancellation", () => {
+  it.each(["desktop", "phone"])(
+    "cancels a keyboard reorder before ordinary Escape dismisses the %s editor",
+    async (surface) => {
+      responsive.usesDesktopWorkbench = surface === "desktop";
+      responsive.isMobile = surface === "phone";
+      state.sidebarViews.views = [
+        {
+          ...VIEW,
+          sort: {
+            key: "running",
+            direction: "desc",
+            thenBy: [{ key: "lastActivityAt", direction: "desc" }],
+          },
+        },
+      ];
+      const onOpenChange = vi.fn();
+      render(
+        <SidebarFilterPopover
+          trigger={<button type="button">Open</button>}
+          open
+          onOpenChange={onOpenChange}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+      const handle = screen.getByTestId("sort-rule-handle-0");
+      handle.focus();
+      fireEvent.keyDown(handle, { key: " ", code: "Space" });
+      await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBe("true"));
+      // The keyboard sensor attaches its document listener on the next timer turn.
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+      const bubbleListener = vi.fn();
+      document.addEventListener("keydown", bubbleListener);
+      try {
+        fireEvent.keyDown(handle, { key: "ArrowDown", code: "ArrowDown" });
+        fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBeNull());
+        expect(handle.closest('[data-dragging="true"]')).toBeNull();
+        expect(bubbleListener.mock.calls.some(([event]) => event.key === "Escape")).toBe(true);
+        expect(onOpenChange).not.toHaveBeenCalledWith(false);
+        expect(state.updateSidebarDraft).not.toHaveBeenCalled();
+        expect(handle.isConnected).toBe(true);
+
+        fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      } finally {
+        document.removeEventListener("keydown", bubbleListener);
+      }
+    },
+  );
+});
+
+describe("SidebarFilterPopover editor state", () => {
   it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
@@ -157,15 +214,57 @@ describe("SidebarFilterPopover task-row editor", () => {
     expect(screen.queryByTestId("task-row-details-toggle")).toBeNull();
     expect(screen.queryByTestId("sort-key-select")).toBeNull();
     expect(screen.queryByTestId("group-key-select")).toBeNull();
-    expect(screen.getByText("Status, Sort direction asc", { exact: true })).toBeTruthy();
+    expect(screen.getByText("Status: Ascending", { exact: true })).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
     expect(screen.getByTestId("sort-key-select")).toBeTruthy();
     fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
     expect(screen.getByTestId("group-key-select")).toBeTruthy();
+    const indentToggle = screen.getByRole("switch", { name: "Indent grouped tasks" });
+    expect(indentToggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(indentToggle);
+    expect(state.updateSidebarDraft).toHaveBeenCalledWith({ groupIndent: false });
+    fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
+    expect(screen.queryByRole("switch", { name: "Indent grouped tasks" })).toBeNull();
 
     fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
+    expect(state.updateSidebarDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("remounts reorder gestures when the active view changes with the same sort values", () => {
+    const sort = {
+      key: "running" as const,
+      direction: "desc" as const,
+      thenBy: [
+        { key: "lastActivityAt" as const, direction: "desc" as const },
+        { key: "createdAt" as const, direction: "desc" as const },
+      ],
+    };
+    state.sidebarViews.views = [
+      { ...VIEW, sort },
+      { ...SECOND_VIEW, sort },
+    ];
+    state.sidebarViews.activeViewId = VIEW.id;
+    const props = {
+      trigger: <button type="button">Open</button>,
+      open: true,
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(<SidebarFilterPopover {...props} />);
+    fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+    const originalHandle = screen.getByTestId("sort-rule-handle-0");
+    originalHandle.focus();
+    fireEvent.keyDown(originalHandle, { key: " " });
+    fireEvent.keyDown(originalHandle, { key: "ArrowDown" });
+
+    state.sidebarViews.activeViewId = SECOND_VIEW.id;
+    rerender(<SidebarFilterPopover {...props} />);
+
+    const replacementHandle = screen.getByTestId("sort-rule-handle-0");
+    expect(originalHandle.isConnected).toBe(false);
+    expect(replacementHandle).not.toBe(originalHandle);
+    fireEvent.keyDown(originalHandle, { key: " " });
     expect(state.updateSidebarDraft).not.toHaveBeenCalled();
   });
 

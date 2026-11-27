@@ -90,15 +90,16 @@ test.describe("Agent profile — ACP-first", () => {
     expect(Math.abs(popoverBox!.x - selectorBox!.x)).toBeLessThanOrEqual(12);
   });
 
-  test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
+  test("profile name edits persist across reload", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
 
-    // Use the seeded default profile rather than creating a new one — the
-    // profile editor page reads from the agents list that's hydrated on the
-    // server, and a freshly POSTed profile race-conditions with SSR.
+    // Use the seeded profile independently of catalog order or profileless families.
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const agent = agents.find((candidate) =>
+      candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    const profile = agent?.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!agent || !profile) throw new Error("Seeded agent profile is missing from the catalog");
     const originalName = profile.name;
 
     try {
@@ -142,25 +143,46 @@ test.describe("Agent profile — ACP-first", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await expect
-      .poll(
-        async () => {
-          const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
-          if (!resp.ok()) return false;
-          const data = (await resp.json()) as {
-            agents?: {
-              name: string;
-              model_config?: { config_options?: { id: string }[] };
-            }[];
-          };
-          const mock = data.agents?.find((a) => a.name === "mock-agent");
-          return Boolean(
-            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
-          );
-        },
-        { timeout: 20_000, intervals: [250, 500, 1000] },
-      )
-      .toBe(true);
+    let lastAvailability: unknown;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+            if (!resp.ok()) {
+              lastAvailability = { status: resp.status(), body: await resp.text() };
+              return false;
+            }
+            const data = (await resp.json()) as {
+              agents?: {
+                name: string;
+                model_config?: {
+                  status?: string;
+                  error?: string;
+                  config_options?: { id: string }[];
+                };
+              }[];
+            };
+            const mock = data.agents?.find((a) => a.name === "mock-agent");
+            lastAvailability = {
+              status: resp.status(),
+              agentFound: Boolean(mock),
+              modelStatus: mock?.model_config?.status,
+              modelError: mock?.model_config?.error,
+              configOptionIds: mock?.model_config?.config_options?.map((option) => option.id),
+            };
+            return Boolean(
+              mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+            );
+          },
+          { timeout: 20_000, intervals: [250, 500, 1000] },
+        )
+        .toBe(true);
+    } catch (error) {
+      throw new Error(`mock-agent availability snapshot: ${JSON.stringify(lastAvailability)}`, {
+        cause: error,
+      });
+    }
 
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];

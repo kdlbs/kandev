@@ -191,21 +191,19 @@ func TestHTTPCreateRepositoryIgnoresRemoteURL(t *testing.T) {
 	}
 }
 
-func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
+func TestHTTPUpdateRepositoryValidatesRemoteURL(t *testing.T) {
 	router, repo := newRepositoryHTTPTestRouter(t)
 	if err := repo.CreateRepository(context.Background(), &models.Repository{
-		ID:          "provider-repo",
-		WorkspaceID: "ws-1",
-		Name:        "owner/repo",
-		SourceType:  "provider",
-		RemoteURL:   "https://github.com/owner/old.git",
+		ID: "provider-repo", WorkspaceID: "ws-1", Name: "owner/repo", SourceType: "provider",
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "owner", ProviderName: "repo",
+		RemoteURL: "https://github.com/owner/old.git",
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	request := httptest.NewRequest(
 		http.MethodPatch,
 		"/api/v1/repositories/provider-repo",
-		strings.NewReader(`{"remote_url":"https://github.com/owner/repo.git"}`),
+		strings.NewReader(`{"remote_url":"git@github.com:owner/repo.git"}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -219,8 +217,8 @@ func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRepository: %v", err)
 	}
-	if repository.RemoteURL != "https://github.com/owner/old.git" {
-		t.Errorf("RemoteURL = %q, want original value %q", repository.RemoteURL, "https://github.com/owner/old.git")
+	if repository.RemoteURL != "git@github.com:owner/repo.git" {
+		t.Errorf("RemoteURL = %q, want validated replacement", repository.RemoteURL)
 	}
 }
 
@@ -466,6 +464,52 @@ func TestHTTPDesktopDiscoveryRootLifecycle(t *testing.T) {
 	}
 	if len(roots) != 0 {
 		t.Fatalf("roots after remove = %+v, want none", roots)
+	}
+}
+
+func TestConfirmHomeDiscoveryHTTPUsesBackendHomeAndIsIdempotent(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve Home: %v", err)
+	}
+	t.Setenv("HOME", home)
+	router, repo, _ := newDesktopRepositoryHTTPTestRouter(t)
+	if err := repo.SetDesktopDiscoveryMigration(context.Background(), &models.DesktopDiscoveryMigration{
+		HomeConfirmationRequired: true,
+	}); err != nil {
+		t.Fatalf("set migration state: %v", err)
+	}
+
+	confirm := func(target *gin.Engine) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		target.ServeHTTP(response, httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/repositories/discovery/roots/confirm-home",
+			nil,
+		))
+		return response
+	}
+	first := confirm(router)
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"path":"`+home+`"`) {
+		t.Fatalf("first confirmation = %d/%s", first.Code, first.Body.String())
+	}
+	second := confirm(router)
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry confirmation status = %d, want %d: %s", second.Code, http.StatusOK, second.Body.String())
+	}
+	roots, err := repo.ListDesktopDiscoveryRoots(context.Background())
+	if err != nil {
+		t.Fatalf("list roots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != home {
+		t.Fatalf("roots = %+v, want one backend Home root", roots)
+	}
+
+	serverRouter, _, _ := newRepositoryHTTPTestRouterWithService(t)
+	serverResponse := confirm(serverRouter)
+	if serverResponse.Code != http.StatusConflict {
+		t.Fatalf("server mode status = %d, want %d: %s", serverResponse.Code, http.StatusConflict, serverResponse.Body.String())
 	}
 }
 

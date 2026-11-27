@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -188,6 +189,28 @@ func (a *testMessageCreatorAdapter) CreateUserMessageIdempotent(
 	return err
 }
 
+func (a *testMessageCreatorAdapter) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, agentSessionID, status string,
+) (bool, error) {
+	return a.svc.SetUserMessageDeliveryStatus(ctx, messageID, agentSessionID, status)
+}
+
+func (a *testMessageCreatorAdapter) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateCompletedUserMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
 func (a *testMessageCreatorAdapter) CreateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, title, status, agentSessionID, turnID string, normalized *streams.NormalizedPayload) error {
 	metadata := map[string]interface{}{
 		"tool_call_id": toolCallID,
@@ -253,7 +276,20 @@ func (a *testMessageCreatorAdapter) CreateSessionMessageIdempotent(ctx context.C
 	return err
 }
 
-func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
+func (a *testMessageCreatorAdapter) CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+	})
+	return err
+}
+
+func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, messageOptions models.PermissionRequestMessageOptions) (string, error) {
 	metadata := map[string]interface{}{
 		"request_id":     requestID,
 		"pending_id":     pendingID,
@@ -262,7 +298,16 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 		"action_type":    actionType,
 		"action_details": actionDetails,
 	}
-	msg, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+	presentation := messageOptions.Presentation
+	if presentation == "" {
+		presentation = models.PermissionPresentationInteractive
+	}
+	metadata[models.PermissionPresentationMetadataKey] = string(presentation)
+	if messageOptions.Decision != nil {
+		metadata["permission_decision"] = messageOptions.Decision
+		metadata["status"] = string(models.PermissionStatusApproved)
+	}
+	request := &taskservice.CreateMessageRequest{
 		TaskSessionID: sessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -270,7 +315,15 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 		AuthorType:    "agent",
 		Type:          "permission_request",
 		Metadata:      metadata,
-	})
+	}
+	var msg *models.Message
+	var err error
+	if requestID == "" {
+		msg, err = a.svc.CreateMessage(ctx, request)
+	} else {
+		messageID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("permission:"+taskID+":"+sessionID+":"+requestID)).String()
+		msg, err = a.svc.CreateMessageIdempotent(ctx, messageID, request)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -279,6 +332,10 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 
 func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
 	return a.svc.UpdatePermissionMessage(ctx, taskID, sessionID, requestID, pendingID, status)
+}
+
+func (a *testMessageCreatorAdapter) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return a.svc.UpdatePermissionPresentation(ctx, request)
 }
 
 func (a *testMessageCreatorAdapter) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {

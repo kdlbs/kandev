@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/deliverylimits"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/startupdiag"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -36,31 +41,65 @@ type PermissionOperationError struct {
 	Message string
 }
 
+// SessionRestoreOperationError preserves the typed restore outcome returned
+// by agentctl so lifecycle can distinguish missing native state from a
+// transport or provider failure.
+type SessionRestoreOperationError struct {
+	Code    string
+	Message string
+	Details map[string]interface{}
+}
+
+func (e *SessionRestoreOperationError) Error() string {
+	if e == nil || e.Message == "" {
+		return "session restore failed"
+	}
+	return e.Message
+}
+
 func (e *PermissionOperationError) Error() string { return e.Message }
 
 func (e *PermissionOperationError) PermissionCode() string { return e.Code }
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name                  string `json:"name"`
+	Version               string `json:"version"`
+	SupportsSessionResume bool   `json:"supports_session_resume,omitempty"`
+	SupportsSessionLoad   bool   `json:"supports_session_load,omitempty"`
 }
 
 // InitializeResponse from agentctl
 type InitializeResponse struct {
-	Success   bool       `json:"success"`
-	AgentInfo *AgentInfo `json:"agent_info,omitempty"`
-	Error     string     `json:"error,omitempty"`
+	ACPProtocolVersion uint16               `json:"acp_protocol_version,omitempty"`
+	ProcessGeneration  uint64               `json:"process_generation,omitempty"`
+	Success            bool                 `json:"success"`
+	AgentInfo          *AgentInfo           `json:"agent_info,omitempty"`
+	DurableDelivery    *DurableDeliveryInfo `json:"durable_delivery,omitempty"`
+	Error              string               `json:"error,omitempty"`
 }
+
+// InitializeError preserves bounded process evidence returned by agentctl.
+type InitializeError struct {
+	Message         string
+	StartupEvidence *types.ManagedStartupEvidence
+}
+
+func (e *InitializeError) Error() string { return "initialize failed: " + e.Message }
 
 // Initialize sends the ACP initialize request via the agent WebSocket stream.
 func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
+	c.mu.RLock()
+	processGeneration := c.processGeneration
+	c.mu.RUnlock()
 	payload := struct {
-		ClientName    string `json:"client_name"`
-		ClientVersion string `json:"client_version"`
+		ClientName        string `json:"client_name"`
+		ClientVersion     string `json:"client_version"`
+		ProcessGeneration uint64 `json:"process_generation,omitempty"`
 	}{
-		ClientName:    clientName,
-		ClientVersion: clientVersion,
+		ClientName:        clientName,
+		ClientVersion:     clientVersion,
+		ProcessGeneration: processGeneration,
 	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.initialize", payload)
@@ -73,175 +112,476 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return nil, fmt.Errorf("initialize failed: unable to parse error")
 		}
-		return nil, fmt.Errorf("initialize failed: %s", errPayload.Message)
+		return nil, &InitializeError{
+			Message:         errPayload.Message,
+			StartupEvidence: managedStartupEvidenceFromDetails(errPayload.Details),
+		}
 	}
 
 	var result InitializeResponse
 	if err := resp.ParsePayload(&result); err != nil {
 		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
 	}
+	c.setDurableDelivery(result.DurableDelivery)
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
+	c.setSessionCapabilities(result.AgentInfo)
+	c.mu.Lock()
+	c.acpProtocolVersion = result.ACPProtocolVersion
+	if result.ProcessGeneration != 0 {
+		c.processGeneration = result.ProcessGeneration
+	}
+	c.mu.Unlock()
 	return result.AgentInfo, nil
+}
+
+func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedStartupEvidence {
+	value, ok := details["startup_evidence"]
+	if !ok || value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var evidence types.ManagedStartupEvidence
+	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
+		return nil
+	}
+	normalizeManagedStartupEvidence(&evidence)
+	return &evidence
+}
+
+func normalizeManagedStartupEvidence(evidence *types.ManagedStartupEvidence) {
+	if evidence == nil {
+		return
+	}
+	switch evidence.ExitDisposition {
+	case types.ManagedStartupExitOrdinary,
+		types.ManagedStartupExitIntentional,
+		types.ManagedStartupExitSignal,
+		types.ManagedStartupExitUnknown:
+	default:
+		evidence.ExitDisposition = types.ManagedStartupExitUnknown
+	}
+	if evidence.DiagnosticReason != startupdiag.ReasonMiseConfigUntrusted || !evidence.DiagnosticComplete {
+		evidence.DiagnosticReason = ""
+	}
 }
 
 // NewSessionResponse from agentctl
 type NewSessionResponse struct {
-	Success    bool                       `json:"success"`
-	SessionID  string                     `json:"session_id,omitempty"`
-	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-	Error      string                     `json:"error,omitempty"`
+	Success             bool                       `json:"success"`
+	SessionID           string                     `json:"session_id,omitempty"`
+	ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+	AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+	Error               string                     `json:"error,omitempty"`
 }
 
 // createSessionRequest sends a session creation request and parses the response.
 // Used by both NewSession and ResetSession which share the same payload/response format.
-func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (string, error) {
+func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (NewSessionResponse, error) {
 	payload := struct {
-		Cwd        string            `json:"cwd"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{Cwd: cwd, McpServers: mcpServers}
+		Cwd           string                       `json:"cwd"`
+		McpServers    []types.McpServer            `json:"mcp_servers,omitempty"`
+		MCPResolution []streams.MCPResolutionEntry `json:"mcp_resolution,omitempty"`
+	}{Cwd: cwd, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
 	if err != nil {
-		return "", fmt.Errorf("%s request failed: %w", action, err)
+		return NewSessionResponse{}, fmt.Errorf("%s request failed: %w", action, err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return "", fmt.Errorf("%s failed: unable to parse error", action)
+			return NewSessionResponse{}, fmt.Errorf("%s failed: unable to parse error", action)
 		}
-		return "", fmt.Errorf("%s failed: %s", action, errPayload.Message)
+		if authenticationError := sessionOperationAuthenticationError(action, resp, errPayload); authenticationError != nil {
+			return NewSessionResponse{}, authenticationError
+		}
+		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, errPayload.Message)
 	}
 
 	var result NewSessionResponse
 	if err := resp.ParsePayload(&result); err != nil {
-		return "", fmt.Errorf("failed to parse %s response: %w", action, err)
+		return NewSessionResponse{}, fmt.Errorf("failed to parse %s response: %w", action, err)
 	}
 	if !result.Success {
-		return "", fmt.Errorf("%s failed: %s", action, result.Error)
+		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, result.Error)
 	}
-	c.setLastSessionModelState(result.ModelState)
-	return result.SessionID, nil
+	c.setSessionSetupModelState(result.SessionID, result.ModelState)
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result, nil
 }
 
 // NewSession creates a new ACP session via the agent WebSocket stream.
 func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers)
+	result, err := c.NewSessionWithResult(ctx, cwd, mcpServers)
+	return result.SessionID, err
 }
 
 // ResetSession creates a new session on the same connection, resetting context without
 // restarting the subprocess. Returns the new session ID or an error if not supported.
 func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers)
+	result, err := c.ResetSessionWithResult(ctx, cwd, mcpServers)
+	return result.SessionID, err
+}
+
+// NewSessionWithResult returns the identity from this exact request.
+func (c *Client) NewSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
+	return c.createSessionRequest(ctx, agentSessionNewAction, cwd, servers)
+}
+
+// ResetSessionWithResult returns the identity from this exact reset.
+func (c *Client) ResetSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
+	return c.createSessionRequest(ctx, agentSessionResetAction, cwd, servers)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
 func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return c.LoadSessionWithPolicy(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict)
+}
+
+// LoadSessionWithPolicy restores an existing ACP session while carrying the
+// host-selected policy onto its initial settings reports.
+func (c *Client) LoadSessionWithPolicy(
+	ctx context.Context,
+	sessionID string,
+	mcpServers []types.McpServer,
+	policy streams.SessionSettingsPolicy,
+) error {
+	_, err := c.LoadSessionWithResult(ctx, sessionID, mcpServers, policy)
+	return err
+}
+
+func (c *Client) LoadSessionWithResult(ctx context.Context, sessionID string, mcpServers []types.McpServer, policy streams.SessionSettingsPolicy) (string, error) {
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return "", fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		SessionID  string            `json:"session_id"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{SessionID: sessionID, McpServers: mcpServers}
+		SessionID             string                        `json:"session_id"`
+		McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+		MCPResolution         []streams.MCPResolutionEntry  `json:"mcp_resolution,omitempty"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+	}{SessionID: sessionID, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	c.setLastSessionModelState(nil)
-	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
+	resp, err := c.sendStreamRequest(ctx, agentSessionLoadAction, payload)
 	if err != nil {
-		return fmt.Errorf("load session request failed: %w", err)
+		return "", fmt.Errorf("load session request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("load session failed: unable to parse error")
+			return "", fmt.Errorf("load session failed: unable to parse error")
 		}
-		return fmt.Errorf("load session failed: %s", errPayload.Message)
+		if errPayload.Code == "SESSION_RESTORE_REQUIRED" || errPayload.Code == "SESSION_RESTORE_BLOCKED" {
+			return "", &SessionRestoreOperationError{
+				Code:    errPayload.Code,
+				Message: errPayload.Message,
+				Details: errPayload.Details,
+			}
+		}
+		if authenticationError := sessionOperationAuthenticationError(agentSessionLoadAction, resp, errPayload); authenticationError != nil {
+			return "", authenticationError
+		}
+		return "", fmt.Errorf("load session failed: %s", errPayload.Message)
 	}
 
 	var result struct {
-		Success    bool                       `json:"success"`
-		ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-		Error      string                     `json:"error,omitempty"`
+		Success             bool                       `json:"success"`
+		ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+		AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+		Error               string                     `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
-		return fmt.Errorf("failed to parse load session response: %w", err)
+		return "", fmt.Errorf("failed to parse load session response: %w", err)
 	}
 	if !result.Success {
-		return fmt.Errorf("load session failed: %s", result.Error)
+		return "", fmt.Errorf("load session failed: %s", result.Error)
 	}
-	c.setLastSessionModelState(result.ModelState)
-	return nil
+	c.setSessionSetupModelState(sessionID, result.ModelState)
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result.AttachmentAttemptID, nil
+}
+
+// ResumeSession reconnects an existing ACP session without replaying its
+// transcript. The agentctl server only permits this when ACP initialize
+// advertised sessionCapabilities.resume.
+func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []types.McpServer) error {
+	_, err := c.ResumeSessionWithResult(ctx, sessionID, cwd, mcpServers)
+	return err
+}
+
+func (c *Client) ResumeSessionWithResult(ctx context.Context, sessionID, cwd string, mcpServers []types.McpServer) (string, error) {
+	payload := struct {
+		SessionID     string                       `json:"session_id"`
+		Cwd           string                       `json:"cwd"`
+		McpServers    []types.McpServer            `json:"mcp_servers,omitempty"`
+		MCPResolution []streams.MCPResolutionEntry `json:"mcp_resolution,omitempty"`
+	}{SessionID: sessionID, Cwd: cwd, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
+
+	c.setLastSessionModelState(nil)
+	resp, err := c.sendStreamRequest(ctx, agentSessionResumeAction, payload)
+	if err != nil {
+		return "", fmt.Errorf("resume session request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return "", fmt.Errorf("resume session failed: unable to parse error")
+		}
+		if authenticationError := sessionOperationAuthenticationError(agentSessionResumeAction, resp, errPayload); authenticationError != nil {
+			return "", authenticationError
+		}
+		return "", fmt.Errorf("resume session failed: %s", errPayload.Message)
+	}
+	var result struct {
+		Success             bool                       `json:"success"`
+		ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+		AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+		Error               string                     `json:"error,omitempty"`
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return "", fmt.Errorf("failed to parse resume session response: %w", err)
+	}
+	if !result.Success {
+		return "", fmt.Errorf("resume session failed: %s", result.Error)
+	}
+	c.setSessionSetupModelState(sessionID, result.ModelState)
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result.AttachmentAttemptID, nil
+}
+
+func (c *Client) setSessionSetupModelState(sessionID string, state *streams.SessionModelState) {
+	if state == nil {
+		return
+	}
+	setup := *state
+	if setup.SessionID == "" {
+		setup.SessionID = sessionID
+	}
+	c.setLastSessionModelState(&setup)
+}
+
+// ForkSession asks the current provider session to fork through a completed
+// turn. The operation is not retried because an interrupted response is
+// ambiguous at the provider boundary.
+func (c *Client) ForkSession(ctx context.Context, sessionID, completedTurnID string) (string, error) {
+	if sessionID == "" || completedTurnID == "" {
+		return "", errors.New("session ID and completed turn ID are required")
+	}
+	resp, err := c.sendStreamRequest(ctx, "agent.session.fork", struct {
+		SessionID       string `json:"session_id"`
+		CompletedTurnID string `json:"completed_turn_id"`
+	}{SessionID: sessionID, CompletedTurnID: completedTurnID})
+	if err != nil {
+		return "", fmt.Errorf("fork session request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		var payload ws.ErrorPayload
+		if err := resp.ParsePayload(&payload); err != nil {
+			return "", errors.New("fork session failed: unable to parse error")
+		}
+		if payload.Code == ws.ErrorCodeConflict {
+			return "", fmt.Errorf("%w: %s", protocol.ErrForkPrecondition, payload.Message)
+		}
+		return "", fmt.Errorf("fork session failed: %s", payload.Message)
+	}
+	var result struct {
+		Success   bool   `json:"success"`
+		SessionID string `json:"session_id"`
+		Error     string `json:"error"`
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return "", fmt.Errorf("failed to parse fork session response: %w", err)
+	}
+	if !result.Success || result.SessionID == "" {
+		if result.Error == "" {
+			result.Error = "response omitted forked session ID"
+		}
+		return "", fmt.Errorf("fork session failed: %s", result.Error)
+	}
+	return result.SessionID, nil
+}
+
+// ModeResult reports which mode the agent ended up in after a mode change.
+// A clamped or unobserved mode must not read as a clean apply, so the caller
+// receives the agent's own answer rather than an echo of the request.
+type ModeResult struct {
+	Requested string `json:"requested"`
+	Effective string `json:"effective"`
+	Confirmed bool   `json:"confirmed"`
+}
+
+// ConfigurationResult is an ACP config option result returned by the
+// correlated setter response.
+type ConfigurationResult = streams.ConfigurationResult
+
+// Applied reports whether the agent confirmed the exact requested mode.
+func (r ModeResult) Applied() bool {
+	return r.Confirmed && r.Effective == r.Requested
 }
 
 // SetMode changes the agent's session mode via the agent WebSocket stream.
-func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) error {
+func (c *Client) SetMode(ctx context.Context, sessionID, modeID string) (ModeResult, error) {
 	payload := struct {
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}{SessionID: sessionID, ModeID: modeID}
 
+	result := ModeResult{Requested: modeID}
+
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_mode", payload)
 	if err != nil {
-		return fmt.Errorf("set mode request failed: %w", err)
+		return result, fmt.Errorf("set mode request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set mode failed: unable to parse error")
+			return result, fmt.Errorf("set mode failed: unable to parse error")
 		}
-		return fmt.Errorf("set mode failed: %s", errPayload.Message)
+		return result, fmt.Errorf("set mode failed: %s", errPayload.Message)
 	}
 
-	return nil
+	// An older agentctl answers without the result body. Leaving Confirmed
+	// false there is correct: nothing observed the applied mode.
+	if err := resp.ParsePayload(&result); err != nil {
+		return ModeResult{Requested: modeID}, nil
+	}
+	if result.Requested == "" {
+		result.Requested = modeID
+	}
+	return result, nil
 }
 
 // SetModel changes the agent's model via the agent WebSocket stream.
 func (c *Client) SetModel(ctx context.Context, modelID string) error {
+	_, err := c.SetModelWithResult(ctx, modelID)
+	return err
+}
+
+// SetModelWithResult reads the effective model and any catalog evidence from
+// the correlated setter response. Older agentctl peers remain unconfirmed.
+func (c *Client) SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error) {
+	result := streams.ConfigurationResult{Requested: modelID}
 	payload := struct {
 		ModelID string `json:"model_id"`
 	}{ModelID: modelID}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_model", payload)
 	if err != nil {
-		return fmt.Errorf("set model request failed: %w", err)
+		return result, fmt.Errorf("set model request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set model failed: unable to parse error")
+			return result, fmt.Errorf("set model failed: unable to parse error")
 		}
-		return fmt.Errorf("set model failed: %s", errPayload.Message)
+		return result, fmt.Errorf("set model failed: %s", errPayload.Message)
 	}
 
-	return nil
+	if err := resp.ParsePayload(&result); err != nil {
+		return streams.ConfigurationResult{Requested: modelID}, nil
+	}
+	if result.Requested == "" {
+		result.Requested = modelID
+	}
+	return result, nil
 }
 
 // SetConfigOption sets a session config option via the agent WebSocket stream.
 func (c *Client) SetConfigOption(ctx context.Context, configID, value string) error {
+	return c.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyStrict)
+}
+
+// SetConfigOptionWithResult returns only the value present in the correlated
+// setter response. A missing value stays unconfirmed.
+func (c *Client) SetConfigOptionWithResult(ctx context.Context, configID, value string) (streams.ConfigurationResult, error) {
+	return c.SetConfigOptionWithPolicyResult(ctx, configID, value, streams.SessionSettingsPolicyStrict)
+}
+
+// SetConfigOptionWithPolicy applies a startup config option and carries its
+// host-selected provenance to the adapter's convergence event.
+func (c *Client) SetConfigOptionWithPolicy(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+) error {
+	_, err := c.setConfigOption(ctx, configID, value, policy, false)
+	return err
+}
+
+// SetConfigOptionWithPolicyResult applies a config option and returns any
+// provider-reported value from that exact response.
+func (c *Client) SetConfigOptionWithPolicyResult(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+) (streams.ConfigurationResult, error) {
+	return c.setConfigOption(ctx, configID, value, policy, true)
+}
+
+func (c *Client) setConfigOption(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+	includeConfigurationResult bool,
+) (streams.ConfigurationResult, error) {
+	result := streams.ConfigurationResult{ConfigID: configID, Requested: value}
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return result, fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
-	}{ConfigID: configID, Value: value}
+		ConfigID                   string                        `json:"config_id"`
+		Value                      string                        `json:"value"`
+		SessionSettingsPolicy      streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+		IncludeConfigurationResult bool                          `json:"include_configuration_result,omitempty"`
+	}{ConfigID: configID, Value: value, IncludeConfigurationResult: includeConfigurationResult}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_config_option", payload)
 	if err != nil {
-		return fmt.Errorf("set config option request failed: %w", err)
+		return result, fmt.Errorf("set config option request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("set config option failed: unable to parse error")
+			return result, fmt.Errorf("set config option failed: unable to parse error")
 		}
-		return fmt.Errorf("set config option failed: %s", errPayload.Message)
+		if errPayload.Code == ws.ErrorCodeValidation {
+			return result, fmt.Errorf("set config option failed: %s", errPayload.Message)
+		}
+		return result, fmt.Errorf("set config option outcome uncertain: %s", errPayload.Message)
 	}
 
-	return nil
+	if !includeConfigurationResult {
+		return result, nil
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return streams.ConfigurationResult{ConfigID: configID, Requested: value}, nil
+	}
+	if result.ConfigID == "" {
+		result.ConfigID = configID
+	}
+	if result.Requested == "" {
+		result.Requested = value
+	}
+	return result, nil
 }
 
 // Authenticate triggers authentication for a given auth method via the agent WebSocket stream.
@@ -275,7 +615,19 @@ func (c *Client) Prompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 ) error {
-	return c.prompt(ctx, text, attachments, promptGeneration, false)
+	return c.prompt(ctx, text, attachments, promptGeneration, false, "")
+}
+
+// PromptWithSubmissionID sends a prompt with a backend-owned durable delivery
+// identity. Empty IDs retain the ordinary request-correlation behavior.
+func (c *Client) PromptWithSubmissionID(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	submissionID string,
+) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, false, submissionID)
 }
 
 // PromptSteer sends a prompt with the steer flag set, asking agentctl to deliver
@@ -288,7 +640,18 @@ func (c *Client) PromptSteer(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 ) error {
-	return c.prompt(ctx, text, attachments, promptGeneration, true)
+	return c.prompt(ctx, text, attachments, promptGeneration, true, "")
+}
+
+// PromptSteerWithSubmissionID is the durable-identity variant of PromptSteer.
+func (c *Client) PromptSteerWithSubmissionID(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	submissionID string,
+) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, true, submissionID)
 }
 
 func (c *Client) prompt(
@@ -297,13 +660,19 @@ func (c *Client) prompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 	steer bool,
+	submissionID string,
 ) error {
+	c.setLastDeliverySubmissionID("")
 	payload := struct {
-		Text             string                 `json:"text"`
-		Attachments      []v1.MessageAttachment `json:"attachments,omitempty"`
-		PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
-		Steer            bool                   `json:"steer,omitempty"`
-	}{Text: text, Attachments: attachments, PromptGeneration: promptGeneration, Steer: steer}
+		Text                 string                 `json:"text"`
+		Attachments          []v1.MessageAttachment `json:"attachments,omitempty"`
+		PromptGeneration     uint64                 `json:"prompt_generation,omitempty"`
+		DeliverySubmissionID string                 `json:"delivery_submission_id,omitempty"`
+		Steer                bool                   `json:"steer,omitempty"`
+	}{
+		Text: text, Attachments: attachments, PromptGeneration: promptGeneration,
+		DeliverySubmissionID: submissionID, Steer: steer,
+	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.prompt", payload)
 	if err != nil {
@@ -315,12 +684,16 @@ func (c *Client) prompt(
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return fmt.Errorf("prompt failed: unable to parse error")
 		}
+		if storageErr := promptStorageError(errPayload); storageErr != nil {
+			return storageErr
+		}
 		return fmt.Errorf("prompt failed: %s", errPayload.Message)
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
+		Success      bool   `json:"success"`
+		SubmissionID string `json:"submission_id,omitempty"`
+		Error        string `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
 		return fmt.Errorf("failed to parse prompt response: %w", err)
@@ -328,6 +701,9 @@ func (c *Client) prompt(
 	if !result.Success {
 		c.logger.Warn("prompt returned failure response", zap.String("error", result.Error))
 		return fmt.Errorf("prompt failed: %s", result.Error)
+	}
+	if result.SubmissionID != "" {
+		c.setLastDeliverySubmissionID(result.SubmissionID)
 	}
 	return nil
 }
@@ -346,18 +722,60 @@ type MCPHandler interface {
 // If mcpHandler is provided, MCP requests from agentctl will be dispatched to it and responses sent back.
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/agent/stream"
+	return c.StreamUpdatesFrom(ctx, handler, mcpHandler, onDisconnect, 0)
+}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
+// StreamUpdatesFrom opens the updates stream after a committed delivery
+// sequence. A zero cursor preserves the original first-connect behavior.
+func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
+	return c.StreamUpdatesFromWithOwner(ctx, handler, mcpHandler, onDisconnect, after, nil)
+}
+
+// StreamUpdatesFromWithOwner opens an update stream and reports its accepted
+// connection owner before the stream starts dispatching agent events.
+func (c *Client) StreamUpdatesFromWithOwner(
+	ctx context.Context,
+	handler func(AgentEvent),
+	mcpHandler MCPHandler,
+	onDisconnect func(err error),
+	after uint64,
+	onConnected func(ownerID uint64),
+) error {
+	attempt, streamCtx, err := c.beginUpdatesStreamDial(ctx)
+	if err != nil {
+		return err
+	}
+	const wsRoute = "/api/v1/agent/stream"
+	// Retained sidecars may predate stage metadata; they ignore this query.
+	route := wsRoute + "?stage=1"
+	if after > 0 {
+		route += "&after=" + strconv.FormatUint(after, 10)
+	}
+
+	conn, _, err := c.dialWebSocketWithConn(attempt.ctx, route, c.wsAuthHeaders(), func(conn net.Conn) error {
+		return c.registerUpdatesStreamDialConn(attempt, conn)
+	})
+	if err != nil {
+		c.retireUpdatesStreamDial(attempt)
+		return fmt.Errorf("failed to connect to updates stream: %w", err)
+	}
+
+	cancel, err := c.completeUpdatesStreamDial(attempt, conn)
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
+	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
+	stage := newUpdateStreamStage(attempt.ownerID)
+	stage.connected.Store(true)
 	c.mu.Lock()
-	c.agentStreamConn = conn
+	if c.agentStreamConn == conn {
+		c.updateStage.Store(stage)
+	}
 	c.mu.Unlock()
-
-	c.logger.Info("connected to updates stream", zap.String("url", wsURL))
+	if onConnected != nil {
+		onConnected(attempt.ownerID)
+	}
 
 	// writeMessage uses the shared stream write mutex for thread-safe writes
 	writeMessage := func(data []byte) error {
@@ -366,7 +784,10 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	go func() {
+		defer cancel()
+		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage, stage)
+	}()
 
 	return nil
 }
@@ -383,7 +804,7 @@ func (c *Client) HasAgentStream() bool {
 //
 // Agent events (message_chunk, tool_call, complete, ...) are NOT run inline on
 // this loop. They are handed, in order, to a single dispatchAgentEvents worker
-// goroutine through an unbounded reader-side queue. This keeps the read loop
+// goroutine through a bounded reader-side queue. This keeps the read loop
 // free to deliver request/response frames (e.g. the agent.cancel response) even
 // while an event handler is blocked.
 //
@@ -398,11 +819,10 @@ func (c *Client) HasAgentStream() bool {
 // immediately, the cancel returns, the guard releases, and the deferred
 // handleAgentReady then safely no-ops.
 //
-// The queue is unbounded on purpose: a fixed buffered channel would let a burst
-// of events pile up behind a blocked handler and then backpressure the read
-// loop on send, re-wedging response-frame delivery exactly as the inline
-// version did. enqueue never blocks the read loop, so no volume of events can
-// starve the cancel response.
+// The queue is bounded so a permanently blocked handler cannot exhaust the
+// backend process. A full queue closes the stream; committed events remain
+// recoverable through the agentctl journal on the next connection. enqueue
+// never blocks the read loop, so a burst cannot starve a cancel response.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,
 	conn *websocket.Conn,
@@ -410,15 +830,18 @@ func (c *Client) readUpdatesStream(
 	mcpHandler MCPHandler,
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
+	stage *updateStreamStage,
 ) {
 	// Ordered, single-worker dispatch preserves per-stream event ordering while
 	// decoupling handler execution from response-frame delivery.
 	events := newAgentEventQueue()
 	workerDone := make(chan struct{})
-	go c.dispatchAgentEvents(handler, events, workerDone)
+	go c.dispatchAgentEvents(handler, events, workerDone, stage)
 
 	var lastErr error
+	var nativeQuestions nativeQuestionDispatch
 	defer func() {
+		stage.connected.Store(false)
 		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
@@ -458,6 +881,14 @@ func (c *Client) readUpdatesStream(
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			// Retention/admission checks must observe transport loss before the
+			// ordered event worker drains. Keep the disconnect callback delayed
+			// until after that drain, but retire this connection's live handle now.
+			c.mu.Lock()
+			if c.agentStreamConn == conn {
+				c.agentStreamConn = nil
+			}
+			c.mu.Unlock()
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				c.logger.Info("updates stream closed normally")
 				// Normal close — don't report as disconnect error
@@ -471,6 +902,9 @@ func (c *Client) readUpdatesStream(
 		// Try to parse as ws.Message to check message type
 		var wsMsg ws.Message
 		if err := json.Unmarshal(message, &wsMsg); err == nil {
+			if c.consumeUpdateStreamMetadata(stage, wsMsg) {
+				continue
+			}
 			// Check if this is a response/error to a pending request
 			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
 				continue
@@ -484,7 +918,9 @@ func (c *Client) readUpdatesStream(
 					zap.String("action", wsMsg.Action),
 					zap.String("session_id", sessionID),
 					zap.String("pending_id", pendingID))
-				go c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
+				nativeQuestions.start(ctx, &wsMsg, func(ctx context.Context) {
+					c.dispatchMCPRequest(ctx, wsMsg, mcpHandler, writeMessage)
+				})
 				continue
 			}
 		}
@@ -501,18 +937,27 @@ func (c *Client) readUpdatesStream(
 			// state yet, so its asynchronous catalog must remain available to the
 			// bounded startup-policy wait.
 			c.setLastSessionModelState(&streams.SessionModelState{
-				CurrentModelID:       event.CurrentModelID,
-				Models:               event.SessionModels,
-				ConfigOptions:        event.ConfigOptions,
-				ConfigOptionsSettled: eventDataBool(event.Data, "config_options_settled"),
+				SessionID:                 event.SessionID,
+				CurrentModelID:            event.CurrentModelID,
+				Models:                    event.SessionModels,
+				ConfigOptions:             event.ConfigOptions,
+				SessionSettingsGeneration: event.SessionSettingsGeneration,
+				ConfigOptionsComplete:     eventDataBool(event.Data, streams.ConfigOptionsCompleteKey),
+				VerifiedConfigOptionIDs:   event.VerifiedConfigOptionIDs,
+				ConfigOptionsSettled:      eventDataBool(event.Data, "config_options_settled"),
+				ConfigOptionsDisplayOnly:  eventDataBool(event.Data, streams.ConfigOptionsDisplayOnlyKey),
 			})
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		stage.recordRead()
 		// Hand off to the ordered worker rather than running handler inline.
-		// enqueue never blocks the read loop, so a burst of events behind a
-		// blocked handler can't backpressure delivery of response frames.
-		events.enqueue(event)
+		// A full bounded queue closes the stream so retained events can be
+		// replayed instead of growing process memory without limit.
+		if !events.enqueue(event) {
+			lastErr = errAgentEventQueueFull
+			return
+		}
 	}
 }
 
@@ -520,7 +965,7 @@ func (c *Client) readUpdatesStream(
 // pushed onto the queue, preserving arrival order. It is the single consumer of
 // the queue; readUpdatesStream closes the queue on teardown and waits on
 // workerDone so an in-flight handler finishes before disconnect is signaled.
-func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}) {
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stage *updateStreamStage) {
 	defer close(done)
 	for {
 		event, ok := events.dequeue()
@@ -528,38 +973,69 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 			return
 		}
 		handler(event)
+		stage.recordHandled()
 	}
 }
 
-// agentEventQueue is an unbounded FIFO queue decoupling the stream read loop
+// agentEventQueue is a bounded FIFO queue decoupling the stream read loop
 // (producer) from the ordered event-dispatch worker (consumer). enqueue never
-// blocks, so no volume of events can backpressure the read loop and starve
-// response-frame delivery. A single-slot notify channel wakes the worker
-// without accumulating a signal per event.
+// blocks, so a full queue closes the stream instead of starving response-frame
+// delivery. A single-slot notify channel wakes the worker without accumulating
+// a signal per event.
 type agentEventQueue struct {
-	mu     sync.Mutex
-	items  []AgentEvent
-	notify chan struct{}
-	closed bool
+	mu        sync.Mutex
+	items     []queuedAgentEvent
+	bytes     int
+	limit     int
+	byteLimit int
+	notify    chan struct{}
+	closed    bool
+}
+
+const maxAgentEventQueueItems = 4096
+const maxAgentEventQueueBytes = int(deliverylimits.BackendDispatchQueueBytes)
+
+// ErrAgentEventQueueFull indicates that the bounded reader-side event queue
+// could not accept another event. Durable callers reconnect from their
+// committed cursor; legacy callers must surface an uncertain outcome.
+var ErrAgentEventQueueFull = errors.New("agent event dispatch queue is full")
+
+// Keep the package-local name for tests and older callers inside this package.
+var errAgentEventQueueFull = ErrAgentEventQueueFull
+
+type queuedAgentEvent struct {
+	event AgentEvent
+	bytes int
 }
 
 func newAgentEventQueue() *agentEventQueue {
-	return &agentEventQueue{notify: make(chan struct{}, 1)}
+	return &agentEventQueue{
+		limit:     maxAgentEventQueueItems,
+		byteLimit: maxAgentEventQueueBytes,
+		notify:    make(chan struct{}, 1),
+	}
 }
 
 // enqueue appends an event and wakes the worker. It is a no-op after close.
-func (q *agentEventQueue) enqueue(event AgentEvent) {
-	q.mu.Lock()
-	if q.closed {
-		q.mu.Unlock()
-		return
+func (q *agentEventQueue) enqueue(event AgentEvent) bool {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return false
 	}
-	q.items = append(q.items, event)
+	eventBytes := len(payload)
+	q.mu.Lock()
+	if q.closed || len(q.items) >= q.limit || q.bytes+eventBytes > q.byteLimit {
+		q.mu.Unlock()
+		return false
+	}
+	q.items = append(q.items, queuedAgentEvent{event: event, bytes: eventBytes})
+	q.bytes += eventBytes
 	q.mu.Unlock()
 	select {
 	case q.notify <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 // close marks the queue closed and wakes the worker so it can drain any
@@ -581,15 +1057,16 @@ func (q *agentEventQueue) dequeue() (AgentEvent, bool) {
 	for {
 		q.mu.Lock()
 		if len(q.items) > 0 {
-			event := q.items[0]
+			queued := q.items[0]
 			// Zero the vacated slot before advancing so the evicted event's
 			// maps/slices/pointer fields (tool-call payloads can be large)
 			// become collectable now, not only when the whole backing array is
 			// freed at stream shutdown.
-			q.items[0] = AgentEvent{}
+			q.items[0] = queuedAgentEvent{}
 			q.items = q.items[1:]
+			q.bytes -= queued.bytes
 			q.mu.Unlock()
-			return event, true
+			return queued.event, true
 		}
 		if q.closed {
 			q.mu.Unlock()
@@ -713,14 +1190,9 @@ func eventDataBool(data map[string]any, key string) bool {
 // CloseUpdatesStream closes the agent events stream connection.
 func (c *Client) CloseUpdatesStream() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.agentStreamConn != nil {
-		if err := c.agentStreamConn.Close(); err != nil {
-			c.logger.Debug("failed to close agent events stream", zap.Error(err))
-		}
-		c.agentStreamConn = nil
-	}
+	cleanup, conn := c.takeUpdatesStreamLocked()
+	c.mu.Unlock()
+	closeUpdatesStream(cleanup, conn)
 }
 
 // CancelResponse is the response from the agentctl cancel endpoint.

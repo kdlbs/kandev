@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/replayfixtures"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // queuedReplayFakeAgent wraps replayFakeAgent to close releaseBarrier the
@@ -155,12 +156,23 @@ func runQueuedFixtureOnce(t *testing.T, fx replayfixtures.Fixture) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Adapter.Prompt did not return")
 	}
-	if promptErr == nil {
-		t.Fatal("Adapter.Prompt returned nil, want the fixture's prompt_error")
+	observedEvents := drainEvents(a)
+	tokens := tokenizeEvents(observedEvents)
+	wantTokens := fx.Expect.Events
+	if promptErr != nil {
+		wantTokens = wantTokens[:len(wantTokens)-1]
+	} else {
+		var retainedFailure bool
+		for _, event := range observedEvents {
+			if event.Type == streams.EventTypeError &&
+				event.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime {
+				retainedFailure = true
+			}
+		}
+		if !retainedFailure {
+			t.Fatal("Adapter.Prompt returned nil without a retained terminal error event")
+		}
 	}
-
-	tokens := tokenizeEvents(drainEvents(a))
-	wantTokens := fx.Expect.Events[:len(fx.Expect.Events)-1]
 	if len(tokens) != len(wantTokens) {
 		t.Fatalf("tokenized events (observed exactly when Adapter.Prompt returned) = %v, want %v", tokens, wantTokens)
 	}

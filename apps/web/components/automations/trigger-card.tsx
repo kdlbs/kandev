@@ -11,6 +11,7 @@ import {
   IconClock,
   IconBrandGithub,
   IconWebhook,
+  IconPlayerPlay,
   IconTrash,
   IconChevronDown,
   IconChevronUp,
@@ -24,6 +25,7 @@ import { GitHubPushConfig } from "./trigger-configs/github-push-config";
 import { GitHubCIConfig } from "./trigger-configs/github-ci-config";
 import { WebhookConfig } from "./trigger-configs/webhook-config";
 import { describeSchedule } from "./schedule-expression";
+import { PR_EVENTS } from "./trigger-configs/pr-events";
 
 type TriggerCardProps = {
   pluginInfo?: NonNullable<TriggerTypeInfo["plugin"]>;
@@ -41,9 +43,10 @@ const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
   github_pr: IconBrandGithub,
   github_pr_merged: IconBrandGithub,
   github_push: IconBrandGithub,
-  github_ci: IconBrandGithub,
   webhook: IconWebhook,
   plugin_event: IconWebhook,
+  github_ci: IconBrandGithub,
+  manual: IconPlayerPlay,
 };
 
 const GITHUB_COLOR = "text-purple-400";
@@ -56,6 +59,7 @@ const TRIGGER_COLOR: Record<TriggerType, string> = {
   github_ci: GITHUB_COLOR,
   webhook: "text-orange-400",
   plugin_event: "text-orange-400",
+  manual: "text-emerald-400",
 };
 
 // Keyed by the cron expression the backend parses — syntax, never translated.
@@ -85,12 +89,13 @@ const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {
   github_ci: "automations:triggerInfoNotImplemented",
   webhook: "automations:triggerInfoWebhook",
   plugin_event: "automations:pluginWebhookHelp",
+  manual: "automations:triggerInfoManual",
 };
 
 // A plain function returning copy is invisible to `i18next/no-literal-string`,
 // which only inspects literals in JSX — `t` is threaded in from the caller so
 // the summary re-resolves on a locale switch.
-function getTriggerSummary(
+export function getTriggerSummary(
   trigger: AutomationTrigger,
   t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
@@ -111,8 +116,11 @@ function getTriggerSummary(
     return describeSchedule(expr, (cfg.timezone as string) ?? "");
   }
   if (trigger.type === "github_pr") {
-    // Event names are the persisted GitHub event ids, not copy.
-    const events = (cfg.events as string[]) ?? [];
+    // An event id this build does not know stays as the persisted id.
+    const events = ((cfg.events as string[]) ?? []).map((event) => {
+      const labelKey = PR_EVENTS.find((known) => known.value === event)?.labelKey;
+      return labelKey ? t(labelKey) : event;
+    });
     return events.length > 0
       ? t("automations:summaryPrEvents", { events: events.join(", ") })
       : t("automations:summaryPullRequestEvent");
@@ -225,7 +233,9 @@ function TriggerConfigForm({
     case "scheduled":
       return <ScheduledConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_pr":
-      return <GitHubPRConfig config={trigger.config} onUpdate={onUpdate} />;
+      return (
+        <GitHubPRConfig config={trigger.config} workspaceId={workspaceId} onUpdate={onUpdate} />
+      );
     case "github_pr_merged":
       return (
         <GitHubPRMergedConfig

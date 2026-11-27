@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -12,12 +12,11 @@ import {
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
+import { InboxOpenTaskLink } from "@/components/needs-you-inbox/inbox-open-task-link";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { toast } from "@/lib/toast/sonner";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
-import { linkToTask } from "@/lib/links";
 import {
   inboxHistoryClarificationQuestions,
   inboxHistoryPermissionContent,
@@ -25,16 +24,13 @@ import {
   inboxHistorySecondaryText,
 } from "@/lib/inbox-history/row-presentation";
 import type { InboxHistoryBundle } from "@/lib/types/inbox-history";
+import { ClarificationMarkdown } from "@/components/task/chat/clarification-markdown";
 
 // Standalone touch icons need both dimensions held to the 44px minimum, not
 // just min-height (control-sizing.md, "Standalone touch icons need both
 // height and width checks").
 const TOUCH_ICON_BUTTON =
   "max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11";
-
-function taskHrefForBundle(bundle: InboxHistoryBundle): string {
-  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
-}
 
 function InboxHistoryQuestionDetail({ bundle }: { bundle: InboxHistoryBundle }) {
   const { t } = useTranslation();
@@ -55,14 +51,28 @@ function InboxHistoryQuestionDetail({ bundle }: { bundle: InboxHistoryBundle }) 
       {bundle.context && <p className="text-xs text-muted-foreground">{bundle.context}</p>}
       {questions.map((question) => (
         <div key={question.id} className="text-sm">
-          <p className="font-medium">
-            {question.title || question.prompt || t("inboxHistory:noContent")}
-          </p>
-          {question.title && question.prompt && (
-            <p className="text-xs text-muted-foreground">{question.prompt}</p>
+          {question.title && (
+            <ClarificationMarkdown variant="inline" className="block font-medium">
+              {question.title}
+            </ClarificationMarkdown>
+          )}
+          {question.prompt && (
+            <ClarificationMarkdown variant="block" className="text-xs text-muted-foreground">
+              {question.prompt}
+            </ClarificationMarkdown>
+          )}
+          {!question.title && !question.prompt && (
+            <p className="font-medium">{t("inboxHistory:noContent")}</p>
           )}
           {question.optionLabels.length > 0 && (
-            <p className="text-xs text-muted-foreground">{question.optionLabels.join(", ")}</p>
+            <p className="text-xs text-muted-foreground">
+              {question.optionLabels.map((label, index) => (
+                <Fragment key={index}>
+                  {index > 0 ? ", " : null}
+                  <ClarificationMarkdown variant="inline">{label}</ClarificationMarkdown>
+                </Fragment>
+              ))}
+            </p>
           )}
         </div>
       ))}
@@ -95,12 +105,16 @@ function InboxHistoryRowIcon({ bundle }: { bundle: InboxHistoryBundle }) {
   );
 }
 
-function inboxHistoryPrimaryText(bundle: InboxHistoryBundle, fallback: string): string {
+function inboxHistoryPrimaryText(bundle: InboxHistoryBundle, fallback: string) {
   if (bundle.kind === "permission") {
-    return inboxHistoryPermissionContent(bundle).content || fallback;
+    return { text: inboxHistoryPermissionContent(bundle).content || fallback, markdown: false };
   }
-  const questions = inboxHistoryClarificationQuestions(bundle);
-  return questions[0]?.title || questions[0]?.prompt || bundle.context || fallback;
+  const question = inboxHistoryClarificationQuestions(bundle)[0];
+  const questionText = question?.title || question?.prompt;
+  return {
+    text: questionText || bundle.context || fallback,
+    markdown: Boolean(questionText),
+  };
 }
 
 // The tab's two actions. Icon-only with an aria-label on a phone or
@@ -109,11 +123,13 @@ function inboxHistoryPrimaryText(bundle: InboxHistoryBundle, fallback: string): 
 // otherwise. Rendering one pair rather than both keeps a hidden duplicate
 // out of the accessibility tree at every breakpoint.
 function InboxHistoryRowActions({
-  taskHref,
+  taskId,
+  sessionId,
   onCopyId,
   compact,
 }: {
-  taskHref: string;
+  taskId: string;
+  sessionId: string;
   onCopyId: () => void;
   compact: boolean;
 }) {
@@ -127,13 +143,14 @@ function InboxHistoryRowActions({
           size="icon"
           className={`cursor-pointer ${TOUCH_ICON_BUTTON}`}
         >
-          <Link
-            href={taskHref}
+          <InboxOpenTaskLink
+            taskId={taskId}
+            sessionId={sessionId}
             aria-label={t("inboxHistory:openTask")}
             data-testid="inbox-history-open-task"
           >
             <IconExternalLink className="h-4 w-4" />
-          </Link>
+          </InboxOpenTaskLink>
         </Button>
         <Button
           type="button"
@@ -152,9 +169,13 @@ function InboxHistoryRowActions({
   return (
     <>
       <Button asChild variant="outline" size="sm" className="cursor-pointer">
-        <Link href={taskHref} data-testid="inbox-history-open-task">
+        <InboxOpenTaskLink
+          taskId={taskId}
+          sessionId={sessionId}
+          data-testid="inbox-history-open-task"
+        >
           {t("inboxHistory:openTask")}
-        </Link>
+        </InboxOpenTaskLink>
       </Button>
       <Button
         type="button"
@@ -181,7 +202,6 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
 
   const primaryText = inboxHistoryPrimaryText(bundle, t("inboxHistory:noContent"));
   const secondaryText = inboxHistorySecondaryText(bundle);
-  const taskHref = taskHrefForBundle(bundle);
   const relativeTime = formatRelativeTime(bundle.created_at);
 
   const handleCopyId = () => {
@@ -203,7 +223,15 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
         >
           <InboxHistoryRowIcon bundle={bundle} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{primaryText}</span>
+            <span className="block truncate text-sm font-medium [&_*]:whitespace-nowrap [&_br]:hidden">
+              {primaryText.markdown ? (
+                <ClarificationMarkdown variant="inline" linkBehavior="passive">
+                  {primaryText.text}
+                </ClarificationMarkdown>
+              ) : (
+                primaryText.text
+              )}
+            </span>
             <span className="block truncate text-xs text-muted-foreground">{secondaryText}</span>
           </span>
           {expanded ? (
@@ -229,7 +257,8 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <InboxHistoryRowActions
-              taskHref={taskHref}
+              taskId={bundle.task_id}
+              sessionId={bundle.session_id}
               onCopyId={handleCopyId}
               compact={compactActions}
             />

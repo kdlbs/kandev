@@ -32,7 +32,7 @@ function PillCommandList({
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   touchTarget?: boolean;
 }) {
   const groups = new Map<string, { label?: string; options: PillOption[] }>();
@@ -118,6 +118,7 @@ export function PillPickerContent({
   setOpen,
   emptyMessage,
   action,
+  actions,
   popoverHeader,
   touchTarget,
 }: {
@@ -131,8 +132,9 @@ export function PillPickerContent({
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
   touchTarget: boolean;
 }) {
@@ -156,25 +158,25 @@ export function PillPickerContent({
               touchTarget={refreshLabel === "repositories"}
             />
           ) : null}
-          {action ? (
-            <Tooltip>
+          {(actions ?? (action ? [action] : [])).map((item) => (
+            <Tooltip key={item.label}>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={action.label}
-                  data-testid="create-local-repository-button"
+                  aria-label={item.label}
+                  data-testid={item.testId ?? "create-local-repository-button"}
                   onClick={() => {
-                    action.onSelect();
+                    item.onSelect();
                     setOpen(false);
                   }}
                   className={`${controlSizingClassName("icon")} max-md:min-h-12 max-md:min-w-12 [@media(pointer:coarse)]:min-h-12 [@media(pointer:coarse)]:min-w-12 inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer`}
                 >
-                  {action.icon}
+                  {item.icon}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{action.label}</TooltipContent>
+              <TooltipContent>{item.label}</TooltipContent>
             </Tooltip>
-          ) : null}
+          ))}
         </div>
         <PillCommandList
           options={options}
@@ -203,8 +205,9 @@ type PillSurfaceProps = {
   value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
   dropdownTestId?: string;
 };
@@ -225,6 +228,7 @@ export function PillPopover({
   emptyMessage,
   portalContainer,
   action,
+  actions,
   popoverHeader,
   dropdownTestId,
 }: PillSurfaceProps & { portalContainer: HTMLElement | null }) {
@@ -250,6 +254,7 @@ export function PillPopover({
           setOpen={setOpen}
           emptyMessage={emptyMessage}
           action={action}
+          actions={actions}
           popoverHeader={popoverHeader}
           touchTarget={false}
         />
@@ -273,6 +278,7 @@ export function PillDrawer({
   onPointerSelect,
   emptyMessage,
   action,
+  actions,
   popoverHeader,
   dropdownTestId,
   mobileTitle,
@@ -299,6 +305,7 @@ export function PillDrawer({
           setOpen={setOpen}
           emptyMessage={emptyMessage}
           action={action}
+          actions={actions}
           popoverHeader={popoverHeader}
           touchTarget
         />

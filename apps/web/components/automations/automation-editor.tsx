@@ -17,35 +17,39 @@ import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { getAutomation } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
-  CreateAutomationRequest,
-  CreateAutomationResponse,
   TriggerType,
   AutomationTrigger,
   TriggerTypeInfo,
-  UpdateAutomationRequest,
 } from "@/lib/types/automation";
 import { RunsSection } from "./runs-section";
 import {
   type CreatedWebhookDetails,
   type FormState,
-  buildCreatePayload,
-  buildUpdatePayload,
-  buildWebhookUrl,
-  resolveRepositoryIdsForMode,
+  DEFAULT_RETRY_POLICY,
+  normalizeRetryPolicyForTaskMode,
+  automationDraftRevision,
 } from "./automation-payload";
 import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
+import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
+import { useAutomationMCPReconciliation } from "@/hooks/domains/settings/use-automation-mcp-reconciliation";
+import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
 import {
   CreatedWebhookDialogHost,
   EditorFooter,
   isAutomationFieldDirty,
   NameField,
-  SettingsSection,
-  ThenSection,
   WhenSection,
 } from "./automation-editor-sections";
+import {
+  AgentSection,
+  DestinationSection,
+  FailureSection,
+  InstructionsSection,
+  RepeatRunsSection,
+} from "./automation-editor-groups";
 
 type AutomationEditorProps = {
   workspaceId: string;
@@ -72,10 +76,19 @@ const defaultForm: FormState = {
   enabled: true,
   maxConcurrentRuns: 1,
   continuationPolicy: "new_task",
+  followUpPrompt: "",
+  prContinuationStepId: "",
+  prMergedAction: "keep",
+  prClosedAction: "keep",
   taskMode: "automation_run",
+  managedDestination: undefined,
   repositoryMode: "none",
+  retryPolicy: DEFAULT_RETRY_POLICY,
+  pluginTools: [],
 };
-
+/**
+ * Initialize an editor draft from persisted settings, including the current MCP selection revision.
+ */
 function formFromAutomation(a: Automation): FormState {
   return {
     name: a.name,
@@ -85,6 +98,7 @@ function formFromAutomation(a: Automation): FormState {
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
     taskMode: a.task_mode ?? "automation_run",
+    managedDestination: a.managed_destination,
     repositoryMode: (a.repositories?.length ?? a.repository_ids.length) > 0 ? "selected" : "none",
     repositorySelections: (
       a.repositories ?? a.repository_ids.map((id) => ({ repository_id: id, base_branch: "" }))
@@ -99,6 +113,26 @@ function formFromAutomation(a: Automation): FormState {
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
+    ...prContinuationFormFields(a),
+    retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
+    pluginTools: a.plugin_tools ?? [],
+    mcpSelection: a.mcp_selection,
+    mcpSelectionRevision: a.mcp_selection_revision ?? 0,
+  };
+}
+
+/** Initialize per-PR options, defaulting fields an older server omits. */
+function prContinuationFormFields(
+  a: Automation,
+): Pick<
+  FormState,
+  "followUpPrompt" | "prContinuationStepId" | "prMergedAction" | "prClosedAction"
+> {
+  return {
+    followUpPrompt: a.follow_up_prompt ?? "",
+    prContinuationStepId: a.pr_continuation_step_id ?? "",
+    prMergedAction: a.pr_merged_action ?? "keep",
+    prClosedAction: a.pr_closed_action ?? "keep",
   };
 }
 
@@ -111,95 +145,6 @@ function getConditionType(triggers: AutomationTrigger[]): TriggerType | null {
 /** Checks if the prompt matches any known default prompt from the trigger types. */
 function isDefaultPrompt(prompt: string, triggerTypes: TriggerTypeInfo[]): boolean {
   return triggerTypes.some((t) => t.default_prompt === prompt);
-}
-
-type SaveHandlerOpts = {
-  isNew: boolean;
-  workspaceId: string;
-  form: FormState;
-  currentId: string | null;
-  // supportsMultiRepo mirrors what ConfigSection's picker rendered for this
-  // save. See normalizeRepositorySelections.
-  supportsMultiRepo: boolean;
-  create: (payload: CreateAutomationRequest) => Promise<CreateAutomationResponse>;
-  update: (id: string, payload: UpdateAutomationRequest) => Promise<unknown>;
-  setSaving: React.Dispatch<React.SetStateAction<boolean>>;
-  setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  // setCreatedWebhook surfaces the URL + secret in a dialog after creating
-  // a webhook automation, then the user is redirected to the listings page.
-  // Null when no webhook trigger was configured on the new automation.
-  setCreatedWebhook: React.Dispatch<React.SetStateAction<CreatedWebhookDetails | null>>;
-  onSaved: (form: FormState, triggers: AutomationTrigger[]) => void;
-  triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
-  router: ReturnType<typeof useRouter>;
-};
-
-// useSaveHandler returns the save callback for the automation editor.
-// Pulled out of AutomationEditor to keep that component under the
-// function-length lint cap; the save flow has gotten chunky now that it
-// registers discovered repos before persisting the automation.
-function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
-  const { isNew, workspaceId, form, currentId, create, update, supportsMultiRepo } = opts;
-  const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router, onSaved } =
-    opts;
-  return async () => {
-    setSaving(true);
-    try {
-      // The picker only ever *renders* repositorySelections[0] once the
-      // executor stops supporting multi-repo. It doesn't truncate the
-      // underlying array, so resolveNormalizedRepositoryIds re-enforces the
-      // same invariant right before persisting.
-      const { repositories, selections: promotedSelections } = await resolveRepositoryIdsForMode(
-        workspaceId,
-        form.repositorySelections,
-        form.repositorySelections.length > 0 ? "selected" : "none",
-        {
-          supportsMultiRepo,
-        },
-      );
-      const promoteSelections = () => {
-        setForm((prev) => ({ ...prev, repositorySelections: promotedSelections }));
-      };
-      const formWithPromotedSelections = { ...form, repositorySelections: promotedSelections };
-      if (isNew) {
-        const a = await create(
-          buildCreatePayload(workspaceId, form, repositories, triggerActions.pending),
-        );
-        promoteSelections();
-        // Webhook automations need their URL + secret communicated to the
-        // user; show the dialog and let its close handler do the redirect.
-        // Everything else goes straight to the listings page with a toast.
-        const hasWebhookTrigger = (a.triggers ?? []).some((t) => t.type === "webhook");
-        if (hasWebhookTrigger && a.webhook_secret) {
-          const savedTriggers = a.triggers ?? [];
-          triggerActions.loadTriggers(savedTriggers);
-          triggerActions.clearPending();
-          onSaved(formWithPromotedSelections, savedTriggers);
-          setCurrentId(a.id);
-          setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
-        } else {
-          toast.success(t("automations:automationCreated"));
-          runWithNavigationBlockerBypassed(() =>
-            router.push(`/settings/workspaces/${workspaceId}/automations`),
-          );
-        }
-      } else if (currentId) {
-        await update(currentId, buildUpdatePayload(form, repositories));
-        const persistedTriggers = await triggerActions.persistDrafts();
-        promoteSelections();
-        onSaved(formWithPromotedSelections, persistedTriggers);
-      }
-    } catch (err) {
-      // The interpolated value is an API/network diagnostic and stays English
-      // by design — see docs/i18n.md ("interpolated value" limit).
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(t("automations:failedToSaveAutomation", { error: msg }));
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
 }
 
 /** Loads an existing automation on mount and populates form + trigger state. */
@@ -220,7 +165,10 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
       .then((a) => {
         const loadedForm = formFromAutomation(a);
         const loadedTriggers = a.triggers ?? [];
-        setForm(loadedForm);
+        setForm({
+          ...loadedForm,
+          retryPolicy: normalizeRetryPolicyForTaskMode(loadedForm.taskMode, loadedForm.retryPolicy),
+        });
         loadTriggers(loadedTriggers);
         onLoaded(loadedForm, loadedTriggers);
       })
@@ -350,9 +298,14 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
   const canSave =
     options.form.name.trim().length > 0 &&
     (options.form.taskMode !== "normal_task" || options.form.workflowId.trim().length > 0) &&
-    options.form.repositorySelections.every(
-      (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
-    );
+    (options.form.taskMode !== "managed_conversation" ||
+      Boolean(
+        options.form.managedDestination?.plugin_id && options.form.managedDestination?.instance_key,
+      )) &&
+    (options.form.taskMode === "managed_conversation" ||
+      options.form.repositorySelections.every(
+        (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
+      ));
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,
@@ -423,6 +376,11 @@ function AutomationDeleteControls({
   );
 }
 
+/**
+ * Keep MCP choices and their saved revision with the automation draft throughout save and
+ * conflict recovery.
+ */
+// eslint-disable-next-line max-lines-per-function -- The editor coordinates its form, trigger, settings-save, and deletion lifecycles.
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
@@ -433,7 +391,17 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const isNew = currentId === null;
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
+  const mcpReconciliation = useAutomationMCPReconciliation(
+    workspaceId,
+    currentId,
+    setForm,
+    setSavedForm,
+  );
   const triggerTypes = useTriggerTypeMetadata(workspaceId);
+  const pluginToolOptions = useAutomationPluginTools(
+    workspaceId,
+    form.taskMode === "automation_run",
+  );
 
   const { placeholders, defaultTaskTitle, activeTriggerInfo, conditionType } = useConditionMetadata(
     triggerActions.allTriggers,
@@ -451,7 +419,16 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   });
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "taskMode") {
+        return {
+          ...next,
+          retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
+        };
+      }
+      return next;
+    });
   }, []);
 
   const discard = useCallback(() => {
@@ -463,6 +440,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     isNew,
     workspaceId,
     form,
+    savedForm,
     currentId,
     supportsMultiRepo,
     create,
@@ -476,7 +454,12 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     savedRevision,
     discard,
     remove,
-    onSaved: (nextSavedForm) => setSavedForm(nextSavedForm),
+    onSaved: (nextSavedForm) => {
+      setSavedForm(nextSavedForm);
+      mcpReconciliation.saved();
+    },
+    onMCPSelectionSaveFailed: mcpReconciliation.failed,
+    onPluginToolsSaveFailed: pluginToolOptions.reload,
   });
   const { dirtyBaseline, triggersDirty } = useEditorDirtyState(isNew, savedForm, triggerActions);
 
@@ -484,8 +467,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
       <NameField
         value={form.name}
+        enabled={form.enabled}
         isDirty={isAutomationFieldDirty(form, dirtyBaseline, "name")}
+        enabledIsDirty={isAutomationFieldDirty(form, dirtyBaseline, "enabled")}
         onChange={(v) => updateField("name", v)}
+        onEnabledChange={(v) => updateField("enabled", v)}
       />
       <Separator />
       <WhenSection
@@ -497,18 +483,41 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         isDirty={triggersDirty}
       />
       <Separator />
-      <ThenSection
+      <DestinationSection
         form={form}
-        workspaceId={workspaceId}
-        placeholders={placeholders}
-        defaultTaskTitle={defaultTaskTitle}
         savedForm={dirtyBaseline}
+        workspaceId={workspaceId}
         updateField={updateField}
       />
+      <RepeatRunsSection
+        form={form}
+        savedForm={dirtyBaseline}
+        updateField={updateField}
+        hasPRTrigger={triggerActions.allTriggers.some((trigger) => trigger.type === "github_pr")}
+      />
+      <InstructionsSection
+        form={form}
+        savedForm={dirtyBaseline}
+        updateField={updateField}
+        placeholders={placeholders}
+        defaultTaskTitle={defaultTaskTitle}
+      />
+      <AgentSection
+        form={form}
+        savedForm={dirtyBaseline}
+        workspaceId={workspaceId}
+        supportsMultiRepo={supportsMultiRepo}
+        updateField={updateField}
+        mcp={mcpReconciliation}
+        pluginTools={pluginToolOptions}
+      />
+      <FailureSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
-      <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
-      <Separator />
-      <RunsSection automationId={currentId} workspaceId={workspaceId} />
+      <RunsSection
+        automationId={currentId}
+        workspaceId={workspaceId}
+        historyMode={form.retryPolicy.history_mode}
+      />
       <AutomationDeleteControls
         saving={saving}
         isNew={isNew}
@@ -528,7 +537,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
 
 function automationRevision(form: FormState, triggers: AutomationTrigger[]): string {
   return JSON.stringify({
-    form,
+    form: automationDraftRevision(form),
     triggers: triggers.map(({ id, type, config, enabled }) => ({ id, type, config, enabled })),
   });
 }

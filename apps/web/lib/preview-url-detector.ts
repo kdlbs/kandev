@@ -42,16 +42,21 @@ function tryParseFullUrl(match: string): PreviewUrlInfo | null {
 
 /** Try to extract a URL from host:port pattern matches. */
 function tryParseHostPort(line: string, matches: RegExpMatchArray): PreviewUrlInfo | null {
-  const match = matches[matches.length - 1];
-  const portMatch = match.match(/:(\d{2,5})$/);
-  const port = portMatch ? Number(portMatch[1]) : undefined;
   const scheme = /https/i.test(line) ? "https" : "http";
-  return { url: `${scheme}://${match}`, port, scheme };
+  for (let index = matches.length - 1; index >= 0; index--) {
+    const match = matches[index];
+    const portMatch = match.match(/:(\d{2,5})$/);
+    if (!portMatch) continue;
+    const port = Number(portMatch[1]);
+    if (port > 65535) continue;
+    return { url: `${scheme}://${match}`, port, scheme };
+  }
+  return null;
 }
 
 export function detectPreviewUrl(line: string): PreviewUrlInfo | null {
   const fullUrlPattern = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s]*/gi;
-  const hostPortPattern = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})/gi;
+  const hostPortPattern = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})(?!\d)/gi;
 
   const fullUrlMatches = line.match(fullUrlPattern);
   if (fullUrlMatches) {

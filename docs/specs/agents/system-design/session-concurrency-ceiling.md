@@ -1,9 +1,12 @@
 ---
 status: current
 system: agents
+updated: 2026-11-02
 requirements:
   - REQ-AGENTS-SESSION-CEILING-001
   - REQ-AGENTS-SESSION-CEILING-002
+  - REQ-AGENTS-SESSION-CEILING-003
+  - REQ-AGENTS-SESSION-CEILING-005
 ---
 
 # Session Concurrency Ceiling System Design
@@ -15,7 +18,11 @@ resumes, workflow starts, queue drains, and dynamic relaunches. The controller
 does not own task metadata or provider execution. It returns a reservation or a
 typed refusal. The task repository owns the durable deferred-launch record.
 
-This design defines the implemented opt-in behavior. The composition root
+This design defines the opt-in behavior including
+[message-turn admission](#message-turn-admission) for
+[issue #4998](https://github.com/kdlbs/kandev/issues/4998). The
+[message-turn plan](../../../plans/idle-session-message-capacity/plan.md)
+records its implementation. The composition root
 resolves a disabled default, saved Settings value, or explicit startup
 environment override before automatic launch consumers start. The
 [delivery plan](../../../plans/session-ceiling-opt-in/plan.md) records the
@@ -28,6 +35,45 @@ in force when enabled.
 | --- | --- |
 | `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery) |
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
+| `REQ-AGENTS-SESSION-CEILING-003` | [Message-turn admission](#message-turn-admission) |
+| `REQ-AGENTS-SESSION-CEILING-005` | [Execution-grade capacity](#execution-grade-capacity) |
+
+## Execution-grade capacity
+
+The existing capacity setting also stores `policy` (`automatic` by default,
+or explicitly `all`) and `grade_limits`. Defaults remain disabled. The legacy
+environment override retains automatic-only behavior. Settings apply the total,
+policy and grade map together under the admission controller's existing lock.
+The 64-entry limit bounds task summaries and update events.
+
+The `execution_grade` profile and task field is an explicit, trimmed name of
+at most 64 Unicode characters without control characters. Empty is unconfigured.
+Omitted or null profile PATCH values retain the stored grade; an explicit empty
+string clears it. A nonempty task grade wins over the selected logical profile.
+Profile duplication and prepared execution snapshots preserve this classification.
+
+Admission persists `admitted_execution_grade` and its separate known bit.
+Active sessions retain their admitted grade across later profile/task edits.
+All-policy admission counts persisted active sessions and in-flight reservations
+once, and checks both the total and the selected grade's maximum. A zero grade
+maximum is valid. Unknown population and unconfigured grades have distinct
+refusal reasons; neither is treated as zero usage. Existing admitted work survives
+settings changes. Automatic-only policy preserves manual overrides.
+
+All-policy message turns check both capacity dimensions before warm dispatch
+or cold resume. Their tickets retain and persist the admitted grade. A nested
+resume uses that snapshot despite later profile or task edits. Count tickets,
+launch reservations, and admitted rows once per session under the same lock.
+A legacy ungraded ticket remains unknown until a counted row supplies its grade.
+Existing ownership survives settings changes; automatic-only overrides remain.
+
+Explicit workflow starts capture their selected destination before grade
+admission. A lost promotion releases only that launch's reservation and readmits
+against the current selection. Existing deferred records provide arrival order
+for all-policy replay; this adds no polling loop. Queue projection uses the same
+locked admission observation for total, per-grade usage and unavailable state.
+The Settings editor saves or resets its draft through the existing API and
+retains stale/conflict feedback rather than claiming an unapplied change.
 
 ## Components and responsibilities
 
@@ -39,6 +85,8 @@ in force when enabled.
 | Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
 | Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
+| Message-turn admission | Reserves bounded turns before warm or cold dispatch, independently of caller provenance. |
+| Message capacity wait registry | Tracks active queue-head identities for the existing capacity worker without owning their payload. |
 
 ## Data and contracts
 
@@ -161,8 +209,22 @@ launch request
   -> ceiling sweep replays the stored kind when capacity is available
 ```
 
-Manual origins bypass refusal and write a manual-override audit entry. Automatic
-origins never become manual during replay. The sweep clears a record only after
+Explicit launch overrides bypass refusal and write a manual-override audit entry.
+Ordinary messages use bounded turn admission even when their caller has manual
+execution authority. Automatic origins never become manual during replay.
+Task focus that resumes an
+idle-suspended session is passive inspection, like opening a conversation, so it
+uses the automatic origin. Its deferred record keeps the completed-session
+permission and the idle-suspension check, so a parked completed session stays a
+valid destination and the replay re-checks that the idle policy still parks it.
+Only a held claim from the same service for the exact task/session resume may
+bypass its own queued-launch guard. The bypass renews the unchanged durable
+claim, including its owner and unexpired lease, and validates the route;
+foreign, released, superseded and expired claims remain blocked. Renewal errors
+remain retryable and preserve the queued record. A replay that no longer has
+idle-suspension provenance is dropped. Final provider admission
+still revalidates claim and route ownership.
+The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
@@ -191,8 +253,173 @@ that a disabled limit still blocks work while confirmed replay is pending.
 
 The task-owned [queued session ownership design](../../tasks/system-design/queued-session-ownership.md)
 plans explicit passive-inspection classification at the caller boundary. Opening
-a conversation is not a manual override. Actual explicit execution retains this
-design's manual admission rule; workflow parking eligibility remains task-owned.
+a conversation is not a manual override. Explicit Start, Resume, Send Now, and
+legacy Run next retain manual admission. Ordinary message submission follows
+the message-turn boundary below. Workflow parking eligibility remains task-owned.
+
+## Message-turn admission
+
+### Policy and compatibility
+
+The enabled ceiling also bounds new orchestrated message turns. Normal Send,
+`message.add`, `message_task_kandev`, and automatic queue delivery use this rule.
+The caller's identity and explicit user authority remain separate from capacity
+policy. Keep `launchOrigin` for its existing workflow and creation semantics.
+Do not classify capacity intent from transport, `queued_by`, or sender identity.
+
+Introduce a typed internal capacity intent at the orchestrator boundary.
+Ordinary message requests default to bounded admission. Only the owned Start,
+Resume, Send Now, and legacy Run next paths request an explicit override.
+An already accepted continuation retains its existing execution and turn fences.
+Caller-supplied metadata cannot grant either exemption.
+
+This changes enabled installations: an ordinary message no longer grants a
+manual capacity override. Disabled installations retain current behavior.
+There is no separate per-workspace setting. The primary expected behavior in
+issue #4998 defined this scope.
+
+The alternative of changing only `PromptTask` to automatic is insufficient.
+`sessionAlreadyPromptReady` returns before cold-resume admission, including for
+automatic queued prompts. A handler-only population check also races with
+other message and launch requests.
+
+### One controller, two reservation lifetimes
+
+Extend `sessionCeilingController` with attempt-owned turn reservations under its
+existing mutex. Keep launch reservations and turn reservations separately owned.
+Population is the union of counted session IDs and both reservation sets.
+Nested admission for the same session must see either reservation without
+counting that session twice.
+
+A new turn ticket binds the task, session incarnation, and an attempt token.
+Reserve before cold resume, a counted-state claim, or provider input.
+Keep the ticket across `STARTING -> WAITING_FOR_INPUT` during cold startup.
+Launch confirmation and startup callbacks release only their launch ownership.
+They cannot remove a turn ticket that still awaits dispatch.
+
+After the new turn has a durable counted state, its ticket can release.
+Pre-dispatch rejection releases only the rejecting attempt's ticket.
+An uncertain provider acceptance keeps the existing counted-state or recovery
+ownership until correlated settlement. Existing continuation and replacement
+fences remain authoritative. An old callback cannot release a newer ticket.
+A context handle is reusable only while the controller still owns its exact
+token and the attempt has not released or expired it. A stale handle reacquires
+bounded capacity under the retry's own ownership instead of bypassing admission.
+
+Wire the guard into `promptTask` before `ensureSessionRunning` can take its warm
+return. Direct request handlers can reserve earlier and transfer a typed ticket
+to asynchronous dispatch. Revalidate its recipient after workflow routing.
+Created-session message starts and supported completed-session follow-ups must
+obtain the same bounded ticket before their launch or resume path.
+
+Queued passthrough input needs the same guard before
+`PreparePassthroughRunning` and the PTY write. Preserve the deferred running
+publication in
+[the passthrough decision](../../../decisions/2026-08-31-passthrough-running-publication.md).
+Direct terminal keystrokes remain outside this message-delivery contract.
+
+Controller locks protect population decisions only. Release them before queue
+mutations, provider I/O, callbacks, or synchronous event publication.
+Do not introduce a controller-to-session-lock acquisition edge.
+
+### Durable input admission
+
+Use the existing `messagequeue` as the only owner of pending prompt content.
+Do not copy message waits into the task's single `deferred_launch` record.
+That record cannot represent two independently pending sibling conversations.
+
+Return a typed capacity refusal before provider acceptance. A direct caller
+either transfers its reserved ticket to dispatch or commits the pending input.
+For `MessageHandlers.wsAddMessage`, make that choice before its success response.
+Reuse `CreateQueuedMessageIdempotent`, already used for comment-bearing input,
+to persist the transcript and queue receipt together after a refusal.
+Preserve attachment claims, reference expansion, the client message identity,
+delivery submission identity, and `MetaKeyTurnStartAlreadyProcessed`.
+
+For agent messages, preserve the captured queue identity and sender metadata.
+Use the existing queued result, including the accepted entry ID.
+A failed queue insert retains the existing failure/rollback outcome.
+Do not report successful queuing because a transcript row alone exists.
+The low-level `PromptTask` surface can return the typed refusal to its producer.
+It must not silently persist a second copy behind a producer-owned callback.
+
+A pinned completed target retains its existing explicit-follow-up eligibility.
+Persist a trusted completed-follow-up intent on its queue entry without starting
+its runtime. The ordinary terminal rejection still applies to other producers.
+Replay revalidates the exact task/session incarnation and the allowed completed
+resume before using its ticket. Filter reserved intent metadata from raw client
+queue requests. Failed and cancelled sessions remain rejected.
+
+After a queued capacity refusal, restore the exact reservation at its original
+queue position. Preserve its entry ID, enqueue time, payload, and delivery ledger.
+Suppress the immediate follow-up drain for this outcome. Keep existing durable
+acceptance and uncertain-delivery handling separate from pre-dispatch refusal.
+
+### Capacity wake-up and restart
+
+Add one process-local wait registry to `Service`, keyed by queue session identity.
+Each entry identifies the accepted head, not its prompt content.
+Register only after durable admission or restoration. Revalidate the head and
+incarnation before every retry. Queue removal, transfer, reset, deletion, or
+accepted dispatch makes an old registry entry ineligible.
+
+Extend `ceilingSweepTick` to visit registered message waits after the existing
+launch pass. Reuse its release signal and 20-second recovery tick.
+Registration must request a recheck after the queue worker releases its guard.
+This closes release-before-registration without a refusal-driven busy loop.
+Every pass remains bounded to one attempt per candidate.
+
+Sort eligible message candidates by the scheduler's task priority rank, then
+the head's original enqueue time, with stable session/entry tie breakers.
+Expose the existing rank helper from `orchestrator/queue` for internal reuse.
+Do not change ordering of the existing deferred-launch pass or promise fairness
+across different scheduling systems.
+
+Retry through the identity-aware automatic queue drain. Recheck Auto-run,
+clarification, WIP, cancellation, recovery, and dispatch ownership before work.
+Keep the original admission origin and queue provenance unchanged.
+Increasing or disabling capacity signals both kinds of wait through the same
+worker. Disabling does not enable a paused queue.
+
+A CREATED target and a supported completed follow-up acquire their bounded
+ticket before the sweep schedules a start or resume. The ticket is retained
+until the session leaves that state or the attempt fails, so two waits cannot
+both observe the final slot and start manually. Auto-run OFF blocks both kinds
+of startup as well as ordinary dispatch. A confirmed deletion, replacement,
+or empty queue removes a wait; an unavailable identity, snapshot, or session
+read keeps it so the next sweep can retry.
+
+The registry starts empty after backend restart. Persisted queue contents remain
+under
+[the task resume contract](../../tasks/system-design/resume-prompt-queue.md#backend-restart).
+Do not enumerate persisted queues at boot to start their agents.
+Existing authorized open/resume/new-input or readiness activity can register a
+still-blocked session again. Task-level automatic launch records retain their
+separate existing restart behavior.
+
+### Presentation and verification
+
+Reuse the existing pending-message panel on desktop and phone. No new queue,
+task state, capacity status field, or task-wide launch banner is required.
+One sibling's pending message must not replace another sibling's task-level
+launch ownership or falsely mark an active task as entirely waiting.
+
+Update the existing Session capacity help and discovery descriptions to name
+ordinary message turns and explicit execution overrides. Keep the current
+Settings controls and save behavior. The phone queue remains inline above its
+composer. Its existing internal scroll owner, safe-area handling, touch actions,
+and Auto-run controls remain authoritative.
+
+Tests must cover warm and cold requests, simultaneous final-slot contenders,
+startup-to-turn ownership, delayed callbacks, two sibling queues, and payload
+retention. A mixed population includes both counted and idle/terminal sessions.
+Handler tests must use a real controller for capacity decisions.
+Desktop and phone E2E submit a real message at full capacity and observe pending
+input followed by one delivered turn after release.
+
+The controller and queue remain the existing owners. This local extension needs
+no new database schema, settings owner, or scheduler goroutine. Its rationale
+and alternatives are recorded here, so no separate ADR is required.
 
 ## Failure and recovery
 
@@ -203,9 +430,89 @@ failed. A deferred detached relaunch leaves the automation run and its durable
 record for the sweep. Queue dispatch treats a seam-3 refusal as retryable so the
 original message remains in the queue.
 
+A replay returns its outcome together with the error and a short detail, so the
+warning for a preserved non-ceiling failure names the cause. Validation of the
+built agent or continue command (`validate agent command:` or
+`validate continue command:`) is a permanent failure. A later pass rebuilds the
+same command from the same profile, and each attempt leaves a failed session.
+The sweep drops that record with `ceiling_dropped_launch_invalid`. The lifecycle command producer emits a typed `BuiltCommandValidationError`,
+and consumers recognize it through `errors.As`, including resume, sanitizer,
+and cleanup wrappers. Display text alone never proves this failure. All seven
+replay kinds preserve the error until settlement; ensure and dynamic-relaunch
+paths classify it after their accepted/deferred/superseded guards. Other
+failures keep their retry.
+
+Entry validation distinguishes uncertainty from a dead end. `unavailable` keeps
+the record; it is reserved for failed step, transition, or task reads, which
+validation reports as errors. The start auto-start eligibility read also
+preserves uncertainty when the record already carries a binding. A genuine
+`ErrWorkflowStepNotFound` or a readable step without auto-start remains a
+terminal destination. `permanently unavailable` covers shapes that no
+later pass can repair: a legacy sessionless `start`, an underivable or
+incomplete binding, an unrouted entry whose step now routes sessions, and a task
+with no durable entry identity. The sweep, the claimed replay, and the claimed
+binding check treat it like `superseded` and drop the record.
+
 Office automatic starts do not use workflow-step auto-start eligibility when the
 sweep evaluates a `start` record. This keeps Office scheduling ownership in the
 Office path.
+
+A legacy automation run's start refused at seam 1 is queued, not failed. The `start`
+payload records the run ID and thread disposition under `automation_run`. The
+automation dispatcher receives `ErrRunDeferred`, so it leaves the run
+`triggered` and bound to its task, and the run keeps its concurrency slot while
+the ceiling stays full. The orchestrator skips failure cleanup, so the task and
+its record remain. The sweep replays that start through the same dispatcher. It
+binds the new session and turn to the run, or fails the run when the launch
+fails for a non-ceiling reason. When the launch succeeds but the binding fails,
+the run is failed and cleanup attempts to stop the launched session, since no
+completion would settle the run; the task is kept. Failed or unknown stopping
+does not authorize a replacement start. Workflow-step auto-start eligibility
+does not apply because the trigger is the start signal.
+
+A newly created automation task carries `automation_start_owned` before
+`CreateTask` publishes feeder moves. Its value is the admitted run ID, or a
+fresh internal token for an unbound internal start. Workflow auto-start yields
+to that owner. Continuations reuse their task and never acquire or overwrite
+initial-start ownership. Wire create requests and ordinary metadata updates
+cannot set or remove the marker.
+
+Release compares the captured owner through the existing metadata CAS boundary
+and publishes `task.updated` on removal, using a bounded detached context.
+A queued dispatch keeps its marker until exact replay admission or a definitive
+queue drop. A failed unbound legacy run can release on a drop only when its
+task has no session rows. Session creation can precede run binding; existing
+rows or an uncertain session read retain ownership, regardless of session
+state. Legacy bound session/turn evidence can release the initial fence;
+a durable retry keeps it until its matching run is terminal and its immutable
+run/generation/task/session/turn/submission launch is confirmed stopped. Generic
+retry and recovery fences continue to apply independently.
+
+Startup and later workflow entry consult the existing run and launch ledgers.
+Restart, expired leases, unknown acceptance, failed Stop, missing ownership
+and read uncertainty do not certify termination or permit generic replay.
+Unresolved legacy boolean markers also remain fenced. Explicit task/session
+recovery remains subject to the existing retry owner controls.
+
+For legacy runs, the sweep drops a start whose run was deleted or is no longer
+`triggered`, such
+as a stopped, bound, failed, or startup-reconciled run, without launching. A run
+that closes between that check and the replay's dispatch is reported by the
+replay, and the start is dropped the same way. Dropping any other queued
+automation start first fails its run, because no completion event will settle
+it; the record is cleared only after the run is no longer waiting, so a failed
+run update leaves the record for the next sweep. Startup reconciliation can
+fail an unbound legacy run, after which the sweep drops its waiting start. When
+its task is hard-deleted while the start is queued, the task-deleted event fails
+the unbound legacy run. Its concurrency slot is released, and the missing task
+prevents a later replay.
+
+Retry-enabled starts use the durable launch ledger and exact prepared-payload
+admission. Queued, accepted or uncertain launch ownership can survive restart
+and remain live across instances. Startup, lease recovery and task deletion
+must retain unresolved ownership and use the existing retry cancellation and
+termination boundaries; none of them alone proves a launch stopped or permits
+a replacement start.
 
 ## Persistence
 

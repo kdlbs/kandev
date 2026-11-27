@@ -29,7 +29,7 @@ type TaskIssueStore interface {
 	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*taskmodels.TaskRepository, error)
 	GetRepository(ctx context.Context, repositoryID string) (*taskmodels.Repository, error)
-	UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*taskmodels.Task, error)
+	UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *taskmodels.TaskGitHubIssueLink) (*taskmodels.Task, error)
 }
 
 type LinkTaskIssueRequest struct {
@@ -40,6 +40,7 @@ type LinkTaskIssueRequest struct {
 }
 
 type TaskIssueLinkResponse struct {
+	GitHubHost  string `json:"github_host"`
 	TaskID      string `json:"task_id"`
 	TaskTitle   string `json:"task_title"`
 	Owner       string `json:"owner"`
@@ -84,8 +85,25 @@ func (s *Service) LinkTaskIssueForUser(
 	if task == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	owner, repo, number, err := resolveIssueReference(req)
+	if err := s.authorizeWorkspaceAccess(ctx, task.WorkspaceID); err != nil {
+		return nil, err
+	}
+	host, err := s.selectedGitHubHost(ctx, task.WorkspaceID)
 	if err != nil {
+		return nil, err
+	}
+	var owner, repo string
+	var number int
+	if req.Issue != "" {
+		owner, repo, number, err = parseIssueReferenceForHost(req.Issue, req.Owner, req.Repo, host)
+	} else {
+		owner, repo, number, err = resolveIssueReference(req)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ctx = withExpectedGitHubHost(ctx, host.String())
+	if err := s.validateIssueTaskRepository(ctx, store, taskID, owner, repo); err != nil {
 		return nil, err
 	}
 	if err := s.ensureRepositoryInWorkspaceScope(ctx, task.WorkspaceID, owner, repo); err != nil {
@@ -95,7 +113,7 @@ func (s *Service) LinkTaskIssueForUser(
 	if err != nil {
 		return nil, err
 	}
-	return s.linkTaskIssueResolved(ctx, resolved.Client, store, task, taskID, owner, repo, number)
+	return s.linkTaskIssueResolved(withGitHubOperationFence(ctx, s, task.WorkspaceID, resolved), resolved.Client, store, task, taskID, owner, repo, number)
 }
 
 func (s *Service) linkTaskIssueWithClient(
@@ -130,16 +148,19 @@ func (s *Service) linkTaskIssueResolved(
 	if err != nil {
 		return nil, err
 	}
+	var unlock func()
+	ctx, unlock, err = s.lockResourceMutation(ctx, task.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	if err := s.validateIssueTaskRepository(ctx, store, taskID, issue.RepoOwner, issue.RepoName); err != nil {
 		return nil, err
 	}
-	metadata := copyMetadata(task.Metadata)
-	metadata[taskMetaIssueURL] = issue.HTMLURL
-	metadata[taskMetaIssueNumber] = issue.Number
-	metadata[taskMetaIssueOwner] = issue.RepoOwner
-	metadata[taskMetaIssueRepo] = issue.RepoName
-	metadata[taskMetaIssueLinked] = true
-	if _, err := store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata); err != nil {
+	link := &taskmodels.TaskGitHubIssueLink{
+		URL: issue.HTMLURL, Number: issue.Number, Owner: issue.RepoOwner, Repo: issue.RepoName,
+	}
+	if _, err := store.UpdateTaskGitHubIssue(context.WithoutCancel(ctx), taskID, link); err != nil {
 		return nil, err
 	}
 	return taskIssueResponse(taskID, task.Title, issue), nil
@@ -169,17 +190,11 @@ func (s *Service) UnlinkTaskIssue(ctx context.Context, taskID string) error {
 	if store == nil {
 		return errStoreUnavailable
 	}
-	task, err := store.GetTask(ctx, taskID)
+	_, err := store.GetTask(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	metadata := copyMetadata(task.Metadata)
-	delete(metadata, taskMetaIssueURL)
-	delete(metadata, taskMetaIssueNumber)
-	delete(metadata, taskMetaIssueOwner)
-	delete(metadata, taskMetaIssueRepo)
-	delete(metadata, taskMetaIssueLinked)
-	_, err = store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata)
+	_, err = store.UpdateTaskGitHubIssue(context.WithoutCancel(ctx), taskID, nil)
 	return err
 }
 
@@ -242,18 +257,21 @@ func (s *Service) validateIssueTaskRepository(ctx context.Context, store TaskIss
 		if strings.EqualFold(entity.Provider, githubProviderName) &&
 			strings.EqualFold(entity.ProviderOwner, owner) &&
 			strings.EqualFold(entity.ProviderName, repo) {
-			return nil
+			task, err := store.GetTask(ctx, taskID)
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return ErrIssueRepositoryMismatch
+			}
+			host, err := s.selectedGitHubHost(ctx, task.WorkspaceID)
+			if err != nil {
+				return err
+			}
+			return s.requireAttachedGitHubHost(ctx, taskRepo.RepositoryID, host)
 		}
 	}
 	return ErrIssueRepositoryMismatch
-}
-
-func copyMetadata(metadata map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(metadata)+5)
-	for key, value := range metadata {
-		out[key] = value
-	}
-	return out
 }
 
 func taskIssueLinkFromMetadata(row taskIssueMetadataRow) (TaskIssueLinkResponse, bool) {
@@ -269,11 +287,23 @@ func taskIssueLinkFromMetadata(row taskIssueMetadataRow) (TaskIssueLinkResponse,
 	if !ok {
 		return TaskIssueLinkResponse{}, false
 	}
-	owner, repo, issueNumber, err := parseIssueReference(issueURL, "", "")
+	host, err := providerGitHubURLHost(issueURL)
+	if err != nil {
+		return TaskIssueLinkResponse{}, false
+	}
+	if !host.IsPublic() {
+		linked, _ := metadata[taskMetaIssueLinked].(bool)
+		watchID, _ := metadata["issue_watch_id"].(string)
+		if !linked && watchID == "" {
+			return TaskIssueLinkResponse{}, false
+		}
+	}
+	owner, repo, issueNumber, err := parseIssueReferenceForHost(issueURL, "", "", host)
 	if err != nil || issueNumber != metadataNumber {
 		return TaskIssueLinkResponse{}, false
 	}
 	return TaskIssueLinkResponse{
+		GitHubHost:  host.String(),
 		TaskID:      row.TaskID,
 		TaskTitle:   row.TaskTitle,
 		Owner:       owner,
@@ -296,7 +326,9 @@ func positiveMetadataInt(value interface{}) (int, bool) {
 }
 
 func taskIssueResponse(taskID, taskTitle string, issue *Issue) *TaskIssueLinkResponse {
+	host, _ := providerGitHubURLHost(issue.HTMLURL)
 	return &TaskIssueLinkResponse{
+		GitHubHost:  host.String(),
 		TaskID:      taskID,
 		TaskTitle:   taskTitle,
 		Owner:       issue.RepoOwner,

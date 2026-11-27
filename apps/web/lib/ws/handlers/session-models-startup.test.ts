@@ -152,6 +152,68 @@ it("keeps persisted model state until a settled startup payload arrives", () => 
   );
 });
 
+it("invalidates confirmed command mode during startup until provider configuration settles", () => {
+  const store = makeStore({
+    sessionModels: {
+      bySessionId: {
+        "session-1": {
+          currentModelId: providerModelId,
+          models: [],
+          configOptions: [],
+          configOptionsSettled: true,
+          confirmedConfigOptions: { collaboration_mode: "plan" },
+        },
+      },
+    } as AppState["sessionModels"],
+    taskSessions: {
+      items: {
+        "session-1": { ...makeTaskSession({}), state: "STARTING" },
+      },
+    },
+  });
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  handler(
+    makeMessage(
+      makePayload(providerModelId, {
+        config_options_settled: false,
+        config_options: [
+          {
+            type: "select",
+            id: "collaboration_mode",
+            name: "Collaboration Mode",
+            current_value: "plan",
+            options: [],
+          },
+        ],
+      }),
+    ),
+  );
+  expect(
+    store.getState().sessionModels.bySessionId["session-1"].confirmedConfigOptions,
+  ).toBeUndefined();
+
+  handler(
+    makeMessage(
+      makePayload(providerModelId, {
+        config_options_settled: true,
+        config_options: [
+          {
+            type: "select",
+            id: "collaboration_mode",
+            name: "Collaboration Mode",
+            current_value: "default",
+            options: [],
+          },
+        ],
+      }),
+    ),
+  );
+  expect(store.getState().sessionModels.bySessionId["session-1"].confirmedConfigOptions).toEqual({
+    collaboration_mode: "default",
+  });
+});
+
 it("restores persisted runtime after a hydrated session restarts", () => {
   const store = makeStore({
     contextWindow: {

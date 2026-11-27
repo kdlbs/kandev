@@ -26,7 +26,7 @@ func DefaultDomainDescriptors() []DomainDescriptor {
 		editorDomain(),
 		notificationProviderDomain(),
 		compatibilityIntegrationDomain("issue_integrations", "issue_integration", "Issue integrations", "Use provider-specific Jira, Linear, and Sentry resource types for settings updates."),
-		compatibilityIntegrationDomain("code_host_integrations", "code_host_integration", "Code host integrations", "Use provider-specific GitHub, GitLab, and Azure DevOps resource types for settings updates."),
+		compatibilityIntegrationDomain("code_host_integrations", "code_host_integration", "Code host integrations", "Use provider-specific GitHub and GitLab resource types for settings updates."),
 		jiraSettingsDomain(),
 		linearSettingsDomain(),
 		sentryInstanceDomain(),
@@ -35,13 +35,10 @@ func DefaultDomainDescriptors() []DomainDescriptor {
 		sentryIssueWatchDomain(),
 		githubSettingsDomain(),
 		gitlabSettingsDomain(),
-		azureDevOpsSettingsDomain(),
 		githubReviewWatchDomain(),
 		githubIssueWatchDomain(),
 		gitlabReviewWatchDomain(),
 		gitlabIssueWatchDomain(),
-		azureDevOpsWorkItemWatchDomain(),
-		azureDevOpsPullRequestWatchDomain(),
 		automationDomain(),
 		automationTriggerDomain(),
 		runtimeFlagDomain(),
@@ -69,12 +66,8 @@ func integrationReadOnly(resourceType, path, label, description, jsonType, owner
 	}
 }
 
-func integrationWritable(resourceType, path, label, description, jsonType, owner, authority string) FieldDescriptor {
-	return domainWritable(resourceType, path, label, description, jsonType, owner, authority)
-}
-
 func integrationNullableWritable(resourceType, path, label, description, jsonType, owner, authority string) FieldDescriptor {
-	field := integrationWritable(resourceType, path, label, description, jsonType, owner, authority)
+	field := domainWritable(resourceType, path, label, description, jsonType, owner, authority)
 	field.Nullable = true
 	return field
 }
@@ -95,7 +88,7 @@ func jiraSettingsDomain() DomainDescriptor {
 	owner := "jira"
 	target := workspaceIntegrationTarget()
 	return integrationDomain("issue_integrations", "jira_settings", "Jira settings", "Noncredential Jira defaults for one workspace.", owner, target,
-		integrationWritable("jira_settings", "defaultProjectKey", "Default project", "Default Jira project key for issue workflows.", "string", owner, "workspace.manage"),
+		domainWritable("jira_settings", "defaultProjectKey", "Default project", "Default Jira project key for issue workflows.", "string", owner, "workspace.manage"),
 		integrationReadOnly("jira_settings", "siteUrl", "Site URL", "Configured Jira site identity. Credential and identity changes use the connection flow.", "string", owner),
 		integrationReadOnly("jira_settings", "email", "Account email", "Configured Jira account metadata.", "string", owner),
 		integrationReadOnly("jira_settings", "authMethod", "Authentication method", "Configured Jira authentication method.", "string", owner),
@@ -108,7 +101,7 @@ func linearSettingsDomain() DomainDescriptor {
 	owner := "linear"
 	target := workspaceIntegrationTarget()
 	return integrationDomain("issue_integrations", "linear_settings", "Linear settings", "Noncredential Linear defaults for one workspace.", owner, target,
-		integrationWritable("linear_settings", "defaultTeamKey", "Default team", "Default Linear team key for issue workflows.", "string", owner, "workspace.manage"),
+		domainWritable("linear_settings", "defaultTeamKey", "Default team", "Default Linear team key for issue workflows.", "string", owner, "workspace.manage"),
 		integrationReadOnly("linear_settings", "authMethod", "Authentication method", "Configured Linear authentication method.", "string", owner),
 		integrationReadOnly("linear_settings", "orgSlug", "Organization slug", "Computed Linear organization metadata.", "string", owner),
 		integrationReadOnly("linear_settings", "hasSecret", "Credential present", "Whether a credential is enrolled, without exposing it.", "boolean", owner),
@@ -118,7 +111,7 @@ func linearSettingsDomain() DomainDescriptor {
 func sentryInstanceDomain() DomainDescriptor {
 	owner := "sentry"
 	return integrationDomain("issue_integrations", "sentry_instance", "Sentry instances", "Named noncredential Sentry instance settings.", owner, TargetRules{Scope: ScopeResource, RequiresResourceID: true, RequiresWorkspaceID: true, AllowsWorkspaceID: true},
-		integrationWritable("sentry_instance", "name", "Name", "Display name for the Sentry instance.", "string", owner, "workspace.manage"),
+		domainWritable("sentry_instance", "name", "Name", "Display name for the Sentry instance.", "string", owner, "workspace.manage"),
 		integrationReadOnly("sentry_instance", "url", "URL", "Configured Sentry instance identity. Connection changes use the interactive flow.", "string", owner),
 		integrationReadOnly("sentry_instance", "authMethod", "Authentication method", "Configured Sentry authentication method.", "string", owner),
 		integrationReadOnly("sentry_instance", "hasSecret", "Credential present", "Whether a credential is enrolled, without exposing it.", "boolean", owner),
@@ -127,19 +120,19 @@ func sentryInstanceDomain() DomainDescriptor {
 
 func issueWatchFields(resourceType, owner, filterPath, filterType string) []FieldDescriptor {
 	fields := []FieldDescriptor{
-		integrationWritable(resourceType, "workflowId", "Workflow", "Workflow that receives matching issues.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "workflowStepId", "Workflow step", "Workflow step that receives matching issues.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "repositoryId", "Repository", "Optional repository binding for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "agentProfileId", "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "executorProfileId", "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "prompt", "Prompt", "Prompt added to created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "enabled", "Enabled", "Whether background polling is enabled.", "boolean", owner, "workspace.manage"),
-		integrationWritable(resourceType, "pollIntervalSeconds", "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
+		domainWritable(resourceType, "workflowId", "Workflow", "Workflow that receives matching issues.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "workflowStepId", "Workflow step", "Workflow step that receives matching issues.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "repositoryId", "Repository", "Optional repository binding for created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "agentProfileId", "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "executorProfileId", "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "prompt", "Prompt", "Prompt added to created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "enabled", "Enabled", "Whether background polling is enabled.", "boolean", owner, "workspace.manage"),
+		domainWritable(resourceType, "pollIntervalSeconds", "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
 		integrationNullableWritable(resourceType, "maxInflightTasks", "Concurrent task limit", "Maximum open tasks created by this watch, or null for unlimited.", "integer", owner, "workspace.manage"),
 	}
 	if filterPath != "" {
-		fields = append(fields, integrationWritable(resourceType, filterPath, "Filter", "Provider-specific issue filter.", filterType, owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, filterPath, "Filter", "Provider-specific issue filter.", filterType, owner, "workspace.manage"))
 	}
 	return fields
 }
@@ -150,7 +143,7 @@ func jiraIssueWatchDomain() DomainDescriptor {
 
 func linearIssueWatchDomain() DomainDescriptor {
 	fields := issueWatchFields("linear_issue_watch", "linear", "filter", "object")
-	fields = append(fields, integrationWritable("linear_issue_watch", "sortBy", "Sort order", "Order in which matching Linear issues are dispatched.", "string", "linear", "workspace.manage"))
+	fields = append(fields, domainWritable("linear_issue_watch", "sortBy", "Sort order", "Order in which matching Linear issues are dispatched.", "string", "linear", "workspace.manage"))
 	return integrationDomain("issue_integrations", "linear_issue_watch", "Linear issue watches", "Linear issue watch schedules and task bindings.", "linear", watchTarget(), fields...)
 }
 
@@ -161,12 +154,12 @@ func sentryIssueWatchDomain() DomainDescriptor {
 func githubSettingsDomain() DomainDescriptor {
 	owner := "github"
 	return integrationDomain("code_host_integrations", "github_settings", "GitHub settings", "Noncredential GitHub scope and query preferences for one workspace.", owner, workspaceIntegrationTarget(),
-		integrationWritable("github_settings", "task_git_credentials_mode", "Task Git credentials", "Credential routing mode for task worktrees.", "string", owner, "workspace.manage"),
-		integrationWritable("github_settings", "repo_scope_mode", "Repository scope mode", "Repository scope selection mode.", "string", owner, "workspace.manage"),
-		integrationWritable("github_settings", "repo_scope_orgs", "Organizations", "Organization allowlist for repository scope.", "array", owner, "workspace.manage"),
-		integrationWritable("github_settings", "repo_scope_repos", "Repositories", "Repository allowlist for repository scope.", "array", owner, "workspace.manage"),
-		integrationWritable("github_settings", "saved_presets", "Saved presets", "Workspace-scoped GitHub action presets.", "object", owner, "workspace.manage"),
-		integrationWritable("github_settings", "default_query_presets", "Default query presets", "Workspace-scoped GitHub query presets.", "object", owner, "workspace.manage"),
+		domainWritable("github_settings", "task_git_credentials_mode", "Task Git credentials", "Credential routing mode for task worktrees.", "string", owner, "workspace.manage"),
+		domainWritable("github_settings", "repo_scope_mode", "Repository scope mode", "Choose all repositories or selected owners and exact repositories; legacy orgs/repos inputs stay exclusive.", "string", owner, "workspace.manage"),
+		domainWritable("github_settings", "repo_scope_orgs", "Organizations", "Organization allowlist for repository scope.", "array", owner, "workspace.manage"),
+		domainWritable("github_settings", "repo_scope_repos", "Repositories", "Repository allowlist for repository scope.", "array", owner, "workspace.manage"),
+		domainWritable("github_settings", "saved_presets", "Saved presets", "Workspace-scoped GitHub action presets.", "object", owner, "workspace.manage"),
+		domainWritable("github_settings", "default_query_presets", "Default query presets", "Workspace-scoped GitHub query presets.", "object", owner, "workspace.manage"),
 	)
 }
 
@@ -179,39 +172,29 @@ func gitlabSettingsDomain() DomainDescriptor {
 	)
 }
 
-func azureDevOpsSettingsDomain() DomainDescriptor {
-	owner := "azuredevops"
-	return integrationDomain("code_host_integrations", "azure_devops_settings", "Azure DevOps settings", "Noncredential Azure DevOps query and action presets for one workspace.", owner, workspaceIntegrationTarget(),
-		integrationWritable("azure_devops_settings", "workItemQueries", "Work item queries", "Saved work item query presets.", "array", owner, "workspace.manage"),
-		integrationWritable("azure_devops_settings", "pullRequestQueries", "Pull request queries", "Saved pull request query presets.", "array", owner, "workspace.manage"),
-		integrationWritable("azure_devops_settings", "workItemActions", "Work item actions", "Saved work item action presets.", "array", owner, "workspace.manage"),
-		integrationWritable("azure_devops_settings", "pullRequestActions", "Pull request actions", "Saved pull request action presets.", "array", owner, "workspace.manage"),
-	)
-}
-
 func codeHostWatchFields(resourceType, owner string, projects bool, issue, camelCase bool) []FieldDescriptor {
 	fields := []FieldDescriptor{
-		integrationWritable(resourceType, codeHostWatchPath("workflow_id", camelCase), "Workflow", "Workflow that receives matching items.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, codeHostWatchPath("workflow_step_id", camelCase), "Workflow step", "Workflow step that receives matching items.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, codeHostWatchPath("agent_profile_id", camelCase), "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, codeHostWatchPath("executor_profile_id", camelCase), "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "prompt", "Prompt", "Prompt added to created tasks.", "string", owner, "workspace.manage"),
-		integrationWritable(resourceType, "enabled", "Enabled", "Whether background polling is enabled.", "boolean", owner, "workspace.manage"),
-		integrationWritable(resourceType, codeHostWatchPath("poll_interval_seconds", camelCase), "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
-		integrationWritable(resourceType, codeHostWatchPath("cleanup_policy", camelCase), "Cleanup policy", "Policy for tasks created by this watch.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("workflow_id", camelCase), "Workflow", "Workflow that receives matching items.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("workflow_step_id", camelCase), "Workflow step", "Workflow step that receives matching items.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("agent_profile_id", camelCase), "Agent profile", "Profile used for created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("executor_profile_id", camelCase), "Executor profile", "Executor profile used for created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "prompt", "Prompt", "Prompt added to created tasks.", "string", owner, "workspace.manage"),
+		domainWritable(resourceType, "enabled", "Enabled", "Whether background polling is enabled.", "boolean", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("poll_interval_seconds", camelCase), "Poll interval", "Background polling interval in seconds.", "integer", owner, "workspace.manage"),
+		domainWritable(resourceType, codeHostWatchPath("cleanup_policy", camelCase), "Cleanup policy", "Policy for tasks created by this watch.", "string", owner, "workspace.manage"),
 		integrationNullableWritable(resourceType, codeHostWatchPath("max_inflight_tasks", camelCase), "Concurrent task limit", "Maximum open tasks created by this watch, or null for unlimited.", "integer", owner, "workspace.manage"),
 	}
 	if projects {
-		fields = append(fields, integrationWritable(resourceType, "projects", "Projects", "Provider project filters.", "array", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "projects", "Projects", "Provider project filters.", "array", owner, "workspace.manage"))
 	} else {
-		fields = append(fields, integrationWritable(resourceType, "repos", "Repositories", "Provider repository filters.", "array", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "repos", "Repositories", "Provider repository filters.", "array", owner, "workspace.manage"))
 	}
 	if issue {
-		fields = append(fields, integrationWritable(resourceType, "labels", "Labels", "Issue label filters.", "array", owner, "workspace.manage"))
-		fields = append(fields, integrationWritable(resourceType, "custom_query", "Custom query", "Provider-specific issue query.", "string", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "labels", "Labels", "Issue label filters.", "array", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "custom_query", "Custom query", "Provider-specific issue query.", "string", owner, "workspace.manage"))
 	} else {
-		fields = append(fields, integrationWritable(resourceType, "review_scope", "Review scope", "Review assignment scope.", "string", owner, "workspace.manage"))
-		fields = append(fields, integrationWritable(resourceType, "custom_query", "Custom query", "Provider-specific review query.", "string", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "review_scope", "Review scope", "Review assignment scope.", "string", owner, "workspace.manage"))
+		fields = append(fields, domainWritable(resourceType, "custom_query", "Custom query", "Provider-specific review query.", "string", owner, "workspace.manage"))
 	}
 	return fields
 }
@@ -246,31 +229,6 @@ func gitlabReviewWatchDomain() DomainDescriptor {
 
 func gitlabIssueWatchDomain() DomainDescriptor {
 	return integrationDomain("code_host_integrations", "gitlab_issue_watch", "GitLab issue watches", "GitLab issue watch schedules and task bindings.", "gitlab", watchTarget(), codeHostWatchFields("gitlab_issue_watch", "gitlab", true, true, false)...)
-}
-
-func azureDevOpsWorkItemWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_work_item_watch", "azuredevops", false, true, true), "repos", "labels", "custom_query")
-	fields = append(fields,
-		integrationWritable("azure_devops_work_item_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_work_item_watch", "wiql", "WIQL", "Azure Boards query.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_work_item_watch", "repositoryId", "Repository", "Optional repository binding.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_work_item_watch", "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", "azuredevops", "workspace.manage"),
-	)
-	return integrationDomain("code_host_integrations", "azure_devops_work_item_watch", "Azure work item watches", "Azure work item watch schedules and task bindings.", "azuredevops", watchTarget(), fields...)
-}
-
-func azureDevOpsPullRequestWatchDomain() DomainDescriptor {
-	fields := withoutIntegrationFields(codeHostWatchFields("azure_devops_pull_request_watch", "azuredevops", false, false, true), "repos", "review_scope", "custom_query")
-	fields = append(fields,
-		integrationWritable("azure_devops_pull_request_watch", "projectId", "Project", "Azure DevOps project filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "azureRepositoryId", "Azure repository", "Azure Repos repository filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "status", "Status", "Pull request status filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "creatorId", "Creator", "Pull request creator filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "reviewerId", "Reviewer", "Pull request reviewer filter.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "repositoryId", "Repository", "Optional repository binding.", "string", "azuredevops", "workspace.manage"),
-		integrationWritable("azure_devops_pull_request_watch", "baseBranch", "Base branch", "Base branch for the optional repository binding.", "string", "azuredevops", "workspace.manage"),
-	)
-	return integrationDomain("code_host_integrations", "azure_devops_pull_request_watch", "Azure pull request watches", "Azure pull request watch schedules and task bindings.", "azuredevops", watchTarget(), fields...)
 }
 
 func withoutIntegrationFields(fields []FieldDescriptor, paths ...string) []FieldDescriptor {
@@ -400,7 +358,7 @@ func workflowEventsField(owner string) FieldDescriptor {
 	triggers := []string{
 		"on_enter", "on_turn_start", "on_turn_complete", "on_exit", "on_comment",
 		"on_blocker_resolved", "on_children_completed", "on_approval_resolved", "on_heartbeat",
-		"on_budget_alert", "on_agent_error",
+		"on_budget_alert", "on_agent_error", "on_pr_merged", "on_pr_closed",
 	}
 	properties := make(map[string]any, len(triggers))
 	for _, trigger := range triggers {
@@ -446,12 +404,26 @@ func repositoryDomain() DomainDescriptor {
 	fields := make([]FieldDescriptor, 0, len(paths))
 	for _, item := range paths {
 		field := domainWritable("repository", item.path, item.label, "Repository setting.", item.typ, owner, "workspace.manage")
+		if item.path == "remote_url" {
+			field.Description = "Credential-free clone locator. A replacement must preserve the saved provider identity, host, namespace, and name."
+		}
 		if item.path == "secret_bindings" {
 			field.Sensitive = true
 		}
 		fields = append(fields, field)
 	}
-	return supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain := supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
+	domain.Operations[0].Options = map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"validate_only": map[string]any{
+				"type":        "boolean",
+				"description": "Validate a single remote_url replacement without writing.",
+			},
+		},
+	}
+	return domain
 }
 
 func repositoryScriptDomain() DomainDescriptor {
@@ -475,6 +447,7 @@ func repositorySetDomain() DomainDescriptor {
 func executorDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor", "Executors", "Execution target settings.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor", "name", "Name", "Executor name.", "string", owner, "execution.manage"),
 		domainWritable("executor", "type", "Type", "Executor runtime type.", "string", owner, "execution.manage"),
 		domainWritable("executor", "status", "Status", "Whether the executor accepts work.", "string", owner, "execution.manage"),
@@ -486,6 +459,7 @@ func executorDomain() DomainDescriptor {
 func executorProfileDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor_profile", "Executor profiles", "Named executor presets.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor_profile", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "name", "Name", "Profile name.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "mcp_policy", "MCP policy", "MCP policy for this executor profile.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "config", "Configuration", "Validated executor profile configuration.", "object", owner, "execution.manage"),
@@ -631,21 +605,25 @@ func userSettingsDomain() DomainDescriptor {
 		"workflow_filter_id", "workflow filter", "string", "repository_ids", "repository selection", "array", "tasks_list_sort", "task sort", "string",
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
-		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
-		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
+		"chat_submit_key", "chat submit key", "string", "escape_cancels_agent", "Escape pauses the agent", "boolean", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
+		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "unread_task_dot", "unread task dot", "boolean",
+		"unread_task_dot_hide_delay_seconds", "unread task dot hide delay", "integer",
+		"agent_generated_task_titles", "generated titles", "boolean", "prompt_suggestions", "prompt suggestions", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
 		"mcp_task_agent_profile_default", "MCP task profile", "string", "show_anchored_prompt_bar", "anchored prompt bar", "boolean", "show_scroll_to_last_prompt", "scroll to last prompt", "boolean",
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
-		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
+		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_turn_changed_files", "turn changed files", "boolean",
+		"show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
 		"lsp_auto_start_languages", "LSP auto start", "array", "lsp_auto_install_languages", "LSP auto install", "array", "lsp_server_configs", "LSP server configs", "object",
-		"lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
+		"markdown_preview_by_default", "Open Markdown files in Preview", "boolean", "lsp_status_location", "LSP status location", "string", "saved_layouts", "saved layouts", "array", "sidebar_views", "sidebar views", "array", "sidebar_layout_state", "sidebar layout state", "object",
 		"sidebar_active_view_id", "active sidebar view", "string", "sidebar_draft", "sidebar draft", "object", "thread_views", "thread views", "array",
 		"thread_active_view_id", "active thread view", "string", "thread_view_draft", "thread draft", "object", "sidebar_task_prefs", "sidebar task preferences", "object",
 		"sidebar_task_color_automation", "sidebar color automation", "object", "sidebar_task_colors", "sidebar task colors", "object", "sidebar_task_color_patch", "sidebar task color patch", "object", "task_create_last_used", "last task create values", "object",
-		"jira_saved_views", "Jira saved views", "object", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
-		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
+		"jira_saved_views", "Jira saved views", "object", "jira_default_view_id", "Jira default view", "string", "jira_task_presets", "Jira task presets", "object", "github_saved_presets", "GitHub saved presets", "object",
+		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
-		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string",
+		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string", "message_time_display", "message time display", "string", "agent_tab_close_behavior", "agent tab close behavior", "string",
+		"sidebar_fast_actions_enabled", "sidebar fast action icons", "boolean", "sidebar_new_task_style", "sidebar New Task style", "string",
 		"sidebar_hover_enabled", "sidebar hover enabled", "boolean", "sidebar_hover_delay_ms", "sidebar hover delay", "integer",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",
@@ -662,6 +640,16 @@ func userSettingsDomain() DomainDescriptor {
 			field.Schema = map[string]any{"type": "object"}
 		}
 		switch values[index] {
+		case "sidebar_fast_actions_enabled":
+			field.SettingsHref = "/settings/preferences/layouts?tab=sidebar"
+			field.DefaultBehavior = "false for new users; true for existing users without a saved value"
+		case "sidebar_new_task_style":
+			field.SettingsHref = "/settings/preferences/layouts?tab=sidebar"
+			field.DefaultBehavior = "simple for new users; compact for existing users without a saved value"
+			field.Schema = map[string]any{"type": "string", "enum": []string{"simple", "compact"}}
+		case "unread_task_dot_hide_delay_seconds":
+			field.DefaultBehavior = "2 seconds"
+			field.Schema = map[string]any{"type": "integer", "minimum": 0, "maximum": 60}
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()
 		case "sidebar_task_color_patch":
@@ -671,7 +659,7 @@ func userSettingsDomain() DomainDescriptor {
 			}}
 		}
 		switch values[index] {
-		case "sidebar_draft", "thread_view_draft", "jira_saved_views", "jira_task_presets", "github_saved_presets", "github_default_query_presets", "gitlab_saved_presets", "azure_devops_browse_preferences":
+		case "sidebar_draft", "thread_view_draft", "jira_saved_views", "jira_task_presets", "github_saved_presets", "github_default_query_presets", "gitlab_saved_presets":
 			field.Nullable = true
 		}
 		fields = append(fields, field)
@@ -755,10 +743,13 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.allow_indexing", "allow_indexing", "Allow indexing", "boolean", "Legacy compatibility permission.", false),
 			profileWritable("agent_profile.auto_approve", "auto_approve", "Auto approve", "boolean", "Automatically approve supported agent permissions.", false),
 			profileWritable("agent_profile.cli_passthrough", "cli_passthrough", "CLI passthrough", "boolean", "Enable CLI passthrough mode.", false),
+			profileWritableWithDefault("agent_profile.cursor_mcp_auth_enabled", "cursor_mcp_auth_enabled", "Share Cursor MCP credentials", "boolean", "Reuse local Cursor MCP credentials when a Cursor profile launches.", "true for new profiles"),
+			profileWritableWithDefault("agent_profile.cursor_plugins_mcp_enabled", "cursor_plugins_mcp_enabled", "Import Cursor plugin MCP servers", "boolean", "Import local Cursor plugin MCP servers when a Cursor profile launches.", "true for new profiles"),
 			profileWritable("agent_profile.enabled", "enabled", "Enabled", "boolean", "Allow this profile for new work.", false),
 			profileWritable("agent_profile.cli_flags", "cli_flags", "CLI flags", "array", "Complete replacement list of validated CLI flags.", true),
 			profileWritableSensitive("agent_profile.env_vars", "env_vars", "Environment variables", "array", "Complete replacement list. Secret values remain references.", true),
 			profileWritable("agent_profile.command_prefix", "command_prefix", "Command prefix", "string", "Optional validated launcher prefix.", false),
+			profileWritable("agent_profile.copilot_selected_plugins", "copilot_selected_plugins", "Copilot plugins", "array", "Stable Copilot plugin identities loaded by new local/worktree processes. Omitted updates preserve the committed selection.", true),
 			profileWritable("agent_profile.dynamic", "dynamic", "Dynamic routing", "object", "Versioned dynamic routing document.", true),
 		},
 	}
@@ -807,6 +798,12 @@ func profileWritable(key, path, label, jsonType, description string, replacement
 			"x-kandev-dynamic":     "provider_config_options",
 		}
 	}
+	return field
+}
+
+func profileWritableWithDefault(key, path, label, jsonType, description, defaultBehavior string) FieldDescriptor {
+	field := profileWritable(key, path, label, jsonType, description, false)
+	field.DefaultBehavior = defaultBehavior
 	return field
 }
 

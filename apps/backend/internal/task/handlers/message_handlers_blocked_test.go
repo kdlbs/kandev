@@ -55,6 +55,33 @@ type messageAddSwitchRepo struct {
 	failReload                   bool
 	taskGetCalls                 int
 	preflightErr                 error
+	hasUserPromptHistory         bool
+	promptHistoryErr             error
+	promptHistoryCalls           int
+	promptHistoryBarrier         chan struct{}
+	promptHistoryBarrierAfter    int
+	acknowledgedTurnError        string
+	turnErrorAckErr              error
+}
+
+func (r *messageAddSwitchRepo) RecordTaskTurnError(context.Context, string, models.TaskTurnError) (bool, error) {
+	return false, nil
+}
+
+func (r *messageAddSwitchRepo) AcknowledgeTaskTurnErrorIfStamp(
+	_ context.Context,
+	_ string,
+	stamp string,
+	_ time.Time,
+	_ string,
+) (models.TurnErrorAcknowledgementResult, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
+	if r.turnErrorAckErr != nil {
+		return models.TurnErrorAcknowledgementMissing, r.turnErrorAckErr
+	}
+	r.acknowledgedTurnError = stamp
+	return models.TurnErrorAcknowledgementStored, nil
 }
 
 func (r *messageAddSwitchRepo) messageCount() int {
@@ -143,6 +170,7 @@ type capturedFirstTurn struct {
 	content                string
 	references             []v1.EntityReference
 	promptReferenceContext string
+	deliverySubmissionID   string
 }
 
 type firstTurnCaptureOrchestrator struct {
@@ -599,14 +627,15 @@ func runCreatedMessageContextTest(t *testing.T, task *models.Task, session *mode
 }
 
 type switchingTurnStartOrchestrator struct {
-	mu               sync.Mutex
-	startOnce        sync.Once
-	repo             *messageAddSwitchRepo
-	forwardedSession string
-	startedSession   string
-	switchPrimary    bool
-	started          chan struct{}
-	turnStartCalls   int
+	mu                sync.Mutex
+	startOnce         sync.Once
+	repo              *messageAddSwitchRepo
+	forwardedSession  string
+	startedSession    string
+	startedSubmission string
+	switchPrimary     bool
+	started           chan struct{}
+	turnStartCalls    int
 }
 
 func (o *switchingTurnStartOrchestrator) PromptTask(
@@ -690,6 +719,12 @@ func (o *switchingTurnStartOrchestrator) getStartedSession() string {
 	return o.startedSession
 }
 
+func (o *switchingTurnStartOrchestrator) getStartedSubmission() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.startedSubmission
+}
+
 func (o *switchingTurnStartOrchestrator) getForwardedSession() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -740,6 +775,7 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 		t.Fatal("created session was not started")
 	}
 	assert.Equal(t, "s2", orch.getStartedSession())
+	assert.NotEmpty(t, orch.getStartedSubmission())
 	assert.Empty(t, orch.getForwardedSession())
 }
 

@@ -6,6 +6,8 @@
 
 Related system design: [health endpoint version](../specs/platform/system-design/health-endpoint-version.md)
 
+Backup mechanism superseded by: [separate backups from compaction](2026-10-12-separate-sqlite-backups-from-compaction.md). Upgrade ordering and verification remain required.
+
 ## Context
 
 Kandev ships a single binary that auto-applies SQLite schema changes on every boot. Migrations are imperative `runMigrations()` functions across four repositories (`task`, `office`, `workflow`, `agent/settings/store`), each doing dozens of `_, _ = r.db.Exec("ALTER TABLE ...")` with errors swallowed. Today this has three concrete problems:

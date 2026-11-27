@@ -1,88 +1,106 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
-import { useAppStore } from "@/components/state-provider";
-import { fetchDiskUsage, refreshDiskUsage } from "@/lib/api/domains/system-api";
+import { useQuery } from "@tanstack/react-query";
+import { refreshDiskUsage } from "@/lib/api/domains/system-api";
+import {
+  createDiskUsageQueryOptions,
+  useDiskUsageScope,
+  type DiskUsageScope,
+} from "./disk-usage-query";
 
-/**
- * Fetch-on-mount hook for `/api/v1/system/disk-usage`. The backend serves the
- * cached value (or null while computing) and publishes a `system.job.update`
- * event with kind=disk-walk when the background walk finishes. That event is
- * already routed into the jobs map by registerSystemEventsHandlers — this hook
- * watches for the transition (running → succeeded/failed) and refetches the
- * usage payload once so the cards swap in the fresh value without polling.
- */
+type RefreshError = { identityKey: string; generation: number; message: string };
+type PendingRefresh = {
+  token: symbol;
+  identityKey: string;
+  generation: number;
+  previousQueryError: Error | null;
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function useDiskUsage() {
-  const diskUsage = useAppStore((s) => s.system.diskUsage);
-  const setSystemDiskUsage = useAppStore((s) => s.setSystemDiskUsage);
-  // Pick the last disk-walk job we have seen, regardless of id. There is at
-  // most one in flight at a time.
-  // Wrapped in useShallow so the inline derivation doesn't create a fresh
-  // reference each render and trip "Maximum update depth exceeded" in
-  // consumers when there are no disk-walk jobs (the array reduces to the
-  // same null, but a missing memo would still re-run the equality check).
-  const diskWalkJob = useAppStore(
-    useShallow((s) => {
-      const jobs = Object.values(s.system.jobs).filter((j) => j.kind === "disk-walk");
-      return jobs.length > 0 ? jobs[jobs.length - 1] : null;
-    }),
+  const scope = useDiskUsageScope();
+  const query = useQuery(createDiskUsageQueryOptions(scope.identity));
+  const [refreshError, setRefreshError] = useState<RefreshError | null>(null);
+  const [pendingRefresh, setPendingRefresh] = useState<PendingRefresh | null>(null);
+
+  const pendingRefreshForScope =
+    pendingRefresh?.identityKey === scope.identityKey &&
+    pendingRefresh.generation === scope.generation
+      ? pendingRefresh
+      : null;
+
+  useEffect(() => {
+    if (query.isFetching) setRefreshError(null);
+  }, [query.isFetching]);
+
+  const reloadForScope = useCallback(
+    async (captured: DiskUsageScope) => {
+      if (!scope.isCurrentScope(captured)) return;
+      setRefreshError(null);
+      await query.refetch({ cancelRefetch: true, throwOnError: false });
+    },
+    [query.refetch, scope.isCurrentScope],
   );
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetchDiskUsage({ cache: "no-store" });
-      setSystemDiskUsage(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setSystemDiskUsage]);
-
+  const reload = useCallback(
+    () => reloadForScope(scope.captureScope()),
+    [reloadForScope, scope.captureScope],
+  );
   const refresh = useCallback(async () => {
-    setError(null);
+    const captured = scope.captureScope();
+    if (!scope.isCurrentScope(captured)) return;
+    const token = Symbol();
+    setPendingRefresh({
+      token,
+      identityKey: captured.identityKey,
+      generation: captured.generation,
+      previousQueryError: query.error,
+    });
+    setRefreshError(null);
+
     try {
-      await refreshDiskUsage();
-      // Re-read so the `computing: true` flag shows up immediately.
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      await refreshDiskUsage({ baseUrl: captured.identity.apiBaseUrl });
+    } catch (error) {
+      if (scope.isCurrentScope(captured)) {
+        setRefreshError({
+          identityKey: captured.identityKey,
+          generation: captured.generation,
+          message: errorMessage(error),
+        });
+        setPendingRefresh((pending) => (pending?.token === token ? null : pending));
+      }
+      return;
     }
-  }, [reload]);
 
-  // Initial fetch.
-  useEffect(() => {
-    if (diskUsage) return;
-    void reload();
-  }, [diskUsage, reload]);
-
-  // Refetch when the disk-walk job reports a terminal state.
-  useEffect(() => {
-    if (!diskWalkJob) return;
-    if (diskWalkJob.state === "succeeded" || diskWalkJob.state === "failed") {
-      void reload();
+    try {
+      await reloadForScope(captured);
+    } finally {
+      if (scope.isCurrentScope(captured)) {
+        setPendingRefresh((pending) => (pending?.token === token ? null : pending));
+      }
     }
-  }, [diskWalkJob, reload]);
+  }, [query.error, reloadForScope, scope.captureScope, scope.isCurrentScope]);
 
-  // Polling fallback: keep refetching while the backend reports
-  // computing=true. The primary path is the WS system.job.update event above,
-  // but if the WS connection is not yet open when the disk-walk job finishes
-  // (typical on first page load) the broadcast is dropped and the UI would
-  // otherwise sit on "Calculating..." forever. Polling stops as soon as the
-  // backend reports the cached value.
-  useEffect(() => {
-    if (!diskUsage?.computing) return;
-    const interval = setInterval(() => {
-      void reload();
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [diskUsage?.computing, reload]);
+  let error: string | null = null;
+  if (!query.isFetching) {
+    if (
+      refreshError?.identityKey === scope.identityKey &&
+      refreshError.generation === scope.generation
+    ) {
+      error = refreshError.message;
+    } else if (query.error && query.error !== pendingRefreshForScope?.previousQueryError) {
+      error = errorMessage(query.error);
+    }
+  }
 
-  return { diskUsage, isLoading, error, reload, refresh };
+  return {
+    diskUsage: query.data ?? null,
+    isLoading: query.isFetching,
+    error,
+    reload,
+    refresh,
+  };
 }

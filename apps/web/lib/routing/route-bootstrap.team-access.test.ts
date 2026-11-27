@@ -19,6 +19,8 @@ function apiWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     viewer_role: "owner",
     scopes: ["workspace.read", "workspace.manage", "member.manage"],
     member_count: 3,
+    acp_idle_suspension_enabled: true,
+    acp_idle_timeout_minutes: 90,
     created_at: "2026-08-22T10:00:00Z",
     updated_at: "2026-08-22T10:00:00Z",
     ...overrides,
@@ -32,6 +34,23 @@ describe("mapWorkspaceItem", () => {
     expect(item.viewer_role).toBe("owner");
     expect(item.scopes).toEqual(["workspace.read", "workspace.manage", "member.manage"]);
     expect(item.member_count).toBe(3);
+  });
+
+  it("carries the ACP idle-suspension policy into the store", () => {
+    const item = mapWorkspaceItem(apiWorkspace());
+    expect(item.acp_idle_suspension_enabled).toBe(true);
+    expect(item.acp_idle_timeout_minutes).toBe(90);
+  });
+
+  it("falls back to the disabled policy defaults when the API omits the ACP fields", () => {
+    const item = mapWorkspaceItem(
+      apiWorkspace({
+        acp_idle_suspension_enabled: undefined,
+        acp_idle_timeout_minutes: undefined,
+      } as Partial<Workspace>),
+    );
+    expect(item.acp_idle_suspension_enabled).toBe(false);
+    expect(item.acp_idle_timeout_minutes).toBe(120);
   });
 
   it("leaves team-access fields undefined when the API omits them", () => {

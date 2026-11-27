@@ -15,7 +15,8 @@ import {
   performLayoutSwitch,
   hasRightColumn,
 } from "@/lib/state/dockview-store";
-import { restoreEnvLayout } from "./dockview-layout-restore";
+import type { SessionListRestoreState } from "@/lib/state/dockview-env-switch";
+import { collectPhantomSessionIdsForEnv, restoreEnvLayout } from "./dockview-layout-restore";
 import {
   setupContainerResizeSync,
   setupGroupTracking,
@@ -28,6 +29,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
 import { useEditorKeybinds } from "@/hooks/use-editor-keybinds";
 import { usePlanPanelAutoOpen } from "@/hooks/use-plan-panel-auto-open";
+import { RENDERABLE_COMPONENT_NAMES } from "@/lib/state/layout-manager/renderable-components";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { LeftHeaderActions, RightHeaderActions } from "./dockview-header-actions";
@@ -49,6 +51,7 @@ import { useSyncTodoPanel } from "./dockview-todo-panel-sync";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
+  useOwnedDockviewSessionId,
 } from "./dockview-desktop-layout-hooks";
 import { renderPanel } from "./dockview-panel-content";
 import { PreviewController } from "./preview-controller";
@@ -131,28 +134,15 @@ function PortalSlot(props: IDockviewPanelProps) {
 // --- COMPONENT MAP ---
 // All panel types use the same PortalSlot wrapper — dockview only manages
 // layout positioning.  Actual rendering happens in PanelPortalHost below.
-const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
-  chat: PortalSlot,
-  "diff-viewer": PortalSlot,
-  "file-editor": PortalSlot,
-  "commit-detail": PortalSlot,
-  changes: PortalSlot,
-  files: PortalSlot,
-  terminal: PortalSlot,
-  browser: PortalSlot,
-  vscode: PortalSlot,
-  plan: PortalSlot,
-  todos: PortalSlot,
-  "prompt-history": PortalSlot,
-  "pr-detail": PortalSlot,
-  "mr-detail": PortalSlot,
-  "review-detail": PortalSlot,
-  "plugin-panel": PortalSlot,
-  canvas: PortalSlot,
-  // Backwards compat aliases for saved layouts
-  "diff-files": PortalSlot,
-  "all-files": PortalSlot,
-};
+// Built from the static renderable-component list so the registered set and
+// the restore/validation predicate cannot diverge.
+const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> = Object.fromEntries(
+  RENDERABLE_COMPONENT_NAMES.map((name) => [name, PortalSlot]),
+);
+
+/** Component names this renderer registers; must equal
+ *  `RENDERABLE_COMPONENT_NAMES`. */
+export const DESKTOP_COMPONENT_NAMES: readonly string[] = Object.keys(components);
 
 // --- TAB COMPONENTS ---
 /** Tab header for permanent panels: renders the default dockview tab without
@@ -226,7 +216,7 @@ export const DESKTOP_VALID_COMPONENTS = new Set(Object.keys(components));
  * that launch races can produce), performs a layout switch to the new env;
  * same-env session switches are a no-op.
  */
-function useEnvSwitchCleanup(
+export function useEnvSwitchCleanup(
   effectiveSessionId: string | null,
   effectiveEnvId: string | null,
   activeTaskId: string | null,
@@ -234,6 +224,7 @@ function useEnvSwitchCleanup(
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
+  const appStore = useAppStoreApi();
   const currentSessionIdsKey = useAppStore((state) => {
     if (!activeTaskId) return "";
     return (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
@@ -279,13 +270,34 @@ function useEnvSwitchCleanup(
     // through the sidebar/dropdown switch helpers. Same-env switches return
     // early above (no-op).
     if (newEnvId) {
-      const currentSessionIds = currentSessionIdsKey ? currentSessionIdsKey.split(",") : [];
+      const state = appStore.getState();
+      const currentSessionIds: string[] = activeTaskId
+        ? (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) =>
+            String(session.id),
+          )
+        : [];
       if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
         currentSessionIds.unshift(effectiveSessionId);
       }
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, initialLayout);
+      const sessionListRestoreState: SessionListRestoreState = {
+        loaded: activeTaskId
+          ? (state.taskSessionsByTask.loadedByTaskId[activeTaskId] ?? false)
+          : false,
+        knownForeignSessionIds: collectPhantomSessionIdsForEnv(state, newEnvId),
+      };
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, {
+        initialLayout,
+        sessionListRestoreState,
+      });
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey, initialLayout]);
+  }, [
+    effectiveEnvId,
+    effectiveSessionId,
+    activeTaskId,
+    currentSessionIdsKey,
+    initialLayout,
+    appStore,
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +305,7 @@ function useEnvSwitchCleanup(
 // ---------------------------------------------------------------------------
 
 type DockviewDesktopLayoutProps = {
+  taskId?: string | null;
   workspaceId: string | null;
   workflowId: string | null;
   sessionId?: string | null;
@@ -348,6 +361,7 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   }
 
   const currentEnvId = refs.envIdRef.current;
+  useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
   const restored =
     !layout.initialLayout &&
     restoreEnvLayout(api, currentEnvId, appStore, DESKTOP_VALID_COMPONENTS);
@@ -370,8 +384,6 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
       rightPaneAvailable: paneState.available,
     });
   }
-
-  useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
   refs.readyDisposersRef.current.push(setupGroupTracking(api));
   const sessionTabSyncDisposable = setupSessionTabSync(api, appStore);
@@ -415,7 +427,23 @@ function DockviewMainArea({ effectiveSessionId, hasDevScript, onReady }: Dockvie
   );
 }
 
+function useDockviewSidebarSizeSync(
+  api: DockviewReadyEvent["api"] | null,
+  layoutRootRef: React.RefObject<HTMLDivElement | null>,
+) {
+  const appSidebarCollapsed = useAppStore((state) => state.appSidebar.collapsed);
+  const appSidebarWidth = useAppStore((state) => state.appSidebar.width);
+  useLayoutEffect(() => {
+    if (!api) return;
+    const dockview = layoutRootRef.current?.querySelector<HTMLElement>(".dv-dockview");
+    const container = dockview?.parentElement;
+    if (container) syncDockviewContainerSize(api, container);
+  }, [api, appSidebarCollapsed, appSidebarWidth]);
+}
+
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
+  taskId = null,
+  workspaceId,
   sessionId,
   repository,
   initialLayout,
@@ -427,13 +455,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const layoutRootRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyDisposersRef = useRef<Array<() => void>>([]);
+  const ownedApiRef = useRef<DockviewReadyEvent["api"] | null>(null);
   const appStore = useAppStoreApi();
 
-  const effectiveSessionId =
-    useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
+  const effectiveSessionId = useOwnedDockviewSessionId(taskId, sessionId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const appSidebarCollapsed = useAppStore((state) => state.appSidebar.collapsed);
-  const appSidebarWidth = useAppStore((state) => state.appSidebar.width);
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
   );
@@ -453,15 +479,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
     envIdRef.current = effectiveEnvId;
   }, [effectiveEnvId]);
 
-  useLayoutEffect(() => {
-    if (!api) return;
-    const dockview = layoutRootRef.current?.querySelector<HTMLElement>(".dv-dockview");
-    const container = dockview?.parentElement;
-    if (container) syncDockviewContainerSize(api, container);
-  }, [api, appSidebarCollapsed, appSidebarWidth]);
+  useDockviewSidebarSizeSync(api, layoutRootRef);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
+      ownedApiRef.current = event.api;
       setupReadyDockview({
         api: event.api,
         appStore,
@@ -497,7 +519,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   useSyncReviewPanel();
   useSyncTodoPanel();
-  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
+  useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef, ownedApiRef);
 
   // Visual masking: hide the dockview container during slow-path layout
   // switches (full fromJSON rebuild) to prevent the old layout from flashing.
@@ -521,7 +543,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         onReady={onReady}
       />
       <BottomTerminalPanel />
-      <PanelPortalHost renderPanel={renderPanel} />
+      <PanelPortalHost
+        renderPanel={(panelId, component, params) =>
+          renderPanel(panelId, component, params, workspaceId)
+        }
+      />
       <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
     </div>
   );

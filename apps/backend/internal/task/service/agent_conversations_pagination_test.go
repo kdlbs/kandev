@@ -9,13 +9,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // acPagingTaskRepo is a task repo fake that honours page/pageSize the way the
 // real SQLite repository does, so the managed-conversation lookup is exercised
 // against a workspace holding more ephemeral tasks than one page.
 type acPagingTaskRepo struct {
+	unsupportedTaskFieldUpdater
 	mu    sync.Mutex
 	tasks []*models.Task
 }

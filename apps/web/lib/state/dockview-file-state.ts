@@ -13,7 +13,7 @@ export function buildFileStateActions(set: StoreSet) {
     setFileState: (path: string, state: FileEditorState) => {
       set((prev) => {
         const m = new Map(prev.openFiles);
-        m.set(path, state);
+        m.set(path, { ...state, instanceId: Symbol() });
         return { openFiles: m };
       });
     },
@@ -22,7 +22,7 @@ export function buildFileStateActions(set: StoreSet) {
         const e = prev.openFiles.get(path);
         if (!e) return prev as { openFiles: Map<string, FileEditorState> };
         const m = new Map(prev.openFiles);
-        m.set(path, { ...e, ...updates });
+        m.set(path, { ...e, ...updates, instanceId: e.instanceId });
         return { openFiles: m };
       });
     },

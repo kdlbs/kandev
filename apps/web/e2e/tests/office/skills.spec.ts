@@ -4,63 +4,33 @@ import { test, expect } from "../../fixtures/office-fixture";
 import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Skills", () => {
-  test("create and list skill", async ({ officeApi, officeSeed }) => {
+  test("canonical skill slug survives create, list and get, and deletion removes it", async ({
+    officeApi,
+    officeSeed,
+  }) => {
     const skill = await officeApi.createSkill(officeSeed.workspaceId, {
       name: "Test Skill",
       slug: "test-skill",
       content: "# Test\n\nThis is a test skill.",
     });
-    // A caller-supplied slug is normalized to its canonical kandev-prefixed
-    // form on write (AC-001.12).
-    expect((skill as Record<string, unknown>).slug).toBe("kandev-test-skill");
-
-    const skills = await officeApi.listSkills(officeSeed.workspaceId);
-    const list =
-      (skills as { skills?: Record<string, unknown>[] }).skills ??
-      (skills as unknown as Record<string, unknown>[]);
-    expect(
-      Array.isArray(list)
-        ? list.some((s) => (s as Record<string, unknown>).slug === "kandev-test-skill")
-        : false,
-    ).toBe(true);
-  });
-
-  test("get skill by id", async ({ officeApi, officeSeed }) => {
-    const created = await officeApi.createSkill(officeSeed.workspaceId, {
-      name: "Get Skill",
-      slug: "get-skill",
-      content: "# Get\n\nFetch by ID.",
-    });
-    const id = (created as Record<string, unknown>).id as string;
-    const fetched = await officeApi.getSkill(id);
-    expect((fetched as Record<string, unknown>).id).toBe(id);
-    expect((fetched as Record<string, unknown>).slug).toBe("kandev-get-skill");
-  });
-
-  test("delete skill removes it from list", async ({ officeApi, officeSeed }) => {
-    const created = await officeApi.createSkill(officeSeed.workspaceId, {
-      name: "Delete Skill",
-      slug: "delete-skill",
-      content: "# Delete\n\nWill be removed.",
-    });
-    const id = (created as Record<string, unknown>).id as string;
-
-    await officeApi.deleteSkill(id);
-
-    const skills = await officeApi.listSkills(officeSeed.workspaceId);
-    const list =
-      (skills as { skills?: Record<string, unknown>[] }).skills ??
-      (skills as unknown as Record<string, unknown>[]);
-    expect(
-      Array.isArray(list) ? list.some((s) => (s as Record<string, unknown>).id === id) : false,
-    ).toBe(false);
-  });
-
-  test("skills page renders", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office/workspace/skills");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/Skills/i, {
-      timeout: 10_000,
-    });
+    const id = skill.id as string;
+    let deleted = false;
+    try {
+      expect(skill.slug).toBe("kandev-test-skill");
+      const { skills } = (await officeApi.listSkills(officeSeed.workspaceId)) as {
+        skills: Array<Record<string, unknown>>;
+      };
+      expect(skills.some((entry) => entry.slug === "kandev-test-skill")).toBe(true);
+      expect(await officeApi.getSkill(id)).toMatchObject({ id, slug: "kandev-test-skill" });
+      await officeApi.deleteSkill(id);
+      deleted = true;
+      const remaining = (await officeApi.listSkills(officeSeed.workspaceId)) as {
+        skills: Array<Record<string, unknown>>;
+      };
+      expect(remaining.skills.some((entry) => entry.id === id)).toBe(false);
+    } finally {
+      if (!deleted) await officeApi.deleteSkill(id);
+    }
   });
 
   test("discovers and imports provider skill from isolated user home", async ({
@@ -97,6 +67,7 @@ test.describe("Skills", () => {
     expect(supportingFile.content).toBe("Use the isolated backend HOME only.\n");
 
     await testPage.goto("/office/workspace/skills");
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Skills/i, { timeout: 10_000 });
     await expect(testPage.getByText(name).first()).toBeVisible({ timeout: 10_000 });
   });
 });

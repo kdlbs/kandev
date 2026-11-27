@@ -4,10 +4,11 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-08-27
+updated: 2026-11-24
 owners:
   - tbd
 ---
+
 # Tauri Desktop App System Design
 
 ## Purpose and boundaries
@@ -18,7 +19,8 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture) |
+| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership), [Settings notification test](#settings-notification-test) |
+| AC `.18`–`.20` | [macOS agent PATH](#macos-agent-path) |
 
 ## Desktop architecture
 
@@ -48,6 +50,37 @@ implemented launch and backend-lifecycle behavior, it provides:
 The macOS red window close control quits Kandev and stops its owned backend. It does not hide the
 window or leave a tray/background process. `Cmd+W` is deliberately separate from that lifecycle.
 
+### macOS window chrome
+
+The main macOS window uses Tauri's overlay title-bar style with decorations
+enabled and its centered native title hidden. The native traffic lights remain
+at the upper left, over Kandev's own startup surface and later its web app.
+This removes the separate full-width strip without replacing the native
+controls with web buttons. Other platforms keep their decorated windows. See
+the [isolated startup design](isolated-startup.md#macos-window-chrome) for the
+first-paint and conflict states. This follows the
+[macOS overlay decision](../../../decisions/2026-09-25-macos-overlay-titlebar.md).
+
+The macOS web shell reserves the traffic-light hit area within the existing
+sidebar/page header row. The expanded sidebar is at least 320px wide: the
+native controls sit at the left, then the Kandev link, flexible workspace
+switcher, and fixed collapse button stay in one 40px header row. The
+workspace name truncates before its chevron or the collapse control can be
+covered. A hover-revealed sidebar follows the same expanded arrangement.
+
+The collapsed rail is only 56px wide, narrower than the traffic-light hit
+area. Its top 40px stays clear; its Kandev brand and expand button stack
+below that area, as they do today. The native controls may extend over the
+left end of the adjacent page header, so that header also reserves the
+remaining controls width before its title or search. The workspace switcher
+is absent in collapsed mode, as it is today, and returns after expansion.
+Interactive controls do not become drag regions. Empty portions of the
+header provide window dragging through Tauri's narrow drag affordance. The
+existing installed-PWA window-controls overlay remains separate: its geometry
+comes from the browser API, while the desktop app uses a shell-provided macOS
+overlay hint and fixed safe inset checked on supported macOS versions. No
+general window-management API is exposed to the backend-served page.
+
 ### Existing shell guarantees
 
 This increment preserves the shipped desktop contract:
@@ -55,8 +88,10 @@ This increment preserves the shipped desktop contract:
 - installers target macOS arm64/x64, Linux arm64/x64, and Windows x64;
 - the app starts the packaged native launcher and Go backend, then displays the existing embedded
   Vite/React SPA without requiring Node.js or a separate web server at runtime;
-- desktop and CLI/browser launches share the existing Kandev data directory, database, worktrees,
-  executor settings, integrations, and agent configuration;
+- normal desktop and CLI/browser launches share the selected Kandev data
+  directory, database, worktrees, executor settings, integrations, and agent
+  configuration; a conflict can instead lead to the explicit
+  [isolated test launch](isolated-startup.md);
 - the desktop shell owns the backend process tree, waits for a two-stage readiness signal (a
   token-verified `/health` proving process ownership, then an unauthenticated `/ready` proving
   application readiness), and cleans up on startup failure, quit, update restart, or WebView
@@ -66,7 +101,9 @@ This increment preserves the shipped desktop contract:
   started, and `/ready` then reports the backend has finished startup;
 - GUI launches retain the predictable process environment and common user binary locations needed
   to discover configured agent CLIs;
-- a second launch focuses the existing instance instead of starting another backend; and
+- a second normal launch focuses the existing normal instance instead of
+  starting another backend; explicit temporary test processes follow the
+  [isolated startup design](isolated-startup.md); and
 - GitHub releases continue to include the existing installers, runtime archives, and checksums.
 
 ## Existing launch and data contract
@@ -88,14 +125,26 @@ navigates the WebView to the backend origin once `/ready` reports the backend ha
 startup. The desktop shell also sets `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` to identify the
 launch as desktop-owned. The nested native launcher must forward the shell's exact non-empty
 health token to the backend and use it for its own `/health` readiness poll rather than
-replacing it with another token. A second instance focuses the first and does not start another
-backend.
+replacing it with another token. A second normal instance focuses the first and
+does not start another backend. An explicit temporary test process is exempt
+from that GUI single-instance guard and owns distinct data.
 
-The shell preserves the existing GUI-launch `PATH` normalization and the existing Kandev data
-directory, SQLite database, worktrees, executor settings, integrations, and agent configuration.
+The normal launch preserves the existing GUI-launch `PATH` normalization and the selected Kandev
+data directory, SQLite database, worktrees, executor settings, integrations, and agent
+configuration. A separate test launch follows the [isolated startup design](isolated-startup.md).
 It owns cleanup of the launcher/backend process tree on quit, startup failure, and update restart.
 The existing HTTP, WebSocket, and boot-payload product APIs remain the SPA's data plane; the
 desktop bridge is only for native integration.
+
+### macOS agent PATH
+
+On macOS, `common_path_entries` reads `~/.nvm/alias/default`. For `node` or a
+numeric version prefix, select the highest matching installed Node release by
+numeric version order. An exact version selects its own directory. If its `bin`
+contains executable `node`, `npm`, and `npx`, append it after the common PATH
+entries. The existing PATH builder handles duplicates and passes PATH to the
+launcher and its local descendants. If the lookup yields no usable bin, use
+the ordinary desktop PATH. [nvm discovery plan](../../../plans/macos-desktop-nvm-path/plan.md)
 
 ## Contextual close contract
 
@@ -186,6 +235,80 @@ Notifications settings control requests native permission from a user gesture;
 background events never prompt. An open app keeps the in-app update indication
 when native permission is denied or native delivery fails.
 
+### Settings notification test
+
+The existing `DesktopNotificationsSection` control uses the same delivery
+target as `useNotificationPermission`: the native client when its Tauri invoke
+transport is available, otherwise the Web Notification API. This covers
+`AC-DESKTOP-DESKTOP-TAURI-APP-001.15` through `.17`. Target selection occurs
+before inspecting the browser API. Native delivery never falls back to the
+browser after a permission or command failure.
+
+`useNotificationsActions.handleTestNotification` delegates to a cohesive
+settings action in `notification-test-action.ts`, keeping provider draft and
+save logic separate. The native branch uses the existing
+`nativeNotifications.permission.get`, `.request`, and `.show` commands. It
+queries permission at the gesture boundary, requests only `prompt` or
+`prompt-with-rationale` from that explicit click, and sends only after a
+`granted` result. A denied result refreshes the permission owner without
+requesting again. A permission request also refreshes that owner. Neither
+branch changes provider enabled state or event selections. The browser branch
+retains its granted/default/denied/unsupported behavior. Both targets use the
+existing `settings:testNotificationTitle` unchanged and the existing
+`settings:testNotificationBody` key with device-neutral copy: "If you can read
+this, notifications are working on this device." The body value is corrected
+in English, Portuguese, Simplified Chinese, both Traditional Chinese catalogs,
+Japanese, and Korean. Traditional Chinese values come from the existing
+zh-hant generator. No new keys or unrelated translation changes are needed.
+
+The local native test identity is exactly
+`desktop.test_notification:<occurrence>`. Each click generates a non-empty
+occurrence with the existing `generateUUID()` capability fallback. The request
+omits both `taskId` and `sessionId`. This identity is private to the native
+bridge; it is not a provider catalog entry, backend event, or subscription.
+`native_notifications::validate_request` accepts this single additional known
+prefix, requires its non-empty suffix and absent task/session context, and
+applies the existing event-ID, title, body, and context length bounds. Unknown
+types, including lookalike prefixes, remain rejected. Session events still
+require a non-empty task ID. Update and session validation are otherwise
+unchanged.
+
+The command continues to check `BackendState::require_owned_origin` before
+validation and permission, then uses the existing permission-before-claim,
+bounded dedup cache, notification builder, and release-on-display-failure
+path. Replaying the same test identity deduplicates; two explicit clicks use
+different identities. No Tauri command, capability, plugin permission, backend
+ownership check, or OS permission bypass is added.
+
+Permission query/request rejection is caught and passed to the existing
+permission refresh callback's error argument. A `permission-denied` show result
+refreshes actual permission without another prompt. `shown` adds no success
+claim beyond the existing test notification; `duplicate` causes no retry or
+success claim. `display-failed` and show-command rejection use the existing
+test-failure console diagnostic and ordinary permission refresh, never its
+error argument. Thus a display error cannot change a still-granted permission
+to the misleading permission-check error state. Refresh failures are contained
+by the existing permission owner; any callback rejection is also contained by
+the action. There is no current dedicated delivery-result toast or status
+surface to reuse, so this repair adds none and preserves the existing Test
+control's troubleshooting hint.
+
+This is state/action routing in the unchanged settings surface: no geometry,
+touch, navigation, scrolling, or breakpoint changes. The existing settings
+group is the phone exemplar. Rendered component tests exercise the real
+control, permission hook, settings state/actions, native client, and Tauri
+invoke transport, replacing only provider/store IO and the external OS invoke
+boundary. Native and browser delivery assertions check the actual message body
+for the device-neutral diagnostic rather than a false browser-capability claim.
+Browser-only controls cover the shared mobile action path. This
+narrow case uses the mobile-parity state/data exception rather than adding
+layout or Playwright work. JS tests prove command delivery, not native OS
+display. Rust tests independently prove the real validator and dedup rules.
+
+The existing native-integration and semantic-event ADRs remain authoritative:
+an explicit local diagnostic is not a fabricated domain occurrence. This
+bounded extension needs no new ADR or general notification policy.
+
 ## Desktop bridge and permissions
 
 The Go-served SPA may receive a small versioned set of desktop events and commands for menu
@@ -198,8 +321,9 @@ unrestricted URL opening. Its directory command only returns a folder selected t
 system panel.
 
 External `http`, `https`, and `mailto` links open in the system browser/client. Internal loopback
-navigation, downloads, and blob URLs remain in the WebView unless an existing workflow specifies
-otherwise.
+navigation and blob URLs remain in the WebView. In-app file downloads use the
+[native download contract](native-downloads.md) for destination and completion;
+the WebView still transfers their bytes.
 
 The launch boundary remains:
 
@@ -237,6 +361,14 @@ backend shutdown primitive, but updater restart must preserve Tauri's updater ex
 Size, position, and maximized state are persisted after stable changes. Minimized state is not
 restored. If a saved position is outside all current displays, the window is clamped to a visible
 display before being shown.
+
+Saved bounds describe the outer window frame in physical pixels, as reported by the platform
+window's outer position and outer size. Restore applies the same basis. Tauri's `set_size`
+resizes the client area, so the shell first measures the current frame (outer size minus inner
+size) and applies the saved outer size minus that frame. Restarting without resizing therefore
+restores the saved outer size instead of growing the window by the frame each time. Clamping to a
+visible display also compares outer sizes. Without a measurable frame, such as the macOS overlay
+title bar, the saved size is applied unchanged.
 
 ## Failure modes
 
@@ -321,6 +453,8 @@ display before being shown.
   and does not mark a task route from generic activation.
 - **GIVEN** a saved window position belongs to a disconnected display, **WHEN** Kandev reopens,
   **THEN** the main window appears within a currently visible display.
+- **GIVEN** a decorated main window was saved at an outer size, **WHEN** Kandev restarts
+  repeatedly without the user resizing it, **THEN** each restart restores that same outer size.
 - **GIVEN** the same settings page is opened in a browser or narrow/mobile viewport, **WHEN** it
   renders, **THEN** the existing service-update experience and responsive layout remain intact;
   desktop-only native actions are not shown.
@@ -332,7 +466,8 @@ display before being shown.
 - Global shortcuts that operate while another application is focused.
 - Silent, forced, or downgrade updates; App Store/Microsoft Store/Snap distribution.
 - Auto-updating Linux `.deb` or `.rpm` packages outside their package managers.
-- Notification events beyond the canonical provider catalog in this increment.
+- New provider notification events beyond the canonical catalog; the explicit
+  local settings test is not a provider event.
 - A separate native settings window, multiple native windows, or a rewritten native UI.
 - Mobile Tauri targets. Native shortcuts have no mobile analogue; the shared settings page must
   remain responsive and preserve browser/mobile behavior.
@@ -340,10 +475,58 @@ display before being shown.
 - Rewriting the shared frontend or backend in Rust.
 - General native filesystem plugin access from the SPA.
 
+## Auxiliary child ownership
+
+The shell owns the exit status of each auxiliary process it starts. This
+covers `AC-DESKTOP-DESKTOP-TAURI-APP-001.12` through `.14`. The backend's
+existing `BackendState` supervision remains separate.
+
+`apps/desktop/src-tauri/src/child_process.rs` provides a private managed-launch
+helper. It accepts a Rust `Command`, not WebView arguments. It allocates a
+named worker thread before any child starts. The worker spawns the command,
+returns the spawn result and PID through a one-shot channel, and calls
+`Child::wait()` on the exact child. The caller waits only for that spawn
+acknowledgement. It never waits for process exit. If acknowledgement delivery
+fails, the worker still waits for its child. A thread-allocation failure cannot
+leave an unwatched child because spawn follows thread allocation.
+
+The macOS branch of `external_links::open_validated_external_url` keeps
+`validate_external_url` and invokes `/usr/bin/open` with two distinct arguments:
+`--` and the validated URL. It uses the managed-launch helper and null standard
+streams. It does not use a shell, accept a program from the page, or call
+`tauri_plugin_opener` for this branch. The browser application keeps its normal
+independent lifetime. The existing plugin remains the Windows and Linux path.
+The common menu handler and origin-checked Tauri command already use this
+function, so both receive the correction.
+
+The temporary GUI launch uses the same helper, as described in the
+[isolated startup design](isolated-startup.md#process-modes). Its wait worker
+does not create a parent-lifetime watchdog or terminate the GUI child.
+
+Workers report a wait error or unsuccessful helper exit through bounded native
+stderr messages. Messages identify the operation and status, without the URL,
+environment, or captured process output. Spawn and worker-allocation failures
+return through the existing `Result<(), String>` command contract. A helper
+exit after spawn does not retroactively reject a completed command.
+
+No worker uses `waitpid(-1)`, `SIGCHLD` handlers, automatic child-status discard,
+or a global reaper. Every wait targets its own `Child`. Rust Unix tests prove
+that the PID no longer has a waitable status after cleanup, while an unrelated
+live child remains under its original owner. Production does not poll process
+lists or introduce a timer, persistence, configuration, or a runtime flag.
+
+This change preserves existing child lifetimes and native capabilities.
+[ADR-0039](../../../decisions/0039-native-desktop-integration-boundary.md)
+and the [temporary-process decision](../../../decisions/2026-09-25-temporary-desktop-test-processes.md)
+remain the authority. The local wait implementation needs no new ADR.
+
 ## Implementation plans and decisions
 
+- [Desktop settings notification test fix](../../../plans/desktop-notification-test/plan.md)
+- [Desktop child reaping fix](../../../plans/desktop-child-reaping/plan.md)
 - [Initial Desktop Tauri App plan](../../../plans/desktop-tauri-app/plan.md)
 - [Desktop Native Integration plan](../../../plans/desktop-native-integration/plan.md)
+- [Isolated desktop startup plan](../../../plans/desktop-isolated-startup/plan.md)
 - [ADR-0026: Tauri desktop shell over native runtime](../../../decisions/0026-tauri-desktop-shell.md)
 - [ADR-0039: Native desktop integration boundary](../../../decisions/0039-native-desktop-integration-boundary.md)
 - [Desktop Repository Discovery Consent plan](../../../plans/desktop-repository-discovery-consent/plan.md)

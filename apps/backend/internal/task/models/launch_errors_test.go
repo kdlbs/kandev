@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,233 @@ func TestLoadLastAgentErrorIgnoresMalformedOptionalBootstrapFields(t *testing.T)
 	require.Equal(t, "", lastError.ExecutionID)
 	require.Equal(t, "", lastError.AttemptID)
 	require.Empty(t, lastError.Causes)
+}
+
+func TestLoadLastAgentErrorKeepsCauseWhenOptionalEvidenceIsMalformed(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The agent could not start.",
+			"occurred_at": "2026-09-30T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            AgentErrorCauseCodeModelUnavailable,
+				"detail":          "The requested model is unavailable.",
+				"reason":          AgentErrorCauseReasonRequestedNotAdvertised,
+				"requested_model": map[string]interface{}{"unexpected": true},
+				"effective_model": 42,
+				"prompt_not_sent": "true",
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Len(t, lastError.Causes, 1)
+	cause := lastError.Causes[0]
+	require.Equal(t, AgentErrorCauseCodeModelUnavailable, cause.Code)
+	require.Equal(t, AgentErrorCauseReasonRequestedNotAdvertised, cause.Reason)
+	require.Empty(t, cause.RequestedModel)
+	require.Empty(t, cause.EffectiveModel)
+	require.Nil(t, cause.PromptNotSent)
+}
+
+func TestCopilotPluginPreparationCauseRoundTripsSafeEvidence(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The selected Copilot plugins could not be prepared.",
+			"occurred_at": "2026-11-05T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            "plugin_preparation_failed",
+				"detail":          "The selected Copilot plugins could not be prepared.",
+				"reason":          "invalid_inventory",
+				"runtime_version": "9.9.9",
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Len(t, lastError.Causes, 1)
+	encoded, err := json.Marshal(lastError.Causes[0])
+	require.NoError(t, err)
+	var cause map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &cause))
+	require.Equal(t, "plugin_preparation_failed", cause["code"])
+	require.Equal(t, "invalid_inventory", cause["reason"])
+	require.Equal(t, "9.9.9", cause["runtime_version"])
+}
+
+func TestCopilotPluginPreparationCauseDropsInvalidEvidence(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The agent could not start.",
+			"occurred_at": "2026-11-05T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            "plugin_preparation_failed",
+				"detail":          "private native document /home/private",
+				"reason":          "private_native_document",
+				"runtime_version": "9.9.9 /home/private",
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	require.Len(t, lastError.Causes, 1)
+	encoded, err := json.Marshal(lastError.Causes[0])
+	require.NoError(t, err)
+	var cause map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &cause))
+	require.Equal(t, "plugin_preparation_failed", cause["code"])
+	require.NotContains(t, cause, "reason")
+	require.NotContains(t, cause, "runtime_version")
+	require.NotContains(t, string(encoded), "private native document")
+	require.Equal(t, AgentErrorCausePluginPreparationDetail, cause["detail"])
+}
+
+func TestSafeAgentErrorRuntimeVersionMatchesManagedSelector(t *testing.T) {
+	for _, version := range []string{"1.0.104", "10.20.30+build.7"} {
+		require.Equal(t, version, safeAgentErrorRuntimeVersion(version))
+	}
+	for _, version := range []string{
+		"1.2.3-beta.1", "latest", "^1.2.3", "@github/copilot@1.2.3", "1.2.3 /home/private", "1.2.3\x00",
+	} {
+		require.Empty(t, safeAgentErrorRuntimeVersion(version), "version %q must be rejected", version)
+	}
+}
+
+func TestNonPluginAgentErrorCausesDropRuntimeVersionEvidence(t *testing.T) {
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodeModelUnavailable,
+			Reason:         AgentErrorCauseReasonRequestedNotAdvertised,
+			RequestedModel: "provider-model",
+			RuntimeVersion: "1.0.105 /private/path",
+		},
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodePermissionModeFailed,
+			Reason:         AgentErrorCauseReasonApplicationFailed,
+			RequestedMode:  "safe",
+			RuntimeVersion: "1.0.105 /private/path",
+		},
+	})
+	require.Len(t, causes, 2)
+	for _, cause := range causes {
+		require.Empty(t, cause.RuntimeVersion)
+	}
+}
+
+func TestSelectionCauseRoundTrip(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyLastAgentError: map[string]interface{}{
+			"message":     "The agent could not start.",
+			"occurred_at": "2026-09-30T10:00:00Z",
+			"causes": []map[string]interface{}{{
+				"operation":       AgentErrorCauseOperationStart,
+				"code":            AgentErrorCauseCodeModelUnavailable,
+				"reason":          "requested_not_advertised",
+				"requested_model": "anthropic/claude-opus-4-8",
+				"effective_model": "provider-default",
+				"prompt_not_sent": true,
+			}},
+		},
+	}
+
+	lastError, ok := LoadLastAgentError(metadata)
+	require.True(t, ok)
+	encoded, err := json.Marshal(lastError)
+	require.NoError(t, err)
+	var projection map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &projection))
+	causes := projection["causes"].([]interface{})
+	cause := causes[0].(map[string]interface{})
+	require.Equal(t, "requested_not_advertised", cause["reason"])
+	require.Equal(t, "anthropic/claude-opus-4-8", cause["requested_model"])
+	require.Equal(t, "provider-default", cause["effective_model"])
+	require.Equal(t, true, cause["prompt_not_sent"])
+}
+
+func TestNormalizeAgentErrorDetailsCountsAttemptedModelInBudget(t *testing.T) {
+	cause := AgentErrorCause{
+		Operation:      AgentErrorCauseOperationStart,
+		Code:           AgentErrorCauseCodeModelSelectionFailed,
+		Reason:         AgentErrorCauseReasonApplicationFailed,
+		RequestedModel: "vendor/primary",
+		AttemptedModel: "vendor/fallback",
+	}
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{cause})
+	require.Len(t, causes, 1)
+	causes = []AgentErrorCause{causes[0]}
+
+	details := NormalizeAgentErrorDetails(strings.Repeat("d", maxLaunchErrorDetailsBytes), causes)
+	cause = causes[0]
+	evidenceBytes := len(cause.Operation) + len(cause.Code) + len(cause.Detail) + len(cause.Reason) +
+		len(cause.RequestedModel) + len(cause.EffectiveModel) + len(cause.AttemptedModel) +
+		len(cause.RequestedMode) + len(cause.EffectiveMode)
+	require.LessOrEqual(t, len(details)+evidenceBytes, maxLaunchErrorDetailsBytes)
+}
+
+func TestNormalizeSelectionCauseRejectsUnsafeSelectorIDs(t *testing.T) {
+	unsafeSelectors := []string{
+		"model\u0085id",
+		"model@credential-host",
+		".config/agent/credentials.json",
+		strings.Repeat("opaque", 8),
+		strings.Repeat("m", maxAgentErrorSelectorBytes+1),
+		"https://user:secret@example.test/model",
+	}
+	for index, selector := range unsafeSelectors {
+		t.Run(string(rune('a'+index)), func(t *testing.T) {
+			lastError, ok := LoadLastAgentError(map[string]interface{}{
+				SessionMetaKeyLastAgentError: map[string]interface{}{
+					"message":     "The agent could not start.",
+					"occurred_at": "2026-09-30T10:00:00Z",
+					"causes": []map[string]interface{}{{
+						"operation":       AgentErrorCauseOperationStart,
+						"code":            AgentErrorCauseCodeModelUnavailable,
+						"reason":          AgentErrorCauseReasonRequestedNotAdvertised,
+						"requested_model": selector,
+						"prompt_not_sent": true,
+					}},
+				},
+			})
+			require.True(t, ok)
+			require.Len(t, lastError.Causes, 1)
+			require.Empty(t, lastError.Causes[0].RequestedModel)
+			require.NotNil(t, lastError.Causes[0].PromptNotSent)
+			require.True(t, *lastError.Causes[0].PromptNotSent)
+		})
+	}
+}
+
+func TestNormalizeAgentErrorCausesKeepsDistinctPromptEvidence(t *testing.T) {
+	promptNotSent := true
+	promptMayHaveBeenSent := false
+	causes := NormalizeAgentErrorCauses([]AgentErrorCause{
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodeModelUnavailable,
+			Reason:         AgentErrorCauseReasonRequestedNotAdvertised,
+			RequestedModel: "anthropic/claude-opus-4-8",
+			PromptNotSent:  &promptNotSent,
+		},
+		{
+			Operation:      AgentErrorCauseOperationStart,
+			Code:           AgentErrorCauseCodeModelUnavailable,
+			Reason:         AgentErrorCauseReasonRequestedNotAdvertised,
+			RequestedModel: "anthropic/claude-opus-4-8",
+			PromptNotSent:  &promptMayHaveBeenSent,
+		},
+	})
+	require.Len(t, causes, 2)
+	require.NotNil(t, causes[0].PromptNotSent)
+	require.True(t, *causes[0].PromptNotSent)
+	require.NotNil(t, causes[1].PromptNotSent)
+	require.False(t, *causes[1].PromptNotSent)
 }
 
 func sumCauseDetailBytes(causes []AgentErrorCause) int {

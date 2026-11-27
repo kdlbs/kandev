@@ -12,6 +12,13 @@ owners:
 
 ## Authority
 
+`system.Service.StartBackground` starts `StorageRuntime`, which registers the
+task-resource cleanup worker. Its owned goroutine performs due work
+asynchronously; `StartBackground` does not wait for cleanup recovery or
+filesystem work. The worker's start/stop contract follows
+[Task Cleanup Source Manifest](archive-source-manifest.md#background-recovery).
+This does not change the mandatory archive-cascade recovery gate.
+
 This document is the exhaustive production starter, subscription, listener,
 process, sweep, route-publication, readiness, and cleanup catalog for the archive
 recovery gate. [Archive Cascade Boundary Contracts](archive-cascade-boundary-contracts.md#mandatory-recovery-runtime)
@@ -76,7 +83,6 @@ the registry artifact, Task 04 verifier, and all work-order file lists.
 | P25b post_gate | `startApplicationProducersAndPublishRoutes` -> `startCronScheduler` | shared cron loop | `cronLoop.Stop` | false |
 | P26 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartAutoArchiveLoop` | auto-archive loop | `task.Service.StopAutoArchiveLoop` | false |
 | P27 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartArchivedSessionReconciliationLoop` | archived-session loop | `task.Service.StopArchivedSessionReconciliationLoop` | false |
-| P28 post_gate | `startApplicationProducersAndPublishRoutes` -> `task.Service.StartQuickChatExpirationLoop` | quick-chat loop | `task.Service.StopQuickChatExpirationLoop` | false |
 | P29a post_gate | `startApplicationProducersAndPublishRoutes` -> `provideStorageComposition` | artifact/quarantine reconciliation | `storageComposition.Close` | false |
 | P29b post_gate | `startApplicationProducersAndPublishRoutes` -> `system.Service.StartBackground` | storage/update/metrics workers | `system.Service.StopBackground` | false |
 | P30a post_gate | `startApplicationProducersAndPublishRoutes` -> `review.Runner.Start` | review worker | `review.Runner.Stop` | false |

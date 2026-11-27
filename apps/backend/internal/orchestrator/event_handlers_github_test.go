@@ -47,18 +47,19 @@ type mockGitHubService struct {
 	// lookups honour repository_id + branch instead of returning prWatch for
 	// every query, so tests can assert that a branch switch leaves another
 	// branch's found-PR watch alone.
-	sessionWatches      []*github.PRWatch
-	ensureWatchCalls    int
-	createWatchCalls    int
-	associateCalls      int
-	updateBranchCalls   int
-	updatePRNumberCalls int
-	resetWatchCalls     int
-	resetWatchBranch    string
-	ensureWatchBranch   string
-	createWatchBranch   string
-	updatedBranch       string
-	updatedPRNumber     int
+	sessionWatches        []*github.PRWatch
+	ensureWatchCalls      int
+	createWatchCalls      int
+	associateCalls        int
+	updateBranchCalls     int
+	updatePRNumberCalls   int
+	resetWatchCalls       int
+	resetWatchBranch      string
+	ensureWatchBranch     string
+	createWatchBranch     string
+	updatedBranch         string
+	updatedPRNumber       int
+	lastAssociatePRNumber int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -132,6 +133,10 @@ type mockGitHubService struct {
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
+
+func (m *mockGitHubService) InvalidatePRFeedbackForAutomation(context.Context, string, string, string, int) error {
+	return nil
+}
 
 func (m *mockGitHubService) FindPRByBranchForWorkspace(
 	ctx context.Context, _, owner, repo, branch string,
@@ -402,6 +407,17 @@ func (m *mockGitHubService) EnsurePRWatchForWorkspace(
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
+func (m *mockGitHubService) GetPRWatch(_ context.Context, id string) (*github.PRWatch, error) {
+	if m.prWatch != nil && m.prWatch.ID == id {
+		return m.prWatch, nil
+	}
+	for _, watch := range m.sessionWatches {
+		if watch != nil && watch.ID == id {
+			return watch, nil
+		}
+	}
+	return nil, nil
+}
 func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(
 	_ context.Context, _, repositoryID, branch string,
 ) (*github.PRWatch, error) {
@@ -441,7 +457,18 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string,
 ) (*github.PRWatch, error) {
 	m.lastCreateWatchWorkspaceID = workspaceID
-	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
+	watch, err := m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
+	if watch != nil {
+		watch.WorkspaceID = workspaceID
+		watch.SessionID = sessionID
+		watch.TaskID = taskID
+		watch.RepositoryID = repositoryID
+		watch.Owner = owner
+		watch.Repo = repo
+		watch.PRNumber = prNumber
+		watch.Branch = branch
+	}
+	return watch, err
 }
 func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
@@ -450,6 +477,7 @@ func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repos
 	branch := ""
 	if pr != nil {
 		branch = pr.HeadBranch
+		m.lastAssociatePRNumber = pr.Number
 	}
 	m.associateLog = append(m.associateLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil
@@ -460,10 +488,32 @@ func (m *mockGitHubService) AssociatePRWithTaskForWorkspace(
 	m.lastAssociateWorkspaceID = workspaceID
 	return m.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
 }
-func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, _, branch string) error {
+func (m *mockGitHubService) UpdatePRWatchBranchIfSearching(_ context.Context, id, branch string) error {
 	m.updateBranchCalls++
 	m.updatedBranch = branch
+	if m.prWatch != nil && m.prWatch.ID == id {
+		m.prWatch.Branch = branch
+	}
+	for _, watch := range m.sessionWatches {
+		if watch != nil && watch.ID == id {
+			watch.Branch = branch
+		}
+	}
 	return nil
+}
+func (m *mockGitHubService) ApplyPRWatchDiscoveryResult(
+	ctx context.Context, watch *github.PRWatch, pr *github.PR,
+) (bool, error) {
+	if watch == nil || pr == nil {
+		return false, nil
+	}
+	if err := m.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
+		return false, err
+	}
+	if _, err := m.AssociatePRWithTaskForWorkspace(ctx, watch.WorkspaceID, watch.TaskID, watch.RepositoryID, pr); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, prNumber int) error {
 	m.updatePRNumberCalls++
@@ -900,7 +950,7 @@ func TestDetectPushAndAssociatePR(t *testing.T) {
 		ghSvc := &mockGitHubService{
 			client: mockClient,
 			prWatch: &github.PRWatch{
-				ID: "w1", SessionID: "s1", TaskID: "t1",
+				ID: "w1", WorkspaceID: "ws1", SessionID: "s1", TaskID: "t1",
 				Owner: "myorg", Repo: "myrepo",
 				PRNumber: 0, Branch: "feature-branch",
 			},

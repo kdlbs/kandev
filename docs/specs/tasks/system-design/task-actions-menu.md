@@ -69,6 +69,9 @@ its board row from the store (see below) and degrades per
 **Dialog host (new, one per surface).** Mounts the confirmation and link
 dialogs the entries open. Each surface hosts its own so a dialog outlives the
 menu that opened it and is not nested inside a portal that unmounts on select.
+The single-task **Change workflow...** entry opens the shared form from
+[Change workflow](change-workflow.md); that design owns its task snapshot, draft,
+preview, version check, in-flight guard, and result recovery.
 
 ## Data and contracts
 
@@ -86,7 +89,7 @@ menu that opened it and is not nested inside a portal that unmounts on select.
 
 - *Identifier-only*: Archive, Delete. Available whenever a task identifier is
   known.
-- *Board-row*: Edit, Priority, Move to, Send to workflow, Link, Detach from
+- *Board-row*: Edit, Priority, Move to, Change workflow, Link, Detach from
   parent. Each needs fields carried by the board row (priority, workflow
   membership, step, repositories, or parent task id), and is omitted while
   that row is unresolved.
@@ -132,12 +135,10 @@ and passes them down, and the shared move-target derivation then uses that
 supplied list verbatim for the current workflow. So the tiebreak is not new
 behavior being introduced here, and the card's Move to submenu does not change.
 
-The one place the shared derivation is weaker is *other* workflows: it sorts
-their steps with `position` alone. Adopting `sortWorkflowStepsByPosition` there
-gives the new surfaces the same order the card's Move to already has, and
-changes the card's Send to workflow submenu only where two steps of a
-non-current workflow share a `position` -- an order that is arbitrary today.
-`AC-TASKS-TASK-ACTIONS-MENU-002.10` names that as its one permitted exception.
+The existing card menus retain their workflow-target ordering. The shared
+Change workflow form sorts destination steps from its loaded workflow snapshot
+by `position`, then step `id`, as defined by its requirement. This keeps the
+explicit form selection deterministic without changing the bulk workflow path.
 
 Two exclusions travel with the target list. User-hidden steps are filtered out
 for the current workflow and not for other workflows, which is what the card
@@ -238,16 +239,11 @@ exist in `en`, `pt-pt`, `zh-cn`, `zh-tw`, `zh-hk`, and `pseudo`.
    neither.
 5. On a move: the subject task alone is moved. Both surfaces stay on the task.
    The detail top bar's stepper re-reads the current step from state.
-5a. If the board row is lost while a Move to or Send to workflow submenu is
-   open, the live demotion of `AC-TASKS-TASK-ACTIONS-MENU-002.6` removes the
-   submenu's parent entry, so the submenu closes with it and the top-level menu
-   stays open on the identifier-only entries. A move already in flight is not
-   cancelled: it was dispatched against the server, which remains the arbiter,
-   and it lands or fails on its own terms
-   (`AC-TASKS-TASK-ACTIONS-MENU-004.1c`). This is a rare flash rather than a
-   state machine -- the row is lost by a store update, and the alternative,
-   pinning an open submenu to a target list the store no longer backs, would
-   mean offering move targets that may no longer exist.
+5a. If the board row is lost while a Move to submenu is open, the live demotion
+  of `AC-TASKS-TASK-ACTIONS-MENU-002.6` removes the submenu's parent entry. A
+  Change workflow form stays open because it has its own task snapshot; if the
+  task changes before submit, its version check refreshes the source and keeps
+  the user's valid draft for review. The shared form contract owns this recovery.
 6. Edit opens the existing edit dialog seeded from the subject task; save uses
    the existing task update contract.
 
@@ -283,14 +279,11 @@ exception rather than leaving the parity rule to over-claim.
   request cannot be started from the same menu. The disabled state is therefore
   observable by reopening the menu mid-flight, not by watching the menu that
   dispatched the request.
-- Move to, Send to workflow, and Link are outside that rule by decision, not by
-  omission (`AC-TASKS-TASK-ACTIONS-MENU-004.1a`). Link starts no task-state
-  request on select -- it opens a dialog, which owns its own submit state. Move
-  carries no menu-level pending state on the card either, so adding one here
-  would be a new divergence rather than parity. Two moves issued in quick
-  succession are two independent requests and the server arbitrates, which is
-  the same rule the detail surface's own workflow stepper already applies with
-  its last-request-wins guard.
+- Move to and Link are outside that rule by decision, not by omission
+  (`AC-TASKS-TASK-ACTIONS-MENU-004.1a`). Link starts no task-state request on
+  select; its dialog owns submit state. A single-task Change workflow selection
+  opens a form with its own in-flight guard and source-version check. The bulk
+  workflow submenu retains its existing independent move behavior.
 - Two surfaces acting on one task issue independent requests. The server is the
   arbiter: the losing request fails and raises the existing per-action failure
   feedback. No new error surface, no client-side lock across surfaces.
@@ -333,6 +326,64 @@ exception rather than leaving the parity rule to over-claim.
 - A task removed by another client is handled by each surface's existing
   missing-subject behavior. The menu is closed by then, because the removal is
   observed through state rather than through a menu interaction.
+
+### External issue-link form lifetime
+
+`TaskExternalLinkDialog` owns this rule for all existing callers, including
+`SidebarLinkDialogs` and the phone task picker
+(`AC-TASKS-TASK-ACTIONS-MENU-004.7`). Key its inner form by task identifier,
+provider, and workspace, so subject replacement creates independent transient
+state. A committed opening receives a fresh local admission identity; closing
+invalidates it synchronously, and layout cleanup invalidates it on unmount or
+open-state change. StrictMode setup/cleanup must create fresh identities rather
+than revive an old request. Render attempts do not mutate admission ownership.
+
+Submit captures that identity and the original task, issue key, workspace,
+provider, and selected Sentry instance. It continues the existing lookup and
+PATCH, including reading the latest original-task title after lookup and applying
+the existing title normalization. Only the still-current identity can close the
+form or publish inline error/pending state. A stale success retains its success
+toast; a stale failure uses the existing error-toast surface instead of silently
+losing feedback or placing an error in a replacement form. There is no request
+cancellation, rollback, shared pending registry, or transport change. Field-only
+task updates do not replace an opening.
+
+### Native GitLab task-MR link lifetime
+
+`TaskMRLinkDialog` owns `AC-TASKS-TASK-ACTIONS-MENU-004.8` across conditional
+`SidebarLinkDialogs` mounts (desktop sidebar and phone task picker), retained
+`TaskActionsMenuDialogs` and card mounts, and the MR status chip/topbar. The
+Tasks system owns form completion authority; the
+[GitLab integration](../../integrations/requirements/gitlab-integration.md)
+continues to own provider permissions, URL validation and association semantics.
+
+Key an inner form by task and workspace identifiers. Give each committed open
+form and explicit repository selection a fresh local admission identity in a
+layout effect. Closing invalidates it synchronously; layout cleanup retires it on
+unmount or replacement. StrictMode effect replay must create a new identity;
+uncommitted concurrent renders must not mutate the current owner. Object-only
+metadata refreshes keep the same form. Repository changes retire completion and
+busy authority without rewriting its raw URL or moving focus. Keep default
+repository hydration and closed-form reset behavior. Passive default hydration
+fills the selector without retiring a pending admission or changing its captured
+payload; only an explicit selection change advances repository ownership.
+
+Submit captures the identity, trimmed URL, repository, workspace and task. Its
+synchronous pending bit prevents duplicate admissions before React renders.
+`createTaskMR` and `setTaskMR` continue to publish successful original-target
+associations regardless of whether their form survives. Only the current owner
+can close or clear pending state. Failures keep the existing error toast even
+when stale, without changing replacement form state. No abort, rollback,
+shared registry, API/store change or generic form framework is introduced.
+
+Permanent integration coverage uses the actual sidebar coordinator, providers,
+Radix dialog, API client and store with only fetch deferred. It also exercises
+retained mounts, task/workspace/repository replacement and return, concurrent
+requests, StrictMode, and abandoned renders. Focused desktop and phone browser
+checks use the shipped Link action, a disposable backend and mock GitLab,
+causally held responses, persisted original associations and a later Save or
+Cancel. Phone uses the shipped task-picker sheet and touch activation. The
+existing compact dialog composition and localized copy are unchanged.
 
 ## Persistence
 

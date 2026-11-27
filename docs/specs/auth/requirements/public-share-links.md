@@ -24,10 +24,26 @@ When a user finishes a noteworthy task — an interesting bug-fix transcript, a 
 - **AC-AUTH-PUBLIC-SHARE-LINKS-001.3:** The user only publishes by clicking an explicit confirm button in the dialog ("Publish to GitHub Gist"). The dialog never auto-publishes on open.
 - **AC-AUTH-PUBLIC-SHARE-LINKS-001.4:** On publish, kandev builds a **frozen snapshot** of the session and uploads it as a secret GitHub Gist on the user's authenticated GitHub account. The dialog then shows the gist URL with a "Copy" button.
 - **AC-AUTH-PUBLIC-SHARE-LINKS-001.5:** A snapshot is self-contained: it survives the underlying task, session, or workspace being deleted from kandev. It MUST NOT contain foreign keys to live kandev rows.
-- **AC-AUTH-PUBLIC-SHARE-LINKS-001.6:** Every snapshot passes through a redaction pass before being uploaded:
-- **AC-AUTH-PUBLIC-SHARE-LINKS-001.7:** Absolute paths under the session's worktree root are rewritten to repo-relative paths (`/Users/foo/proj/src/x.ts` → `src/x.ts`).
-- **AC-AUTH-PUBLIC-SHARE-LINKS-001.8:** Known secret shapes are stripped: `sk-[a-zA-Z0-9]{20,}`, `ghp_[A-Za-z0-9]{36,}`, `gho_[A-Za-z0-9]{36,}`, `github_pat_[A-Za-z0-9_]{36,}`, `AKIA[0-9A-Z]{16}`.
+- **AC-AUTH-PUBLIC-SHARE-LINKS-001.6:** Every new preview and published snapshot shall apply the existing redaction rules to conversation content and exported task/session descriptive metadata, including the task title and session agent type, model, and executor type. The redacted values shall appear consistently in the snapshot, rendered share, fallback README, and publication description wherever those values are used. Exporting shall not modify the source task, session, or messages. Ordinary metadata and conversation values that match no rule shall be preserved.
+- **AC-AUTH-PUBLIC-SHARE-LINKS-001.7:** Absolute paths under the session's worktree roots or workspace fallback are rewritten to repo-relative paths (`/Users/foo/proj/src/x.ts` → `src/x.ts`), including in the descriptive metadata covered by AC-AUTH-PUBLIC-SHARE-LINKS-001.6. Matching metadata paths shall contribute `abs-path` to the snapshot's applied-rule list.
+- **AC-AUTH-PUBLIC-SHARE-LINKS-001.8:** Known secret shapes are stripped: `sk-[a-zA-Z0-9]{20,}`, `ghp_[A-Za-z0-9]{36,}`, `gho_[A-Za-z0-9]{36,}`, `github_pat_[A-Za-z0-9_]{36,}`, `AKIA[0-9A-Z]{16}`. Matches in the descriptive metadata covered by AC-AUTH-PUBLIC-SHARE-LINKS-001.6 shall use the same replacement and rule names as conversation matches. The snapshot's applied-rule list shall include the distinct rules triggered by metadata and conversation content.
+
+## Compatibility and exclusions
+
+These metadata clarifications retain the existing draft status; they do not
+declare the entire capability accepted or implemented. New previews and
+publications receive the correction. Previously published snapshots remain
+frozen. Desktop and phone clients receive the same redacted artifact data.
+
+This repair does not change snapshot shape, version, identifier or timestamp
+semantics, share permissions, or the confirmation workflow. It does not extend
+the secret catalog, promise exhaustive secret detection, or scan, rewrite, or
+automatically revoke historical shares.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/public-share-links.md).
+
+## Implementation plans
+
+- [Public share metadata redaction](../../../plans/public-share-metadata-redaction/plan.md)

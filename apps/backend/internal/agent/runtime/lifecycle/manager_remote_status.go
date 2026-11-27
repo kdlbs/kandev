@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const remoteStatusAttemptTimeout = 5 * time.Second
+
 func (m *Manager) remoteStatusLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(m.remoteStatusPollInterval)
@@ -26,7 +28,14 @@ func (m *Manager) remoteStatusLoop(ctx context.Context) {
 }
 
 func (m *Manager) pollRemoteStatuses(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	m.retryPendingRemoteRecoveries(ctx)
 	for _, execution := range m.executionStore.List() {
+		if ctx.Err() != nil {
+			return
+		}
 		m.pollOneRemoteStatus(ctx, execution)
 	}
 }
@@ -46,7 +55,10 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 
 	instance := m.remoteStatusInstance(ctx, execution)
 	if refresher, refreshable := rt.(RemoteInstanceRefresher); refreshable {
-		if refreshErr := m.refreshTrackedRemoteInstance(ctx, execution, refresher); refreshErr != nil {
+		refreshCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+		refreshErr := m.refreshTrackedRemoteInstance(refreshCtx, execution, refresher)
+		cancel()
+		if refreshErr != nil {
 			m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
 				RuntimeName: execution.RuntimeName, LastCheckedAt: time.Now().UTC(),
 				ErrorMessage: refreshErr.Error(),
@@ -59,7 +71,9 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		}
 		instance = m.remoteStatusInstance(ctx, execution)
 	}
-	status, statusErr := provider.GetRemoteStatus(ctx, instance)
+	statusCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+	status, statusErr := provider.GetRemoteStatus(statusCtx, instance)
+	cancel()
 	if statusErr != nil {
 		m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
 			RuntimeName:   execution.RuntimeName,
@@ -188,7 +202,9 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 			ContainerID: rec.ContainerID,
 			Metadata:    rec.Metadata,
 		}
-		status, statusErr := provider.GetRemoteStatus(ctx, instance)
+		statusCtx, cancel := context.WithTimeout(ctx, remoteStatusAttemptTimeout)
+		status, statusErr := provider.GetRemoteStatus(statusCtx, instance)
+		cancel()
 		if statusErr != nil {
 			m.storeRemoteStatus(rec.SessionID, &RemoteStatus{
 				RuntimeName:   rec.Runtime,

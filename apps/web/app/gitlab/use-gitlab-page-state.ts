@@ -8,7 +8,7 @@ import { MR_PRESETS, ISSUE_PRESETS, presetLabel } from "@/components/gitlab/my-g
 import { useGitLabSearch } from "@/components/gitlab/my-gitlab/use-gitlab-search";
 import { useSavedPresets, type SavedPreset } from "@/components/gitlab/my-gitlab/use-saved-presets";
 import { useKnownProjects } from "@/components/gitlab/my-gitlab/use-known-projects";
-import { useCommittedQuery } from "@/components/gitlab/my-gitlab/use-committed-query";
+import { useCommittedQuery } from "@/hooks/use-committed-query";
 
 // Normative trim set for the milestone filter: Unicode White_Space plus
 // U+0085 (NEL), which JS's built-in String.prototype.trim() and the bare \s
@@ -39,6 +39,7 @@ function resolveTitle(
 const EMPTY_PROJECTS: string[] = [];
 
 export type UseProjectOptionsArgs = {
+  workspaceId: string;
   selection: SidebarSelection;
   committedQuery: string;
   milestone: string;
@@ -52,8 +53,10 @@ export function buildProjectOptionsResetKey(
   selection: SidebarSelection,
   committedQuery: string,
   milestone: string,
+  workspaceId: string,
 ): string {
   return JSON.stringify([
+    workspaceId,
     selection.kind,
     selection.source,
     selection.id,
@@ -63,6 +66,7 @@ export function buildProjectOptionsResetKey(
 }
 
 export function useProjectOptions({
+  workspaceId,
   selection,
   committedQuery,
   milestone,
@@ -70,7 +74,7 @@ export function useProjectOptions({
   loading,
   projectFilter,
 }: UseProjectOptionsArgs): string[] {
-  const resetKey = buildProjectOptionsResetKey(selection, committedQuery, milestone);
+  const resetKey = buildProjectOptionsResetKey(selection, committedQuery, milestone, workspaceId);
 
   // `useKnownProjects`'s accumulator clears the instant `resetKey` changes and
   // immediately refills with whatever project list it is handed in that same
@@ -310,6 +314,7 @@ function useSearchAndProjects({
     enabled: searchEnabled && Boolean(workspaceId),
   });
   const projectOptions = useProjectOptions({
+    workspaceId: workspaceId ?? "",
     selection,
     committedQuery,
     milestone: committedMilestone,

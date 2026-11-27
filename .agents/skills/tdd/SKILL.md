@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Implement changes using Test-Driven Development (Red-Green-Refactor). Use for bug fixes, new features, or any code change that should have test coverage.
+description: Implement changes using Test-Driven Development (Red-Green-Refactor). Use for code changes that need coverage or requested test-value audits.
 ---
 
 # TDD
@@ -11,9 +11,8 @@ Use this procedure directly in the primary conversation for every code change,
 regardless of size. The user may switch that conversation to the lower-cost
 implementation model before beginning the Red-Green-Refactor cycle.
 
-Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
-
-Wrote code before a test? Delete it. Start over from a failing test.
+Establish a failing test before changing production behavior. Use existing
+coverage to verify behavior-preserving changes.
 
 ## Related skills
 
@@ -23,13 +22,40 @@ Wrote code before a test? Delete it. Start over from a failing test.
 
 ## When to use
 
-- Bug fixes — write a test that reproduces the bug before fixing
+- Bug fixes that need a failing test to reproduce the regression
 - New functions, methods, or utilities
 - Refactoring existing logic that lacks tests
 
 **Skip** for: pure UI components (we don't test React components), config files, generated code.
 
+For scheduling, background delivery, or task/session lifecycle changes, use the
+single [lifecycle evidence checklist](references/lifecycle-evidence.md) to map
+applicable scenarios to their acceptance criteria and focused proof.
+
 For UI rendering bugs, prefer extracting or using a pure helper and testing that helper. Add Playwright only when the behavior is truly visual or integration-level. Avoid adding React component tests just to assert DOM output; that does not match this project's testing convention.
+
+## Test-value gate
+
+Before adding a test case, search the owning suite and relevant coverage at
+other layers. For each new or changed assertion, answer these questions:
+
+1. What observable behavior, invariant, or independent contract does it protect?
+2. What specific regression would fail this assertion while existing tests pass?
+3. Can an existing case cover that regression with a small extension?
+4. Does it require a production export, flag, or injection hook that only tests use?
+
+Run the existing case when it already catches the regression. Extend it when
+the new assertion fits the same scenario. Add a separate case only when it
+covers a distinct behavior or failure mode the current suite would otherwise
+miss. Choose the least expensive layer that can expose the failure. Use
+additional layers for distinct transport, lifecycle, platform, or input-handler
+risks.
+
+For test-only seams, first look for proof through an existing production boundary.
+Keep necessary performance instrumentation only with a named invariant and no simpler proof.
+
+For a requested test audit or consolidation, load [test-audit.md](references/test-audit.md).
+Do not start a broad cleanup as part of ordinary TDD.
 
 ## Determine test scope
 
@@ -58,6 +84,10 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+When a change targets one path but edits a helper or predicate shared by other
+paths, scope the change at the call site or add a regression for every unchanged
+path. Shared-helper coverage alone does not prove those paths stayed unchanged.
+
 When one behavior has separate wheel, keyboard, touch, or pointer handlers,
 inventory and test every handler with distinct branching. For input at a hard
 boundary where the underlying position cannot change, dispatch the input event
@@ -72,6 +102,10 @@ requirement into the test.
 
 For failure-path tests, inject the error at the boundary the production code claims to handle and exercise the real downstream call chain; do not short-circuit by mocking the handler under test.
 When production code has a defensive nil/fallback branch or sanitizes an internal error into a public error, inject that alternate return at the interface boundary and assert the public result plus absence of internal details or sensitive content.
+For a test asserting that a side effect does not occur, enable every prerequisite
+that would otherwise cause it and add a positive control with the same setup to
+prove the side effect is reachable. Observe the actual side effect, not a proxy
+that can remain unchanged.
 
 For parser, canonicalization, or sanitization tests, build fixtures from the
 producer's exact serialized shape. Include boundary cases such as optional
@@ -90,6 +124,15 @@ that omits the field, so a partial payload cannot silently discard an existing
 value.
 For MCP/API tool registration or mode-gated catalogs, add positive tests for
 intended modes and negative tests asserting tool absence in every excluded mode.
+For opt-in or feature-flagged implementations, exercise both the explicit
+enabled path and the disabled/default path; default-path coverage alone does
+not prove that the opt-in implementation is wired.
+
+When production behavior depends on an optional interface or type assertion, a
+pass-through fake that omits that capability is invalid coverage. Use the real
+implementation or a capability-complete fake, and assert the exact accepted
+content and trusted context at persistence and dispatch, including empty
+expansions and delayed or created-session paths.
 
 When content passes through multiple canonicalizers or a delayed/created-session
 path, test each handoff with distinct sentinels and assert exact equality at
@@ -116,6 +159,14 @@ epoch before every asynchronous request, inventory all callers, and use
 deferred response/event tests to prove ordering. React loading state does not
 serialize same-tick callbacks; use an immediate ref or shared in-flight promise
 when request identity must be single-flight.
+
+For fetch effects that depend on live store values such as message count, a
+dependency rerender is not lifecycle invalidation. Do not let an effect-local
+cleanup boolean be the only ownership guard: capture a session, connection, or
+attempt generation for response writes and loading finalization, and invalidate
+that generation only on the corresponding session/connection change or unmount.
+Add a red test that defers the response, triggers a same-session live-row
+rerender, and proves the pending state settles without overwriting newer UI.
 
 For hooks writing shared workspace or global caches, test the ownership matrix:
 a second consumer preserves valid cached data; an initiator unmount before a
@@ -152,16 +203,20 @@ observable state assertion as the proof of behavior.
 
 ## Steps
 
-### 1. RED — Write a failing test
+### 1. RED — Establish a failing test
 
-1. Identify the single behavior to implement or bug to reproduce
-2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
-3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
+1. Identify the behavior to implement or the bug to reproduce.
+2. Reuse or extend the smallest suitable test. Add a case only when the
+   test-value gate identifies a distinct gap.
+3. Run the case and confirm it fails on the expected assertion. Fix compile
+   or import errors before evaluating the failure.
    For a brand-new Go package, create the package directory and minimal test package first, then run the focused package test so RED fails on behavior rather than package-selection or import errors.
-4. If it passes immediately, the test is not testing new behavior — revise it.
-   Exception: a reviewer-requested test that documents behavior already present
-   on the current head is valid test-only contract coverage. Label it as such,
-   make no production change, and run the focused suite.
+4. If the case passes, check that the fixture reaches the affected path and
+   that the assertion exposes the intended regression.
+   Exception: requested test-only contract coverage or an audit assertion repair
+   can pass on the current head. Make no permanent production change.
+   For an assertion repair, demonstrate RED with a deliberate mutation through
+   [test-audit.md](references/test-audit.md), then restore the source.
 
 For bug fixes, use the Prove-It Pattern: reproduce the bug with a failing test before changing production code. A fix without a regression test is not complete unless the change is explicitly untestable and you say why.
 
@@ -179,6 +234,9 @@ For bug fixes, use the Prove-It Pattern: reproduce the bug with a failing test b
 3. Run the test after each change to confirm still green
 
 In tests, prefer DAMP over DRY: each test should read like a small specification. Shared helpers are fine when they remove noise, but not when they hide the scenario.
+For fixture setup that needs a canonicalized identifier, use the production helper
+instead of copying its algorithm. Keep expected values literal and independent;
+if a test needs an independent oracle, keep it local and explain why.
 
 ### 4. Repeat
 
@@ -202,6 +260,11 @@ a later patch.
 - When a change adds a bulk or action entry point, test that entry point directly,
   including its empty, partial, and success paths; coverage of a shared helper or
   neighboring single-item flow does not prove the new dispatch path works.
+- When an opt-in mode replaces a shared implementation, exercise the real
+  component with that mode enabled and production-shaped callbacks, while
+  keeping separate assertions for the default path. Conversion tests alone do
+  not prove mounted editor reconciliation, selection, undo, or insert-then-submit
+  behavior.
 
 **Don't test mock behavior:**
 - If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.
@@ -219,6 +282,11 @@ a later patch.
 - When adding a named export to a shared module, search for full-module
   `vi.mock()` factories and add the export to each factory. Focused tests can
   pass while a full suite fails on an out-of-date module shape.
+- For hook, store-selector, action, or data return-shape changes, use `rg` to
+  find every affected `vi.mock()` factory and stubbed consumer, update each
+  mock for every consumed field, then run the full owning package test command
+  and the nearest real component or consumer test; typecheck alone does not
+  catch an omitted runtime field.
 
 **Never swallow errors in tests:**
 - `try/catch` that silently ignores failures in test helpers or setup — these hide real failures.
@@ -229,8 +297,8 @@ a later patch.
 ## Red flags
 
 - Writing production code before a failing test exists — delete and start over
-- Test passes on first run — revise it, except for clearly labelled
-  reviewer-requested test-only contract coverage
+- Test passes on first run — revise it, except for requested test-only
+  contract coverage or an audit assertion repair with mutation proof
 - Fixing a test to make it pass instead of fixing the production code
 - Large jumps — multiple behaviors implemented between test runs
 - Skipping the refactor step

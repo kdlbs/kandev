@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
+const hostScope = vi.hoisted(() => ({ host: undefined as string | undefined }));
+
 const fetchPRInfoMock = vi.fn();
 const fetchIssueInfoMock = vi.fn();
 
@@ -16,6 +18,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
+  hostScope.host = undefined;
   pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID);
   pluginRegistry.unregisterPlugin("test-coarse-provider");
   pluginRegistry.unregisterPlugin("test-exact-provider");
@@ -327,6 +330,28 @@ describe("usePRInfoByURL — GitHub pull requests", () => {
 });
 
 describe("usePRInfoByURL — non-PR and issue URLs", () => {
+  it.each([
+    REPO_URL,
+    "https://gitlab.com/acme/site",
+    "https://dev.azure.com/acme/project/_git/site",
+  ])("settles a plain repository URL without metadata fetch: %s", (url) => {
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+
+    expect(result.current.settled(url)).toBe(false);
+    act(() => result.current.ensure(` ${url} `));
+    expect(result.current.settled(url)).toBe(true);
+    expect(result.current.loading(url)).toBe(false);
+    expect(result.current.info(url)).toBeUndefined();
+    expect(result.current.error(url)).toBeUndefined();
+    expect(fetchPRInfoMock).not.toHaveBeenCalled();
+    expect(fetchIssueInfoMock).not.toHaveBeenCalled();
+
+    act(() => result.current.clear(url));
+    expect(result.current.settled(url)).toBe(false);
+    act(() => result.current.ensure(url));
+    expect(result.current.settled(url)).toBe(true);
+  });
+
   it("no-ops (no fetch, no cached info) for a non-PR repo URL", async () => {
     const { result } = renderHook(() => usePRInfoByURL("ws-1"));
 
@@ -620,4 +645,40 @@ describe("usePRInfoByURL — workspace scope", () => {
     expect(result.current.error(PR_URL_A)).toBeUndefined();
     expect(result.current.loading(PR_URL_A)).toBe(false);
   });
+});
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      githubStatus: {
+        byWorkspaceId: {
+          "workspace-1": { status: { automation: { github_host: hostScope.host } } },
+        },
+      },
+    }),
+}));
+
+it("uses the configured GHES host and discards a pending result after host replacement", async () => {
+  hostScope.host = "git.company.example";
+  let release: (value: ReturnType<typeof makePR>) => void = () => {};
+  fetchPRInfoMock.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const { result, rerender } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+  const url = "https://git.company.example/acme/site/pull/42";
+  act(() => result.current.ensure(url));
+  expect(fetchPRInfoMock).toHaveBeenCalledWith(
+    WORKSPACE_ID,
+    "acme",
+    "site",
+    42,
+    expect.objectContaining({ expectedHost: "git.company.example" }),
+  );
+  hostScope.host = "other.company.example";
+  rerender();
+  await act(async () => release(makePR({ number: 42 })));
+  expect(result.current.info(url)).toBeUndefined();
 });

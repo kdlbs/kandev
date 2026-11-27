@@ -14,6 +14,21 @@ import {
   isWalkthroughComment,
 } from "./types";
 import { t } from "@/lib/i18n";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+
+export function commentAttachmentsForDelivery(comments: Comment[]): MessageAttachment[] {
+  return comments.flatMap((comment) =>
+    (comment.attachments ?? []).map((attachment) => ({
+      ...attachment,
+      comment_id: comment.attachments?.[0]?.attachment_id,
+    })),
+  );
+}
+
+export function appendCommentAttachmentMarker(lines: string[], comment: Comment): void {
+  const groupId = comment.attachments?.[0]?.attachment_id;
+  if (groupId) lines.push("", `<!-- kandev-comment-files:${groupId} -->`);
+}
 
 /**
  * Format diff review comments as human-readable markdown for sending to agent.
@@ -34,7 +49,9 @@ export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): strin
     for (const comment of fileComments) {
       if (comment.source === "review-file") {
         const prefix = comment.repositoryName ? `${comment.repositoryName}/` : "";
-        lines.push(`**${prefix}${comment.filePath}**`, toBlockquote(comment.text), "");
+        lines.push(`**${prefix}${comment.filePath}**`, toBlockquote(comment.text));
+        appendCommentAttachmentMarker(lines, comment);
+        lines.push("");
         continue;
       }
       const lineRange =
@@ -49,6 +66,7 @@ export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): strin
       lines.push(comment.codeContent);
       lines.push("```");
       lines.push(`> ${comment.text}`);
+      appendCommentAttachmentMarker(lines, comment);
       lines.push("");
     }
   }
@@ -64,6 +82,23 @@ export function toBlockquote(text: string): string {
     .split("\n")
     .map((line) => `> ${line}`)
     .join("\n");
+}
+
+function hasOddBackslashPrefix(text: string, index: number): boolean {
+  let backslashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    backslashCount += 1;
+  }
+  return backslashCount % 2 === 1;
+}
+
+function protectSourceMentions(text: string): string {
+  const protect = (token: string, index: number, source: string) =>
+    hasOddBackslashPrefix(source, index) ? token : "\\" + token;
+  return text
+    .replace(/&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);/gi, protect)
+    .replace(/@[A-Za-z]/g, protect)
+    .replaceAll("agent://", "agent:\\/\\/");
 }
 
 /**
@@ -82,6 +117,7 @@ export function formatPlanCommentsAsMarkdown(comments: PlanComment[]): string {
       lines.push("```");
     }
     lines.push(toBlockquote(c.text));
+    appendCommentAttachmentMarker(lines, c);
     lines.push("");
   }
 
@@ -127,6 +163,7 @@ export function formatWalkthroughCommentsAsMarkdown(comments: WalkthroughComment
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(c.text));
+    appendCommentAttachmentMarker(lines, c);
     lines.push("");
   }
 
@@ -141,15 +178,34 @@ export function formatAgentMessageCommentsAsMarkdown(comments: AgentMessageComme
 
   const lines: string[] = ["### Agent Message Comments", ""];
   for (const comment of comments) {
-    lines.push("Selected agent response:");
-    lines.push(toBlockquote(comment.selectedText));
+    // i18n-exempt: agent-facing prompt text, not UI copy
+    lines.push(
+      comment.authorName
+        ? `Selected comment from ${comment.authorName}:`
+        : "Selected agent response:",
+    );
+    lines.push(
+      toBlockquote(
+        comment.authorName ? protectSourceMentions(comment.selectedText) : comment.selectedText,
+      ),
+    );
     lines.push("");
     lines.push("User feedback:");
     lines.push(toBlockquote(comment.text));
+    appendCommentAttachmentMarker(lines, comment);
     lines.push("");
   }
   lines.push("---", "");
   return lines.join("\n");
+}
+
+/** Prepends the formatted extract block to user text; either part may be empty. */
+export function composeAgentMessageCommentBody(
+  comments: AgentMessageComment[],
+  text: string,
+): string {
+  const block = formatAgentMessageCommentsAsMarkdown(comments);
+  return block ? `${block}\n${text.trim()}`.trimEnd() : text.trim();
 }
 
 /**

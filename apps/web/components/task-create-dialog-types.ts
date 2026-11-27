@@ -1,15 +1,37 @@
-import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
+import type {
+  TaskRepoRow,
+  TaskLocalRepositorySelection,
+  TaskRepositorySnapshot,
+  TaskRemoteRepoRow,
+  TaskRemoteRepositorySelection,
+  TaskWorkspaceFolderSelection,
+  TaskRepositorySelection,
+  TaskRepositorySetsConfig,
+} from "./task-create-dialog-source-types";
+export type {
+  TaskRepoRow,
+  TaskLocalRepositorySelection,
+  TaskRepositorySnapshot,
+  TaskRemoteRepoRow,
+  TaskRemoteRepositorySelection,
+  TaskWorkspaceFolderSelection,
+  TaskWorkspaceSelection,
+  TaskRepositorySelection,
+  TaskRepositorySetsConfig,
+} from "./task-create-dialog-source-types";
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type React from "react";
 import type { RefObject } from "react";
+import type { ComboboxOption } from "@/components/combobox";
 import type {
   LocalRepository,
   Repository,
-  RepositorySet,
   Executor,
   Task,
   TaskPriority,
+  InitialWorkspaceLayout,
   CreateTaskResponse,
-  Branch,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
 import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
@@ -19,6 +41,7 @@ import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generato
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -38,6 +61,7 @@ import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-di
 import type { TaskCreateLastUsedSourceApi } from "@/lib/types/http-user-settings";
 import type { ExecutorSourcePolicy } from "@/components/task-create-dialog-executor-source-policy";
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
+import type { TaskCreateRecovery } from "@/components/task-create-dialog-recovery";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
@@ -87,6 +111,7 @@ export interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -118,125 +143,12 @@ export type DialogPromptEnhance = {
   onCopyPending: () => Promise<void> | void;
 };
 
-/**
- * One repository row in the task-create form. The form tracks every repo
- * (whether one or many) as an entry in `repositories[]`. There is no
- * "primary" — the backend treats them all equally and uses array order
- * for position. Removing the last row clears the form's repo selection.
- *
- * Exactly one of `repositoryId` (workspace repo) or `localPath` (on-machine
- * git folder discovered via the workspace's repo discovery) is set per row.
- * `key` is a stable client-side id used as React key and for
- * add/update/remove ops; it's not sent to the backend.
- */
-export type TaskRepoRow = {
-  key: string;
-  /** Workspace repo id, when the user picked from the workspace's repos. */
-  repositoryId?: string;
-  /** On-machine repo path, when the user picked from discovered repos. */
-  localPath?: string;
-  branch: string;
-  /** Explicit effective base copied from a repository set or chosen in the form. */
-  baseBranch?: string;
-  /** Saved repository policy selected for this row. */
-  branchPolicyId?: string;
-  /** Explicit remote-origin checkout mode for a remote executor. */
-  checkoutSource?: "remote_origin";
-  /** Credential-free origin identity confirmed by the backend. */
-  expectedOrigin?: string;
-  /** Branches read from the verified origin while remote clone mode is active. */
-  remoteBranches?: Branch[];
-};
-
-/** A workspace or host-local repository in the ordered task draft. */
-export type TaskLocalRepositorySelection = TaskRepoRow & { kind: "local" };
-
-/** Repository fields needed to rehydrate an edit form without losing a policy snapshot. */
-export type TaskRepositorySnapshot = {
-  repository_id: string;
-  base_branch?: string;
-  id?: string;
-  task_id?: string;
-  checkout_branch?: string;
-  branch_policy_id?: string;
-  branch_policy_name?: string;
-  branch_policy_base_branch?: string;
-  branch_policy_branch_template?: string;
-  branch_policy_pull_request_target?: string;
-  position?: number;
-  metadata?: Record<string, unknown>;
-  created_at?: string;
-  updated_at?: string;
-};
-
-/**
- * One remote-repo row in the task-create form. Each row is either a
- * picker-selected repo or a manually-pasted URL/PR — both collapse to a
- * single `url` field, with `source` only used for UI affordance.
- */
-export type TaskRemoteRepoRow = {
-  checkoutOptions?: RepositoryCheckoutOptions;
-  key: string; // stable client-side React key
-  url: string; // canonical https://… or paste-as-typed
-  /** Exact credential-free clone URL returned by provider URL inspection. */
-  remoteUrl?: string;
-  branch: string;
-  source: "picker" | "paste";
-  prNumber?: number;
-  prBaseBranch?: string;
-  prHeadBranch?: string;
-  // Optional metadata when source === "picker":
-  provider?: string;
-  providerHost?: string;
-  providerScope?: string;
-  providerRepoId?: string;
-  providerOwner?: string;
-  providerName?: string;
-  fullName?: string; // "owner/name"
-};
-
-/** A provider-backed or pasted repository in the ordered task draft. */
-export type TaskRemoteRepositorySelection = TaskRemoteRepoRow & { kind: "remote" };
-
-/** A live host folder in the ordered task workspace draft. */
-export type TaskWorkspaceFolderSelection = {
-  kind: "folder";
-  key: string;
-  localPath: string;
-  displayName?: string;
-};
-
-/** Every workspace source attached to a task, in the order submitted. */
-export type TaskWorkspaceSelection =
-  | TaskLocalRepositorySelection
-  | TaskRemoteRepositorySelection
-  | TaskWorkspaceFolderSelection;
-
-/** @deprecated Use TaskWorkspaceSelection for new source-aware callers. */
-export type TaskRepositorySelection = TaskWorkspaceSelection;
-
-export type TaskRepositorySetsConfig = {
-  sets: RepositorySet[];
-  onApply: (set: RepositorySet) => void;
-  rows?: TaskRepoRow[];
-  repositories?: Repository[];
-  save?: {
-    workspaceId: string;
-    rows: TaskRepoRow[];
-    repositories: Repository[];
-    isLocalExecutor: boolean;
-    freshBranchEnabled: boolean;
-    selections?: TaskRepositorySelection[];
-    open: boolean;
-    setOpen: (open: boolean) => void;
-  } | null;
-};
-
 export type StepType = {
   id: string;
   title: string;
-  /** Workflow that supplied these fallback-only steps. */
+  /** Workflow that supplied these steps. */
   workflowId?: string;
+  color?: string;
   position?: number;
   is_start_step?: boolean;
   prompt?: string;
@@ -244,6 +156,17 @@ export type StepType = {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   };
+  /** Fixed workflow profile that owns this step, when one is configured. */
+  agent_profile_id?: string;
+  /** Session recipient declared by the step, when one is configured. */
+  session_target?: WorkflowSessionTarget | null;
+};
+
+/** Selected-workflow step metadata shared by launch preview and replacement rows. */
+export type TaskCreateWorkflowStepsResult = {
+  status: "idle" | "loading" | "success" | "error";
+  steps: StepType[];
+  retry: () => void;
 };
 
 export type TaskCreateDialogInitialValues = {
@@ -272,6 +195,11 @@ export type TaskCreateDialogInitialValues = {
   prNumber?: number;
   prBaseBranch?: string;
 };
+
+export type InitialWorkspaceLayoutMode =
+  | "unavailable"
+  | "single-repository"
+  | "multiple-repositories";
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
@@ -395,7 +323,6 @@ export type DialogComputedArgs = {
 export type TaskCreateEffectsArgs = {
   open: boolean;
   workspaceId: string | null;
-  workflowId: string | null;
   effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
@@ -425,6 +352,8 @@ export type TaskCreateEffectsArgs = {
   lastUsedExecutorProfileId?: string | null;
   /** Backend-owned last-used branch. */
   lastUsedBranch?: string | null;
+  /** Complete selected-workflow steps owned by the task dialog observer. */
+  selectedWorkflowSteps: TaskCreateWorkflowStepsResult;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -458,12 +387,24 @@ export type TaskFormInputsHandle = {
   getValue: () => string;
   setValue: (v: string) => void;
   getAttachments: () => FileAttachment[];
+  clearAttachments?: () => void;
 };
 
 export type DialogFormState = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
+  setBuiltinMCPPreferences?: (value: BuiltinMCPCreateDraft | undefined) => void;
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  selectedParentTaskId?: string;
+  setSelectedParentTaskId?: (v: string | undefined) => void;
+  relatedTaskIds?: string[];
+  setRelatedTaskIds?: (v: string[]) => void;
+  /** Task-level MCP additions. Empty means no additions at this scope. */
+  mcpServerIds: string[];
+  setMcpServerIds: (v: string[]) => void;
+  mcpServerIdsDirty: boolean;
+  setMcpServerIdsDirty: (dirty: boolean) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -617,9 +558,13 @@ export type DialogFormState = {
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
   setPriority: (v: TaskPriority) => void;
+  /** Initial working-directory layout for a newly created task. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
+  setInitialWorkspaceLayout?: (v: InitialWorkspaceLayout) => void;
 };
 
 export type SubmitHandlersDeps = {
+  builtinMCPPreferences?: BuiltinMCPCreateDraft;
   isSessionMode: boolean;
   isEditMode: boolean;
   /** Create-mode opt-in: derive a provisional title from the prompt. */
@@ -668,6 +613,7 @@ export type SubmitHandlersDeps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -675,6 +621,8 @@ export type SubmitHandlersDeps = {
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
+  /** Native create-mode recovery owner. Custom transports bypass it. */
+  recovery?: TaskCreateRecovery;
   /** Refreshes selected branch-policy options after a stale task submission. */
   refreshBranchPolicies?: () => Promise<void>;
   preserveTaskCreateLastUsedOnClose?: () => void;
@@ -691,8 +639,11 @@ export type SubmitHandlersDeps = {
   resetRepositorySelections?: (v: TaskRepositorySelection[]) => void;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
+  setMcpServerIds: (v: string[]) => void;
+  setMcpServerIdsDirty: (v: boolean) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
+  setInitialWorkspaceLayout: (v: InitialWorkspaceLayout) => void;
   clearDraft: () => void;
   freshBranchEnabled: boolean;
   isLocalExecutor: boolean;
@@ -705,8 +656,14 @@ export type SubmitHandlersDeps = {
   sourcePolicyInvalid?: boolean;
   /** Predecessor task IDs to link at creation time. */
   blockedBy?: string[];
+  relatedTaskIds?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
+  /** Task-level MCP additions selected in the Advanced section. */
+  mcpServerIds?: string[];
+  mcpServerIdsDirty: boolean;
+  /** Persists task-level selections when editing an existing task. */
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
@@ -715,6 +672,8 @@ export type SubmitHandlersDeps = {
   workflowAgentOverrides: Record<string, string>;
   /** Create-mode validation shared by the footer and every submit entry point. */
   workflowAgentOverridesBlockedReason?: string;
+  /** Initial working-directory layout after capability validation. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -743,14 +702,13 @@ export type DialogFormBodyProps = {
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;
+  taskId?: string | null;
+  parentTaskId?: string;
+  defaultStepId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;
@@ -835,6 +793,11 @@ export type DialogFormBodyProps = {
   onWorkflowAgentOverrideChange: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides: () => void;
   onRetryWorkflowAgentOverrides: () => void;
+  /** Workspace MCP definitions available to the task selector. */
+  mcpDefinitions: MCPServerDefinition[];
+  mcpDefinitionsLoading: boolean;
+  mcpInheritedSelections: MCPInheritedSelection[];
+  mcpSelectionRecovery?: { error: unknown; reload: () => Promise<unknown> };
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog
@@ -846,4 +809,6 @@ export type DialogFormBodyProps = {
   runnerEditable: boolean;
   /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
   runnerIneligibleReason: string;
+  /** Whether the parent workspace layout control is available for this form. */
+  initialWorkspaceLayoutMode: InitialWorkspaceLayoutMode;
 };

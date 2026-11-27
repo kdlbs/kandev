@@ -42,7 +42,8 @@ describe("describeEnsureError", () => {
     const info = describeEnsureError(new Error("websocket disconnected"), "ws-1");
     expect(info?.isAgentProfileMissing).toBe(false);
     expect(info?.title).toBe("Couldn't start a session");
-    expect(info?.detail).toContain("websocket disconnected");
+    expect(info?.detail).not.toContain("websocket disconnected");
+    expect(info?.detail).toMatch(/backend rejected/i);
     expect(info?.action).toBeNull();
   });
 
@@ -126,10 +127,11 @@ describe("EnsureSessionErrorBanner", () => {
     fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
 
     expect(details.open).toBe(true);
-    expect(screen.getByText("Resume attempt")).toBeTruthy();
-    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
-    expect(screen.getByText("Workspace restore attempt")).toBeTruthy();
-    expect(screen.getByText(RESTORE_FAILURE_DETAIL)).toBeTruthy();
+    expect(details.textContent).toContain("Resume attempt");
+    expect(details.textContent).toContain(RESUME_FAILURE_DETAIL);
+    expect(details.textContent).toContain("Workspace restore attempt");
+    expect(details.textContent).toContain("restore failed: workspace ***");
+    expect(details.textContent).not.toContain("/tmp/task-123");
   });
 
   it("disables retry while automatic recovery is in flight", () => {
@@ -151,11 +153,12 @@ describe("EnsureSessionErrorBanner", () => {
   });
 
   it("keeps a read-only fallback notice compact while retaining its resume cause in details", () => {
-    render(
+    const onRetry = vi.fn();
+    const { rerender } = render(
       <SessionRecoveryFeedback
         error={null}
         notice="Workspace restored in read-only mode"
-        onRetry={() => {}}
+        onRetry={onRetry}
         recoveryFailure={{
           outcome: "workspace_read_only",
           resumeError: RESUME_FAILURE_DETAIL,
@@ -167,12 +170,27 @@ describe("EnsureSessionErrorBanner", () => {
     const details = screen.getByTestId("session-recovery-details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
     expect(screen.queryByText("Workspace restore attempt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Resume session" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId("session-recovery-details-summary"));
 
     expect(details.open).toBe(true);
-    expect(screen.getByText("Resume attempt")).toBeTruthy();
-    expect(screen.getByText(RESUME_FAILURE_DETAIL)).toBeTruthy();
+    expect(details.textContent).toContain("Resume attempt");
+    expect(details.textContent).toContain(RESUME_FAILURE_DETAIL);
+    rerender(
+      <SessionRecoveryFeedback
+        error={null}
+        notice="Workspace restored in read-only mode"
+        onRetry={onRetry}
+        retryDisabled
+        recoveryFailure={{ outcome: "workspace_read_only", resumeError: RESUME_FAILURE_DETAIL }}
+      />,
+    );
+    const resume = screen.getByRole("button", { name: "Resume session" }) as HTMLButtonElement;
+    expect(resume.disabled).toBe(true);
+    fireEvent.click(resume);
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it("renders status failures as compact retryable feedback with collapsed details", () => {

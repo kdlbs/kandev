@@ -61,6 +61,39 @@ func (c *workflowAttentionCacheClient) GetPRFeedback(
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
 
+func TestPRStatusAndFeedbackShareOneCachedWorkflowSnapshot(t *testing.T) {
+	client := &workflowAttentionCacheClient{MockClient: NewMockClient()}
+	client.AddPR(&PR{
+		Number: 143, State: prStateOpen, RepoOwner: "acme", RepoName: "widget",
+		HeadSHA: "head", HeadBranch: "feature", HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	})
+	client.ReplaceWorkflowRuns("acme", "widget", "head", []WorkflowRun{{
+		ID: 7, CheckSuiteID: 77, WorkflowID: 9, Name: "Preview", Event: "pull_request_target",
+		Status: "in_progress", HeadSHA: "head", HeadBranch: "feature",
+		HeadRepoOwner: "contributor", HeadRepoName: "widget-fork",
+	}})
+	svc := newTestService(client)
+	ctx := context.Background()
+
+	feedback, err := svc.GetPRFeedback(ctx, "acme", "widget", 143)
+	if err != nil {
+		t.Fatalf("GetPRFeedback() error = %v", err)
+	}
+	if feedback.ChecksState == nil || *feedback.ChecksState != checkStatusPending {
+		t.Fatalf("feedback checks_state = %v, want pending", feedback.ChecksState)
+	}
+	status, err := svc.GetPRStatus(ctx, "acme", "widget", 143)
+	if err != nil {
+		t.Fatalf("GetPRStatus() error = %v", err)
+	}
+	if status.ChecksState != checkStatusPending || status.ChecksTotal != 0 {
+		t.Fatalf("status = %+v, want pending with no fabricated check count", status)
+	}
+	if got := client.runCalls.Load(); got != 1 {
+		t.Fatalf("Actions reads = %d, want one shared workflow snapshot", got)
+	}
+}
+
 func TestWorkflowAttentionCacheExpiryAndInvalidation(t *testing.T) {
 	ctx := context.Background()
 	clock := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)

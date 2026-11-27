@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -201,5 +202,90 @@ func TestCompileStep_RequiresApproval(t *testing.T) {
 	}
 	if actions[2].RequiresApproval {
 		t.Fatalf("expected disable_plan_mode to not require approval")
+	}
+}
+
+// TestCompileStep_OnTurnCompleteMovesMatchAdvancesOnTurnComplete keeps the
+// model-level WorkflowStep.AdvancesOnTurnComplete in step with the workflow
+// engine's actual transition result for the same actions.
+func TestCompileStep_OnTurnCompleteMovesMatchAdvancesOnTurnComplete(t *testing.T) {
+	const guardedCase = "wait_for_quorum guarded move"
+	const guardedSelfThenMoveCase = "guarded self-target falls through to later move"
+	cases := map[string][]wfmodels.OnTurnCompleteAction{
+		"no actions":          nil,
+		"disable_plan_mode":   {{Type: wfmodels.OnTurnCompleteDisablePlanMode}},
+		"move_to_next":        {{Type: wfmodels.OnTurnCompleteMoveToNext}},
+		"move_to_previous":    {{Type: wfmodels.OnTurnCompleteMoveToPrevious}},
+		"move_to_step":        {{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "s3"}}},
+		"self-targeting move": {{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "current"}}},
+		"self-target then valid move": {
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "current"}},
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "s3"}},
+		},
+		"invalid guard self-target blocks later move": {
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{
+				"step_id": "current",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "", "threshold": QuorumAllApprove}},
+			}},
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "s3"}},
+		},
+		guardedSelfThenMoveCase: {
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{
+				"step_id": "current",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "approver", "threshold": QuorumAllApprove}},
+			}},
+			{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "s3"}},
+		},
+		"move_to_step without config": {{Type: wfmodels.OnTurnCompleteMoveToStep}},
+		"move_to_step empty step_id":  {{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": ""}}},
+		"requires_approval move": {{
+			Type:   wfmodels.OnTurnCompleteMoveToNext,
+			Config: map[string]any{"requires_approval": true},
+		}},
+		"malformed then valid move": {
+			{Type: wfmodels.OnTurnCompleteMoveToStep},
+			{Type: wfmodels.OnTurnCompleteMoveToPrevious},
+		},
+		guardedCase: {{
+			Type: wfmodels.OnTurnCompleteMoveToStep,
+			Config: map[string]any{
+				"step_id": "s3",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "approver", "threshold": QuorumAllApprove}},
+			},
+		}},
+	}
+	for name, actions := range cases {
+		t.Run(name, func(t *testing.T) {
+			step := &wfmodels.WorkflowStep{ID: "current", WorkflowID: "wf", Events: wfmodels.StepEvents{OnTurnComplete: actions}}
+			spec := CompileStep(step)
+			compiled := spec.Events[TriggerOnTurnComplete]
+			if name == guardedCase && (len(compiled) != 1 || compiled[0].Guard == nil) {
+				t.Fatalf("expected one move compiled with a wait_for_quorum guard, got %+v", compiled)
+			}
+			if name == guardedSelfThenMoveCase && (len(compiled) != 2 || compiled[0].Guard == nil) {
+				t.Fatalf("expected guarded self-target followed by a move, got %+v", compiled)
+			}
+
+			store := &fakeStore{
+				nextSteps: map[int]StepSpec{0: {ID: "next", Position: 1}},
+				prevSteps: map[int]StepSpec{0: {ID: "previous", Position: -1}},
+			}
+			decisions := newFakeDecisionStore()
+			participants := fakeParticipants{list: []ParticipantInfo{{ID: "p1", Role: "approver", AgentProfileID: "approver-1", DecisionRequired: true}}}
+			if name == guardedCase {
+				decisions.byKey[dkey("task", "current")] = []DecisionInfo{{TaskID: "task", StepID: "current", ParticipantID: "p1", Decision: DecisionApproved}}
+			}
+			eng := New(store, MapRegistry{}, WithDecisionStore(decisions), WithParticipantStore(participants))
+			result, err := eng.processActions(context.Background(), HandleInput{
+				TaskID: "task", SessionID: "session", Trigger: TriggerOnTurnComplete, EvaluateOnly: true,
+			}, MachineState{TaskID: "task", SessionID: "session", WorkflowID: "wf", CurrentStepID: "current"}, spec, compiled, nil)
+			if err != nil {
+				t.Fatalf("processActions() error = %v", err)
+			}
+			engineMoves := result.Transitioned
+			if got := step.AdvancesOnTurnComplete(); got != engineMoves {
+				t.Fatalf("AdvancesOnTurnComplete() = %t, engine transition result = %t (%+v)", got, engineMoves, result)
+			}
+		})
 	}
 }

@@ -22,6 +22,39 @@ type admissionOrderMessageRepository struct {
 	events []string
 }
 
+type promptHistoryMessageRepository struct {
+	repository.MessageRepository
+	hasHistory bool
+	err        error
+	seenID     string
+}
+
+func (r *promptHistoryMessageRepository) HasUserPromptHistory(
+	_ context.Context,
+	sessionID string,
+) (bool, error) {
+	r.seenID = sessionID
+	return r.hasHistory, r.err
+}
+
+func TestHasUserPromptHistoryDelegatesAndReturnsReadErrors(t *testing.T) {
+	repo := &promptHistoryMessageRepository{hasHistory: true}
+	svc := &Service{messages: repo}
+	hasHistory, err := svc.HasUserPromptHistory(context.Background(), "session-prompt-history")
+	if err != nil {
+		t.Fatalf("HasUserPromptHistory: %v", err)
+	}
+	if !hasHistory || repo.seenID != "session-prompt-history" {
+		t.Fatalf("history = %v, queried session = %q", hasHistory, repo.seenID)
+	}
+
+	wantErr := errors.New("history read failed")
+	repo.err = wantErr
+	if _, err := svc.HasUserPromptHistory(context.Background(), "session-prompt-history"); !errors.Is(err, wantErr) {
+		t.Fatalf("HasUserPromptHistory error = %v, want %v", err, wantErr)
+	}
+}
+
 func (r *admissionOrderMessageRepository) AcquirePlanCommentAdmission(
 	ctx context.Context,
 	_ string,
@@ -229,6 +262,35 @@ func TestCreateMessageWithCompletedTurnRecordsClosedTurn(t *testing.T) {
 	}
 	if turn.TaskSessionID != "sess-msg" || turn.TaskID != "task-msg" {
 		t.Fatalf("turn = %+v, want it bound to the session's task", turn)
+	}
+}
+
+func TestCreateMessageIdempotentCanCreateClosedLifecycleTurn(t *testing.T) {
+	svc, _, repo := newMessageTestService(t)
+	ctx := context.Background()
+	req := &CreateMessageRequest{
+		TaskID: "task-msg", TaskSessionID: "sess-msg", AuthorType: "agent",
+		Type: string(models.MessageTypeStatus), Content: "restored after interruption", CompletedTurn: true,
+	}
+
+	message, err := svc.CreateMessageIdempotent(ctx, "recovery-notice", req)
+	if err != nil {
+		t.Fatalf("CreateMessageIdempotent: %v", err)
+	}
+	turn, err := repo.GetTurn(ctx, message.TurnID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("lifecycle turn = %+v, want completed lifecycle-only turn", turn)
+	}
+
+	replayed, err := svc.CreateMessageIdempotent(ctx, "recovery-notice", req)
+	if err != nil {
+		t.Fatalf("replay CreateMessageIdempotent: %v", err)
+	}
+	if replayed.ID != message.ID || replayed.TurnID != message.TurnID {
+		t.Fatalf("replay = %+v, want original message %+v", replayed, message)
 	}
 }
 

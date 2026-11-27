@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -35,6 +37,8 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes(svc))
+	dispatcher.RegisterFunc(ws.ActionAutomationPluginToolOptions, wsPluginToolOptions(svc))
+	dispatcher.RegisterFunc("automation.mcp_options", wsMCPOptions(svc))
 	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunDelete, wsDeleteRun(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunStop, wsStopRun(svc, log))
@@ -94,13 +98,21 @@ func wsGet(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.M
 	}
 }
 
+// wsCreate admits native editor selections and rejects automation-authored configuration changes.
 func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
+		payload, _ := parseMap(msg)
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
+		}
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
-		a, err := svc.CreateAutomation(ctx, &req)
+		a, err := svc.CreateAutomation(WithNativePluginToolIntent(ctx), &req)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -121,23 +133,38 @@ func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.
 	}
 }
 
+// wsUpdate preserves omitted selections and admits explicit changes only through the native editor.
 func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
 		payload, _ := parseMap(msg)
 		id, _ := payload["id"].(string)
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
 		}
+		if raw, present := payload["plugin_tools"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "plugin_tools cannot be null", nil)
+		}
+		if raw, present := payload["mcp_selection"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
+		}
 		var req UpdateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 		}
-		a, err := svc.UpdateAutomation(ctx, id, &req)
+		a, err := svc.UpdateAutomation(WithNativePluginToolIntent(ctx), id, &req)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, a)
 	}
+}
+
+func automationMCPMutationDenied(msg *ws.Message) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+		"automation configuration is not available from an MCP session", nil)
 }
 
 func wsDelete(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -195,17 +222,16 @@ func wsManualTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
 		data, _ := json.Marshal(map[string]string{triggerDataSourceKey: triggerDataSourceManual})
-		triggerID := ""
-		if len(a.Triggers) > 0 {
-			triggerID = a.Triggers[0].ID
+		triggerID := "manual:" + id
+		requestID := msg.ID
+		if requestID == "" {
+			requestID = uuid.NewString()
 		}
-		result, fireErr := svc.FireTrigger(ctx, id, triggerID, "manual", data, DedupNotConfigured())
+		dedupKey := fmt.Sprintf("manual:%s:%s", id, requestID)
+		result, fireErr := svc.FireTrigger(ctx, id, triggerID, TriggerTypeManual, data, DedupKey(dedupKey))
 		if fireErr != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fireErr.Error(), nil)
 		}
-		// A skip is not a failure, but it is not a fire either. Reporting
-		// triggered = true for one leaves the caller — and the person who
-		// clicked — unable to tell that nothing ran.
 		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
 			"triggered": !result.Skipped,
 			"skipped":   result.Skipped,
@@ -224,6 +250,23 @@ func wsListRuns(svc *Service, log *logger.Logger) func(ctx context.Context, msg 
 		limit := 50
 		if l, ok := payload["limit"].(float64); ok && l > 0 {
 			limit = int(l)
+		}
+		if pageRequested, _ := payload["page"].(bool); pageRequested {
+			cursor, _ := payload["cursor"].(string)
+			page, err := svc.ListRunPage(ctx, automationID, cursor, limit)
+			if err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			}
+			return ws.NewResponse(msg.ID, msg.Action, page)
+		}
+
+		if history, _ := payload["history"].(bool); history {
+			cursor, _ := payload["cursor"].(string)
+			page, err := svc.ListRetryHistory(ctx, automationID, cursor, limit)
+			if err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			}
+			return ws.NewResponse(msg.ID, msg.Action, page)
 		}
 		runs, err := svc.ListRuns(ctx, automationID, limit)
 		if err != nil {
@@ -247,6 +290,14 @@ func wsListWorkspaceRuns(svc *Service, log *logger.Logger) func(ctx context.Cont
 		limit := 50
 		if l, ok := payload["limit"].(float64); ok && l > 0 {
 			limit = int(l)
+		}
+		if history, _ := payload["history"].(bool); history {
+			cursor, _ := payload["cursor"].(string)
+			page, err := svc.ListWorkspaceRetryHistory(ctx, workspaceID, cursor, limit)
+			if err != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+			}
+			return ws.NewResponse(msg.ID, msg.Action, page)
 		}
 		runs, err := svc.ListWorkspaceRuns(ctx, workspaceID, limit)
 		if err != nil {
@@ -364,6 +415,27 @@ func wsTriggerTypes(svc *Service) func(ctx context.Context, msg *ws.Message) (*w
 			}
 		}
 		return ws.NewResponse(msg.ID, msg.Action, types)
+	}
+}
+
+func wsPluginToolOptions(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		if isMCPAutomationContext(ctx) {
+			return automationMCPMutationDenied(msg)
+		}
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		groups, err := svc.PluginToolOptions(ctx, workspaceID)
+		if err != nil {
+			if errors.Is(err, ErrAutomationNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace unavailable", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load plugin tool options", nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"groups": groups})
 	}
 }
 

@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-09-09
-updated: 2026-09-10
+updated: 2026-11-11
 owners:
   - kandev
 ---
@@ -20,9 +20,9 @@ does not need to reopen merely because its agent answers a question.
 
 ## Requirements
 
-### REQ-TASKS-COMPLETION-001: Explicit completion on step entry
+### REQ-TASKS-COMPLETION-001: Explicit completion and evidence on step entry
 
-**Intent:** Make task completion a visible, portable workflow choice.
+**Intent:** Make task completion a visible, portable, verifiable workflow choice.
 
 #### Acceptance criteria
 
@@ -69,6 +69,23 @@ does not need to reopen merely because its agent answers a question.
   use coordinated Save changes and discard, and disable editing for read-only
   synchronized workflows. The phone control shall be reachable by touch.
 
+#### Optional evidence gate amendment (September 27)
+
+**Intent:** Make task completion evidence enforceable across every entry point.
+
+- **AC-TASKS-COMPLETION-001.14:** A task shall support versioned optional
+  completion criteria with evidence and verifier identity. Changing a criterion
+  or its declared evidence subject shall invalidate affected verification.
+  Removing or weakening an unmet criterion shall require explicit human
+  confirmation.
+- **AC-TASKS-COMPLETION-001.15:** An enabled completion gate shall block every
+  transition into a completing workflow step until current criteria are
+  verified, including manual, bulk, queued, agent, and automation paths.
+- **AC-TASKS-COMPLETION-001.16:** A human shall be able to inspect blockers and
+  explicitly override a gate with a recorded reason. Plugin absence shall
+  leave a visible blocker and shall never require a synchronous plugin callback
+  to evaluate completion.
+
 ### REQ-TASKS-COMPLETION-002: Follow-ups in completed conversations
 
 **Intent:** Preserve conversation continuity after task or session completion.
@@ -113,11 +130,12 @@ does not need to reopen merely because its agent answers a question.
   conversation and workspace identity. Concurrent archive, delete, or explicit
   stop shall prevent a stale resume from resurrecting work.
 
-### REQ-TASKS-COMPLETION-003: Workspace access after conversation completion
+### REQ-TASKS-COMPLETION-003: Workspace access and management claims
 
-**Intent:** Let users inspect and use a retained task workspace without resuming
-its agent conversation. The task system owns admission and recovery; workspace
-ownership remains governed by the canonical task environment.
+**Intent:** Let users inspect retained task work and govern its management
+ownership without resuming its agent conversation. The task system owns
+admission and recovery; workspace ownership remains governed by the canonical
+task environment.
 
 #### Acceptance criteria
 
@@ -159,6 +177,92 @@ ownership remains governed by the canonical task environment.
   44-pixel touch targets. Expanded details shall remain within the workspace
   surface, preserve keyboard access, and cause no horizontal page overflow.
 
+#### Management-claim amendment (September 27)
+
+**Intent:** Prevent competing managers from changing the same delegated work.
+
+- **AC-TASKS-COMPLETION-003.11:** The system shall support one optional
+  management claim per task, separate from its worker assignee, with an
+  installation, opaque instance key, and fencing generation.
+- **AC-TASKS-COMPLETION-003.12:** Claim acquisition, release, and transfer
+  shall compare observed task and claim versions. A conflicting plugin or an
+  obsolete generation shall not perform a management mutation.
+- **AC-TASKS-COMPLETION-003.13:** A human shall be able to inspect and transfer
+  or release a claim, including when its plugin is disabled or uninstalled.
+  The system shall audit the action and shall not silently steal a claim after
+  a timeout.
+
+### REQ-TASKS-COMPLETION-004: Plugin coordination without native task controls
+
+**Intent:** Preserve ordinary task details while plugins use task-owned coordination contracts.
+
+This amendment replaces the native task-detail presentation specified by
+the original coordination plan. It does not remove management claims or gates.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COMPLETION-004.1:** Desktop and phone task details shall omit the
+  native Manager and Completion requirements controls, including their dialogs,
+  drawers, loading states, and empty states. This applies with or without claims
+  or criteria. The task page shall not request their detail endpoints on open.
+- **AC-TASKS-COMPLETION-004.2:** Removing these controls shall leave no reserved
+  toolbar space. The phone header, existing error feedback, content, composer,
+  and bottom navigation shall remain visible and usable without overlap or
+  horizontal page overflow. Existing desktop panels shall retain their layout.
+- **AC-TASKS-COMPLETION-004.3:** Claims, criteria, evidence, history, version
+  checks, and completion enforcement shall survive the presentation change.
+  Tasks without criteria shall retain their completion behavior. Human recovery
+  through existing authorized APIs shall remain available without a plugin.
+- **AC-TASKS-COMPLETION-004.4:** Existing completion-move failures shall remain
+  visible through normal task error feedback. Removing the controls shall not
+  grant plugins human override authority or erase unmet criteria.
+
+This amendment removes the built-in inspection and recovery UI. It does not
+promise an equivalent plugin UI already exists. Existing authorized human APIs
+continue to satisfy the recovery contracts in criteria 001.16 and 003.13.
+Plugin presentation and any future native recovery entry require separate scope.
+
+### REQ-TASKS-COMPLETION-005: One completion rule and atomic completion admission
+
+**Intent:** Every path that completes a task uses the same definition of a
+completing step, the same admission checks, and the same completion effects.
+Office human Done (`REQ-OFFICE-HUMAN-DONE-002`) is one consumer of this
+contract, not a special case inside the task system.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COMPLETION-005.1:** "Final step" (no successor by position) and
+  "completing step" (final step with completion enabled) shall each have one
+  definition. Every check that decides either fact, in Go or in SQL, shall
+  produce the same answer for the same committed workflow, including tied
+  maximum positions.
+- **AC-TASKS-COMPLETION-005.2:** A completion policy contributed by another
+  system shall be evaluated inside the same transaction as the task write it
+  admits. A refused completion shall leave the task's step, state, decisions,
+  and step-entry actions unchanged and shall publish no task event.
+- **AC-TASKS-COMPLETION-005.3:** Human authority for a completion shall apply
+  only to the write that the human request named. Step-entry actions, event
+  handlers, and any later write caused by that request shall be evaluated with
+  their own actor, and shall neither inherit human authority nor be refused
+  because of the earlier request's scope.
+- **AC-TASKS-COMPLETION-005.4:** When a task's committed state becomes
+  `COMPLETED`, `FAILED`, or `CANCELLED`, dependents, the parent, and a linked
+  routine run shall observe that transition regardless of the destination
+  step's name and regardless of whether the task has an assignee. Repeated
+  delivery shall not repeat these effects. For Office dependencies, only
+  `COMPLETED` satisfies a blocker. `FAILED` and `CANCELLED` keep dependents
+  held and use the failure escalation in
+  `REQ-OFFICE-BLOCKER-POLICY-002`.
+- **AC-TASKS-COMPLETION-005.5:** A bulk move shall check every task's move
+  admission, including completion policies and completion gates, before it
+  moves any task. When any task is refused at that check, no task shall move
+  and the response shall identify each refused task and its reason.
+- **AC-TASKS-COMPLETION-005.6:** When a task is refused after the batch check
+  passed (a concurrent change), the response shall report which tasks moved
+  and which task was refused, with its reason. The user shall see that result
+  as visible text on desktop and phone, and the board shall show the actual
+  placement of every task.
+
 ## Compatibility and exclusions
 
 This contract replaces name-based workflow completion and the permanent
@@ -181,3 +285,11 @@ executor, or change physical workspace ownership.
 
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
+- [Remove native coordination controls](../../../plans/remove-native-coordination-ui/plan.md)
+- [Completion policy consolidation](../../../plans/completion-policy-consolidation/plan.md)
+
+## Coordination controls
+
+The [coordination controls design](../system-design/coordination-controls.md)
+specifies task management claims and the optional evidence gate. Tasks without
+completion criteria retain their current behavior.

@@ -31,6 +31,9 @@ var ambientEnvNotScrubbed = []string{
 	// KANDEV_DESKTOP_RUNTIME describes the launch policy inherited by the
 	// agentctl child. Keep it intact so diagnostics reflect the real runtime.
 	"KANDEV_DESKTOP_RUNTIME",
+	// XDG_RUNTIME_DIR selects code-server's IPC socket directory. Preserve the
+	// host runtime location; socket lookup tests set their own isolated value.
+	"XDG_RUNTIME_DIR",
 }
 
 // clearAmbientGitLabEnv removes the inherited GitLab host/token values so

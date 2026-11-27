@@ -24,20 +24,40 @@ const (
 // updater; tests and embedders can provide a deterministic implementation.
 type RuntimeUpdateStatusResolver func(context.Context, string) (string, error)
 
+// runtimeUpdateStatusCacheEntry holds a registry lookup or, when native is
+// set, a normalized native check result.
 type runtimeUpdateStatusCacheEntry struct {
 	latest    string
+	metadata  *RuntimeVersionMetadata
 	checkedAt time.Time
 	expiresAt time.Time
 	ok        bool
+	native    bool
+	state     dto.AgentUpdateCheckState
+	current   string
+	channel   string
+	reason    agents.NativeUpdateCheckReason
 }
 
 type runtimeUpdateStatusTarget struct {
-	agentName        string
-	packageName      string
-	defaultVersion   string
-	activeVersion    string
-	effectiveVersion string
-	selectionErr     error
+	agentName          string
+	updateMode         dto.AgentUpdateMode
+	packageName        string
+	defaultVersion     string
+	activeVersion      string
+	effectiveVersion   string
+	selectionErr       error
+	capability         agents.RuntimeUpdateCapability
+	displayName        string
+	currentVersion     string
+	available          bool
+	enabled            bool
+	family             string
+	source             string
+	runtimeRevision    uint64
+	migrationAvailable bool
+	nativeCheck        *agents.NativeUpdateCheckSpec
+	nativeEligible     bool
 }
 
 // SetRuntimeUpdateStatusClock injects the clock used for status cache TTLs.
@@ -70,11 +90,16 @@ func (c *Controller) InvalidateRuntimeUpdateStatus(packageName string) {
 	}
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()
-	delete(c.runtimeUpdateStatusCache, packageName)
+	delete(c.runtimeUpdateStatusCache, runtimeUpdateStatusCacheKey(packageName, dto.AgentUpdateModePinned))
+	delete(c.runtimeUpdateStatusCache, runtimeUpdateStatusCacheKey(packageName, dto.AgentUpdateModeSelfUpdate))
+}
+
+func runtimeUpdateStatusCacheKey(packageName string, mode dto.AgentUpdateMode) string {
+	return string(mode) + "\x00" + packageName
 }
 
 // ListAgentUpdateStatuses returns one non-mutating status item for each
-// available built-in managed runtime. Registry failures are represented as
+// registered runtime. Source failures are represented as
 // unknown entries rather than failing the whole batch.
 func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgentUpdateStatusResponse, error) {
 	targets, err := c.runtimeUpdateStatusTargets(ctx)
@@ -83,54 +108,144 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 	}
 
 	now := c.runtimeUpdateStatusTime()
-	entries := make(map[string]runtimeUpdateStatusCacheEntry, len(targets))
-	uniquePackages := make(map[string]struct{}, len(targets))
-	for _, target := range targets {
-		if _, exists := uniquePackages[target.packageName]; exists {
-			continue
-		}
-		uniquePackages[target.packageName] = struct{}{}
-	}
-	type result struct {
-		packageName string
-		entry       runtimeUpdateStatusCacheEntry
-	}
-	results := make(chan result, len(uniquePackages))
-	for packageName := range uniquePackages {
-		go func(packageName string) {
-			entry := c.runtimeUpdateStatusEntry(ctx, packageName, now)
-			results <- result{packageName: packageName, entry: entry}
-		}(packageName)
-	}
-	for range uniquePackages {
-		item := <-results
-		entries[item.packageName] = item.entry
-	}
-
+	entries := c.runtimeUpdateStatusEntries(ctx, targets, now)
 	statuses := make([]dto.AgentUpdateStatusDTO, 0, len(targets))
-	for _, target := range targets {
-		entry := entries[target.packageName]
-		status := dto.AgentUpdateStatusDTO{
-			AgentName:        target.agentName,
-			Package:          target.packageName,
-			DefaultVersion:   target.defaultVersion,
-			ActiveVersion:    target.activeVersion,
-			EffectiveVersion: target.effectiveVersion,
-			CheckState:       dto.AgentUpdateCheckStateUnknown,
-		}
-		if !entry.checkedAt.IsZero() {
-			checkedAt := entry.checkedAt
-			status.CheckedAt = &checkedAt
-		}
-		if entry.ok {
-			status.LatestVersion = entry.latest
-		}
-		if target.selectionErr == nil && entry.ok {
-			status.CheckState = compareRuntimeUpdateStatus(entry.latest, target.effectiveVersion)
-		}
-		statuses = append(statuses, status)
+	for i, target := range targets {
+		statuses = append(statuses, c.runtimeUpdateStatusDTO(ctx, target, entries[i]))
 	}
 	return &dto.ListAgentUpdateStatusResponse{Statuses: statuses}, nil
+}
+
+// runtimeUpdateStatusEntries resolves each target's lookup key (registry
+// package or native check identity), runs one lookup per unique key
+// concurrently, and returns entries aligned with targets.
+func (c *Controller) runtimeUpdateStatusEntries(
+	ctx context.Context,
+	targets []runtimeUpdateStatusTarget,
+	now time.Time,
+) []runtimeUpdateStatusCacheEntry {
+	keys := make([]string, len(targets))
+	lookups := make(map[string]func() runtimeUpdateStatusCacheEntry, len(targets))
+	for i, target := range targets {
+		switch {
+		case target.nativeCheck != nil:
+			if !target.nativeEligible {
+				continue
+			}
+			lookup := c.prepareNativeUpdateCheck(ctx, target.agentName, *target.nativeCheck)
+			// Project the runtime version this observation used, so the DTO
+			// agrees with the version that keyed and normalized the result.
+			targets[i].currentVersion, targets[i].effectiveVersion = lookup.currentVersion, lookup.currentVersion
+			keys[i] = lookup.key
+			lookups[lookup.key] = func() runtimeUpdateStatusCacheEntry { return c.nativeUpdateCheckEntry(ctx, lookup, now) }
+		case target.packageName != "" && target.available && target.enabled:
+			packageName, mode := target.packageName, target.updateMode
+			keys[i] = runtimeUpdateStatusCacheKey(packageName, mode)
+			lookups[keys[i]] = func() runtimeUpdateStatusCacheEntry { return c.runtimeUpdateStatusEntry(ctx, packageName, mode, now) }
+		}
+	}
+	type result struct {
+		key   string
+		entry runtimeUpdateStatusCacheEntry
+	}
+	results := make(chan result, len(lookups))
+	for key, lookup := range lookups {
+		go func() { results <- result{key: key, entry: lookup()} }()
+	}
+	byKey := make(map[string]runtimeUpdateStatusCacheEntry, len(lookups))
+	for range lookups {
+		item := <-results
+		byKey[item.key] = item.entry
+	}
+	entries := make([]runtimeUpdateStatusCacheEntry, len(targets))
+	for i, key := range keys {
+		if key != "" {
+			entries[i] = byKey[key]
+		}
+	}
+	return entries
+}
+
+func (c *Controller) runtimeUpdateStatusDTO(
+	ctx context.Context,
+	target runtimeUpdateStatusTarget,
+	entry runtimeUpdateStatusCacheEntry,
+) dto.AgentUpdateStatusDTO {
+	status := dto.AgentUpdateStatusDTO{
+		UpdateMode:          target.updateMode,
+		ManagedFallback:     target.capability.ManagedFallback != nil && c.verifiedManagedActivation(),
+		AgentName:           target.agentName,
+		DisplayName:         target.displayName,
+		RuntimeID:           target.capability.RuntimeID,
+		Owner:               target.capability.Owner,
+		Mechanism:           target.capability.Mechanism,
+		Management:          target.capability.Management,
+		Source:              target.packageName,
+		GuidanceURL:         target.capability.Source.GuidanceURL,
+		CurrentVersion:      target.currentVersion,
+		Available:           target.available,
+		Enabled:             target.enabled,
+		AutoUpdateSupported: c.automaticUpdateSupported(target.capability) && target.available && target.enabled,
+		Package:             target.packageName,
+		DefaultVersion:      target.defaultVersion,
+		ActiveVersion:       target.activeVersion,
+		EffectiveVersion:    comparableRuntimeVersion(target, entry),
+		CheckState:          dto.AgentUpdateCheckStateUnknown,
+		Family:              target.family,
+		RuntimeSource:       target.source,
+		RuntimeRevision:     target.runtimeRevision,
+		MigrationAvailable:  target.migrationAvailable,
+	}
+	if target.nativeCheck != nil {
+		status.EffectiveVersion = target.effectiveVersion
+		nativeUpdateCheckViewFor(entry, target.nativeEligible).applyStatus(&status)
+	} else {
+		applyRegistryUpdateStatus(&status, target, entry)
+	}
+	if c.runtimeAutoUpdateStore != nil {
+		c.runtimeAutoUpdateMu.Lock()
+		policy, err := c.runtimeAutoUpdateStore.Get(ctx, target.agentName, target.capability.RuntimeID)
+		c.runtimeAutoUpdateMu.Unlock()
+		if err == nil {
+			status.AutoUpdate, status.LastOutcome = policy.Enabled, policy.Outcome
+		}
+	}
+	return status
+}
+
+func applyRegistryUpdateStatus(status *dto.AgentUpdateStatusDTO, target runtimeUpdateStatusTarget, entry runtimeUpdateStatusCacheEntry) {
+	if !entry.checkedAt.IsZero() {
+		checkedAt := entry.checkedAt
+		status.CheckedAt = &checkedAt
+	}
+	if entry.ok {
+		status.LatestVersion = entry.latest
+	}
+	if target.selectionErr == nil && entry.ok {
+		if target.updateMode == dto.AgentUpdateModeSelfUpdate {
+			status.CheckState = compareHarnessUpdateStatus(entry.latest, status.EffectiveVersion)
+		} else {
+			status.CheckState = compareRuntimeUpdateStatus(entry.latest, status.EffectiveVersion)
+		}
+	}
+}
+
+func comparableRuntimeVersion(target runtimeUpdateStatusTarget, entry runtimeUpdateStatusCacheEntry) string {
+	if target.updateMode == dto.AgentUpdateModeSelfUpdate || target.capability.Managed != nil || target.capability.Source.NPM == "" {
+		return target.effectiveVersion
+	}
+	current, err := managedruntime.ParseStableVersion(target.effectiveVersion)
+	if err != nil || entry.metadata == nil {
+		return ""
+	}
+	// An ACP observation may describe the vendor CLI rather than its npm adapter.
+	for _, published := range entry.metadata.Versions {
+		version, err := managedruntime.ParseStableVersion(published)
+		if err == nil && current.Equal(version) {
+			return target.effectiveVersion
+		}
+	}
+	return ""
 }
 
 func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeUpdateStatusTarget, error) {
@@ -149,37 +264,56 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 	}
 
 	targets := make([]runtimeUpdateStatusTarget, 0)
-	for _, ag := range c.agentRegistry.ListEnabled() {
-		if c.discovery != nil && !available[ag.ID()] {
+	for _, ag := range c.agentRegistry.List() {
+		capability := c.runtimeUpdateCapabilities(ag)
+		target := runtimeUpdateStatusTarget{
+			agentName: ag.ID(), displayName: ag.DisplayName(), capability: capability,
+			available: c.discovery == nil || available[ag.ID()], enabled: ag.Enabled(),
+		}
+		target.packageName = capability.Source.NPM
+		if capability.Source.GitHubRepository != "" {
+			target.packageName = "github:" + capability.Source.GitHubRepository
+		}
+		if c.runtimeUpdater != nil {
+			if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
+				target.currentVersion = caps.AgentVersion
+			}
+		}
+		target.effectiveVersion = target.currentVersion
+		if spec, ok := nativeUpdateCheckSpec(ag); ok {
+			target.nativeCheck = &spec
+			target.nativeEligible = c.nativeUpdateCheckEligible(ag, available)
+		}
+		if harness, ok := ag.(agents.HarnessUpdateAgent); ok {
+			spec := harness.HarnessUpdate()
+			if spec.Package == "" || spec.UpdateCommand.IsEmpty() {
+				continue
+			}
+			target.packageName = spec.Package
+			target.updateMode = dto.AgentUpdateModeSelfUpdate
+			targets = append(targets, target)
 			continue
 		}
-		managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-		if !ok {
-			continue
+		if capability.Managed != nil {
+			target.updateMode = dto.AgentUpdateModePinned
+			target.activeVersion, target.effectiveVersion, target.defaultVersion, target.selectionErr = c.runtimeVersions(ctx, ag.ID(), *capability.Managed)
 		}
-		spec := managed.ManagedNPMRuntime()
-		packageName := strings.TrimSpace(spec.Package)
-		if packageName == "" {
-			continue
+		if managed, ok := ag.(agents.ManagedNPMRuntimeAgent); ok && ag.ID() == agents.OpenCodeACPAgentID && c.hasOpenCodeSelection(ctx) {
+			spec, family, source, revision, selected, migration, err := c.managedRuntimeState(ctx, ag.ID(), managed)
+			if err != nil {
+				return nil, err
+			}
+			target.packageName = spec.Package
+			target.family, target.source = string(family), string(source)
+			target.runtimeRevision, target.migrationAvailable = revision, migration
+			target.defaultVersion, target.activeVersion = spec.DefaultVersionOrPinned(), selected
+			target.effectiveVersion = target.defaultVersion
+			if selected != "" {
+				target.effectiveVersion = selected
+			}
+			target.updateMode = dto.AgentUpdateModePinned
 		}
-		defaultVersion := strings.TrimSpace(spec.DefaultVersionOrPinned())
-		if _, err := managedruntime.ParseStableVersion(defaultVersion); err != nil {
-			// Custom test/extension agents are not part of the built-in managed
-			// catalogue and must not create an unverifiable status item.
-			continue
-		}
-		activeVersion, effectiveVersion, _, selectionErr := c.runtimeVersions(ctx, ag.ID(), spec)
-		if selectionErr != nil {
-			effectiveVersion = defaultVersion
-		}
-		targets = append(targets, runtimeUpdateStatusTarget{
-			agentName:        ag.ID(),
-			packageName:      packageName,
-			defaultVersion:   defaultVersion,
-			activeVersion:    activeVersion,
-			effectiveVersion: effectiveVersion,
-			selectionErr:     selectionErr,
-		})
+		targets = append(targets, target)
 	}
 	return targets, nil
 }
@@ -187,10 +321,15 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 func (c *Controller) runtimeUpdateStatusEntry(
 	ctx context.Context,
 	packageName string,
+	mode dto.AgentUpdateMode,
 	now time.Time,
 ) runtimeUpdateStatusCacheEntry {
+	if ctx.Err() != nil {
+		return runtimeUpdateStatusCacheEntry{}
+	}
 	c.runtimeUpdateStatusMu.Lock()
-	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
+	key := runtimeUpdateStatusCacheKey(packageName, mode)
+	if entry, ok := c.runtimeUpdateStatusCache[key]; ok && now.Before(entry.expiresAt) {
 		c.runtimeUpdateStatusMu.Unlock()
 		return entry
 	}
@@ -201,57 +340,90 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 	c.runtimeUpdateStatusMu.Unlock()
 
-	lookup <- struct{}{}
-	defer func() { <-lookup }()
-
-	// Recheck after waiting for the bounded slot so concurrent requests do not
-	// repeat a lookup that another waiter already completed.
-	c.runtimeUpdateStatusMu.Lock()
-	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
+	result := c.runtimeUpdateStatusFlight.DoChan(key, func() (interface{}, error) {
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeUpdateStatusLookupTimeout)
+		defer cancel()
+		select {
+		case lookup <- struct{}{}:
+		case <-lookupCtx.Done():
+			return runtimeUpdateStatusCacheEntry{}, nil
+		}
+		defer func() { <-lookup }()
+		c.runtimeUpdateStatusMu.Lock()
+		cached, found := c.runtimeUpdateStatusCache[key]
 		c.runtimeUpdateStatusMu.Unlock()
-		return entry
+		if found && now.Before(cached.expiresAt) {
+			return cached, nil
+		}
+		latest, metadata, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName, mode)
+		entry := runtimeUpdateStatusCacheEntry{expiresAt: now.Add(runtimeUpdateStatusFailureTTL)}
+		if err == nil {
+			entry.latest, entry.ok, entry.checkedAt, entry.expiresAt = latest, true, now, now.Add(runtimeUpdateStatusSuccessTTL)
+			entry.metadata = metadata
+		}
+		c.runtimeUpdateStatusMu.Lock()
+		if c.runtimeUpdateStatusCache == nil {
+			c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
+		}
+		c.runtimeUpdateStatusCache[key] = entry
+		c.runtimeUpdateStatusMu.Unlock()
+		return entry, nil
+	})
+	select {
+	case <-ctx.Done():
+		return runtimeUpdateStatusCacheEntry{}
+	case value := <-result:
+		return value.Val.(runtimeUpdateStatusCacheEntry)
 	}
-	c.runtimeUpdateStatusMu.Unlock()
-
-	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
-	defer cancel()
-	latest, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
-	entry := runtimeUpdateStatusCacheEntry{}
-	if err == nil {
-		entry.latest = latest
-		entry.ok = true
-		entry.checkedAt = now
-		entry.expiresAt = now.Add(runtimeUpdateStatusSuccessTTL)
-	} else {
-		entry.expiresAt = now.Add(runtimeUpdateStatusFailureTTL)
-	}
-	c.runtimeUpdateStatusMu.Lock()
-	if c.runtimeUpdateStatusCache == nil {
-		c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
-	}
-	c.runtimeUpdateStatusCache[packageName] = entry
-	c.runtimeUpdateStatusMu.Unlock()
-	return entry
 }
 
-func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string) (string, error) {
+func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string, mode dto.AgentUpdateMode) (string, *RuntimeVersionMetadata, error) {
 	c.runtimeUpdateStatusMu.Lock()
 	resolver := c.runtimeUpdateStatusResolver
 	c.runtimeUpdateStatusMu.Unlock()
 	if resolver != nil {
-		return validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		latest, err := validateRuntimeUpdateLatestForPackage(packageName, resolver, ctx)
+		return latest, nil, err
+	}
+	if mode == dto.AgentUpdateModeSelfUpdate {
+		latest, err := c.resolveHarnessLatest(ctx, packageName)
+		return latest, nil, err
+	}
+	if strings.HasPrefix(packageName, "github:") {
+		latest, err := c.resolveGitHubRuntimeRelease(ctx, strings.TrimPrefix(packageName, "github:"))
+		return latest, nil, err
 	}
 	if c.runtimeUpdater == nil {
-		return "", errors.New("runtime updater unavailable")
+		return "", nil, errors.New("runtime updater unavailable")
 	}
 	if metadataResolver, ok := c.runtimeUpdater.(RuntimeVersionResolver); ok {
 		metadata, err := metadataResolver.ResolveVersions(ctx, packageName)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return validateRuntimeUpdateLatest(metadata.Latest, nil)
+		latest, err := validateRuntimeUpdateLatest(metadata.Latest, nil)
+		if _, restricted := managedruntime.ExpectedMajorForPackage(packageName); restricted {
+			catalogue, catalogueErr := managedruntime.BuildCatalogueForPackage(packageName, metadata.Versions, metadata.Latest)
+			latest, err = catalogue.Latest, catalogueErr
+		}
+		metadata.Versions = append([]string(nil), metadata.Versions...)
+		return latest, &metadata, err
 	}
-	return validateRuntimeUpdateLatest(c.runtimeUpdater.ResolveTarget(ctx, packageName))
+	latest, err := validateRuntimeUpdateLatestForPackage(packageName, c.runtimeUpdater.ResolveTarget, ctx)
+	return latest, nil, err
+}
+
+func (c *Controller) validateAutomaticRuntimeTarget(ctx context.Context, spec agents.ManagedNPMRuntimeSpec, target string) error {
+	now := c.runtimeUpdateStatusTime()
+	c.runtimeUpdateStatusMu.Lock()
+	entry := c.runtimeUpdateStatusCache[runtimeUpdateStatusCacheKey(spec.Package, dto.AgentUpdateModePinned)]
+	c.runtimeUpdateStatusMu.Unlock()
+	if entry.ok && now.Before(entry.expiresAt) && entry.latest == target && entry.metadata != nil {
+		return validateRuntimeCatalogueTargetForPackage(spec.Package, *entry.metadata, target)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	defer cancel()
+	return c.validateAgentUpdateTarget(lookupCtx, spec, target)
 }
 
 func validateRuntimeUpdateLatest(latest string, err error) (string, error) {
@@ -277,6 +449,19 @@ func compareRuntimeUpdateStatus(latest, effective string) dto.AgentUpdateCheckSt
 	return dto.AgentUpdateCheckStateUpToDate
 }
 
+func compareHarnessUpdateStatus(stableLatest, effective string) dto.AgentUpdateCheckState {
+	latest, latestErr := managedruntime.ParseStableVersion(stableLatest)
+	installed, installedErr := managedruntime.ParseStableVersion(effective)
+	if latestErr != nil || installedErr != nil {
+		return dto.AgentUpdateCheckStateUnknown
+	}
+	if latest.GreaterThan(installed) {
+		return dto.AgentUpdateCheckStateUpdateAvailable
+	}
+	// The stable tag cannot establish that a configured canary channel is current.
+	return dto.AgentUpdateCheckStateUnknown
+}
+
 func (c *Controller) runtimeUpdateStatusTime() time.Time {
 	c.runtimeUpdateStatusMu.Lock()
 	now := c.runtimeUpdateStatusNow
@@ -285,4 +470,16 @@ func (c *Controller) runtimeUpdateStatusTime() time.Time {
 		return time.Now().UTC()
 	}
 	return now().UTC()
+}
+
+func validateRuntimeUpdateLatestForPackage(packageName string, resolve RuntimeUpdateStatusResolver, ctx context.Context) (string, error) {
+	latest, err := validateRuntimeUpdateLatest(resolve(ctx, packageName))
+	if err != nil {
+		return "", err
+	}
+	if _, restricted := managedruntime.ExpectedMajorForPackage(packageName); restricted {
+		catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, []string{latest}, latest)
+		return catalogue.Latest, err
+	}
+	return latest, nil
 }

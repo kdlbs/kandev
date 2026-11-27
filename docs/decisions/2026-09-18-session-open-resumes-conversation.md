@@ -61,3 +61,9 @@ solely to disregard parking.
 - [Requirements](../specs/tasks/requirements/queued-session-ownership.md).
 - [Design](../specs/tasks/system-design/queued-session-ownership.md).
 - [Revised implementation plan](../plans/session-open-recovery-eligibility/plan.md).
+
+## Later qualification
+
+The [superseded failure decision](2026-10-02-superseded-failed-session-recovery.md)
+adds a narrow passive-recovery restriction for FAILED conversations with working siblings.
+All other recovery behavior in this decision remains in effect.

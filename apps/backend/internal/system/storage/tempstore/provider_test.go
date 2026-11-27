@@ -88,6 +88,80 @@ func TestAnalyzeTemporaryRootsScopesAndCollapsesAliases(t *testing.T) {
 	}
 }
 
+func TestCapacityRootsReuseCanonicalTemporaryRootResolution(t *testing.T) {
+	effective := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(effective, alias); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewProvider(Config{
+		GOOS:   "linux",
+		Mounts: testMountReader{},
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{{RequestedPath: alias}, {RequestedPath: effective}}, nil
+		},
+	})
+
+	roots, err := provider.CapacityRoots(context.Background())
+	if err != nil {
+		t.Fatalf("CapacityRoots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != effective || roots[0].RequestedPath != alias {
+		t.Fatalf("capacity roots = %#v, want one canonical root", roots)
+	}
+	if len(roots[0].Aliases) != 1 || roots[0].Aliases[0] != effective {
+		t.Fatalf("capacity aliases = %#v, want the collapsed effective path", roots[0].Aliases)
+	}
+}
+
+func TestAnalyzeIncludesBoundedEntryBreakdownAndOwnership(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "small"), []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "large"), []byte("1234567"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registeredPath := filepath.Join(root, "large")
+	provider := New(Config{
+		GOOS: "windows", EffectiveRoot: root, Mounts: testMountReader{},
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{{RequestedPath: root}}, nil
+		},
+		Scanner: filescan.NewLimiter(1),
+		ClassifyOwnership: func(_ context.Context, paths []string) map[string]EntryOwnership {
+			classified := map[string]EntryOwnership{}
+			for _, path := range paths {
+				if path == registeredPath {
+					classified[path] = EntryOwnershipRegisteredKandev
+				} else {
+					classified[path] = EntryOwnershipUntracked
+				}
+			}
+			return classified
+		},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(analysis.Roots) != 1 || analysis.Roots[0].Breakdown == nil {
+		t.Fatalf("roots = %#v, want one root with a breakdown", analysis.Roots)
+	}
+	breakdown := analysis.Roots[0].Breakdown
+	if breakdown.Status != StatusMeasured || len(breakdown.Entries) != 2 {
+		t.Fatalf("breakdown = %#v, want two measured entries", breakdown)
+	}
+	if breakdown.Entries[0].Name != "large" || breakdown.Entries[0].Ownership != EntryOwnershipRegisteredKandev ||
+		breakdown.Entries[0].SizeBytes == nil || *breakdown.Entries[0].SizeBytes != 7 {
+		t.Fatalf("largest entry = %#v, want registered large entry with 7 bytes", breakdown.Entries[0])
+	}
+	if breakdown.Entries[1].Name != "small" || breakdown.Entries[1].Ownership != EntryOwnershipUntracked {
+		t.Fatalf("second entry = %#v, want untracked small entry", breakdown.Entries[1])
+	}
+}
+
 func TestAnalyzeTemporaryRootsCollapsesNestedRootsRegardlessOfOrder(t *testing.T) {
 	parent := t.TempDir()
 	child := filepath.Join(parent, "nested")

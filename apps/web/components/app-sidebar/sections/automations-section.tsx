@@ -3,21 +3,19 @@
 import { useTranslation } from "react-i18next";
 import { IconBolt, IconListDetails, IconLoader2 } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import {
-  STATE_DOT_CLASS,
-  STATE_LABEL_KEY,
-  buildAutomationRows,
-} from "@/components/runs/automation-rows";
+import { buildAutomationRows } from "@/components/runs/automation-rows";
+import { automationRunPresentation } from "@/components/runs/automation-run-presentation";
 import type { AutomationRow } from "@/components/runs/automation-rows";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
+import { useAutomationRunRecorded } from "@/components/runs/use-automation-run-recorded";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useNow } from "@/hooks/use-now";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -28,40 +26,25 @@ import { AppSidebarSection } from "../app-sidebar-section";
 
 const NEW_AUTOMATION_HREF = "/settings/automations";
 
-/**
- * The full list, reachable from the section header. These rows carry a name and
- * a dot; the list page adds the next firing and what each one last said, which
- * is more than a sidebar row should try to hold.
- */
-function OpenListShortcut() {
+function OpenAutomationsLink({ active }: { active: boolean }) {
   const { t } = useTranslation();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Link
-          href={AUTOMATIONS_HREF}
-          aria-label={t("automations:openAutomations")}
-          data-testid="automations-all-runs"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
-        >
-          <IconListDetails className="h-3.5 w-3.5" />
-        </Link>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("automations:openAutomations")}</TooltipContent>
-    </Tooltip>
+    <Link
+      href={AUTOMATIONS_HREF}
+      aria-current={active ? "page" : undefined}
+      data-testid="automations-all-runs"
+      className={cn(
+        "flex min-h-8 items-center gap-2.5 px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-[13px] font-medium rounded-md cursor-pointer",
+        active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
+      )}
+    >
+      <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="flex-1 truncate">{t("automations:openAutomations")}</span>
+    </Link>
   );
 }
 
-/**
- * One automation. The dot answers "is this thing okay" at a glance — the same
- * question the runs list answers, from the same derivation, so the sidebar and
- * the list cannot disagree about an automation's health.
- *
- * The trailing time answers the other one: an automation is a thing that is
- * supposed to keep happening, and "when did it last happen" is what tells you
- * whether it is. It comes from the same `formatRelativeTime` the runs rail
- * prints beside each run, so the two surfaces phrase an age identically.
- */
+/** Newest outcome and age share one run; activity retains running/paused priority. */
 function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolean }) {
   const { automation, state, lastRun } = row;
   const { t } = useTranslation();
@@ -71,12 +54,17 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
   // freezes at whatever it said when the section was first opened — and a
   // stale age is worse than no age, because it reads as a fresh reading.
   useNow(30_000);
+  const presentation = automationRunPresentation(state, lastRun);
+  const age = lastRun ? formatRelativeTime(lastRun.created_at) : null;
+  const metadata = presentation.showOutcome
+    ? t("automations:runStatusWithAge", { status: t(presentation.outcomeLabelKey!), age })
+    : age;
   return (
     <Link
       href={`${AUTOMATIONS_HREF}/${automation.id}`}
       data-testid={`sidebar-automation-${automation.id}`}
       className={cn(
-        "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
+        "flex min-w-0 items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
         active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
@@ -88,20 +76,24 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
         />
       ) : (
         <span
-          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", presentation.dotClass)}
           aria-hidden="true"
         />
       )}
-      {/* The dot is decorative, so the state reaches a screen reader here. */}
-      <span className="sr-only">{`${t(STATE_LABEL_KEY[state])}.`}</span>
+      <span className="sr-only">
+        {presentation.labelKeys
+          .filter((key) => !presentation.showOutcome || key !== presentation.outcomeLabelKey)
+          .map((key) => `${t(key)}.`)
+          .join(" ")}
+      </span>
       <span className="min-w-0 flex-1 truncate">{automation.name}</span>
       {lastRun && (
         <span
-          className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground/70"
+          className="min-w-0 max-w-[60%] wrap-anywhere whitespace-normal text-right text-[11px] font-normal tabular-nums text-muted-foreground/70"
           data-testid={`sidebar-automation-last-run-${automation.id}`}
           title={t("automations:lastRan", { when: formatRelativeTime(lastRun.created_at) })}
         >
-          {formatRelativeTime(lastRun.created_at)}
+          {metadata}
         </span>
       )}
     </Link>
@@ -144,19 +136,28 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const showing = !collapsed && expanded && !isMobile;
   const listScope = collapsed || isMobile ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations } = useWorkspaceAutomations(listScope, { active: !isMobile });
+  const {
+    automations,
+    loading: definitionsLoading,
+    refresh: refreshDefinitions,
+  } = useWorkspaceAutomations(listScope, {
+    active: !isMobile,
+  });
+  const canRefreshDefinitions = Boolean(listScope) && !definitionsLoading;
+  useLiveRefresh(canRefreshDefinitions, refreshDefinitions);
+  useForegroundRefresh(refreshDefinitions, canRefreshDefinitions, listScope);
   const { summaries, refresh } = useAutomationSummaries(summaryScope);
   useLiveRefresh(showing, refresh);
+  useAutomationRunRecorded(summaryScope, undefined, refresh);
   const rows = buildAutomationRows(automations, summaries);
 
   return (
     <AppSidebarSection
+      presentation="navigation"
       id={APP_SIDEBAR_SECTION_IDS.automations}
       label={t("automations:automations")}
       collapsed={collapsed}
       icon={IconBolt}
-      headerAction={<OpenListShortcut />}
-      headerActionVisibility="always"
       defaultExpanded={false}
       collapsedSummary={rows.length > 0 ? rows.length : undefined}
     >
@@ -171,6 +172,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
           />
         ))
       )}
+      <OpenAutomationsLink active={pathname === AUTOMATIONS_HREF} />
     </AppSidebarSection>
   );
 }

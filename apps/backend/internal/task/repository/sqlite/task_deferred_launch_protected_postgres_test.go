@@ -32,6 +32,9 @@ func TestPostgresUpdateTaskPreservingDeferredLaunchWithNilMetadataStaysAnObject(
 	}
 	ctx := context.Background()
 	const taskID = "task-nil-metadata-pg"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-task-nil-metadata-pg", Name: "Nil metadata PG"}); err != nil {
+		t.Fatalf("seed owning workspace: %v", err)
+	}
 	seedPostgresTask(t, repo, taskID)
 
 	stored, lostCompare, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, AbsentDeferredLaunch(),

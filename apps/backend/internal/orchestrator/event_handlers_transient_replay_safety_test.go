@@ -105,7 +105,7 @@ func TestPromptAttemptEvidence_ObservesThoughtAndToolActivity(t *testing.T) {
 		SessionID:   "s1",
 		ExecutionID: "execution-1",
 		Data: &lifecycle.AgentStreamEventData{
-			Type:             "thinking_streaming",
+			Type:             "reasoning",
 			Text:             "thinking about the request",
 			PromptGeneration: 7,
 		},

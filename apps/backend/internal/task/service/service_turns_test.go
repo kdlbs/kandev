@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -876,6 +877,9 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	if info.SessionID != "session-1" {
 		t.Errorf("expected SessionID 'session-1', got %q", info.SessionID)
 	}
+	if info.DeliveryIncarnationID != session.QueueIncarnationID || info.DeliveryHarnessGeneration != 1 || info.DeliveryStreamID != session.QueueIncarnationID+":g1" {
+		t.Fatalf("workspace restore lost persisted delivery identity: incarnation=%q generation=%d stream=%q", info.DeliveryIncarnationID, info.DeliveryHarnessGeneration, info.DeliveryStreamID)
+	}
 	if info.TaskEnvironmentID != "env-123" {
 		t.Errorf("expected TaskEnvironmentID 'env-123', got %q", info.TaskEnvironmentID)
 	}
@@ -938,6 +942,30 @@ func TestGetWorkspaceInfoForSessionRestoresOfficeAgentIdentityFromRuntimeInvento
 	if info.AgentProfileID != "reviewer" {
 		t.Fatalf("AgentProfileID = %q, want reviewer from runtime inventory", info.AgentProfileID)
 	}
+}
+
+func TestGetWorkspaceInfoForSessionCarriesRetainedBuiltinBinding(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	sessionID := "session-builtin-binding"
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: "task-123", AgentProfileID: "profile",
+		State: models.TaskSessionStateRunning, StartedAt: now, UpdatedAt: now,
+	}))
+	binding := map[string]interface{}{"builtin_packages": map[string]interface{}{"task_id": "task-123"}}
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: "task-123",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusReady,
+		AgentExecutionID: "execution-builtin",
+		Metadata:         map[string]interface{}{mcpprofile.BuiltinBindingMetadataKey: binding},
+	}))
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", sessionID)
+	require.NoError(t, err)
+	require.Equal(t, binding, info.Metadata[mcpprofile.BuiltinBindingMetadataKey],
+		"workspace restore must carry the persisted binding as retained evidence")
 }
 
 func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *testing.T) {
@@ -1093,14 +1121,15 @@ func TestGetWorkspaceInfoForSession_UsesRepositoryDefaultBranchIdentity(t *testi
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 	createTestEnvironmentWithRepos(t, repo, "env-default-branch", "task-123", []*models.TaskEnvironmentRepo{
-		{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now},
+		{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", CreatedAt: now},
 	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-default-branch")
 	if err != nil {
 		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
 	}
-	if got := info.WorkspaceRepositories[0]; got.WorktreeID != "worktree-default-branch" || got.BranchIdentitySlug != "main" {
+	if got := info.WorkspaceRepositories[0]; got.TaskEnvironmentRepoID != "session-worktree-default-branch" ||
+		got.WorktreeID != "worktree-default-branch" || got.BranchIdentitySlug != "main" {
 		t.Fatalf("default branch recovery identity = %+v, want persisted main worktree", got)
 	}
 }
@@ -1524,6 +1553,9 @@ func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurren
 	}
 	if info.ExecutorType != string(models.ExecutorTypeKubernetes) || info.RuntimeName != agentruntime.RuntimeKubernetes {
 		t.Fatalf("executor projection = type %q runtime %q", info.ExecutorType, info.RuntimeName)
+	}
+	if got := info.Metadata["executor_id"]; got != "recorded-kubernetes" {
+		t.Fatalf("executor ID metadata = %v, want the recorded Kubernetes executor", got)
 	}
 	if got := info.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
 		t.Fatalf("recorded Pod UID = %v", got)

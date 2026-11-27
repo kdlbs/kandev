@@ -418,16 +418,13 @@ func TestNextCronFire_EveryIntervalUnaffectedByFallBack(t *testing.T) {
 	}
 }
 
-// TestNextCronFire_UnsatisfiableExpressionReturnsZeroWithoutHanging pins the
-// existing (out-of-scope) zero-time behavior for an unsatisfiable expression
-// and proves the fall-back suppression loop added by this change does not
-// spin forever on it.
-func TestNextCronFire_UnsatisfiableExpressionReturnsZeroWithoutHanging(t *testing.T) {
+// @covers AC-OFFICE-AUTOMATIONS-SETTINGS-001.16, AC-OFFICE-AUTOMATIONS-SETTINGS-001.17
+func TestNextCronFire_UnsatisfiableExpressionReturnsErrorWithoutHanging(t *testing.T) {
 	done := make(chan struct{})
 	var got time.Time
 	var err error
 	go func() {
-		got, err = nextCronFire("0 0 30 2 *", "America/New_York", time.Now())
+		got, err = nextCronFire("0 0 30 2 *", "America/New_York", time.Date(2026, time.October, 13, 8, 0, 0, 0, time.UTC))
 		close(done)
 	}()
 	select {
@@ -435,8 +432,8 @@ func TestNextCronFire_UnsatisfiableExpressionReturnsZeroWithoutHanging(t *testin
 	case <-time.After(2 * time.Second):
 		t.Fatal("nextCronFire did not return for an unsatisfiable expression")
 	}
-	if err != nil {
-		t.Fatalf("nextCronFire error: %v", err)
+	if err == nil {
+		t.Fatal("expected an error for a schedule with no occurrence")
 	}
 	if !got.IsZero() {
 		t.Fatalf("expected zero time for unsatisfiable expression, got %s", got)

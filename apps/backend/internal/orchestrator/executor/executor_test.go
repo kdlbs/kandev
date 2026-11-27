@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests
@@ -175,15 +176,22 @@ func TestPrepareSession_Success(t *testing.T) {
 		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
 	}
 
-	// Verify SetSessionPrimary was called
+	// The mock store predates the atomic election contract, so the executor
+	// retains its explicit promotion fallback for legacy repositories.
 	if len(repo.setSessionPrimaryCalls) != 1 {
-		t.Errorf("Expected 1 SetSessionPrimary call, got %d", len(repo.setSessionPrimaryCalls))
+		t.Errorf("Expected 1 SetSessionPrimary fallback call, got %d", len(repo.setSessionPrimaryCalls))
 	}
 }
 
 func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-runner-retry"
+	repo.executorProfiles["profile-old"] = &models.ExecutorProfile{
+		ID: "profile-old", ExecutorID: "executor-runner",
+	}
+	repo.executorProfiles["profile-new"] = &models.ExecutorProfile{
+		ID: "profile-new", ExecutorID: "executor-runner",
+	}
 	repo.tasks[taskID] = &models.Task{
 		ID:          taskID,
 		WorkspaceID: "workspace-runner-retry",
@@ -224,6 +232,33 @@ func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	}
 	if created.ExecutorProfileID != "profile-new" {
 		t.Fatalf("session executor profile = %q, want profile-new", created.ExecutorProfileID)
+	}
+}
+
+func TestResolveTaskLaunchScopeExcludesAutomationOrigins(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["automation-run"] = &models.Task{ID: "automation-run", Origin: models.TaskOriginAutomationRun}
+	repo.tasks["automation-task"] = &models.Task{ID: "automation-task", Origin: models.TaskOriginAutomationTask}
+	repo.tasks["office-automation-run"] = &models.Task{ID: "office-automation-run", Origin: models.TaskOriginAutomationRun, IsFromOffice: true}
+	repo.tasks["office-automation-task"] = &models.Task{ID: "office-automation-task", Origin: models.TaskOriginAutomationTask, IsFromOffice: true}
+	repo.tasks["manual-task"] = &models.Task{ID: "manual-task", Origin: models.TaskOriginManual}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	for _, tc := range []struct {
+		taskID string
+		want   lifecycle.TaskLaunchScope
+	}{
+		{taskID: "automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "manual-task", want: lifecycle.TaskLaunchScopeTask},
+	} {
+		t.Run(tc.taskID, func(t *testing.T) {
+			got, err := exec.resolveTaskLaunchScope(context.Background(), tc.taskID)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
 	}
 }
 
@@ -571,6 +606,7 @@ func TestPrepareSession_WithRepository(t *testing.T) {
 
 func TestLaunchPreparedSession_Success(t *testing.T) {
 	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123"}
 
 	// Pre-create session (as PrepareSession would)
 	session := &models.TaskSession{
@@ -588,6 +624,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.CausingRunID != "office-run-1" {
+				t.Errorf("causing run ID = %q, want office-run-1", req.CausingRunID)
+			}
 			if !req.StartAgent {
 				t.Error("expected lifecycle launch to retain initial-agent activity")
 			}
@@ -599,6 +638,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 			}
 			if req.TaskEnvironmentID == "" {
 				t.Error("Expected non-empty task environment ID")
+			}
+			if req.TaskScope != lifecycle.TaskLaunchScopeTask {
+				t.Errorf("task scope = %q, want %q from the canonical task row", req.TaskScope, lifecycle.TaskLaunchScopeTask)
 			}
 			launchedEnvID = req.TaskEnvironmentID
 			return &LaunchAgentResponse{
@@ -618,7 +660,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true, CausingRunID: "office-run-1",
+	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
@@ -1593,6 +1637,7 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	}
 
 	var commandConfigured atomic.Bool
+	var admissions, starts atomic.Int32
 	var executionDescription string
 	startDone := make(chan error, 1)
 	agentManager := &mockAgentManager{
@@ -1606,7 +1651,13 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			executionDescription = description
 			return nil
 		},
-		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if admissions.Load() != 0 {
+				return nil, errors.New("admission consumed before full-launch promotion")
+			}
+			if req.SessionID != session.ID || req.InitialDeliverySubmissionID != "reserved-submission" {
+				return nil, errors.New("promotion lost immutable launch identity")
+			}
 			if executionDescription != "implement the approved plan" {
 				return nil, fmt.Errorf("execution description was not updated before promotion: %q", executionDescription)
 			}
@@ -1617,6 +1668,10 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			}, nil
 		},
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			starts.Add(1)
+			if admissions.Load() != 1 {
+				return errors.New("provider start did not have exactly one admission")
+			}
 			if !commandConfigured.Load() {
 				err := errors.New(`execution "exec-workspace-only" has no agent command configured`)
 				startDone <- err
@@ -1630,9 +1685,23 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
 
 	_, err := executor.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: session.AgentProfileID,
-		Prompt:         "implement the approved plan",
-		StartAgent:     true,
+		AgentProfileID:       session.AgentProfileID,
+		Prompt:               "implement the approved plan",
+		StartAgent:           true,
+		TurnID:               "reserved-turn",
+		DeliverySubmissionID: "reserved-submission",
+		BeforeAgentStart: func(_ context.Context, executionID, dispatchPrompt string) error {
+			if dispatchPrompt != "implement the approved plan" {
+				return errors.New("promotion lost final prompt")
+			}
+			if !commandConfigured.Load() || executionID != "exec-workspace-only" {
+				return errors.New("admission did not belong to promoted execution")
+			}
+			if !admissions.CompareAndSwap(0, 1) {
+				return errors.New("admission already consumed")
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession: %v", err)
@@ -1647,6 +1716,9 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for StartAgentProcess")
+	}
+	if admissions.Load() != 1 || starts.Load() != 1 {
+		t.Fatalf("admission/start counts = %d/%d", admissions.Load(), starts.Load())
 	}
 }
 
@@ -1826,41 +1898,6 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	// path we do NOT clear TaskDescription.
 	if capturedReq.TaskDescription == "" {
 		t.Error("Expected req.TaskDescription to remain set for wakeup; it was cleared")
-	}
-}
-
-func TestLaunchPreparedSession_ProfileSwitchIgnoresMissingStaleExecution(t *testing.T) {
-	repo := newMockRepository()
-	session := &models.TaskSession{
-		ID: "session-123", TaskID: "task-123", AgentProfileID: "office-cto",
-		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
-	}
-	repo.sessions[session.ID] = session
-	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
-		AgentExecutionID: "stale-codex-exec", ExecutionProfileID: "codex-profile",
-	}
-	launched := false
-	agentManager := &mockAgentManager{
-		stopAgentFunc: func(context.Context, string, bool) error {
-			return fmt.Errorf("stale execution: %w", lifecycle.ErrExecutionNotFound)
-		},
-		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			launched = true
-			return &LaunchAgentResponse{AgentExecutionID: "claude-exec"}, nil
-		},
-	}
-	exec := newTestExecutor(t, agentManager, repo)
-	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
-
-	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: "claude-profile", OfficeAgentProfileID: "office-cto", StartAgent: true,
-	})
-	if err != nil {
-		t.Fatalf("LaunchPreparedSession: %v", err)
-	}
-	if !launched {
-		t.Fatal("expected profile switch to continue with a fresh launch")
 	}
 }
 
@@ -2142,6 +2179,7 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
 		_ string,
+		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
 		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
@@ -2341,6 +2379,7 @@ func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimed
 		ctx context.Context,
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
+		_ string,
 		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
@@ -2558,6 +2597,105 @@ func TestStartAgentProcessAsyncNotifiesAfterProcessStartFailure(t *testing.T) {
 	}
 }
 
+func TestRunAgentProcessAsync_ReattachmentFailurePreservesPeerAndSession(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	var stopCalls atomic.Int32
+	startErr := &lifecycle.AgentReattachmentFailure{
+		ExecutionID: "exec-456", SessionID: "session-123", Cause: errors.New("peer identity unavailable"),
+	}
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return startErr },
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after reattachment failure") }, false, true)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, lifecycle.ErrAgentReattachment) {
+			t.Fatalf("failure callback error = %v, want ErrAgentReattachment", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment failure callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for a pre-existing peer", got)
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session-123")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("session state = %q, want STARTING", session.State)
+	}
+	repo.mu.Lock()
+	taskState := repo.tasks["task-123"].State
+	repo.mu.Unlock()
+	if taskState != v1.TaskStateScheduling {
+		t.Fatalf("task state = %q, want SCHEDULING", taskState)
+	}
+}
+
+func TestRunAgentProcessAsync_LateReattachCancellationPreservesPeer(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	var stopCalls atomic.Int32
+	agentManager := &mockAgentManager{
+		startupDisposition: lifecycle.AgentStartupReattachedExisting,
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(startEntered)
+			<-releaseStart
+			return nil
+		},
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	ctx, cancel := context.WithCancel(WithCancellableResumeContext(context.Background()))
+	defer cancel()
+	exec.runAgentProcessAsync(ctx, "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after cancelled reattachment") }, false, true)
+	select {
+	case <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment startup")
+	}
+	cancel()
+	close(releaseStart)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("failure callback error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cancelled reattachment callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for reattached existing peer", got)
+	}
+}
+
 func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
@@ -2694,6 +2832,7 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 		ctx context.Context,
 		taskID, sessionID, _ string,
 		_ models.TaskSessionState,
+		_ string,
 		_ string,
 		errorValue models.LastAgentError,
 	) (bool, models.TaskSessionState, error) {
@@ -3374,24 +3513,23 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
 func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	t.Parallel()
 	cloner := &recordingAuthenticatedCloner{}
-	exec := &Executor{
-		repoCloner: cloner,
-		secretStore: &mockSecretStore{secrets: map[string]string{
-			"azure_devops:workspace-1:pat": "workspace-pat",
-		}},
-	}
+	exec := &Executor{repoCloner: cloner}
 	azure := &models.Repository{
-		WorkspaceID: "workspace-1", Provider: "azure_devops", ProviderOwner: "Platform", ProviderName: "api",
+		ID: "repository-1", WorkspaceID: "workspace-1", Provider: "azure_devops",
+		ProviderHost: "https://dev.azure.com", ProviderOwner: "Platform", ProviderName: "api",
 	}
-	path, err := exec.ensureClonedWithWorkspaceAuth(
-		context.Background(), azure, "https://dev.azure.com/acme/Platform/_git/api",
-	)
-	if err != nil {
+	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
+		context.Background(), "task-1", "session-1", azure,
+		"https://dev.azure.com/acme/Platform/_git/api",
+	); err != nil {
 		t.Fatal(err)
 	}
-	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
-		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
-		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
+	if cloner.authCalls != 0 || cloner.normalCalls != 1 {
+		t.Fatalf("azure_devops must use the plugin credential request path: %+v", cloner)
+	}
+	if cloner.request.Provider != "azure_devops" || cloner.request.TaskID != "task-1" ||
+		cloner.request.SessionID != "session-1" || cloner.request.RepositoryID != "repository-1" {
+		t.Fatalf("plugin clone scope = %+v", cloner.request)
 	}
 
 	github := &models.Repository{
@@ -3400,29 +3538,8 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
-	bitbucket := &models.Repository{
-		ID: "repository-3", WorkspaceID: "workspace-3", Provider: "bitbucket",
-		ProviderHost: "https://bitbucket.org", ProviderOwner: "acme", ProviderName: "api",
-	}
-	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
-		context.Background(), "task-3", "session-3", bitbucket,
-		"https://bitbucket.org/acme/api.git",
-	); err != nil {
-		t.Fatal(err)
-	}
-	if cloner.request.TaskID != "task-3" || cloner.request.SessionID != "session-3" ||
-		cloner.request.RepositoryID != "repository-3" {
-		t.Fatalf("plugin clone scope = %+v", cloner.request)
-	}
-	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
-	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
-		t.Fatal(err)
-	}
-	if cloner.normalCalls != 3 || cloner.authCalls != 1 {
-		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
-	}
-	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {
-		t.Fatalf("ordinary clone did not preserve workspace/provider isolation: %+v", cloner)
+	if cloner.normalCalls != 2 || cloner.authCalls != 0 {
+		t.Fatalf("built-in providers must use ordinary cloning: %+v", cloner)
 	}
 }
 
@@ -3727,10 +3844,8 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 			atomic.AddInt64(&launchCount, 1)
 			entered <- struct{}{}
 			<-gate
-			// Simulate the lifecycle manager's persistExecutorRunning: the row
-			// must exist after the first launch so the second caller's
-			// HasExecutorRunningRow check returns true and routes to the
-			// fast path (startAgentOnExistingWorkspace) instead of launching again.
+			// Simulate the lifecycle manager's persistExecutorRunning so the
+			// second caller observes the first launch's durable ownership.
 			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
 				ID:               req.SessionID,
 				SessionID:        req.SessionID,
@@ -3740,13 +3855,8 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 			}
 			return &LaunchAgentResponse{AgentExecutionID: "exec-race", Status: v1.AgentStatusStarting}, nil
 		},
-		// Fast path lookup must succeed for the second caller; mirror what
-		// the live store would return after the first caller registered.
-		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
-			return "exec-race", nil
-		},
 		// The repository mock returns shared pointers, unlike the production
-		// database store. Hold both async process-start callbacks until the
+		// database store. Hold the async process-start callback until the
 		// serialized launch calls finish mutating their session snapshots.
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
 			<-startProcessGate
@@ -3793,16 +3903,25 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	wg.Wait()
 	releaseStartProcessGate()
 	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
-	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
 
-	// First call ran LaunchAgent; second call took the fast path so total
-	// stays at 1. Both return non-error (the second is a no-op start).
+	// First call ran LaunchAgent. The second call observes that the winner owns
+	// the starting session and returns a typed busy outcome without reconfiguring
+	// or rewriting its state.
 	if got := atomic.LoadInt64(&launchCount); got != 1 {
 		t.Errorf("LaunchAgent total calls = %d, want 1", got)
 	}
+	successes, busy := 0, 0
 	for i, err := range results {
-		if err != nil {
-			t.Errorf("results[%d] = %v, want nil", i, err)
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrExecutionAlreadyRunning):
+			busy++
+		default:
+			t.Errorf("results[%d] = %v, want nil or ErrExecutionAlreadyRunning", i, err)
 		}
+	}
+	if successes != 1 || busy != 1 {
+		t.Errorf("launch outcomes = %d success, %d busy, want one of each", successes, busy)
 	}
 }

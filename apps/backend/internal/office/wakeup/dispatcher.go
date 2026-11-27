@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -208,8 +210,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 // route the event to its own fresh run instead of trusting the stale
 // in-memory status.
 func (d *Dispatcher) coalesceIntoInflightRun(
-	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
+	ctx context.Context, req *officesqlite.WakeupRequest, inflight *runsmodels.Run,
 ) error {
+	if requestRoutineID := routineIDFromPayload(req); requestRoutineID != "" && requestRoutineID != routineIDFromRun(inflight) {
+		return d.createFreshRun(ctx, req)
+	}
 	reason := effectiveReason(req)
 	if reason != "" &&
 		shared.IsPeriodicTasklessWake(inflight.Reason) &&
@@ -226,6 +231,17 @@ func (d *Dispatcher) coalesceIntoInflightRun(
 		return nil
 	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+}
+
+func routineIDFromRun(run *runsmodels.Run) string {
+	if run.RoutineID != "" {
+		return run.RoutineID
+	}
+	var payload RoutinePayload
+	if UnmarshalPayload(run.ContextSnapshot, &payload) != nil {
+		return ""
+	}
+	return payload.RoutineID
 }
 
 // routineIDFromPayload extracts routine_id from req's payload for a
@@ -437,6 +453,11 @@ func (d *Dispatcher) checkPauseGate(ctx context.Context, req *officesqlite.Wakeu
 		return nil
 	}
 	pause.RecordBlocked("wakeup_dispatch")
+	if req.Source == SourceBlockerFailure {
+		// A blocker failure is a durable alert. Keep it queued so resume or
+		// the recovery tick can retry it after the workspace is available.
+		return shared.ErrWorkspacePaused
+	}
 	if err := d.repo.MarkWakeupRequestSkipped(ctx, req.ID, wakeupPauseSkipReason); err != nil {
 		d.log.Warn("wakeup dispatch: mark skipped (paused) failed",
 			zap.String("wakeup_id", req.ID), zap.Error(err))

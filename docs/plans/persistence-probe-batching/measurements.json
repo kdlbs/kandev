@@ -1,0 +1,626 @@
+{
+  "source_commit": "595df36ed5c1cf02fd90cb972b623ad6edc53df8",
+  "host": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "go": "go version go1.26.6 linux/amd64",
+    "logical_cpus": 16,
+    "temporary_filesystem": "ext2/ext3",
+    "sharing": "Other user workloads may run on this host. No other task-owned stress or compilation ran during the paired measurements."
+  },
+  "workload": {
+    "write_endpoint": "PATCH /api/v1/tasks/:id",
+    "writers": 8,
+    "description_bytes": 16384,
+    "synthetic_tasks": 16,
+    "sample_seconds": 35,
+    "rejected_write_backoff_ms": 100,
+    "read_sampling_interval_ms": 200,
+    "order": [
+      "pair1-baseline",
+      "pair1-batched",
+      "pair2-batched",
+      "pair2-baseline",
+      "pair3-baseline",
+      "pair3-batched"
+    ],
+    "data": "Fresh copy of the same synthetic SQLite seed per paired run",
+    "runtime": "Full backend, dev profile, mocked providers, no agent sessions, existing 15-second probe interval and 2-second deadline"
+  },
+  "source_sha256": {
+    "baseline": "100cb85696302ab72e6816982846e8f0279d17b9398ae5bc4806848231f95299",
+    "batched": "9510f6c6e09e15b8b6dfa944822a0131da07d2d34fa7be6df5097a6636556180"
+  },
+  "runs": [
+    {
+      "label": "pair1-baseline",
+      "at": "2026-10-19T14:28:36.721177+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.09517759599839,
+      "write": {
+        "count": 1840,
+        "status": {
+          "200": 817,
+          "503": 1023
+        },
+        "p50_ms": 0.639,
+        "p95_ms": 321.204,
+        "p99_ms": 989.727
+      },
+      "successful_write": {
+        "count": 817,
+        "status": {
+          "200": 817
+        },
+        "p50_ms": 145.116,
+        "p95_ms": 492.767,
+        "p99_ms": 1607.683
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.316,
+          "p95_ms": 0.491,
+          "p99_ms": 0.798
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.342,
+          "p95_ms": 0.599,
+          "p99_ms": 1.078
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.406,
+          "p95_ms": 0.574,
+          "p99_ms": 0.947
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 11.30851,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:27:36.674000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 9.94513,
+          "writer_wait_count_delta": 2,
+          "writer_wait_ms_delta": 0.256469,
+          "at": "2026-10-19T15:27:36.740000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 4.749997,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:27:51.679000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 2001.227517,
+          "writer_wait_count_delta": 173,
+          "writer_wait_ms_delta": 15623.895929,
+          "at": "2026-10-19T15:28:08.676000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 4.562901,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:28:21.679000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 49.262953,
+          "writer_wait_count_delta": 10,
+          "writer_wait_ms_delta": 340.638173,
+          "at": "2026-10-19T15:28:36.724000+01:00",
+          "during_workload": false
+        }
+      ],
+      "probe_failures": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 1388.313412,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 752,
+          "writer_wait_duration_ms": 53079.930962,
+          "reader_open_connections": 4,
+          "reader_in_use": 0,
+          "reader_wait_count": 13,
+          "reader_wait_duration_ms": 9.047778,
+          "store_id": "task",
+          "at": "2026-10-19T15:28:08.676000+01:00",
+          "during_workload": true
+        }
+      ]
+    },
+    {
+      "label": "pair1-batched",
+      "at": "2026-10-19T14:29:15.127707+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.15709921200323,
+      "write": {
+        "count": 1118,
+        "status": {
+          "200": 1118
+        },
+        "p50_ms": 217.757,
+        "p95_ms": 537.445,
+        "p99_ms": 760.05
+      },
+      "successful_write": {
+        "count": 1118,
+        "status": {
+          "200": 1118
+        },
+        "p50_ms": 217.757,
+        "p95_ms": 537.445,
+        "p99_ms": 760.05
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.286,
+          "p95_ms": 0.993,
+          "p99_ms": 1.416
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.382,
+          "p95_ms": 1.173,
+          "p99_ms": 1.502
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.381,
+          "p95_ms": 0.894,
+          "p99_ms": 1.11
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 0.653765,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:28:39.455000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 0.553372,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:28:39.486000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 274.101175,
+          "writer_wait_count_delta": 24,
+          "writer_wait_ms_delta": 2172.885632,
+          "at": "2026-10-19T15:28:54.730000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 223.689931,
+          "writer_wait_count_delta": 19,
+          "writer_wait_ms_delta": 2143.126238,
+          "at": "2026-10-19T15:29:09.680000+01:00",
+          "during_workload": true
+        }
+      ],
+      "probe_failures": []
+    },
+    {
+      "label": "pair2-baseline",
+      "at": "2026-10-19T14:30:33.802287+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.18916162900132,
+      "write": {
+        "count": 1647,
+        "status": {
+          "200": 626,
+          "503": 1021
+        },
+        "p50_ms": 0.532,
+        "p95_ms": 468.799,
+        "p99_ms": 717.238
+      },
+      "successful_write": {
+        "count": 626,
+        "status": {
+          "200": 626
+        },
+        "p50_ms": 249.909,
+        "p95_ms": 637.507,
+        "p99_ms": 774.648
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.337,
+          "p95_ms": 0.563,
+          "p99_ms": 0.664
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.43,
+          "p95_ms": 0.741,
+          "p99_ms": 0.948
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.472,
+          "p95_ms": 0.719,
+          "p99_ms": 1.034
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 4.898777,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:29:58.024000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 5.72332,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:29:58.061000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 2000.586345,
+          "writer_wait_count_delta": 128,
+          "writer_wait_ms_delta": 17803.252527,
+          "at": "2026-10-19T15:30:15.025000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 5.796754,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:30:28.031000+01:00",
+          "during_workload": true
+        }
+      ],
+      "probe_failures": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 1671.134153,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 974,
+          "writer_wait_duration_ms": 126026.187372,
+          "reader_open_connections": 4,
+          "reader_in_use": 0,
+          "reader_wait_count": 21,
+          "reader_wait_duration_ms": 7.572336,
+          "store_id": "task",
+          "at": "2026-10-19T15:30:15.025000+01:00",
+          "during_workload": true
+        }
+      ]
+    },
+    {
+      "label": "pair2-batched",
+      "at": "2026-10-19T14:29:54.847418+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.26312523800152,
+      "write": {
+        "count": 965,
+        "status": {
+          "200": 965
+        },
+        "p50_ms": 255.312,
+        "p95_ms": 633.794,
+        "p99_ms": 821.683
+      },
+      "successful_write": {
+        "count": 965,
+        "status": {
+          "200": 965
+        },
+        "p50_ms": 255.312,
+        "p95_ms": 633.794,
+        "p99_ms": 821.683
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 176,
+          "status": {
+            "200": 176
+          },
+          "p50_ms": 0.33,
+          "p95_ms": 0.581,
+          "p99_ms": 0.97
+        },
+        "/api/v1/workspaces": {
+          "count": 176,
+          "status": {
+            "200": 176
+          },
+          "p50_ms": 0.454,
+          "p95_ms": 0.793,
+          "p99_ms": 0.982
+        },
+        "/ready": {
+          "count": 176,
+          "status": {
+            "200": 176
+          },
+          "p50_ms": 0.416,
+          "p95_ms": 0.652,
+          "p99_ms": 1.039
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 1.677876,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:29:19.353000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 1.31802,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:29:19.399000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 93.286927,
+          "writer_wait_count_delta": 10,
+          "writer_wait_ms_delta": 657.613408,
+          "at": "2026-10-19T15:29:34.447000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 119.638805,
+          "writer_wait_count_delta": 15,
+          "writer_wait_ms_delta": 994.273036,
+          "at": "2026-10-19T15:29:49.473000+01:00",
+          "during_workload": true
+        }
+      ],
+      "probe_failures": []
+    },
+    {
+      "label": "pair3-baseline",
+      "at": "2026-10-19T14:31:12.887916+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.180055939999875,
+      "write": {
+        "count": 1634,
+        "status": {
+          "200": 614,
+          "503": 1020
+        },
+        "p50_ms": 0.59,
+        "p95_ms": 485.211,
+        "p99_ms": 686.687
+      },
+      "successful_write": {
+        "count": 614,
+        "status": {
+          "200": 614
+        },
+        "p50_ms": 254.311,
+        "p95_ms": 611.418,
+        "p99_ms": 859.352
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.363,
+          "p95_ms": 0.654,
+          "p99_ms": 0.935
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.452,
+          "p95_ms": 0.757,
+          "p99_ms": 2.465
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 110,
+            "503": 65
+          },
+          "p50_ms": 0.45,
+          "p95_ms": 0.767,
+          "p99_ms": 1.829
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 10.506487,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:30:37.379000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 19.290032,
+          "writer_wait_count_delta": 3,
+          "writer_wait_ms_delta": 9.69845,
+          "at": "2026-10-19T15:30:37.435000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 2000.624801,
+          "writer_wait_count_delta": 139,
+          "writer_wait_ms_delta": 17485.643812,
+          "at": "2026-10-19T15:30:54.380000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 7.172102,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:31:07.387000+01:00",
+          "during_workload": true
+        }
+      ],
+      "probe_failures": [
+        {
+          "stage": "table_probe",
+          "elapsed_ms": 1797.63257,
+          "error_class": "deadline_exceeded",
+          "writer_open_connections": 1,
+          "writer_in_use": 1,
+          "writer_wait_count": 1032,
+          "writer_wait_duration_ms": 125130.774929,
+          "reader_open_connections": 4,
+          "reader_in_use": 0,
+          "reader_wait_count": 16,
+          "reader_wait_duration_ms": 11.566653,
+          "store_id": "task",
+          "at": "2026-10-19T15:30:54.380000+01:00",
+          "during_workload": true
+        }
+      ]
+    },
+    {
+      "label": "pair3-batched",
+      "at": "2026-10-19T14:31:51.389170+00:00",
+      "clients": 8,
+      "payload_bytes": 16384,
+      "duration_seconds": 35,
+      "elapsed_seconds": 35.21481470400613,
+      "write": {
+        "count": 935,
+        "status": {
+          "200": 935
+        },
+        "p50_ms": 253.142,
+        "p95_ms": 648.431,
+        "p99_ms": 824.54
+      },
+      "successful_write": {
+        "count": 935,
+        "status": {
+          "200": 935
+        },
+        "p50_ms": 253.142,
+        "p95_ms": 648.431,
+        "p99_ms": 824.54
+      },
+      "read": {
+        "/api/v1/system/diagnostics/persistence": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.283,
+          "p95_ms": 0.488,
+          "p99_ms": 0.739
+        },
+        "/api/v1/workspaces": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.379,
+          "p95_ms": 0.698,
+          "p99_ms": 1.067
+        },
+        "/ready": {
+          "count": 175,
+          "status": {
+            "200": 175
+          },
+          "p50_ms": 0.365,
+          "p95_ms": 0.584,
+          "p99_ms": 1.122
+        }
+      },
+      "probes": [
+        {
+          "total_ms": 0.710914,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:31:15.820000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 0.567045,
+          "writer_wait_count_delta": 0,
+          "writer_wait_ms_delta": 0,
+          "at": "2026-10-19T15:31:15.861000+01:00",
+          "during_workload": false
+        },
+        {
+          "total_ms": 184.972238,
+          "writer_wait_count_delta": 14,
+          "writer_wait_ms_delta": 1610.271694,
+          "at": "2026-10-19T15:31:31.006000+01:00",
+          "during_workload": true
+        },
+        {
+          "total_ms": 315.473404,
+          "writer_wait_count_delta": 22,
+          "writer_wait_ms_delta": 2693.412852,
+          "at": "2026-10-19T15:31:46.137000+01:00",
+          "during_workload": true
+        }
+      ],
+      "probe_failures": []
+    }
+  ]
+}

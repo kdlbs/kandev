@@ -25,6 +25,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -86,9 +87,15 @@ func SSHRequireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 // CreateInstance — but they still bubble up so the UI can surface "agentctl
 // not yet on remote" as a status row.
 func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform) (bool, error) {
-	localSha, _, _, err := localAgentctlSha256(resolver, platform)
+	localSha, hasExpectedDigest, err := resolver.expectedRemoteHelperSHA256(platform)
 	if err != nil {
 		return false, err
+	}
+	if !hasExpectedDigest {
+		localSha, _, _, err = localAgentctlSha256WithContext(ctx, resolver, platform, nil)
+		if err != nil {
+			return false, err
+		}
 	}
 	remoteShaFile, err := expandRemoteHome(ctx, client, sshRemoteAgentctlSha256)
 	if err != nil {
@@ -118,7 +125,7 @@ func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout,
 // command string — that keeps them out of the remote shell's argv and out
 // of `ps aux` / `/proc/PID/cmdline` for the brief window the script runs.
 func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, stdin io.Reader) (stdout, stderr string, err error) {
-	session, err := client.NewSession()
+	session, err := openSSHSession(ctx, client)
 	if err != nil {
 		return "", "", fmt.Errorf("ssh: new session: %w", err)
 	}
@@ -143,6 +150,142 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 		return outBuf.String(), errBuf.String(), ctx.Err()
 	case err := <-done:
 		return outBuf.String(), errBuf.String(), err
+	}
+}
+
+// boundedSSHOutput retains at most limit bytes of one remote stream while
+// always draining the channel. Overflow is reported once through onOverflow so
+// the command can be torn down instead of letting a faulty remote grow backend
+// memory until the context deadline.
+type boundedSSHOutput struct {
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	limit      int
+	overflow   bool
+	onOverflow func()
+}
+
+func newBoundedSSHOutput(limit int, onOverflow func()) *boundedSSHOutput {
+	if limit < 0 {
+		limit = 0
+	}
+	return &boundedSSHOutput{limit: limit, onOverflow: onOverflow}
+}
+
+func (b *boundedSSHOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	remaining := b.limit - b.buf.Len()
+	if remaining > 0 {
+		writeLen := len(p)
+		if writeLen > remaining {
+			writeLen = remaining
+		}
+		_, _ = b.buf.Write(p[:writeLen])
+	}
+	overflowed := len(p) > remaining
+	if overflowed {
+		b.overflow = true
+	}
+	onOverflow := b.onOverflow
+	b.mu.Unlock()
+	if overflowed && onOverflow != nil {
+		onOverflow()
+	}
+	// Consume the whole chunk so the SSH channel keeps draining.
+	return len(p), nil
+}
+
+func (b *boundedSSHOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *boundedSSHOutput) Overflowed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.overflow
+}
+
+// runSSHCommandStdinBounded is the bounded form used for private helper
+// responses. Both streams are capped while every chunk is still drained; any
+// overflow tear down the session and is reported to the caller.
+func runSSHCommandStdinBounded(
+	ctx context.Context,
+	client *ssh.Client,
+	cmd string,
+	stdin io.Reader,
+	limit int,
+) (stdout, stderr string, overflow bool, err error) {
+	session, err := openSSHSession(ctx, client)
+	if err != nil {
+		return "", "", false, fmt.Errorf("ssh: new session: %w", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	var overflowOnce sync.Once
+	overflowCh := make(chan struct{})
+	signalOverflow := func() { overflowOnce.Do(func() { close(overflowCh) }) }
+	outBuf := newBoundedSSHOutput(limit, signalOverflow)
+	errBuf := newBoundedSSHOutput(limit, signalOverflow)
+	session.Stdout = outBuf
+	session.Stderr = errBuf
+	if stdin != nil {
+		session.Stdin = stdin
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- session.Run(cmd) }()
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGTERM)
+		return outBuf.String(), errBuf.String(), outBuf.Overflowed() || errBuf.Overflowed(), ctx.Err()
+	case <-overflowCh:
+		_ = session.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+		return outBuf.String(), errBuf.String(), true, nil
+	case err := <-done:
+		return outBuf.String(), errBuf.String(), outBuf.Overflowed() || errBuf.Overflowed(), err
+	}
+}
+
+// openSSHSession makes the channel-open part of a command context-aware.
+// x/crypto/ssh does not accept a context for Client.NewSession, and a remote
+// transport can leave that call blocked after the caller has cancelled. Close
+// the client on cancellation to release the blocked mux. A client whose
+// channel open cannot complete before its context expires is no longer safe to
+// reuse, so closing it is the only bounded outcome.
+func openSSHSession(ctx context.Context, client *ssh.Client) (*ssh.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, errors.New("nil SSH client")
+	}
+
+	type result struct {
+		session *ssh.Session
+		err     error
+	}
+	opened := make(chan result, 1)
+	go func() {
+		session, err := client.NewSession()
+		opened <- result{session: session, err: err}
+	}()
+
+	select {
+	case result := <-opened:
+		return result.session, result.err
+	case <-ctx.Done():
+		_ = client.Close()
+		result := <-opened
+		if result.session != nil {
+			_ = result.session.Close()
+		}
+		return nil, ctx.Err()
 	}
 }
 
@@ -275,7 +418,11 @@ func expandRemoteHome(ctx context.Context, client *ssh.Client, path string) (str
 // localAgentctlSha256 returns the hex sha256 of the local agentctl binary
 // resolved via AgentctlResolver. Used to decide whether to re-upload.
 func localAgentctlSha256(resolver *AgentctlResolver, platform SSHRemotePlatform) (string, []byte, string, error) {
-	path, err := resolver.ResolveRemoteBinary(platform)
+	return localAgentctlSha256WithContext(context.Background(), resolver, platform, nil)
+}
+
+func localAgentctlSha256WithContext(ctx context.Context, resolver *AgentctlResolver, platform SSHRemotePlatform, onProgress PrepareProgressCallback) (string, []byte, string, error) {
+	path, err := resolver.ResolveRemoteBinaryContext(ctx, platform, onProgress)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -290,7 +437,11 @@ func localAgentctlSha256(resolver *AgentctlResolver, platform SSHRemotePlatform)
 // ensureAgentctlOnHost uploads the agentctl binary if the remote's cached sha256
 // differs from the local binary's sha256. Returns the absolute remote path.
 func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform, log *logger.Logger) (string, error) {
-	localSha, localData, localPath, err := localAgentctlSha256(resolver, platform)
+	return ensureAgentctlOnHostWithProgress(ctx, ctx, client, resolver, platform, log, nil)
+}
+
+func ensureAgentctlOnHostWithProgress(ctx, helperCtx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform, log *logger.Logger, onProgress PrepareProgressCallback) (string, error) {
+	localSha, localData, localPath, err := localAgentctlSha256WithContext(helperCtx, resolver, platform, onProgress)
 	if err != nil {
 		return "", err
 	}
@@ -666,31 +817,49 @@ func buildSSHCreateInstanceRequest(
 	workspacePath string,
 	agentctlBin string,
 ) agentctl.CreateInstanceRequest {
-	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
+	createRequest := agentctl.CreateInstanceRequest{
+		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
+		WorkspacePath:         workspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             sshAgentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnvFromReq(req),
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
+	if req.DurableJournalOwnerID != "" {
+		// The SSH task directory is the stable remote environment. Keep the
+		// journal below it so agentctl replacement does not move delivery state
+		// with the process or session directory.
+		createRequest.DurableJournalPath = filepath.Join(
+			workspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
+		)
+	}
+	return createRequest
 }
 
 // createRemoteAgentInstance creates a per-session agent instance on the
@@ -708,10 +877,10 @@ func createRemoteAgentInstance(
 	req *ExecutorCreateRequest,
 	authToken string,
 	log *logger.Logger,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath, agentctlBin))
 	if err != nil {
-		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
+		return nil, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
 
 	// HTTP-over-direct-tcpip: every request dials a fresh SSH channel to the
@@ -727,40 +896,43 @@ func createRemoteAgentInstance(
 		},
 	}
 
+	if err := requireSSHBuiltinHelper(ctx, httpClient, controlPort, authToken, req); err != nil {
+		return nil, err
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/instances", controlPort)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, fmt.Errorf("ssh: build create-instance request: %w", err)
+		return nil, fmt.Errorf("ssh: build create-instance request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	setSSHControlAuthorization(httpReq, authToken)
 
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return 0, fmt.Errorf("ssh: create-instance dial: %w", err)
+		return nil, fmt.Errorf("ssh: create-instance dial: %w", err)
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("ssh: read create-instance response: %w", err)
+		return nil, fmt.Errorf("ssh: read create-instance response: %w", err)
 	}
 	if httpResp.StatusCode >= http.StatusBadRequest {
-		return 0, fmt.Errorf("ssh: create-instance returned %d: %s", httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf("ssh: create-instance returned %d: %s", httpResp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var resp agentctl.CreateInstanceResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return 0, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, string(respBody))
+		return nil, fmt.Errorf("ssh: parse create-instance response: %w (body: %s)", err, string(respBody))
 	}
 	if resp.Port == 0 {
-		return 0, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", string(respBody))
+		return nil, fmt.Errorf("ssh: create-instance returned port 0 (body: %s)", string(respBody))
 	}
 	log.Info("created remote agent instance",
 		zap.Int("control_port", controlPort),
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
-	return resp.Port, nil
+	return &resp, nil
 }
 
 func setSSHControlAuthorization(req *http.Request, token string) {
@@ -776,42 +948,51 @@ func setSSHControlAuthorization(req *http.Request, token string) {
 // retrying, as opposed to a transport failure or a malformed response.
 var errSSHAgentctlHandshakeRejected = errors.New("ssh: agentctl handshake rejected")
 
-func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (string, error) {
+// sshControlHandshakeResult is the authenticated launch response. Token is
+// always present; Launch carries the controller's self-captured proof for a
+// managed SSH launch that requested one.
+type sshControlHandshakeResult struct {
+	Token  string
+	Launch *sshlaunch.Receipt
+}
+
+func remoteControlHandshake(ctx context.Context, client *ssh.Client, controlPort int, nonce string) (sshControlHandshakeResult, error) {
 	body, err := json.Marshal(map[string]string{"nonce": nonce})
 	if err != nil {
-		return "", err
+		return sshControlHandshakeResult{}, err
 	}
 	httpClient := remoteControlHTTPClient(client, controlPort)
 	defer httpClient.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/auth/handshake", controlPort), bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return sshControlHandshakeResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ssh: agentctl handshake: %w", err)
+		return sshControlHandshakeResult{}, fmt.Errorf("ssh: agentctl handshake: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusForbidden {
 		// 403 is exactly ConsumeNonce rejecting the nonce (control_server.go) —
 		// the one case worth a fresh instance and a retry.
-		return "", fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
+		return sshControlHandshakeResult{}, fmt.Errorf("%w: status %d", errSSHAgentctlHandshakeRejected, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		// Any other non-200 (400/404/500/...) is not the nonce rejection and
 		// must not trigger retryAgentctlHandshake's retry — that would cost
 		// up to sshAgentctlHandshakeAttempts full start-agentctl-and-tear-down
 		// cycles for a failure a fresh instance can't fix.
-		return "", fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
+		return sshControlHandshakeResult{}, fmt.Errorf("ssh: agentctl handshake: unexpected status %d", resp.StatusCode)
 	}
 	var result struct {
-		Token string `json:"token"`
+		Token  string             `json:"token"`
+		Launch *sshlaunch.Receipt `json:"launch"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Token == "" {
-		return "", errors.New("ssh: agentctl handshake returned no token")
+		return sshControlHandshakeResult{}, errors.New("ssh: agentctl handshake returned no token")
 	}
-	return result.Token, nil
+	return sshControlHandshakeResult{Token: result.Token, Launch: result.Launch}, nil
 }
 
 // readRemoteAgentctlLogTail best-effort reads the tail of the current
@@ -848,21 +1029,22 @@ const sshAgentctlHandshakeRetryDelay = 15 * time.Second
 // delay is called between attempts (not after the last one) and is injectable
 // so tests can run the retry loop without waiting on the real backoff; ctx
 // cancellation during the wait aborts the retry immediately.
-func retryAgentctlHandshake(
+func retryAgentctlHandshake[T any](
 	ctx context.Context,
-	attempt func() (port, pid int, token string, err error),
+	attempt func() (port, pid int, value T, err error),
 	teardown func(port, pid int) error,
 	delay func(ctx context.Context, d time.Duration) error,
-) (port, pid int, token string, err error) {
+) (port, pid int, value T, err error) {
 	var lastErr error
+	var zero T
 	for i := range sshAgentctlHandshakeAttempts {
-		port, pid, token, err = attempt()
+		port, pid, value, err = attempt()
 		if err == nil {
-			return port, pid, token, nil
+			return port, pid, value, nil
 		}
 		if pid > 0 {
 			if teardownErr := teardown(port, pid); teardownErr != nil {
-				return 0, 0, "", fmt.Errorf(
+				return 0, 0, zero, fmt.Errorf(
 					"ssh: agentctl teardown after attempt %d: %w",
 					i+1, errors.Join(teardownErr, err))
 			}
@@ -870,16 +1052,16 @@ func retryAgentctlHandshake(
 		// teardown removes sessionDir. startRemoteAgentctl recreates it before
 		// each new pid/log pair, so every retry starts with a clean directory.
 		if !errors.Is(err, errSSHAgentctlHandshakeRejected) {
-			return 0, 0, "", err
+			return 0, 0, zero, err
 		}
 		lastErr = err
 		if i < sshAgentctlHandshakeAttempts-1 {
 			if derr := delay(ctx, sshAgentctlHandshakeRetryDelay); derr != nil {
-				return 0, 0, "", fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
+				return 0, 0, zero, fmt.Errorf("ssh: agentctl handshake retry cancelled: %w", derr)
 			}
 		}
 	}
-	return 0, 0, "", fmt.Errorf(
+	return 0, 0, zero, fmt.Errorf(
 		"ssh: agentctl exhausted %d handshake attempts: %w",
 		sshAgentctlHandshakeAttempts, lastErr,
 	)
@@ -923,6 +1105,12 @@ const (
 	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
 	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyOpenRouterAPIKey     = "OPENROUTER_API_KEY"
+	envKeyCursorAPIKey         = "CURSOR_API_KEY"
+	envKeyAugmentSessionAuth   = "AUGMENT_SESSION_AUTH"
+	envKeyMetaAPIKey           = "META_API_KEY"
+	envKeyWindsurfAPIKey       = "WINDSURF_API_KEY"
+	envKeyXAIAPIKey            = "XAI_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
 	envKeyGitLabToken          = "GITLAB_TOKEN"
@@ -950,6 +1138,12 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyOpenAIAPIKey,
 	envKeyGeminiAPIKey,
 	envKeyGoogleAPIKey,
+	envKeyOpenRouterAPIKey,
+	envKeyCursorAPIKey,
+	envKeyAugmentSessionAuth,
+	envKeyMetaAPIKey,
+	envKeyWindsurfAPIKey,
+	envKeyXAIAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
 	envKeyGitLabToken,
@@ -999,6 +1193,11 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 		if val := req.Env[key]; val != "" {
 			env[key] = val
 		}
+	}
+	// Keep an explicit profile configuration path intact. Mode application no
+	// longer creates or redirects this directory.
+	if configDir := req.Env["CLAUDE_CONFIG_DIR"]; configDir != "" {
+		env["CLAUDE_CONFIG_DIR"] = configDir
 	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
@@ -1167,7 +1366,19 @@ func remoteProcessCommandLineCommand(pid int) string {
 	// PID as an empty, non-zero result so remotePsProbeConfirmsAbsence can still
 	// distinguish it from a probe error. If neither mechanism is available,
 	// return stderr and fail closed rather than treating the process as absent.
+	//
+	// A `ps -p` failure is ambiguous by itself: it means either "no process
+	// with this pid" or "this ps build doesn't understand -p at all". Probing
+	// the caller's own pid (always alive) with the same selector tells them
+	// apart — if `-p` finds the shell running this very script, it is
+	// supported, so the original failure was a genuine miss and the pid is
+	// confirmed absent. This is what lets a host with a working `-p` but no
+	// /proc (macOS) confirm absence instead of falling into the /proc branch
+	// below and failing the identity probe closed on every exited pid.
 	return fmt.Sprintf(`ps -p %[1]d -o command= 2>/dev/null || {
+  if ps -p $$ -o pid= >/dev/null 2>&1; then
+    exit 1
+  fi
   if [ ! -d /proc ]; then
     echo "process identity probe unavailable: ps does not support -p and /proc is absent" >&2
     exit 2
@@ -1223,7 +1434,7 @@ func remoteAgentctlPidFileConfirms(ctx context.Context, client *ssh.Client, sess
 		return err
 	}
 	if !present {
-		return fmt.Errorf("remote agentctl session directory %s disappeared before pidfile verification", sessionDir)
+		return fmt.Errorf("%w: %s", errSSHRemoteSessionDirectoryMissing, sessionDir)
 	}
 	if filePID != pid {
 		return fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)

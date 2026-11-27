@@ -11,11 +11,20 @@ const CUSTOM_INPUT = "schedule-custom-input";
 const CUSTOM_WEEKDAYS = "0 9 * * 1-5";
 const DAILY_9 = "0 9 * * *";
 
-function renderSelector(config: Record<string, unknown> | null) {
+function renderSelector(
+  config: Record<string, unknown> | null,
+  hasOtherTrigger = false,
+  onClear = vi.fn(),
+) {
   const onChange = vi.fn();
   render(
     <TooltipProvider>
-      <ScheduleSelector config={config} onChange={onChange} />
+      <ScheduleSelector
+        config={config}
+        onChange={onChange}
+        onClear={onClear}
+        hasOtherTrigger={hasOtherTrigger}
+      />
     </TooltipProvider>,
   );
   return onChange;
@@ -24,6 +33,12 @@ function renderSelector(config: Record<string, unknown> | null) {
 afterEach(cleanup);
 
 describe("ScheduleSelector preview", () => {
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  it("does not claim the automation never runs when another trigger can start it", () => {
+    renderSelector(null, true);
+    expect(screen.getByTestId(NEXT_RUN).textContent).toBe("No schedule.");
+  });
+
   it("names the resolved instant in both the chosen zone and UTC", () => {
     // The whole point of the line: a cron alone never says which moment it
     // means, and the two readings differ for any zone that is not UTC.
@@ -80,6 +95,33 @@ describe("ScheduleSelector preview", () => {
     fireEvent.blur(input);
 
     expect(onChange).toHaveBeenCalledWith({ cron_expression: "@every 2h", timezone: undefined });
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+describe("ScheduleSelector clearing", () => {
+  it("keeps No schedule available after a schedule is chosen and clears it", () => {
+    const onClear = vi.fn();
+    const onChange = renderSelector({ cron_expression: DAILY_9, timezone: "UTC" }, false, onClear);
+
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "No schedule" }));
+
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("leaves an unsaved custom draft without clearing anything", () => {
+    const onClear = vi.fn();
+    renderSelector(null, false, onClear);
+
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "a custom schedule" }));
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "No schedule" }));
+
+    expect(onClear).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(CUSTOM_INPUT)).toBeNull();
   });
 });
 

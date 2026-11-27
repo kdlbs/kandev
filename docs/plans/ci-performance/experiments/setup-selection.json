@@ -1,0 +1,38 @@
+{
+  "node": [
+    "components/app-status-bar/app-status-bar-order.test.ts",
+    "components/automations/automation-repository-selection.test.ts",
+    "components/automations/plugin-condition.test.ts",
+    "components/azure-devops/azure-devops-board-view.test.ts",
+    "components/azure-devops/azure-devops-presets.test.ts",
+    "components/azure-devops/azure-devops-status.test.ts",
+    "components/branch-picker-boundary.test.ts",
+    "components/canvas/canvas-task-prompt.test.ts",
+    "components/editors/monaco/builtin-providers.test.ts",
+    "components/editors/tiptap/plan-slash-commands.test.ts",
+    "components/github/my-github/action-presets.test.ts",
+    "components/github/my-github/saved-preset-model.test.ts",
+    "components/github/pr-workflow-attention.test.ts",
+    "components/gitlab/watch-form.test.ts",
+    "components/integrations/change-request-task-status-color.test.ts",
+    "components/jira/my-jira/filter-model.test.ts"
+  ],
+  "english-browser": [
+    "components/actions/surface-action-styles.test.ts",
+    "components/app-sidebar/sections/settings/settings-nav-copy.test.ts",
+    "components/app-status-bar/backend-reload-required-alert.test.tsx",
+    "components/automations/automation-delete-confirm-dialog.test.tsx",
+    "components/automations/managed-automation-import.test.ts",
+    "components/automations/schedule-expression.test.ts",
+    "components/automations/trigger-configs/webhook-filters-config.test.tsx",
+    "components/azure-devops/azure-devops-results.test.tsx",
+    "components/azure-devops/azure-devops-save-view-dialog.test.tsx",
+    "components/branch-refresh-button.test.tsx",
+    "components/command-list-scroll-reset.test.tsx",
+    "components/config-chat/config-chat-copy.test.ts",
+    "components/confirmation/inline-confirm-actions.test.tsx",
+    "components/coordinators/coordinator-delete-confirm-dialog.test.tsx",
+    "components/diff/diff-error-boundary.test.tsx",
+    "components/diff/hunk-action-bar.test.tsx"
+  ]
+}

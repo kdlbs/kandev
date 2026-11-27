@@ -66,6 +66,11 @@ Read HEAD and its version together under the existing per-task lock, after autho
 Return exact content, title, task ID, version, and current revision metadata when verified against HEAD.
 Do not label a mismatched latest revision as the current snapshot.
 
+The [partial-read extension](plan-partial-reads.md) adds optional bounded range
+projection and read-side version checks. Full reads remain exact. Partial reads
+return exact substrings and their coherent snapshot metadata; they do not alter
+the conditional-write or recovery policy defined here.
+
 Version comparison and the write occur within the same existing service critical section.
 The supported concurrency boundary remains one backend process with its shared `PlanService` instance.
 This package does not introduce cross-process plan writers or a second lock table.

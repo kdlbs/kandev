@@ -24,15 +24,17 @@ import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { LineStat } from "@/components/diff-stat";
 import type { FileRowContentProps } from "./changes-panel-file-row";
+import { ChangesPanelFileFolder, ChangesPanelFileName } from "./changes-panel-file-name";
 
 export function TouchFileRowContent(props: FileRowContentProps) {
-  const { file, treeMode, indentPx, isPending, folder, name } = props;
+  const { file, treeMode, indentPx, isPending, folder, name, readOnly } = props;
 
   return (
     <>
       <button
         type="button"
         title={file.path}
+        aria-label={readOnly ? file.path : undefined}
         className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
         style={indentPx ? { paddingLeft: Math.min(indentPx, 24) } : undefined}
       >
@@ -42,11 +44,9 @@ export function TouchFileRowContent(props: FileRowContentProps) {
           <FileIcon fileName={name} className="size-3.5 shrink-0" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="block whitespace-normal [overflow-wrap:anywhere] text-xs font-medium leading-4">
-            {name}
-          </span>
+          <ChangesPanelFileName name={name} touchMode />
           <span className="flex min-w-0 items-center gap-2 text-[11px] leading-4 text-muted-foreground">
-            {!treeMode && folder && <span className="min-w-0 truncate">{folder}</span>}
+            {!treeMode && folder && <ChangesPanelFileFolder folder={folder} touchMode />}
             <LineStat
               added={file.plus}
               removed={file.minus}
@@ -57,7 +57,7 @@ export function TouchFileRowContent(props: FileRowContentProps) {
           </span>
         </span>
       </button>
-      <TouchFileRowActions {...props} />
+      {!readOnly && <TouchFileRowActions {...props} />}
     </>
   );
 }

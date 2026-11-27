@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -392,7 +393,7 @@ func buildPendingMoveScenarioWithQueue(t *testing.T, useSQLiteQueue bool) *pendi
 
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	messageQueueService := newAuthoritativeMemoryQueue(repo, log)
 	if useSQLiteQueue {
@@ -543,6 +544,7 @@ func seedReviewSession(t *testing.T, repo *sqliterepo.Repository, now time.Time)
 // wrong session too early and leave the receiving queue without its real drain.
 func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID string) {
 	promptReady := make(chan struct{})
+	var readyOnce sync.Once
 	var preparedSessionID string
 	agentMgr.isAgentReadyFn = func(_ context.Context, _ string) bool {
 		select {
@@ -580,7 +582,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 		agentMgr.mu.Lock()
 		sessionID := preparedSessionID
 		agentMgr.mu.Unlock()
-		close(promptReady)
+		readyOnce.Do(func() { close(promptReady) })
 		svc.handleAgentBootReady(context.Background(), watcher.AgentEventData{
 			TaskID:           "task-1",
 			SessionID:        sessionID,
@@ -889,7 +891,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 			log := testLogger()
-			exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+			exec := withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 			svc := &Service{
 				logger:             log,
 				repo:               repo,
@@ -900,6 +902,14 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				executor:           exec,
 			}
 			svc.SetWorkflowStepGetter(stepGetter)
+			attempt, owner, err := svc.beginResumeAttempt(ctx, "task-1", sessionID)
+			if err != nil {
+				t.Fatalf("begin resume attempt: %v", err)
+			}
+			if !owner {
+				t.Fatal("resume attempt was not admitted")
+			}
+			defer attempt.finish(svc.resumeAttemptStore())
 
 			// Reset task to step-current in case a prior subtest moved it.
 			tk, _ := repo.GetTask(ctx, "task-1")
@@ -911,6 +921,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				TaskID: "task-1", SessionID: sessionID,
 				AgentExecutionID: "ae-current",
 				AgentProfileID:   "profile-impl",
+				AttemptID:        attempt.identity(),
 			})
 
 			finalTask, err := repo.GetTask(ctx, "task-1")
@@ -1020,7 +1031,7 @@ func TestHandleAgentBootReady_DrainsOrphanedQueuedMessage(t *testing.T) {
 				// Wire a real executor so the executeQueuedMessage goroutine
 				// spawned by drainQueuedMessageForPromptableSession can safely call
 				// PromptTask -> executor.GetExecutionBySession without nil-derefing.
-				executor: executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+				executor: withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})),
 			}
 
 			// Seed an orphaned workflow auto-start prompt — what the production
@@ -1191,7 +1202,7 @@ func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log),
-		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})),
 	}
 
 	if _, err := svc.messageQueue.QueueMessage(

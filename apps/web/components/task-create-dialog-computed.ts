@@ -24,6 +24,7 @@ import {
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import { isExecutorProfileProviderAvailable } from "@/lib/executor-provider-display";
 import type { RemoteAuthSpec } from "@/lib/api/domains/settings-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -38,6 +39,7 @@ import {
 } from "@/components/task-create-dialog-executor-source-policy";
 import {
   useSelectedRemoteOriginInspection,
+  isHostRepositorySelection,
   remoteOriginSelectionIsCompatible,
 } from "@/components/task-create-dialog-remote-origin-inspection";
 import type {
@@ -269,7 +271,9 @@ function useExecutorProfileCompat(
       dynamicRoutingEnabled,
     ],
   );
-  const noCompatibleAgent = agentCompatState !== "compatible";
+  const noCompatibleAgent =
+    agentCompatState !== "compatible" ||
+    !isExecutorProfileProviderAvailable(selectedExecutorProfile);
   const selectedAgentProfileName = selectedAgentProfile?.label ?? null;
   return {
     selectedExecutorProfile,
@@ -356,8 +360,8 @@ function useDialogExecutorState({
   const selectedFolderCount = selectedSources.filter(
     (selection) => selection.kind === "folder",
   ).length;
-  const selectedLocalRepositoryCount = selectedSources.filter(
-    (selection) => selection.kind === "local",
+  const selectedLocalRepositoryCount = selectedSources.filter((selection) =>
+    isHostRepositorySelection(selection, repositories),
   ).length;
   const selectedRemoteOriginRepositoryCount = selectedSources.filter(
     (selection) => selection.kind === "local" && selection.checkoutSource === "remote_origin",
@@ -373,6 +377,7 @@ function useDialogExecutorState({
     fs,
     workspaceId,
     exec.selectedExecutorProfile?.executor_type,
+    repositories,
   );
   const agentProfileOptions = useAgentProfileOptions(
     exec.compatibleAgentProfiles,

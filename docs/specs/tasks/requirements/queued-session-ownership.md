@@ -72,8 +72,30 @@ destination entry, whereas a ceiling can delay a session already selected by ent
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.9:** Opening or selecting a
   workflow-stopped conversation shall use normal automatic recovery, including
   non-primary conversations. Recovery shall honor auto-start prevention, capacity,
-  authorization, archive, and terminal-session rules. It shall preserve conversation
+  authorization, archive, terminal-session rules, and the failed-session restriction in 001.13. It shall preserve conversation
   context without sending a new prompt or transferring workflow ownership.
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.10:** When recovery supplies todo
+  snapshots or session-status events without an active prompt turn, those events
+  shall not create an open conversational turn or trigger workflow turn-start
+  actions. Todo snapshots shall update the live todo indicator and persist the
+  latest list, including an empty list, in a completed lifecycle-only turn so a
+  reload can restore it. A lifecycle-only turn shall not be available for a
+  later prompt to adopt.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.11:** When a workflow reuses that
+  recovered conversation, its next prompt shall start a turn on the current step.
+  Resume metadata shall not cause the prompt to inherit an earlier step stamp.
+  Existing completion-signal and clarification checks shall remain effective.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.12:** When a prompt turn already exists,
+  todo updates shall retain that active or reserved turn and persist normally,
+  including empty lists. With no active or reserved prompt turn, a recovery
+  snapshot shall persist in a completed lifecycle-only turn. Reload shall use
+  the latest persisted todo snapshot while preserving earlier todo messages.
+  A genuine active turn shall retain its original step stamp.
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.13:** Passive inspection shall not resume a superseded FAILED conversation while at least one sibling is STARTING or RUNNING. Superseded means that another existing conversation is primary. The failed conversation remains readable and explicitly recoverable. This applies on desktop and phone.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.14:** Status and passive launch admission shall enforce the same failed-session restriction. Admission shall recheck current ownership and sibling states. An unavailable ownership or sibling read shall suppress passive recovery of a candidate failed conversation. Suppression shall preserve its failure, primary ownership, queued work, and prompt history. It shall not start a replacement conversation.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.15:** Explicit recovery shall retain existing admission rules, including intentional concurrency. Eligible primary FAILED conversations and non-failed conversations shall retain normal automatic recovery. With no working sibling, a superseded FAILED conversation shall retain normal recovery. Remembered conversation selection shall remain unchanged.
 
 ### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002: Deferred work survives sibling lifecycle events
 
@@ -149,6 +171,42 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   explanation. Normal conversation controls shall remain available. Genuine queued
   destinations shall retain queue status without a duplicate Start or Resume action.
 
+### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004: Explicit discard of a pending deferred launch
+
+**Intent:** A user can cancel a queued launch they no longer want without
+depending on automatic replay cleanup, and the answer states what actually
+happened to the durable record.
+
+#### Acceptance criteria
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.1:** When the task holds no
+  ceiling-deferred launch, an explicit discard shall succeed as a no-op, write
+  nothing, and report a distinct already-clear outcome.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.2:** When the task holds an unclaimed
+  ceiling-deferred launch, an explicit discard shall settle the launch's
+  automation ownership and remove the ceiling half of the shared durable record.
+  It shall report a distinct discarded outcome and leave every non-ceiling key,
+  including a coexisting WIP or dependency intent, untouched.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.3:** When settlement or the durable
+  clear cannot be proven complete, the discard shall report a distinct retained
+  outcome naming the incomplete step. Before settlement, an ownership or
+  session-inventory read failure shall leave the run and record unchanged. If
+  the final clear fails after the user-requested settlement succeeds, the record
+  and ownership marker shall remain durable for cleanup retry; the run stays
+  terminal and a replay sweep shall finish the discard without replaying it.
+  `retained` reports that the record remains, not that its launch can still run.
+  A failed discard shall never be reported as a no-op or as a success.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.4:** An explicit discard shall not
+  clear a record that another dispatcher currently claims, and shall not clear a
+  successor record that replaced the one it observed. Both cases report the
+  retained outcome.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.5:** An explicit discard shall not
+  start, resume, or stop an agent session, and shall not perform a manual
+  launch.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.6:** The request shall use the existing
+  task-write and executor-mutation authorization of task mutation. An
+  unauthorized caller shall be denied and no durable record shall change.
+
 ## Compatibility and exclusions
 
 Actual manual starts and resumes retain the existing ceiling override. This
@@ -164,3 +222,7 @@ unrelated prompt queues retain their owning contracts.
 ## Design
 
 - [Queued session ownership](../system-design/queued-session-ownership.md)
+
+## Failed-session recovery decision
+
+- [Narrow passive recovery restriction](../../../decisions/2026-10-02-superseded-failed-session-recovery.md)

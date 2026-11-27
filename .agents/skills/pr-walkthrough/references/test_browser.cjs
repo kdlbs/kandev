@@ -29,6 +29,13 @@ async function main() {
       audience: 'Existing users', before: 'Automatic fallback', after: 'Mismatch error',
       action: 'Select a matching model', file: 'src/model.ts',
     }] };
+    data.feature_flags = {
+      coverage: 'partial', summary: 'The picker is gated. The mismatch error ships without a flag.',
+      flags: [{ key: 'new_picker', change: 'new', default: 'prod: off; dev: off; e2e: off. Restart required.',
+        enabled: 'The new picker opens.', disabled: 'The old picker opens. The settings toggle remains visible.', file: 'src/model.ts' }],
+      off_ux: { status: 'changed', items: [{ surface: 'Settings > Feature Toggles', before: 'No picker toggle',
+        after: 'The picker toggle appears even with the flag off.', file: 'src/model.ts' }] },
+    };
     const input = path.join(dir, 'test.json');
     const output = path.join(dir, 'test.html');
     fs.writeFileSync(input, JSON.stringify(data));
@@ -43,6 +50,9 @@ async function main() {
         assert.match(await page.locator('#impact').innerText(), /Breaking changes detected/);
         assert.match(await page.locator('#impact-mcp').innerText(), /net \+1/);
         assert.match(await page.locator('#impact-database').innerText(), /Existing rows retain NULL/);
+        assert.match(await page.locator('#feature-flags').innerText(), /Some feature behavior ships without flags/);
+        assert.match(await page.locator('#feature-flags').innerText(), /prod: off/);
+        assert.match(await page.locator('#feature-flags-off-ux').innerText(), /toggle appears even with the flag off/);
         const geometry = await page.locator('#impact').evaluate((el) => ({
           fits: [...el.querySelectorAll('td')].every(cell => cell.getBoundingClientRect().right <= innerWidth),
           rowDisplay: getComputedStyle(el.querySelector('tr')).display,
@@ -52,9 +62,18 @@ async function main() {
         assert.equal(geometry.fits, true);
         assert.equal(geometry.overflow, false);
         assert.equal(geometry.rowDisplay, width < 768 ? 'block' : 'table-row');
+        const flagGeometry = await page.locator('#feature-flags').evaluate((el) => ({
+          fits: [...el.querySelectorAll('td')].every(cell => cell.getBoundingClientRect().right <= innerWidth),
+          rowDisplay: getComputedStyle(el.querySelector('tr')).display,
+          label: getComputedStyle(el.querySelector('td'), '::before').content,
+        }));
+        assert.equal(flagGeometry.fits, true);
+        assert.equal(flagGeometry.rowDisplay, width < 768 ? 'block' : 'table-row');
         if (width < 768) {
           assert.match(geometry.label, /Affected users/);
           assert.ok((await page.locator('#impact-ux a').boundingBox()).height >= 44);
+          assert.match(flagGeometry.label, /Flag/);
+          assert.ok((await page.locator('#feature-flags a').first().boundingBox()).height >= 44);
         }
       }
       // The shipped menu opens below the shell's desktop navigation breakpoint.
@@ -68,8 +87,17 @@ async function main() {
       }
       assert.equal(new URL(page.url()).hash, '#impact');
       assert.ok(await page.locator('#impact-ux a').getAttribute('href').then(url => url.includes('/files#diff-')));
+      if (await page.locator('#nav-feature-flags').isVisible()) {
+        await page.locator('#nav-feature-flags').click();
+      } else {
+        await page.locator('#mobile-nav summary').click();
+        await page.locator('#mobile-nav-feature-flags').click();
+        assert.equal(await page.locator('#mobile-nav').getAttribute('open'), null);
+      }
+      assert.equal(new URL(page.url()).hash, '#feature-flags');
+      assert.ok(await page.locator('#feature-flags a').first().getAttribute('href').then(url => url.includes('/files#diff-')));
       await page.close();
-      console.log(`PASS ${width}px: impact content, themes, layout, source links, navigation`);
+      console.log(`PASS ${width}px: impact and flag content, themes, layout, source links, navigation`);
     }
   } finally {
     await browser.close();

@@ -188,7 +188,7 @@ func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	if err := wt.CreateFile(filepath.Join("linked", "created.txt")); err != nil {
 		t.Fatalf("CreateFile through registered link: %v", err)
 	}
-	if _, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("linked", "created.txt"), "", "not a diff", stringPtr("updated")); err != nil {
+	if _, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("linked", "created.txt"), filepath.Join("linked", "created.txt"), "", "not a diff", stringPtr("updated")); err != nil {
 		t.Fatalf("ApplyFileDiff through registered link: %v", err)
 	}
 	content, _, _, _, err := wt.GetFileContent(filepath.Join("linked", "created.txt"))
@@ -275,7 +275,7 @@ func TestWorkspaceFileMutationsRejectDescendantSymlinkSwap(t *testing.T) {
 				if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				_, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("switchable", "file.txt"), "", "invalid diff", stringPtr("updated"))
+				_, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("switchable", "file.txt"), filepath.Join("switchable", "file.txt"), "", "invalid diff", stringPtr("updated"))
 				return err
 			},
 			assert: func(t *testing.T, _ string, external string) {

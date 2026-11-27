@@ -75,8 +75,8 @@
     </td>
     <td align="center" valign="top" width="50%">
       <strong>Automation editor</strong><br>
-      Configure repository access, run destination, context, concurrency, and save changes.<br><br>
-      <img src="screenshots/automation-editor.png" alt="Automation editor showing repository access, run destination, context, and save controls" width="520">
+      Choose where runs go, how repeat runs relate, and what the agent is asked to do.<br><br>
+      <img src="screenshots/automation-editor.png" alt="Automation editor showing run destination, workflow, repeat runs, instructions, and save controls" width="520">
     </td>
   </tr>
   <tr>
@@ -87,6 +87,25 @@
     </td>
   </tr>
 </table>
+
+## Office mode (experimental)
+
+Office is disabled by default in production. The [Office guide](public/office.md)
+covers setup, agents, tasks and approvals, routines, budgets, and recovery for
+evaluating the current implementation. These screenshots use a disposable
+Northstar workspace with fictional customer portal work.
+
+| Setup and work | Configuration and operations |
+| --- | --- |
+| ![Office workspace setup with name and task prefix fields](screenshots/office-setup-workspace.png) | ![Engineer identity, reporting relationship, and orchestration settings](screenshots/office-agent-configuration.png) |
+| ![Office task creation with a project and acceptance brief](screenshots/office-new-task.png) | ![Daily release routine with concurrency, catch-up, cron, and timezone settings](screenshots/office-routine.png) |
+| ![Office task detail showing documents, conversation, and properties](screenshots/office-task-detail.png) | ![Office default spend ceiling and budget policy controls](screenshots/office-budgets.png) |
+
+Also see the [dashboard](screenshots/office-dashboard.png),
+[status board](screenshots/office-task-board.png), and
+[workspace pause confirmation](screenshots/office-pause.png).
+Capture provenance and image hashes are recorded in
+[office-capture.json](screenshots/office-capture.json).
 
 ## Plugins
 

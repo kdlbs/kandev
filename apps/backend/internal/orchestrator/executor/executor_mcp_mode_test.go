@@ -172,6 +172,68 @@ func TestResolveTaskSessionMCPProfile_CanvasCapabilityFollowsFeatureAndSurface(t
 	}
 }
 
+func TestResolveTaskSessionMCPProfile_WorkspaceCollaborationReportFollowsFeatureAndSurface(t *testing.T) {
+	tests := []struct {
+		name          string
+		task          *models.Task
+		expectReport  bool
+		expectSurface mcpprofile.Surface
+	}{
+		{
+			name:          "kanban task",
+			task:          &models.Task{ID: "task-kanban"},
+			expectReport:  true,
+			expectSurface: mcpprofile.SurfaceKanbanTask,
+		},
+		{
+			name:          "office task",
+			task:          &models.Task{ID: "task-office", IsFromOffice: true},
+			expectReport:  false,
+			expectSurface: mcpprofile.SurfaceOfficeTask,
+		},
+		{
+			name:          "automation task",
+			task:          &models.Task{ID: "task-automation", Origin: models.TaskOriginAutomationRun},
+			expectReport:  true,
+			expectSurface: mcpprofile.SurfaceAutomation,
+		},
+		{
+			name:          "configuration session",
+			task:          &models.Task{ID: "task-config"},
+			expectReport:  false,
+			expectSurface: mcpprofile.SurfaceConfiguration,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			session := &models.TaskSession{ID: "session", TaskID: tt.task.ID}
+			if tt.expectSurface == mcpprofile.SurfaceConfiguration {
+				session.Metadata = map[string]interface{}{"config_mode": true}
+			}
+			repo.tasks[tt.task.ID] = tt.task
+			repo.sessions[session.ID] = session
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+			profile, err := exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+
+			exec.SetWorkspaceCollaborationEnabled(true)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectSurface, profile.Surface)
+			require.Equal(t, tt.expectReport, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+
+			exec.SetWorkspaceCollaborationEnabled(false)
+			profile, err = exec.ResolveTaskSessionMCPProfile(context.Background(), tt.task.ID, session, true)
+			require.NoError(t, err)
+			require.False(t, profile.HasCapability(mcpprofile.CapabilityWorkspaceCollaborationReport))
+		})
+	}
+}
+
 func TestResolveTaskSessionMCPMode_TitlePendingIsTaskModeVariant(t *testing.T) {
 	ctx := context.Background()
 	repo := newMockRepository()
@@ -230,6 +292,7 @@ func TestMcpModeConstants_MatchTheAgentctlWireValues(t *testing.T) {
 	require.Equal(t, mcpmode.TaskTitlePending, McpModeTaskTitlePending)
 	require.Equal(t, mcpmode.Office, McpModeOffice)
 	require.Equal(t, mcpmode.Automation, McpModeAutomation)
+	require.Equal(t, mcpmode.Coordinator, McpModeCoordinator)
 }
 
 // Every branch of resolveTaskSessionMCPMode, asserted against the exact set
@@ -278,6 +341,12 @@ func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) 
 			session:  &models.TaskSession{ID: "session", TaskID: "task"},
 			wantMode: "",
 		},
+		{
+			name:     "coordinator-origin task",
+			task:     &models.Task{ID: "task", Origin: models.TaskOriginCoordinator},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: McpModeCoordinator,
+		},
 	}
 
 	for _, tt := range tests {
@@ -286,6 +355,7 @@ func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) 
 			repo.tasks[tt.task.ID] = tt.task
 			repo.sessions[tt.session.ID] = tt.session
 			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetCoordinatorLookup(fakeCoordinatorLookup{coordinatorID: "coord-1", ok: true, profilesReady: true})
 
 			mode, err := exec.resolveTaskSessionMCPMode(context.Background(), tt.task.ID, tt.session, true)
 			require.NoError(t, err)

@@ -144,6 +144,23 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 	}
 }
 
+func TestDockerStopInstancePreservesContainerOnIdleSuspension(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.newClientFunc = func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
+		t.Fatal("idle suspension should not initialize docker client")
+		return nil, nil
+	}
+
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "inst-1",
+		ContainerID: "container-1",
+		StopReason:  StopReasonIdleSuspension,
+	}, false); err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+}
+
 func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
@@ -803,13 +820,13 @@ func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {
 		return nil
 	}
-	gotPort, reused, err := dockerExec.findExistingInstance(
+	gotPort, reused, _, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)
@@ -843,13 +860,13 @@ func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *te
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {
 		return ErrGitHubCredentialBrokerUnreachable
 	}
-	_, _, err := dockerExec.findExistingInstance(
+	_, _, _, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)
@@ -869,7 +886,7 @@ func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
 		Env:        map[string]string{"GITHUB_TOKEN": "explicit-profile-token"},
 	}
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
-	port, _, err := dockerExec.findExistingInstance(
+	port, _, _, _, err := dockerExec.findExistingInstance(
 		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
 		req, "container-1", "172.17.0.2", "instance-1", "",
 	)

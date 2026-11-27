@@ -31,6 +31,7 @@ export function TaskReviewDialogMount({
         sessionId={sessionId}
         baseBranch={review.baseBranch}
         onSendComments={review.handleReviewSendComments}
+        sendingComments={review.sendingReviewComments}
         onOpenFile={onOpenFile ?? review.reviewOpenFile}
         gitStatusFiles={review.reviewGitStatusFiles}
         cumulativeDiff={review.reviewCumulativeDiff}

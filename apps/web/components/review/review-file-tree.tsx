@@ -17,7 +17,7 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { useTranslation } from "react-i18next";
 import type { ReviewFile, FileTreeNode } from "./types";
-import { buildFileTree, reviewFileKey } from "./types";
+import { buildFileTree, isReviewFileDetailReady, reviewFileKey } from "./types";
 
 type ReviewFileTreeProps = {
   files: ReviewFile[];
@@ -241,6 +241,7 @@ function ReviewFileRow({
         checked={isReviewed && !isStale}
         onCheckedChange={(checked) => onToggleReviewed(key, checked === true)}
         onClick={(e) => e.stopPropagation()}
+        disabled={!isReviewFileDetailReady(file)}
         className="h-3.5 w-3.5"
       />
       <FileIcon fileName={row.node.name} className="h-4 w-4 shrink-0" />

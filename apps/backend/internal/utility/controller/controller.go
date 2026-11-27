@@ -103,17 +103,17 @@ func (c *Controller) GetTemplateVariables(ctx context.Context) *dto.TemplateVari
 // agent/model pair is used.
 func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePromptRequest, defaults *service.DefaultUtilitySettings, sessionless bool) (*service.PromptRequest, error) {
 	tmplCtx := &template.Context{
-		GitDiff:             req.GitDiff,
-		CommitLog:           req.CommitLog,
-		ChangedFiles:        req.ChangedFiles,
+		GitDiff:             truncateContext(req.GitDiff, MaxGitDiffBytes),
+		CommitLog:           truncateContext(req.CommitLog, MaxCommitLogBytes),
+		ChangedFiles:        truncateContext(req.ChangedFiles, MaxChangedFilesBytes),
 		DiffSummary:         req.DiffSummary,
 		BranchName:          req.BranchName,
 		BaseBranch:          req.BaseBranch,
 		TaskTitle:           req.TaskTitle,
-		TaskDescription:     req.TaskDescription,
+		TaskDescription:     truncateContext(req.TaskDescription, MaxTaskDescriptionBytes),
 		SessionID:           req.SessionID,
 		UserPrompt:          req.UserPrompt,
-		ConversationHistory: req.ConversationHistory,
+		ConversationHistory: truncateConversationHistory(req.ConversationHistory),
 	}
 	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
 }
@@ -143,6 +143,11 @@ func (c *Controller) FailCall(ctx context.Context, callID, errorMessage string, 
 	return c.svc.FailCall(ctx, callID, errorMessage, durationMs)
 }
 
+// CancelCall marks a call as cancelled by the client.
+func (c *Controller) CancelCall(ctx context.Context, callID string, durationMs int) error {
+	return c.svc.CancelCall(ctx, callID, durationMs)
+}
+
 // SetCallExecutionProfile updates the concrete route attribution for a call.
 func (c *Controller) SetCallExecutionProfile(ctx context.Context, callID, executionProfileID string) error {
 	return c.svc.SetCallExecutionProfile(ctx, callID, executionProfileID)
@@ -157,6 +162,10 @@ func (c *Controller) ResolveExecutionAfterFailure(
 	failure *routingerr.Error,
 ) (agentruntime.ProfileExecution, error) {
 	return c.svc.ResolveExecutionAfterFailure(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, failure)
+}
+
+func (c *Controller) ResumePendingRoute(ctx context.Context, sessionID string, generation int64) (agentruntime.ProfileExecution, error) {
+	return c.svc.ResumePendingRoute(ctx, sessionID, generation)
 }
 
 // ListCalls returns the call history for a utility agent.

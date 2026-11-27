@@ -3,7 +3,7 @@ id: "02-qualified-materialization"
 title: "Materialize the qualified PR base"
 status: done
 wave: 2
-depends_on: 
+depends_on:
   - "01-pr-base-identity"
 plan: "plan.md"
 requirements:

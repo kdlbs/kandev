@@ -18,6 +18,8 @@ type ContextFilesStore = {
   unpinFile: (sessionId: string, path: string) => void;
   /** Remove all files where pinned is not true. */
   clearEphemeral: (sessionId: string) => void;
+  /** Consume unchanged submitted selections, retaining pinned and later selections. */
+  consumeSubmittedEphemeral: (sessionId: string, submitted: ContextFile[]) => void;
   /** Remove all files for a session (for cleanup). */
   clearSession: (sessionId: string) => void;
   /** Load persisted files from sessionStorage into the store. Safe to call multiple times. */
@@ -60,7 +62,7 @@ export const useContextFilesStore = create<ContextFilesStore>((set, get) => ({
         }
         return state;
       }
-      const updated = [...existing, file];
+      const updated = [...existing, { ...file }];
       persistFiles(sessionId, updated);
       return { filesBySessionId: { ...state.filesBySessionId, [sessionId]: updated } };
     });
@@ -100,6 +102,16 @@ export const useContextFilesStore = create<ContextFilesStore>((set, get) => ({
     set((state) => {
       const existing = state.filesBySessionId[sessionId] ?? [];
       const updated = existing.filter((f) => f.pinned === true);
+      persistFiles(sessionId, updated);
+      return { filesBySessionId: { ...state.filesBySessionId, [sessionId]: updated } };
+    });
+  },
+
+  consumeSubmittedEphemeral: (sessionId, submitted) => {
+    set((state) => {
+      const existing = state.filesBySessionId[sessionId] ?? [];
+      const updated = existing.filter((file) => file.pinned === true || !submitted.includes(file));
+      if (updated.length === existing.length) return state;
       persistFiles(sessionId, updated);
       return { filesBySessionId: { ...state.filesBySessionId, [sessionId]: updated } };
     });

@@ -1,0 +1,297 @@
+# Office run alias consumer inventory
+
+Snapshot at main commit `89ff7ff7131d3856eb775cb79e4a960be75a867c` (2026-09-27).
+The 31 registered Office aliases consist of eight types and 23 constants.
+Each section lists Go files that import `internal/office/models` and select
+the alias by its package name. Paths ending in `_test.go` are test consumers.
+The alias declaration file and canonical `internal/runs/models` declarations
+are excluded. This is a direct-consumer inventory; it does not count indirect
+uses through other symbols.
+
+## Types
+
+- **`ActorKind`**: 13 consumer file(s).
+  - `apps/backend/internal/office/approvals/handler.go` (production)
+  - `apps/backend/internal/office/approvals/handler_security_test.go` (test)
+  - `apps/backend/internal/office/approvals/service.go` (production)
+  - `apps/backend/internal/office/approvals/service_test.go` (test)
+  - `apps/backend/internal/office/runtime/actions.go` (production)
+  - `apps/backend/internal/office/runtime/actions_test.go` (test)
+  - `apps/backend/internal/office/scheduler/deferred_assignment.go` (production)
+  - `apps/backend/internal/office/scheduler/run.go` (production)
+  - `apps/backend/internal/office/scheduler/run_actor_from_context_test.go` (test)
+  - `apps/backend/internal/office/service/paused_assignment_replay.go` (production)
+  - `apps/backend/internal/office/service/run.go` (production)
+  - `apps/backend/internal/office/service/run_causation_carrier.go` (production)
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+- **`PriorityClass`**: 2 consumer file(s).
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+  - `apps/backend/internal/office/shared/wakereasons.go` (production)
+- **`RoutingBlockedStatus`**: 1 consumer file(s).
+  - `apps/backend/internal/office/dashboard/run_detail_routing_test.go` (test)
+- **`Run`**: 106 consumer file(s).
+  - `apps/backend/internal/backendapp/auth_test.go` (test)
+  - `apps/backend/internal/backendapp/office_routine_cron_to_session_test.go` (test)
+  - `apps/backend/internal/backendapp/office_run_owned_event_no_task_effect_test.go` (test)
+  - `apps/backend/internal/backendapp/office_run_session_launcher.go` (production)
+  - `apps/backend/internal/backendapp/office_run_session_launcher_reconcile_test.go` (test)
+  - `apps/backend/internal/backendapp/office_scope_test.go` (test)
+  - `apps/backend/internal/backendapp/runs_engine_adapter_actor_test.go` (test)
+  - `apps/backend/internal/office/dashboard/dto_test.go` (test)
+  - `apps/backend/internal/office/dashboard/handler_inbox.go` (production)
+  - `apps/backend/internal/office/dashboard/handler_test.go` (test)
+  - `apps/backend/internal/office/dashboard/participant_claim_cancel_failure_test.go` (test)
+  - `apps/backend/internal/office/dashboard/participants_test.go` (test)
+  - `apps/backend/internal/office/dashboard/run_detail.go` (production)
+  - `apps/backend/internal/office/dashboard/run_detail_routing_test.go` (test)
+  - `apps/backend/internal/office/dashboard/run_detail_test.go` (test)
+  - `apps/backend/internal/office/dashboard/service.go` (production)
+  - `apps/backend/internal/office/dashboard/terminal_shape_wiring_test.go` (test)
+  - `apps/backend/internal/office/infra/reconcile_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/agent_working_status_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/base_migrations.go` (production)
+  - `apps/backend/internal/office/repository/sqlite/failure.go` (production)
+  - `apps/backend/internal/office/repository/sqlite/loop_health_silent_success_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/loop_health_stuck_runs_postgres_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/loop_health_stuck_runs_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/mark_run_failed_postgres_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/route_attempts_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/run_outcome_migration_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/run_routing.go` (production)
+  - `apps/backend/internal/office/repository/sqlite/run_routing_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/runs_cancel_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/runs_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/wakeup_gap_strip_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/wakeup_requests_test.go` (test)
+  - `apps/backend/internal/office/runtime/context_builder.go` (production)
+  - `apps/backend/internal/office/runtime/context_builder_test.go` (test)
+  - `apps/backend/internal/office/runtime/scope_derivation_test.go` (test)
+  - `apps/backend/internal/office/scheduler/assignment_rate_limit_test.go` (test)
+  - `apps/backend/internal/office/scheduler/dispatch_routing.go` (production)
+  - `apps/backend/internal/office/scheduler/dispatch_routing_test.go` (test)
+  - `apps/backend/internal/office/scheduler/routing_lifecycle.go` (production)
+  - `apps/backend/internal/office/scheduler/routing_lifecycle_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_causing_run_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_delegation_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_processing.go` (production)
+  - `apps/backend/internal/office/scheduler/run_processing_test.go` (test)
+  - `apps/backend/internal/office/service/budget_admission.go` (production)
+  - `apps/backend/internal/office/service/continuation_summary.go` (production)
+  - `apps/backend/internal/office/service/continuation_summary_failure_test.go` (test)
+  - `apps/backend/internal/office/service/continuation_summary_reader_test.go` (test)
+  - `apps/backend/internal/office/service/env_builder.go` (production)
+  - `apps/backend/internal/office/service/env_builder_test.go` (test)
+  - `apps/backend/internal/office/service/event_subscribers.go` (production)
+  - `apps/backend/internal/office/service/event_subscribers_claimed_run_agent_test.go` (test)
+  - `apps/backend/internal/office/service/event_subscribers_engine_test.go` (test)
+  - `apps/backend/internal/office/service/event_subscribers_run_output_test.go` (test)
+  - `apps/backend/internal/office/service/failure.go` (production)
+  - `apps/backend/internal/office/service/failure_test.go` (test)
+  - `apps/backend/internal/office/service/failure_transient_retry_test.go` (test)
+  - `apps/backend/internal/office/service/prompt_builder.go` (production)
+  - `apps/backend/internal/office/service/retry.go` (production)
+  - `apps/backend/internal/office/service/run.go` (production)
+  - `apps/backend/internal/office/service/run_causation_carrier.go` (production)
+  - `apps/backend/internal/office/service/run_causation_carrier_completeness_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_from_task_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_checkout_contention_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_integration.go` (production)
+  - `apps/backend/internal/office/service/scheduler_integration_routing_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_run_outcome_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_runs.go` (production)
+  - `apps/backend/internal/office/service/scheduler_runs_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_staleness.go` (production)
+  - `apps/backend/internal/office/service/service.go` (production)
+  - `apps/backend/internal/office/service/taskless_lifecycle_test.go` (test)
+  - `apps/backend/internal/office/service/taskless_routed_launch_test.go` (test)
+  - `apps/backend/internal/office/service/test_helpers.go` (production)
+  - `apps/backend/internal/office/testharness/routes_office.go` (production)
+  - `apps/backend/internal/office/wakeup/causation_id_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher.go` (production)
+  - `apps/backend/internal/office/wakeup/dispatcher_race_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher_test.go` (test)
+  - `apps/backend/internal/office/wakeup/routine_e2e_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_postgres_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/base_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/cancel_postgres_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/cancel_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/claim_commit_race_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/claim_safety_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/claim_shutdown_context_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/errors_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/finish_run_postgres_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/requeue_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/run_events_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_claim_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_comments_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_crud_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_list_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_lookup_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_queue_postgres_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_queue_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_session_id_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_snapshot_cas_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_shutdown_context_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_test.go` (test)
+  - `apps/backend/internal/runs/service/service_test.go` (test)
+- **`RunEvent`**: 6 consumer file(s).
+  - `apps/backend/internal/office/dashboard/run_detail.go` (production)
+  - `apps/backend/internal/office/dashboard/run_detail_routing_test.go` (test)
+  - `apps/backend/internal/office/service/activity.go` (production)
+  - `apps/backend/internal/office/service/run_lifecycle_events_test.go` (test)
+  - `apps/backend/internal/office/service/test_helpers.go` (production)
+  - `apps/backend/internal/runs/repository/sqlite/run_events_test.go` (test)
+- **`RunEventLevel`**: 0 consumer file(s).
+  - None.
+- **`RunEventType`**: 0 consumer file(s).
+  - None.
+- **`RunStatus`**: 8 consumer file(s).
+  - `apps/backend/internal/backendapp/auth_test.go` (test)
+  - `apps/backend/internal/backendapp/office_scope_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/runs_cancel_test.go` (test)
+  - `apps/backend/internal/office/wakeup/causation_id_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher_race_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_list_test.go` (test)
+
+## Constants
+
+- **`ActorKindAgent`**: 27 consumer file(s).
+  - `apps/backend/internal/backendapp/adapters_office_test.go` (test)
+  - `apps/backend/internal/backendapp/runs_engine_adapter_actor_test.go` (test)
+  - `apps/backend/internal/office/approvals/handler.go` (production)
+  - `apps/backend/internal/office/approvals/handler_security_test.go` (test)
+  - `apps/backend/internal/office/approvals/service_test.go` (test)
+  - `apps/backend/internal/office/runtime/actions.go` (production)
+  - `apps/backend/internal/office/runtime/actions_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run.go` (production)
+  - `apps/backend/internal/office/scheduler/run_actor_from_context_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_carrier.go` (production)
+  - `apps/backend/internal/office/service/run_causation_carrier_child_task_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_carrier_completeness_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_carrier_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_from_task_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_test.go` (test)
+  - `apps/backend/internal/office/service/subtask_creator_test.go` (test)
+  - `apps/backend/internal/office/service/task_creator_carrier_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_carrier_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_depth_refusal_log_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_gate_outcome_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_refusal_durable_record_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_self_trigger_genuine_error_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_self_trigger_race_postgres_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_self_trigger_total_genuine_error_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_self_trigger_total_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_shutdown_context_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_test.go` (test)
+- **`ActorKindSystem`**: 18 consumer file(s).
+  - `apps/backend/internal/backendapp/adapters_office.go` (production)
+  - `apps/backend/internal/backendapp/adapters_office_test.go` (test)
+  - `apps/backend/internal/backendapp/main.go` (production)
+  - `apps/backend/internal/backendapp/runs_engine_adapter_actor_test.go` (test)
+  - `apps/backend/internal/office/approvals/handler.go` (production)
+  - `apps/backend/internal/office/approvals/handler_security_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run.go` (production)
+  - `apps/backend/internal/office/scheduler/run_actor_from_context_test.go` (test)
+  - `apps/backend/internal/office/service/run.go` (production)
+  - `apps/backend/internal/office/service/run_causation_from_task_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher_race_test.go` (test)
+  - `apps/backend/internal/office/wakeup/dispatcher_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_carrier_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_depth_refusal_log_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_gate_outcome_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_refusal_durable_record_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_test.go` (test)
+  - `apps/backend/internal/runs/service/service_test.go` (test)
+- **`ActorKindUser`**: 10 consumer file(s).
+  - `apps/backend/internal/backendapp/runs_engine_adapter_actor_test.go` (test)
+  - `apps/backend/internal/office/approvals/service_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run.go` (production)
+  - `apps/backend/internal/office/scheduler/run_actor_from_context_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_delegation_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_from_task_test.go` (test)
+  - `apps/backend/internal/office/service/task_creator_carrier_test.go` (test)
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+  - `apps/backend/internal/runs/service/causation_carrier_test.go` (test)
+  - `apps/backend/internal/runs/service/causation_test.go` (test)
+- **`PriorityClassEvent`**: 6 consumer file(s).
+  - `apps/backend/internal/office/scheduler/run_delegation_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_priority_class_test.go` (test)
+  - `apps/backend/internal/office/service/run_priority_class_test.go` (test)
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+  - `apps/backend/internal/office/shared/wakereasons.go` (production)
+  - `apps/backend/internal/runs/repository/sqlite/claim_safety_test.go` (test)
+- **`PriorityClassHuman`**: 7 consumer file(s).
+  - `apps/backend/internal/office/repository/sqlite/run_routing.go` (production)
+  - `apps/backend/internal/office/repository/sqlite/run_routing_test.go` (test)
+  - `apps/backend/internal/office/scheduler/run_delegation_test.go` (test)
+  - `apps/backend/internal/office/service/run_causation_from_task_test.go` (test)
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+  - `apps/backend/internal/runs/repository/sqlite/claim_safety_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_queue_test.go` (test)
+- **`PriorityClassPeriodic`**: 5 consumer file(s).
+  - `apps/backend/internal/office/repository/sqlite/run_routing_test.go` (test)
+  - `apps/backend/internal/office/shared/wakereasons.go` (production)
+  - `apps/backend/internal/office/wakeup/dispatcher_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/claim_safety_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/runs_queue_test.go` (test)
+- **`PriorityClassRecovery`**: 4 consumer file(s).
+  - `apps/backend/internal/office/repository/sqlite/run_routing.go` (production)
+  - `apps/backend/internal/office/repository/sqlite/run_routing_test.go` (test)
+  - `apps/backend/internal/office/shared/launch_safety_metrics.go` (production)
+  - `apps/backend/internal/runs/repository/sqlite/runs_queue_test.go` (test)
+- **`RoutingBlockedActionRequired`**: 0 consumer file(s).
+  - None.
+- **`RoutingBlockedWaitingForCapacity`**: 0 consumer file(s).
+  - None.
+- **`RunEventLevelError`**: 0 consumer file(s).
+  - None.
+- **`RunEventLevelInfo`**: 0 consumer file(s).
+  - None.
+- **`RunEventLevelWarn`**: 2 consumer file(s).
+  - `apps/backend/internal/office/dashboard/service.go` (production)
+  - `apps/backend/internal/office/service/event_subscribers.go` (production)
+- **`RunEventTypeAdapterInvoke`** (selected retirement group): 0 consumer file(s).
+  - None.
+- **`RunEventTypeComplete`** (selected retirement group): 0 consumer file(s).
+  - None.
+- **`RunEventTypeError`** (selected retirement group): 0 consumer file(s).
+  - None.
+- **`RunEventTypeInit`** (selected retirement group): 0 consumer file(s).
+  - None.
+- **`RunEventTypeRuntimeAction`** (selected retirement group): 0 consumer file(s).
+  - None.
+- **`RunEventTypeRuntimeDenied`**: 1 consumer file(s).
+  - `apps/backend/internal/office/dashboard/service.go` (production)
+- **`RunEventTypeStep`**: 0 consumer file(s).
+  - None.
+- **`RunStatusClaimed`**: 2 consumer file(s).
+  - `apps/backend/internal/office/repository/sqlite/runs_inflight.go` (production)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+- **`RunStatusFailed`**: 4 consumer file(s).
+  - `apps/backend/internal/office/service/failure.go` (production)
+  - `apps/backend/internal/office/service/scheduler_runs_test.go` (test)
+  - `apps/backend/internal/office/service/taskless_routed_launch_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+- **`RunStatusFinished`**: 4 consumer file(s).
+  - `apps/backend/internal/office/repository/sqlite/agent_working_status_test.go` (test)
+  - `apps/backend/internal/office/service/scheduler_runs_test.go` (test)
+  - `apps/backend/internal/office/service/taskless_routed_launch_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+- **`RunStatusQueued`**: 6 consumer file(s).
+  - `apps/backend/internal/office/dashboard/participant_claim_cancel_failure_test.go` (test)
+  - `apps/backend/internal/office/dashboard/participants_test.go` (test)
+  - `apps/backend/internal/office/dashboard/terminal_shape_wiring_test.go` (test)
+  - `apps/backend/internal/office/repository/sqlite/runs_inflight.go` (production)
+  - `apps/backend/internal/office/service/taskless_routed_launch_test.go` (test)
+  - `apps/backend/internal/runs/repository/sqlite/assignment_rate_limit_test.go` (test)
+
+## Selected retirement group
+
+The five selected run-event-type constants have no direct Go consumer files:
+`RunEventTypeInit`, `RunEventTypeAdapterInvoke`, `RunEventTypeComplete`,
+`RunEventTypeError`, and `RunEventTypeRuntimeAction`. Their canonical
+declarations and string values remain in `internal/runs/models`.

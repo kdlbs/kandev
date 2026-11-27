@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -60,6 +60,20 @@ const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
 export function normalizeTerminalFontSize(value: number, fallback: number): number {
   const base = Number.isFinite(value) ? value : fallback;
   return Math.min(24, Math.max(8, base));
+}
+
+type TerminalFontEditor = { isCustom: boolean; customValue: string };
+
+function createTerminalFontEditor(fontFamily: string | null): TerminalFontEditor {
+  const isCustom = Boolean(
+    fontFamily && !TERMINAL_FONT_PRESETS.some((preset) => preset.value === fontFamily),
+  );
+  return { isCustom, customValue: isCustom ? (fontFamily ?? "") : "" };
+}
+
+function captureTerminalFont(fontFamily: string | null, editor: TerminalFontEditor) {
+  const terminalFontFamily = editor.isCustom ? editor.customValue.trim() || fontFamily : fontFamily;
+  return { terminalFontFamily, fontEditor: createTerminalFontEditor(terminalFontFamily) };
 }
 
 function FontGroupOptions() {
@@ -141,42 +155,30 @@ function TerminalFontSizeCard({
 
 function TerminalFontCard({
   fontFamily,
+  editor,
   isDirty,
   onChange,
 }: {
   fontFamily: string | null;
+  editor: TerminalFontEditor;
   isDirty: boolean;
-  onChange: (value: string | null) => void;
+  onChange: (fontFamily: string | null, editor: TerminalFontEditor) => void;
 }) {
   const { t } = useTranslation();
-  const [isCustom, setIsCustom] = useState(() => {
-    const current = fontFamily;
-    if (!current) return false;
-    return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
-  });
-  const [customValue, setCustomValue] = useState(() => (isCustom ? fontFamily : "") ?? "");
-
-  useEffect(() => {
-    const nextIsCustom = Boolean(
-      fontFamily && !TERMINAL_FONT_PRESETS.some((preset) => preset.value === fontFamily),
-    );
-    setIsCustom(nextIsCustom);
-    setCustomValue(nextIsCustom ? (fontFamily ?? "") : "");
-  }, [fontFamily]);
+  const { isCustom, customValue } = editor;
 
   const handleSelectChange = (value: string) => {
     if (value === CUSTOM_VALUE) {
-      setIsCustom(true);
+      onChange(fontFamily, { ...editor, isCustom: true });
       return;
     }
-    setIsCustom(false);
-    setCustomValue("");
-    onChange(value === "default" ? null : value);
+    const next = value === "default" ? null : value;
+    onChange(next, createTerminalFontEditor(next));
   };
 
   const handleCustomBlur = () => {
     const trimmed = customValue.trim();
-    if (trimmed) onChange(trimmed);
+    if (trimmed) onChange(trimmed, createTerminalFontEditor(trimmed));
   };
 
   const selectValue = isCustom ? CUSTOM_VALUE : fontFamily || "default";
@@ -213,7 +215,7 @@ function TerminalFontCard({
               placeholder={t("settings:customFontExample")}
               value={customValue}
               data-settings-dirty={isDirty}
-              onChange={(e) => setCustomValue(e.target.value)}
+              onChange={(e) => onChange(fontFamily, { ...editor, customValue: e.target.value })}
               onBlur={handleCustomBlur}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleCustomBlur();
@@ -280,21 +282,33 @@ export function TerminalSettings() {
   const [saved, setSaved] = useState(() => ({
     preferredShell: shellSettings.preferredShell ?? "",
     terminalFontFamily: userSettings.terminalFontFamily,
+    fontEditor: createTerminalFontEditor(userSettings.terminalFontFamily),
     terminalFontSize: userSettings.terminalFontSize ?? 13,
     terminalLinkBehavior: userSettings.terminalLinkBehavior,
   }));
   const [draft, setDraft] = useState(saved);
   const revision = JSON.stringify(draft);
   const validFontSize = normalizeTerminalFontSize(draft.terminalFontSize, 13);
+  const fontDirty =
+    draft.terminalFontFamily !== saved.terminalFontFamily ||
+    draft.fontEditor.customValue !== saved.fontEditor.customValue;
 
   useSettingsSaveContributor({
     id: "general-terminal",
     revision,
-    isDirty: revision !== JSON.stringify(saved),
+    isDirty:
+      fontDirty ||
+      draft.preferredShell !== saved.preferredShell ||
+      draft.terminalFontSize !== saved.terminalFontSize ||
+      draft.terminalLinkBehavior !== saved.terminalLinkBehavior,
     canSave: Number.isFinite(draft.terminalFontSize),
     invalidReason: t("settings:terminalFontSizeMustBeA"),
     save: async () => {
-      const submitted = { ...draft, terminalFontSize: validFontSize };
+      const submitted = {
+        ...draft,
+        ...captureTerminalFont(draft.terminalFontFamily, draft.fontEditor),
+        terminalFontSize: validFontSize,
+      };
       const current = storeApi.getState().userSettings;
       await updateUserSettings({
         workspace_id: current.workspaceId || "",
@@ -338,9 +352,10 @@ export function TerminalSettings() {
       >
         <TerminalFontCard
           fontFamily={draft.terminalFontFamily}
-          isDirty={draft.terminalFontFamily !== saved.terminalFontFamily}
-          onChange={(terminalFontFamily) =>
-            setDraft((current) => ({ ...current, terminalFontFamily }))
+          editor={draft.fontEditor}
+          isDirty={fontDirty}
+          onChange={(terminalFontFamily, fontEditor) =>
+            setDraft((current) => ({ ...current, terminalFontFamily, fontEditor }))
           }
         />
         <TerminalFontSizeCard

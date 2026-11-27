@@ -235,12 +235,31 @@ func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
 	if writeNotVisible(c, err, "Step not found") {
 		return
 	}
+	if errors.Is(err, taskmodels.ErrWorkspaceDefaultExecutorUnavailable) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      taskmodels.ErrWorkspaceDefaultExecutorUnavailable.Error(),
+			"error_code": taskmodels.WorkspaceDefaultExecutorUnavailableErrorCode,
+		})
+		return
+	}
+	if errors.Is(err, taskmodels.ErrExecutorMutationDenied) {
+		c.JSON(http.StatusForbidden, gin.H{"error": taskmodels.ErrExecutorMutationDenied.Error()})
+		return
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case isStepValidationError(msg):
+	case errors.Is(err, models.ErrInvalidWorkflowStepOrder) || isStepValidationError(msg):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case strings.Contains(msg, "not found"):
+	case errors.Is(err, models.ErrWorkflowStepNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "Step not found"})
+	case errors.Is(err, models.ErrWorkflowTemplateNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Template not found"})
+	case errors.Is(err, repoerrors.ErrWorkflowNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workspace not found"})
+	case errors.Is(err, repoerrors.ErrExecutorProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Executor profile not found"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save step"})
 	}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -25,10 +26,27 @@ import (
 type resumeRetryRepo struct {
 	sessionStateSequencer
 	createdMessages []*models.Message
+	messages        map[string]*models.Message
 }
 
 func (r *resumeRetryRepo) CreateMessage(_ context.Context, message *models.Message) error {
 	r.createdMessages = append(r.createdMessages, message)
+	if r.messages != nil {
+		r.messages[message.ID] = message
+	}
+	return nil
+}
+
+func (r *resumeRetryRepo) GetMessage(_ context.Context, messageID string) (*models.Message, error) {
+	message := r.messages[messageID]
+	if message == nil {
+		return nil, sql.ErrNoRows
+	}
+	return message, nil
+}
+
+func (r *resumeRetryRepo) UpdateMessage(_ context.Context, message *models.Message) error {
+	r.messages[message.ID] = message
 	return nil
 }
 
@@ -360,6 +378,32 @@ func TestForwardMessageAsPrompt_SuppressesGenericErrorWhenRecoveryCardOwnsResume
 	assert.Equal(t, 1, orch.promptCalls)
 	assert.Equal(t, 1, orch.resumeCalls)
 	assert.Empty(t, repo.createdMessages, "the existing recovery card must own the resume failure")
+}
+
+func TestForwardMessageAsPrompt_MarksSavedInstructionBlockedWhenRecoveryOwnsDispatch(t *testing.T) {
+	message := &models.Message{
+		ID: "saved-prompt", TaskSessionID: "session-1", TaskID: "task-1",
+		AuthorType: models.MessageAuthorUser, Content: "the saved instruction", Metadata: map[string]interface{}{"plan_mode": true},
+	}
+	repo := &resumeRetryRepo{
+		sessionStateSequencer: sessionStateSequencer{states: []models.TaskSessionState{models.TaskSessionStateWaitingForInput}},
+		messages:              map[string]*models.Message{message.ID: message},
+	}
+	orch := &resumeRetryOrchestrator{promptErr: orchestrator.ErrSessionRecoveryRequired}
+	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+
+	h.forwardMessageAsPrompt(
+		context.Background(), "task-1", "session-1", "profile-1", message.Content,
+		"", false, nil, nil, false, "",
+		canvasGuidanceProjection{deliverySubmissionID: message.ID},
+	)
+
+	stored, err := repo.GetMessage(context.Background(), message.ID)
+	require.NoError(t, err)
+	assert.Equal(t, message.Content, stored.Content)
+	assert.Equal(t, models.MessageDeliveryStatusBlocked, stored.Metadata[models.MessageMetaKeyDeliveryStatus])
+	assert.Equal(t, true, stored.Metadata["plan_mode"])
+	assert.Empty(t, repo.createdMessages, "the recovery card owns the failure; do not add a generic agent error")
 }
 
 func TestForwardMessageAsPrompt_SuppressesCancelledResumeAttemptError(t *testing.T) {

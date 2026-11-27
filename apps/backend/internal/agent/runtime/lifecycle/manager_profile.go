@@ -13,6 +13,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ResolveAgentProfile resolves an agent profile ID to profile information.
@@ -28,25 +31,53 @@ func (m *Manager) ResolveAgentProfile(ctx context.Context, profileID string) (*A
 // getAgentConfigForExecution retrieves the agent configuration for an execution.
 // The execution must have AgentCommand set (which includes the agent type).
 func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.Agent, error) {
+	agentConfig, _, err := m.getAgentConfigAndProfileForExecution(context.Background(), execution)
+	return agentConfig, err
+}
+
+func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("%w: execution %s has no agent profile ID",
+			errRecoveredAgentIdentityAbsent, execution.ID)
 	}
 
 	if m.profileResolver == nil {
-		return nil, fmt.Errorf("profile resolver not configured")
+		return nil, nil, fmt.Errorf("profile resolver not configured")
 	}
 
-	profileInfo, err := m.profileResolver.ResolveProfile(context.Background(), execution.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve profile: %w", err)
+		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
+	}
+	if profileInfo == nil {
+		return nil, nil, fmt.Errorf("%w: failed to resolve profile: empty profile",
+			errRecoveredAgentIdentityAbsent)
 	}
 
 	agentTypeName := profileInfo.AgentName
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return nil, fmt.Errorf("agent type not found: %s", agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return nil, nil, err
 	}
 
+	return agentConfig, profileInfo, nil
+}
+
+// resolveLaunchableAgent returns the registry agent for a resolved agent type
+// name. Virtual execution families (such as the dynamic routing family) own
+// no subprocess: selecting one for a direct launch must fail closed here
+// with ErrVirtualProfile instead of reaching command building, where the
+// empty virtual command would surface only as a generic empty-command error.
+func (m *Manager) resolveLaunchableAgent(agentTypeName string) (agents.Agent, error) {
+	agentConfig, ok := m.registry.Get(agentTypeName)
+	if !ok {
+		return nil, fmt.Errorf("%w: agent type %q not found in registry",
+			errRecoveredAgentIdentityAbsent, agentTypeName)
+	}
+	if agents.IsVirtualAgent(agentConfig) {
+		return nil, fmt.Errorf("%w: agent type %q: %w",
+			errRecoveredAgentIdentityAbsent, agentTypeName, ErrVirtualProfile)
+	}
 	return agentConfig, nil
 }
 
@@ -55,10 +86,79 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.
 // - applies executor-scoped transport rules, allow/deny lists, URL rewrites, and env injection,
 // - converts to ACP stdio server definitions used during session initialization.
 func (m *Manager) resolveMcpServers(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
-	if execution == nil {
+	op, err := m.prepareExecutionMCP(ctx, execution, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	return op.servers, nil
+}
+
+func (m *Manager) resolveMcpServersForLaunch(ctx context.Context, req *LaunchRequest, agentConfig agents.Agent) ([]agentctltypes.McpServer, error) {
+	if req == nil {
 		return nil, nil
 	}
-	return m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
+	if m.mcpResolver != nil && req.WorkspaceID != "" {
+		profileID := executionProfileID(req)
+		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
+			WorkspaceID: req.WorkspaceID, RepositoryIDs: repositoryIDsFromLaunch(req),
+			ProfileID: profileID, TaskID: req.TaskID, SessionID: req.SessionID,
+		}, profileID, req.Metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
+	}
+	return m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+}
+
+func (m *Manager) resolveEffectiveMcpServers(
+	ctx context.Context, resolutionContext mcpconfig.ResolutionContext, profileID string, metadata map[string]interface{}, agentConfig agents.Agent, runtime agentruntime.Runtime,
+) ([]agentctltypes.McpServer, error) {
+	result, err := m.resolveEffectiveMCPResolution(ctx, resolutionContext, profileID, metadata, agentConfig, runtime)
+	if err != nil {
+		return nil, err
+	}
+	return mcpconfig.ToACPServers(result.Servers), nil
+}
+
+// resolveEffectiveMCPResolution applies executor policy to the process-bound automation selection.
+// Unavailable template definitions remain visible as resolution decisions.
+func (m *Manager) resolveEffectiveMCPResolution(
+	ctx context.Context,
+	resolutionContext mcpconfig.ResolutionContext,
+	profileID string,
+	metadata map[string]interface{},
+	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
+) (*mcpconfig.EffectiveMCPResolution, error) {
+	if agentConfig == nil {
+		return &mcpconfig.EffectiveMCPResolution{}, nil
+	}
+	if runtime == "" {
+		runtime = agentruntime.RuntimeStandalone
+	}
+	policy := mcpconfig.DefaultPolicyForRuntime(runtime)
+	policy, executorID, err := m.applyExecutorMcpPolicy(profileID, "", metadata, policy)
+	if err != nil {
+		return nil, err
+	}
+	if raw, ok := metadata[mcpprofile.BuiltinBindingMetadataKey]; ok {
+		binding, err := mcpprofile.ParseBuiltinBindingMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		manifest := binding.BuiltinPackages
+		if manifest.AutomationID != "" {
+			resolutionContext.Automation = &mcpconfig.AutomationMCPContribution{AutomationID: manifest.AutomationID, WorkspaceID: manifest.WorkspaceID, TaskID: manifest.TaskID, Revision: manifest.AutomationRevision, DefinitionIDs: append([]string(nil), manifest.AutomationDefinitionIDs...)}
+		}
+	}
+	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
+	if err != nil {
+		return nil, err
+	}
+	mcpconfig.AddTemplateUnavailableDecisions(result, metadata)
+	for _, decision := range result.Decisions {
+		m.logger.Warn("MCP server was not attached",
+			zap.String("profile_id", profileID), zap.String("executor_id", executorID),
+			zap.String("definition_id", decision.DefinitionID), zap.String("reason_code", decision.ReasonCode))
+	}
+	return result, nil
 }
 
 // applyExecutorMcpPolicy reads executor metadata and applies any executor-scoped MCP policy
@@ -211,8 +311,16 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
 	startupGeneration := execution.startupAttemptSnapshot()
+	setup, revision, captured := capturedMCPSetup(ctx)
 	markBootReady := func(executionID string) error {
 		return m.markBootReadyForStartup(context.Background(), executionID, startupGeneration)
+	}
+	setupAccepted := func(attemptID string) {
+		if captured {
+			execution.withStartupAttempt(startupGeneration, func(string) {
+				m.recordAcceptedMCPSetupOperation(context.Background(), execution, setup, revision, attemptID)
+			})
+		}
 	}
 	// The effective runtime model (user-selected, persisted session state)
 	// takes precedence over the profile's start model for the session; the
@@ -223,7 +331,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, markBootReady,
 		profileModel, profileMode, profileConfigOptions,
 		runtimeModel, runtimeMode, runtimeConfigOptions,
-		policy,
+		policy, setupAccepted,
 	)
 }
 
@@ -283,11 +391,39 @@ func (m *Manager) effectiveSessionRuntimeConfigWithPresence(
 // reverting to the profile default. Falls back to profileMode when no provider
 // is wired, the lookup fails, or no session mode is set. See issue #1183.
 func (m *Manager) effectiveSessionMode(ctx context.Context, execution *AgentExecution, profileMode string) string {
+	mode, _ := m.effectiveSessionModeWithSource(ctx, execution, profileMode)
+	return mode
+}
+
+// ModeSource names which layer supplied the effective session mode.
+type ModeSource string
+
+const (
+	// ModeSourceAgentProfile means the mode came from the agent profile.
+	ModeSourceAgentProfile ModeSource = "agent_profile"
+	// ModeSourceSessionOverride means a persisted session_mode won. It is
+	// written both by the user's mode toggle and by a set_session_mode
+	// workflow action, so a profile mode losing here is expected, not a bug —
+	// but it has to be visible.
+	ModeSourceSessionOverride ModeSource = "session_override"
+	// ModeSourceNone means no layer requested a mode.
+	ModeSourceNone ModeSource = "none"
+)
+
+// effectiveSessionModeWithSource returns the effective mode and the layer that
+// supplied it. Without the source, a profile mode that lost to a persisted
+// override is invisible: the session simply runs in a mode nobody can trace.
+func (m *Manager) effectiveSessionModeWithSource(
+	ctx context.Context, execution *AgentExecution, profileMode string,
+) (string, ModeSource) {
 	info := m.sessionWorkspaceInfo(ctx, execution)
-	if info == nil || info.SessionMode == "" {
-		return profileMode
+	if info != nil && info.SessionMode != "" {
+		return info.SessionMode, ModeSourceSessionOverride
 	}
-	return info.SessionMode
+	if profileMode == "" {
+		return "", ModeSourceNone
+	}
+	return profileMode, ModeSourceAgentProfile
 }
 
 func (m *Manager) sessionWorkspaceInfo(ctx context.Context, execution *AgentExecution) *WorkspaceInfo {

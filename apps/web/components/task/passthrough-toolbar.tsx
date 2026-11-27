@@ -1,15 +1,7 @@
 "use client";
 
 import type { WorkflowMovePreviewTarget } from "./workflow-move-preview-footer";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IconMessageCircle,
   IconMessageDots,
@@ -23,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
-import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
+import { TaskGraphButton } from "@/components/task-graph/task-graph-button";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
@@ -39,7 +31,9 @@ import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-override
 import { formatShortcut } from "@/lib/keyboard/utils";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { ReviewComment } from "@/lib/state/slices/comments";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { AgentTerminalInput } from "./mobile/mobile-agent-terminal";
+import { TaskChatPanel } from "./task-chat-panel";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
@@ -56,13 +50,13 @@ function isEditableElement(element: Element | null) {
   );
 }
 
-function usePassthroughComposerShortcut({
-  focusShortcut,
-  setComposerOpen,
-}: {
-  focusShortcut: KeyboardShortcut;
-  setComposerOpen: Dispatch<SetStateAction<boolean>>;
-}) {
+function usePassthroughComposer(focusShortcut: KeyboardShortcut) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
+  useEffect(() => {
+    if (!composerOpen) return;
+    requestAnimationFrame(() => chatInputRef.current?.focusInput());
+  }, [composerOpen]);
   useKeyboardShortcut(
     focusShortcut,
     useCallback(() => {
@@ -75,6 +69,7 @@ function usePassthroughComposerShortcut({
     }, [setComposerOpen]),
     { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
   );
+  return { composerOpen, setComposerOpen, chatInputRef };
 }
 
 function usePassthroughSendHandler(
@@ -112,19 +107,53 @@ function usePassthroughSendHandler(
 export function PassthroughToolbar({
   sessionId,
   taskId,
+  isVisible = true,
+  detailActive = true,
+  panelId,
+}: {
+  sessionId: string | null | undefined;
+  taskId: string | null;
+  isVisible?: boolean;
+  detailActive?: boolean;
+  panelId?: string;
+}) {
+  const ended = useAppStore((state) =>
+    isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
+  );
+  const { openFile } = useFileEditors(isVisible && detailActive);
+  if (ended) {
+    return (
+      <TaskChatPanel
+        sessionId={sessionId ?? null}
+        taskId={taskId}
+        statusTaskId={taskId}
+        onOpenFile={openFile}
+        onOpenFileAtLine={openFile}
+        hideSessionsDropdown
+        isVisible={isVisible}
+        detailActive={detailActive}
+        panelId={panelId}
+      />
+    );
+  }
+  return <ActivePassthroughToolbar sessionId={sessionId} taskId={taskId} />;
+}
+
+function ActivePassthroughToolbar({
+  sessionId,
+  taskId,
 }: {
   sessionId: string | null | undefined;
   taskId: string | null;
 }) {
-  const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
-  const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
 
   const sessionState = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId]?.state ?? null) : null,
   );
   const keyboardShortcuts = useAppStore((state) => state.userSettings?.keyboardShortcuts);
   const focusShortcut = getShortcut("FOCUS_PASSTHROUGH_INPUT", keyboardShortcuts);
+  const { composerOpen, setComposerOpen, chatInputRef } = usePassthroughComposer(focusShortcut);
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
@@ -166,17 +195,15 @@ export function PassthroughToolbar({
   });
   const { isSending, handleSendMessage } = usePassthroughSendHandler(sendPassthroughMessage);
 
-  useEffect(() => {
-    if (!composerOpen) return;
-    requestAnimationFrame(() => chatInputRef.current?.focusInput());
-  }, [composerOpen]);
-
-  usePassthroughComposerShortcut({ focusShortcut, setComposerOpen });
-
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
-        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={!finePointer} />
+        <AgentTerminalInput
+          sessionId={sessionId}
+          mobile={isMobile}
+          touch={!finePointer}
+          showControls={!composerOpen && !commentsOpen}
+        />
       </div>
 
       {commentsOpen && pendingCount > 0 && (
@@ -584,11 +611,11 @@ function PassthroughStatusRow({
         isTouch={isTouch}
       />
 
-      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 max-md:contents">
         <TaskDependencyChip taskId={taskId} />
+        <TaskGraphButton taskId={taskId} />
         <PRStatusChip taskId={taskId} />
         <MRStatusChip taskId={taskId} />
-        <AzureDevOpsTaskPullRequestChip taskId={taskId} />
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
@@ -597,7 +624,7 @@ function PassthroughStatusRow({
             nextStepName={nextStepName}
             onProceed={onProceed}
             isMoving={isMoving}
-            className={`${isTouch ? "min-h-11 min-w-11" : "h-6"} shrink-0`}
+            className={`${isTouch ? "h-auto min-h-11 min-w-11 whitespace-normal break-words" : "h-6"} ml-auto max-w-full shrink-0`}
             testId="passthrough-proceed-next-step"
           />
         )}

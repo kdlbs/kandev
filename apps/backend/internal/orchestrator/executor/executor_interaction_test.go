@@ -10,7 +10,96 @@ import (
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type submissionIdentityPromptManager struct {
+	*mockAgentManager
+	gotSubmissionID string
+}
+
+func (m *submissionIdentityPromptManager) PromptAgentWithSubmissionID(
+	_ context.Context,
+	_, _ string,
+	_ []v1.MessageAttachment,
+	_ bool,
+	submissionID string,
+) (*PromptResult, error) {
+	m.gotSubmissionID = submissionID
+	return &PromptResult{}, nil
+}
+
+func (m *submissionIdentityPromptManager) PromptAgentWithDispatchCallbackAndSubmissionID(
+	_ context.Context,
+	_, _ string,
+	_ []v1.MessageAttachment,
+	_ bool,
+	_ func(),
+	submissionID string,
+) (*PromptResult, error) {
+	m.gotSubmissionID = submissionID
+	return &PromptResult{}, nil
+}
+
+type callbackOnlyPromptManager struct {
+	*mockAgentManager
+	dispatchCallbackCalls int
+}
+
+func (m *callbackOnlyPromptManager) PromptAgentWithDispatchCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	m.dispatchCallbackCalls++
+	if onDispatched != nil {
+		onDispatched()
+	}
+	return m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+}
+
+func TestDispatchPromptPreservesSubmissionWithoutDispatchCallback(t *testing.T) {
+	manager := &submissionIdentityPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	if _, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, nil, false, "prompt:message-1",
+	); err != nil {
+		t.Fatalf("dispatchToAgent: %v", err)
+	}
+	if manager.gotSubmissionID != "prompt:message-1" {
+		t.Fatalf("submission ID = %q, want prompt:message-1", manager.gotSubmissionID)
+	}
+}
+
+func TestDispatchPromptPreservesSubmissionWithDispatchCallback(t *testing.T) {
+	manager := &submissionIdentityPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	if _, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, func() {}, false, "prompt:message-2",
+	); err != nil {
+		t.Fatalf("dispatchToAgent: %v", err)
+	}
+	if manager.gotSubmissionID != "prompt:message-2" {
+		t.Fatalf("submission ID = %q, want prompt:message-2", manager.gotSubmissionID)
+	}
+}
+
+func TestDispatchPromptRejectsCallbackManagerWithoutSubmissionCapability(t *testing.T) {
+	manager := &callbackOnlyPromptManager{mockAgentManager: &mockAgentManager{}}
+	exec := newTestExecutor(t, manager, newMockRepository())
+	_, err := exec.dispatchToAgent(
+		context.Background(), "execution-1", "prompt", nil, false, nil, func() {}, false, "prompt:message-3",
+	)
+	if !errors.Is(err, ErrPromptDispatchCallbackUnsupported) {
+		t.Fatalf("dispatch error = %v, want missing submission-aware capability", err)
+	}
+	if manager.dispatchCallbackCalls != 0 || manager.promptAgentCallCount != 0 {
+		t.Fatalf("submission was dispatched through legacy callback: callback=%d prompt=%d",
+			manager.dispatchCallbackCalls, manager.promptAgentCallCount)
+	}
+}
 
 func TestStopSessionDetailed_DoesNotOverwriteTerminalRace(t *testing.T) {
 	repo := newMockRepository()
@@ -178,6 +267,67 @@ func TestStopSessionSynchronouslyWaitsForAgentTeardown(t *testing.T) {
 	}
 	if got := repo.sessions["session-sync"].State; got != models.TaskSessionStateCancelled {
 		t.Fatalf("session state = %q, want CANCELLED", got)
+	}
+}
+
+func TestStopSessionSynchronouslyTreatsMissingRuntimeAsStopped(t *testing.T) {
+	runtimeFailure := errors.New("runtime teardown failed")
+	tests := []struct {
+		name           string
+		missingSession bool
+		stopErr        error
+		wantErr        error
+	}{
+		{
+			name:    "missing runtime is already stopped",
+			stopErr: lifecycle.ErrExecutionNotFound,
+		},
+		{
+			name:           "missing session and runtime are already stopped",
+			missingSession: true,
+		},
+		{
+			name:    "runtime teardown failure is preserved",
+			stopErr: runtimeFailure,
+			wantErr: runtimeFailure,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockRepository()
+			if tt.missingSession {
+				repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+					return nil, fmt.Errorf("session deleted: %w", models.ErrTaskSessionNotFound)
+				}
+			} else {
+				repo.sessions["session-sync"] = &models.TaskSession{
+					ID: "session-sync", TaskID: "task-sync", State: models.TaskSessionStateRunning,
+				}
+			}
+			manager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+					if tt.missingSession {
+						return "", lifecycle.ErrNoExecutionForSession
+					}
+					return "execution-sync", nil
+				},
+				stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+					return tt.stopErr
+				},
+			}
+			exec := newTestExecutor(t, manager, repo)
+
+			err := exec.StopSessionSynchronously(context.Background(), "session-sync", "cleanup", true)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("StopSessionSynchronously: %v, want success for absent runtime", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("StopSessionSynchronously error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -830,6 +980,7 @@ func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testi
 		"new-model",
 		&callerSession,
 		&LaunchAgentRequest{},
+		nil,
 		nil,
 		nil,
 		nil,

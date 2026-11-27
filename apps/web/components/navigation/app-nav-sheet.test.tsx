@@ -1,9 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { defaultState } from "@/lib/state/default-state";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
+
+vi.mock("@/components/settings/prompt-conflict-indicator", () => ({
+  PromptConflictIndicator: () => null,
+}));
 
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
@@ -12,6 +17,12 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
 }));
 
+const automationApi = vi.hoisted(() => ({
+  listAutomations: vi.fn().mockResolvedValue([]),
+  listAutomationSummaries: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("@/lib/api/domains/automation-api", () => automationApi);
+
 let pathname = "/settings";
 let inOffice = false;
 
@@ -19,15 +30,26 @@ let resolvedTheme: "light" | "dark" = "light";
 const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
 const NAV_TRIGGER = "app-nav-trigger";
 const ARIA_LABEL = "aria-label";
+const OFFICE_WORKFLOW_ID = "office-workflow";
 
 const state = {
   ...defaultState,
-  features: { canvases: false },
+  features: { ...defaultState.features, canvases: false, coordinator: true },
   workspaces: {
     activeId: "ws-1" as string | null,
     items: [{ id: "ws-1", name: "Workspace", office_workflow_id: null as string | null }],
   },
   userSettings: { ...defaultState.userSettings },
+};
+const appStoreApi = {
+  getState: () => ({
+    ...state,
+    setUserSettings: (userSettings: typeof state.userSettings) => {
+      state.userSettings = userSettings;
+    },
+  }),
+  setState: vi.fn(),
+  subscribe: vi.fn(() => () => {}),
 };
 
 beforeEach(() => {
@@ -56,6 +78,7 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => appStoreApi,
 }));
 
 vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
@@ -67,6 +90,7 @@ vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => inOffice,
+  useOfficeModeState: () => (inOffice ? "office" : "kanban"),
 }));
 
 type NavRegistration = {
@@ -92,7 +116,6 @@ vi.mock("@/lib/plugins/registry", () => ({
 
 vi.mock("@/hooks/use-nav-availability", () => ({
   useNavAvailability: () => ({
-    "azure-devops": false,
     github: false,
     gitlab: false,
     jira: false,
@@ -135,7 +158,25 @@ vi.mock("@/components/system-health/health-indicator", () => ({
 }));
 
 vi.mock("@/components/integrations/integrations-menu", () => ({
-  MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
+  MobileIntegrationsSection: ({
+    pluginDestinations = [],
+    collapsible = false,
+  }: {
+    collapsible?: boolean;
+    pluginDestinations?: { id: string; label: string; href: string }[];
+  }) => (
+    <div data-testid="mobile-integrations-section" data-collapsible={String(collapsible)}>
+      {pluginDestinations.map((item) => (
+        <a key={item.id} href={item.href}>
+          {item.label}
+        </a>
+      ))}
+    </div>
+  ),
+}));
+
+vi.mock("./mobile-coordinators-section", () => ({
+  MobileCoordinatorsSection: () => <section data-testid="mobile-coordinators-section" />,
 }));
 
 vi.mock("@/components/theme/app-theme", () => ({
@@ -147,7 +188,9 @@ type SectionsProps = Parameters<typeof AppNavSections>[0];
 function SectionsHost({
   omitSections,
   omitDestinations,
+  phoneNavigation,
 }: {
+  phoneNavigation?: boolean;
   omitSections?: SectionsProps["omitSections"];
   omitDestinations?: SectionsProps["omitDestinations"];
 }) {
@@ -159,6 +202,7 @@ function SectionsHost({
         omitSections={omitSections}
         omitDestinations={omitDestinations}
         controls={controls}
+        phoneNavigation={phoneNavigation}
       />
       {controls.dialogs}
     </>
@@ -204,7 +248,7 @@ describe("AppNavSheet", () => {
   it("offers task views for Kanban, not Office workspaces", () => {
     const host = render(<SectionsHost />);
     expect(screen.getByRole("button", { name: "Task views" })).not.toBeNull();
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
     host.rerender(<SectionsHost />);
     expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
@@ -222,10 +266,10 @@ describe("AppNavSheet", () => {
     for (const label of ["Home", "Stats", "Settings"]) {
       expect(screen.getByRole("link", { name: label })).not.toBeNull();
     }
-    // Global destinations have a stable position before local navigation.
+    // Global layout destinations have a stable position before local navigation.
     expect(
       screen
-        .getByTestId("app-nav-primary")
+        .getByTestId("mobile-sidebar-layout-navigation")
         .compareDocumentPosition(screen.getByTestId("page-nav")) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
@@ -258,7 +302,7 @@ describe("AppNavSheet", () => {
 
   it("does not offer Kanban destinations from an Office workspace on a shared page", () => {
     inOffice = true;
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
     render(<AppNavSheet />);
     fireEvent.click(screen.getByTestId(NAV_TRIGGER));
     expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
@@ -306,6 +350,22 @@ describe("AppNavSheet", () => {
       workspaceLabel: "Workspace",
       presentation: "mobile",
     });
+  });
+});
+
+describe("AppNavSheet coordinators", () => {
+  afterEach(() => cleanup());
+
+  // @covers AC-COORDINATOR-NEEDS-YOU-006.1
+  it("offers the Coordinators section above Automations on the default phone layout", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    const coordinators = screen.getByTestId("mobile-coordinators-section");
+    const automations = screen.getByTestId("mobile-automations-section");
+    expect(
+      Boolean(coordinators.compareDocumentPosition(automations) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
   });
 });
 
@@ -365,7 +425,7 @@ describe("AppNavSections", () => {
 
     expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
     expect(screen.getByRole("link", { name: "Home" })).not.toBeNull();
-    expect(screen.getByTestId("app-nav-primary")).not.toBeNull();
+    expect(screen.getByTestId("mobile-sidebar-layout-navigation")).not.toBeNull();
   });
 
   it.each([
@@ -392,20 +452,23 @@ describe("AppNavSections", () => {
     expect(status.textContent).toContain("Status");
   });
 
-  it("drops the primary section when the caller omits it", () => {
+  it("drops primary layout entries when the caller omits the primary section", () => {
     render(<SectionsHost omitSections={["primary"]} />);
 
-    expect(screen.queryByTestId("app-nav-primary")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
+    expect(screen.queryByTestId("mobile-new-task-button")).toBeNull();
     // The utility tail stays.
     expect(screen.getByTestId("mobile-improve-kandev-button")).not.toBeNull();
   });
 
-  it("keeps the legacy integrations destination for an untouched Office workspace", () => {
-    state.workspaces.items[0].office_workflow_id = "office-workflow";
+  it("omits regular-workspace integrations from an Office layout", () => {
+    inOffice = true;
+    state.workspaces.items[0].office_workflow_id = OFFICE_WORKFLOW_ID;
 
     render(<SectionsHost />);
 
-    expect(screen.getByTestId("mobile-integrations-section")).not.toBeNull();
+    expect(screen.queryByTestId("mobile-integrations-section")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Integrations" })).toBeNull();
   });
 
   it("hides the health row while the system is healthy", () => {
@@ -421,7 +484,7 @@ describe("AppNavSections", () => {
     expect(screen.getByTestId("app-nav-health-button")).not.toBeNull();
   });
 
-  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin sidebar-footer item", () => {
+  it("renders sidebar-footer plugin destinations in the layout before Utilities", () => {
     navRegistrations = [
       {
         pluginId: "acme",
@@ -439,16 +502,18 @@ describe("AppNavSections", () => {
     const settings = links.indexOf("Settings");
     const plugin = links.indexOf("Acme Board");
 
-    expect(stats).toBeGreaterThanOrEqual(0);
+    expect(plugin).toBeGreaterThanOrEqual(0);
+    expect(stats).toBeGreaterThan(plugin);
     expect(settings).toBeGreaterThan(stats);
-    expect(plugin).toBeGreaterThan(settings);
+    const pluginRows = screen.getAllByRole("link", { name: /^Acme Board$/ });
+    expect(pluginRows).toHaveLength(1);
+    expect(
+      pluginRows[0].closest('[data-testid="mobile-sidebar-layout-navigation"]'),
+    ).not.toBeNull();
   });
 
-  // The phone Utilities group is deliberately uncapped (spec.md#Capacity-and-
-  // overflow: "the phone surface is uncapped"), unlike the desktop footer's
-  // MAX_INLINE_PLUGIN_FOOTER_ITEMS budget — well over that budget (8, per
-  // spec.md's own "well over the budget" scenario) must still render every
-  // item as a row, with no overflow menu of its own.
+  // Sidebar-footer plugin destinations stay direct rows on phones, unlike the
+  // desktop footer's Utilities menu; every entry stays visible without overflow.
   it("renders every plugin sidebar-footer item as a row, uncapped, with no overflow menu", () => {
     navRegistrations = Array.from({ length: 8 }, (_, i) => ({
       pluginId: "acme",
@@ -461,9 +526,15 @@ describe("AppNavSections", () => {
     render(<SectionsHost />);
 
     for (let i = 0; i < 8; i++) {
-      expect(screen.getByRole("link", { name: `Acme Board ${i}` })).not.toBeNull();
+      const pluginRows = screen.getAllByRole("link", {
+        name: new RegExp(`^Acme Board ${i}$`),
+      });
+      expect(pluginRows).toHaveLength(1);
+      expect(
+        pluginRows[0].closest('[data-testid="mobile-sidebar-layout-navigation"]'),
+      ).not.toBeNull();
     }
-    expect(screen.queryByTestId("sidebar-plugin-overflow-button")).toBeNull();
+    expect(screen.queryByTestId("sidebar-footer-more-button")).toBeNull();
   });
 });
 
@@ -501,5 +572,109 @@ describe("AppNavSections theme toggle", () => {
 
     fireEvent.click(toggle);
     expect(mocks.setTheme).toHaveBeenCalledWith("light");
+  });
+});
+
+vi.mock("@/components/navigation/mobile-task-search-action", () => ({
+  MobileTaskSearchAction: () => null,
+}));
+
+describe("integration plugin grouping", () => {
+  afterEach(cleanup);
+  it.each([true, false])(
+    "limits the collapsed disclosure to phoneNavigation=%s",
+    (phoneNavigation) => {
+      render(<SectionsHost phoneNavigation={phoneNavigation} />);
+      expect(
+        screen.getByTestId("mobile-integrations-section").getAttribute("data-collapsible"),
+      ).toBe(String(phoneNavigation));
+    },
+  );
+  // @covers AC-UI-SIDEBAR-CUSTOMIZATION-001.10
+  it.each([false, true])("places an original integration plugin once with Office=%s", (office) => {
+    inOffice = office;
+    state.workspaces.items[0].office_workflow_id = office ? OFFICE_WORKFLOW_ID : null;
+    navRegistrations = [
+      {
+        pluginId: "youtrack",
+        id: "issues",
+        label: "YouTrack",
+        path: "/youtrack",
+        section: "integrations",
+      },
+    ];
+    render(<SectionsHost />);
+    const links = screen.getAllByRole("link", { name: "YouTrack" });
+    expect(links).toHaveLength(1);
+    if (office) {
+      expect(screen.queryByTestId("mobile-integrations-section")).toBeNull();
+    } else {
+      expect(links[0].closest('[data-testid="mobile-integrations-section"]')).not.toBeNull();
+    }
+  });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.22
+describe("saved-layout automation outcomes", () => {
+  afterEach(() => {
+    cleanup();
+    automationApi.listAutomations.mockReset().mockResolvedValue([]);
+    automationApi.listAutomationSummaries.mockReset().mockResolvedValue([]);
+  });
+  it("saved-layout automation row exposes latest failure through the real activity projection", async () => {
+    automationApi.listAutomations.mockResolvedValue([
+      {
+        id: "failed-automation",
+        workspace_id: "ws-1",
+        name: "Nightly audit",
+        enabled: true,
+        max_concurrent_runs: 1,
+        triggers: [],
+        description: "",
+        workflow_id: "",
+        workflow_step_id: "",
+        agent_profile_id: "",
+        executor_profile_id: "",
+        repository_ids: [],
+        prompt: "",
+        task_title_template: "",
+        last_triggered_at: null,
+        created_at: "2026-11-05T10:00:00Z",
+        updated_at: "2026-11-05T10:00:00Z",
+      } satisfies Automation,
+    ]);
+    automationApi.listAutomationSummaries.mockResolvedValue([
+      {
+        automation_id: "failed-automation",
+        open_runs: 0,
+        last_run: {
+          id: "failed-run",
+          automation_id: "failed-automation",
+          trigger_id: "",
+          trigger_type: "manual",
+          task_id: "",
+          status: "failed",
+          dedup_key: "",
+          trigger_data: {},
+          error_message: "",
+          created_at: "2026-11-05T10:00:00Z",
+        } satisfies AutomationRun,
+      },
+    ]);
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    fireEvent.click(screen.getByRole("button", { name: "Automations" }));
+    const row = await screen.findByRole("link", { name: "Nightly audit" });
+    await waitFor(() => expect(row.textContent).toContain("Failed"));
+    expect(row.querySelector(".bg-red-500")).not.toBeNull();
+    const description = document.getElementById(row.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toContain("Failed");
+    expect(description?.textContent).not.toContain("Idle");
+    expect(row.closest('[data-testid="mobile-sidebar-layout-navigation"]')).not.toBeNull();
+    expect(row.getAttribute("href")).toBe("/automations/failed-automation");
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(screen.getByTestId(NAV_TRIGGER).getAttribute("aria-expanded")).toBe("false"),
+    );
   });
 });

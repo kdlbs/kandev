@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	_ "time/tzdata" // embed the IANA timezone database so LoadLocation works without a system zoneinfo (Windows)
 
 	"github.com/kandev/kandev/internal/backendapp"
 	"github.com/kandev/kandev/internal/launcher"

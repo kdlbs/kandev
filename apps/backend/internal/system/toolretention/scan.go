@@ -3,6 +3,7 @@ package toolretention
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
@@ -36,6 +37,9 @@ func (s *Service) stepScan(ctx context.Context) error {
 }
 
 func (s *Service) stepAnalysis(ctx context.Context, r record) error {
+	if err := s.stepHistoryAnalysis(ctx, &r); err != nil {
+		return err
+	}
 	_, err := s.scanBatch(ctx, s.pool.Reader(), &r, false)
 	if err != nil {
 		return err
@@ -91,8 +95,16 @@ func (s *Service) scanBatch(ctx context.Context, q sqlx.QueryerContext, r *recor
 			return nil, err
 		}
 		if done {
+			if !r.Progress.HistoryDone {
+				break
+			}
 			state, code := stateSucceeded, ""
-			if r.Operation.Skipped["eligibility_budget"] > 0 {
+			switch {
+			case r.Operation.HistoryTruncated:
+				state, code = statePartial, "history_limit"
+			case r.Progress.HistoryArchiveFailures >= historyArchiveFailureLimit:
+				state, code = statePartial, "history_archive_failures"
+			case r.Operation.Skipped["eligibility_budget"] > 0:
 				state, code = statePartial, "eligibility_budget"
 			}
 			finishOperation(r, state, code, s.opts.Now())
@@ -211,6 +223,12 @@ func (s *Service) reduceRow(ctx context.Context, q sqlx.QueryerContext, r *recor
 		}
 		if n != 1 {
 			return "", errors.New("message_conflict")
+		}
+		var metadata map[string]any
+		if json.Unmarshal([]byte(raw), &metadata) == nil && models.HasIncrementalShellOutput(metadata) {
+			if err := tasksqlite.RemoveMessageShellOutputTx(ctx, tx, row.ID); err != nil {
+				return "", err
+			}
 		}
 		r.Operation.RemovedMessages++
 		r.FirstMutation = true

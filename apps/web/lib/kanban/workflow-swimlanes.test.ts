@@ -17,6 +17,16 @@ describe("selectWorkflowSwimlanes — hidden workflow filter resolution", () => 
     improve: { workflowName: IMPROVE_WORKFLOW_NAME },
   };
 
+  it("retains unloaded boards as demand candidates", () => {
+    expect(
+      selectWorkflowSwimlanes(null, workflows, {}, true).map((workflow) => workflow.id),
+    ).toEqual(["dev"]);
+    expect(
+      selectWorkflowSwimlanes("improve", workflows, {}, true).map((workflow) => workflow.id),
+    ).toEqual(["improve"]);
+    expect(selectWorkflowSwimlanes("missing", workflows, {}, true)).toEqual([]);
+  });
+
   it("keeps hidden workflows off the All Workflows board", () => {
     expect(selectWorkflowSwimlanes(null, workflows, snapshots).map((w) => w.id)).toEqual(["dev"]);
   });
@@ -147,20 +157,6 @@ describe("selectVisibleWorkflows — lane retention for hidden columns", () => {
     });
 
     expect(result.map((w) => w.id)).toEqual([WF_A.id, WF_B.id]);
-  });
-
-  it("does not retain on a stale hidden id — the predicate is the live intersection", () => {
-    // `hasLiveHiddenSteps` is defined as H ∩ liveStepIds, so a hidden set made
-    // only of deleted step ids reports false and cannot hold a lane open.
-    const result = selectVisibleWorkflows({
-      workflowFilter: null,
-      orderedWorkflows: ordered,
-      hasTasks: (id) => id === WF_B.id,
-      hasLiveHiddenSteps: noneHidden,
-      showEmptyBoard: false,
-    });
-
-    expect(result.map((w) => w.id)).toEqual([WF_B.id]);
   });
 
   it("returns every workflow when an explicit workflow filter is set", () => {

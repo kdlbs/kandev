@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 )
 
@@ -92,7 +93,18 @@ func TestPipelineJobBucket(t *testing.T) {
 		{"running", PipelineJob{Status: "running"}, pipelineJobBucketInProgress},
 		{"pending", PipelineJob{Status: "pending"}, pipelineJobBucketInProgress},
 		{"manual", PipelineJob{Status: "manual"}, pipelineJobBucketInProgress},
+		{"optional-manual", PipelineJob{Status: "manual", AllowFailure: true}, pipelineJobBucketPassed},
 	}
+	for _, status := range []string{"running", "pending", "created", "scheduled", "unknown"} {
+		for _, allowed := range []bool{false, true} {
+			cases = append(cases, struct {
+				name string
+				job  PipelineJob
+				want string
+			}{status, PipelineJob{Status: status, AllowFailure: allowed}, pipelineJobBucketInProgress})
+		}
+	}
+	// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.18
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := pipelineJobBucket(tc.job); got != tc.want {
@@ -118,5 +130,106 @@ func TestSummarizePipelineJobs(t *testing.T) {
 	}
 	if len(failing) != 1 || failing[0].ID != 2 {
 		t.Errorf("failing = %+v, want only job 2", failing)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.16
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.19
+func TestPATClient_MRJobCounts_OptionalManual(t *testing.T) {
+	cases := []struct {
+		name     string
+		jobs     []PipelineJob
+		passing  int
+		pipeline string
+	}{
+		{"optional manual", []PipelineJob{{ID: 1, Status: "success"}, optionalManualJob()}, 2, "success"},
+		{"blocking manual", []PipelineJob{{ID: 1, Status: "success"}, {ID: 2, Status: "manual"}}, 1, "manual"},
+		{"allowed running", []PipelineJob{{ID: 1, Status: "success"}, {ID: 2, Status: "running", AllowFailure: true}}, 1, "running"},
+		{"allowed failed", []PipelineJob{{ID: 1, Status: "success"}, {ID: 2, Status: "failed", AllowFailure: true}}, 2, "success"},
+		{"mixed", mixedPipelineJobs(), 5, "failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			host, stop := pipelineSummaryServer(t, tc.jobs, tc.pipeline)
+			t.Cleanup(stop)
+			client := NewPATClient(host, "disposable-token")
+			status, err := client.GetMRStatus(context.Background(), "team/service", 23)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.PipelineJobsTotal != len(tc.jobs) || status.PipelineJobsPassing != tc.passing {
+				t.Errorf("GetMRStatus counts = %d/%d, want %d/%d", status.PipelineJobsPassing, status.PipelineJobsTotal, tc.passing, len(tc.jobs))
+			}
+			feedback, err := client.GetMRFeedback(context.Background(), "team/service", 23)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(feedback.Pipelines) != 1 {
+				t.Fatalf("pipelines = %+v", feedback.Pipelines)
+			}
+			pipeline := feedback.Pipelines[0]
+			if pipeline.JobsTotal != len(tc.jobs) || pipeline.JobsPassing != tc.passing {
+				t.Errorf("GetMRFeedback counts = %d/%d, want %d/%d", pipeline.JobsPassing, pipeline.JobsTotal, tc.passing, len(tc.jobs))
+			}
+			if pipeline.Status != tc.pipeline || !reflect.DeepEqual(pipeline.Jobs, tc.jobs) {
+				t.Errorf("raw pipeline/job metadata changed: %+v", pipeline)
+			}
+		})
+	}
+}
+
+func pipelineSummaryServer(t *testing.T, jobs []PipelineJob, pipeline string) (string, func()) {
+	t.Helper()
+	return newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body any
+		switch r.URL.Path {
+		case "/projects/team/service/merge_requests/23":
+			body = map[string]any{"id": 123, "iid": 23, "title": "CI summary", "state": "opened", "source_branch": "feature", "target_branch": "main", "sha": "abc123", "web_url": "https://gitlab.example/team/service/-/merge_requests/23", "merge_status": "can_be_merged"}
+		case "/projects/team/service/merge_requests/23/approvals":
+			body = map[string]any{"approved_by": []any{}, "approvals_required": 0}
+		case "/projects/team/service/merge_requests/23/discussions":
+			body = []any{}
+		case "/projects/team/service/pipelines":
+			body = []map[string]any{{"id": 52, "status": pipeline, "ref": "feature", "sha": "abc123"}}
+		case "/projects/team/service/pipelines/52/jobs":
+			body = jobs
+		default:
+			t.Errorf("unexpected provider path %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			t.Error(err)
+		}
+	}))
+}
+
+func optionalManualJob() PipelineJob {
+	return PipelineJob{ID: 2, Name: "deploy", Stage: "deploy", Status: "manual", AllowFailure: true, WebURL: "https://gitlab.example/jobs/2"}
+}
+
+func mixedPipelineJobs() []PipelineJob {
+	return []PipelineJob{
+		{ID: 1, Status: "success"}, optionalManualJob(),
+		{ID: 3, Status: "skipped"}, {ID: 4, Status: "failed", AllowFailure: true},
+		{ID: 5, Status: "manual"}, {ID: 6, Status: "running", AllowFailure: true},
+		{ID: 7, Status: "pending", AllowFailure: true}, {ID: 8, Status: "failed"},
+		{ID: 9, Status: "canceled"}, {ID: 10, Status: "canceled", AllowFailure: true},
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.17
+func TestSummarizePipelineJobs_MixedManual(t *testing.T) {
+	jobs := mixedPipelineJobs()
+	before := append([]PipelineJob(nil), jobs...)
+	total, passing, failing := summarizePipelineJobs(jobs)
+	if total != 10 || passing != 5 {
+		t.Errorf("counts = %d/%d, want 5/10", passing, total)
+	}
+	if !reflect.DeepEqual(failing, []PipelineJob{jobs[7], jobs[8]}) {
+		t.Errorf("failing = %+v, want only non-allowed failed/canceled jobs", failing)
+	}
+	if !reflect.DeepEqual(jobs, before) {
+		t.Error("raw input jobs changed")
 	}
 }

@@ -1,4 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import {
   approvePendingCanvas,
   canvasHref,
@@ -33,9 +35,17 @@ test("renames a task canvas without replacing its running frame", async ({
     ).toBeLessThanOrEqual(32);
     await testPage.getByTestId("canvas-rename-action").click();
     const dialog = testPage.getByRole("dialog", { name: "Rename canvas" });
+    await waitForFiniteAnimations(dialog);
     await expect(dialog.getByLabel("Canvas name")).toBeFocused();
+    const nameInput = dialog.getByLabel("Canvas name");
+    const cancelButton = dialog.getByRole("button", { name: "Cancel", exact: true });
+    const saveButton = dialog.getByRole("button", { name: "Save", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.7
+    await expectControlHeight(nameInput, 28);
+    await expectControlHeight(cancelButton, 28);
+    await expectControlHeight(saveButton, 28);
     await dialog.getByLabel("Canvas name").fill("Updated workflow canvas");
-    await dialog.getByRole("button", { name: "Save" }).click();
+    await saveButton.click();
     await expect(testPage.getByText("Updated workflow canvas").first()).toBeVisible();
     await expect(frame).toHaveAttribute("data-rename-marker", "same-frame");
     await testPage.reload();

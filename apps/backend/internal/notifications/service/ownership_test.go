@@ -176,7 +176,7 @@ func newOwnershipTestService(t *testing.T, repo notificationstore.Repository, ta
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
 	}
-	svc := NewService(repo, tasks, nil, log, func() bool { return authEnforced })
+	svc := NewService(repo, tasks, nil, log, func() bool { return authEnforced }, false)
 	capture := &captureProvider{}
 	svc.providers[models.ProviderTypeLocal] = capture
 	return svc, capture
@@ -329,4 +329,20 @@ func TestServiceRefusesToTouchAnotherUsersProvider(t *testing.T) {
 	if err != nil || after.Name != "slack://user-a" {
 		t.Fatalf("provider mutated by a foreign caller: %#v (%v)", after, err)
 	}
+}
+
+func (r *multiUserRepository) CreateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events []string) error {
+	if err := r.CreateProvider(ctx, provider); err != nil {
+		return err
+	}
+	return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, events)
+}
+func (r *multiUserRepository) UpdateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events *[]string) error {
+	if err := r.UpdateProvider(ctx, provider); err != nil {
+		return err
+	}
+	if events != nil {
+		return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, *events)
+	}
+	return nil
 }

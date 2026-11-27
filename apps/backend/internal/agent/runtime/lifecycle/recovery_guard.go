@@ -52,6 +52,7 @@ const (
 	guardHeld guardState = iota
 	guardStopInFlight
 	guardRetainedUnstoppable
+	guardRetainedRemotePending
 )
 
 // NewRecoveryGuard returns an empty guard map.
@@ -128,6 +129,19 @@ func (g *RecoveryGuard) RetainAsUnstoppable(sessionID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.state[sessionID] = guardRetainedUnstoppable
+}
+
+// RetainAsRemotePending preserves a retryable guard while a remote execution's
+// owner or authenticated recovery evidence remains uncertain.
+func (g *RecoveryGuard) RetainAsRemotePending(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.state[sessionID] != guardRetainedUnstoppable {
+		g.state[sessionID] = guardRetainedRemotePending
+	}
 }
 
 // ReleaseAllExceptRetained releases every guard currently held, except a

@@ -12,7 +12,11 @@ import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import type { TaskMarkerPresentation } from "@/lib/task-color-presentation";
 import type { AutomaticTaskColorSource } from "@/lib/sidebar/task-color-rules";
 import type { TaskRepositoryRuleIdentity } from "@/lib/sidebar/repository-rule-identity";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 
 export type StepDef = {
   id: string;
@@ -25,12 +29,15 @@ export type StepDef = {
 export type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
 
 export type TaskSwitcherItem = {
+  flagNote?: string;
   id: string;
   title: string;
   autopilot?: boolean;
   priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Task-wide RUNNING aggregate; undefined preserves the legacy primary fallback. */
+  hasRunningSession?: boolean;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
@@ -51,6 +58,8 @@ export type TaskSwitcherItem = {
   repositoryRuleIdentities?: readonly TaskRepositoryRuleIdentity[];
   automaticColor?: TaskMarkerPresentation;
   automaticColorSource?: AutomaticTaskColorSource;
+  /** Visible named marker after automatic color overrides the manual fallback. */
+  effectiveColorToken?: string | null;
   /** Persisted task-to-repository links used by host-owned plugin task actions. */
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
@@ -63,26 +72,35 @@ export type TaskSwitcherItem = {
   lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
-  /** True while an accepted archive request is still in flight. */
-  isPendingArchive?: boolean;
+  /** True while an accepted archive or delete request is still in flight. */
+  isPendingRemoval?: boolean;
   isFromOffice?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
+  continuationParentTitle?: string;
+  /** Number of filtered descendants reported by the paged sidebar query. */
+  subtaskCount?: number;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
   /** Automatic session launch waiting for capacity or ownership. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
+  /** Current failed-turn attention. Drives the task-menu dismissal action. */
+  turnError?: { stamp: string; preview: string; sessionId?: string } | null;
   /** Destination-resident WIP queue position, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  /** Raw backend unread sessions; the shared row applies setting and selection. */
+  unreadSessionIds?: string[];
 };
 
 export type TaskSwitcherProps = {
@@ -120,24 +138,30 @@ export type TaskSwitcherProps = {
   onNestTask?: (taskId: string, parentTaskId: string) => void;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
   isLoading?: boolean;
   loadError?: string | null;
   onRetryLoad?: () => void;
   retryLabel?: string;
   totalTaskCount?: number;
   showActivityTime?: boolean;
+  /** Defaults on for callers which predate the saved-view preference. */
+  groupIndent?: boolean;
   taskRowPresentation?: SidebarTaskRowPresentation;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceKey?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceKey?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
+  /** The unread task dot setting; the shared row hides unread dots when false. */
+  unreadMessagesEnabled: boolean;
+  /** How long the open task keeps its unread dot after it is selected; 0 hides it at once. */
+  unreadDotHideDelayMs: number;
+  /** The open task's displayed session, which never keeps that task's dot. */
+  displayedSessionId: string | null;
 };

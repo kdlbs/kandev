@@ -104,6 +104,7 @@ func TestManagerStartLogsRecoveryOutcomeSummaryForZeroCandidates(t *testing.T) {
 	}
 	for name, want := range map[string]int{
 		"candidate_count": 0, "retracked_count": 0, "not_retracked_count": 0,
+		"not_retracked_no_matching_instance": 0, "not_retracked_enumeration_failed": 0,
 		"not_retracked_deadline": 0, "not_retracked_task_identity": 0,
 		"not_retracked_task_environment": 0, "not_retracked_agent_identity": 0,
 		"not_retracked_turn_status": 0, "not_retracked_duplicate_execution": 0,

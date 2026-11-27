@@ -97,5 +97,11 @@ export function ChatInputPluginActions(props: {
     };
   }, [taskSessions, sessionId, taskId, taskTitle, props]);
 
-  return <PluginSlot name="chat-input-actions" slotProps={slotProps} />;
+  return (
+    <PluginSlot
+      name="chat-input-actions"
+      slotProps={slotProps}
+      actionSurface={{ surface: "composer", presentation: props.presentation ?? "desktop" }}
+    />
+  );
 }

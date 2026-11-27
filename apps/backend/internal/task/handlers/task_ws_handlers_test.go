@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -116,6 +118,28 @@ func (r *wsTaskRepo) ArchiveTaskIfActiveWithVacatedStep(_ context.Context, id, _
 func (r *wsTaskRepo) UpdateTaskState(_ context.Context, id string, _ v1.TaskState) error {
 	r.stateUpdates = append(r.stateUpdates, id)
 	return nil
+}
+
+func (r *wsTaskRepo) UpdateTaskStateWithCompletionAdmission(ctx context.Context, id string, state v1.TaskState, _ *completion.Admission) error {
+	return r.UpdateTaskState(ctx, id, state)
+}
+
+func (r *wsTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return r.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
+}
+
+func (r *wsTaskRepo) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	_ *completion.Admission,
+) error {
+	return r.UpdateTaskPreservingDeferredLaunch(ctx, task)
 }
 
 func (r *wsTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
@@ -291,14 +315,40 @@ func TestWSDeleteTaskUsesHandoffCascadeWhenWired(t *testing.T) {
 	repo := &wsTaskRepo{}
 	h := newWSTaskHandlers(t, repo)
 	h.handoffSvc = service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+	h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+	ctx := asUser("user-b")
+	preview, err := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+	require.NoError(t, err)
 
-	resp, err := h.wsDeleteTask(asUser("user-a"), wsWorkflowRequest(t, ws.ActionTaskDelete,
-		map[string]any{"id": "task-b"}))
+	resp, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
 
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted)
 	require.Empty(t, repo.deleted, "wired handoff deletion must not use the legacy service path")
+
+	replay, err := h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b", "confirmation_id": preview.ConfirmationID}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, replay.Type)
+	require.Equal(t, ws.ErrorCodeConflict, wsWorkflowError(t, replay).Code)
+	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted, "single-use confirmation must block replay")
+}
+
+func TestWSDeleteTaskRequiresCurrentConfirmation(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+
+	resp, err := h.wsDeleteTask(asUser("user-b"), wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b"}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	require.Equal(t, ws.ErrorCodeValidation, wsWorkflowError(t, resp).Code)
+	require.Contains(t, wsWorkflowError(t, resp).Message, "preview is required")
+	require.Empty(t, repo.deleted)
+	require.Empty(t, repo.cascadeDeleted)
 }
 
 func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.T) {
@@ -315,9 +365,16 @@ func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.
 			handoff := service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
 			handoff.SetTaskResourceCleaner(&postCommitCleanupFailure{err: fmt.Errorf("cleanup unavailable")})
 			h.SetHandoffService(handoff)
+			ctx := asUser("user-b")
+			requestPayload := map[string]any{"id": "task-b"}
+			if tc.action == ws.ActionTaskDelete {
+				h.service.SetWorktreeCleanup(authzDeleteCleanup{})
+				preview, previewErr := h.service.TaskDeletePreflight(ctx, []string{"task-b"}, false, false)
+				require.NoError(t, previewErr)
+				requestPayload["confirmation_id"] = preview.ConfirmationID
+			}
 
-			resp, err := tc.call(h, asUser("user-b"), wsWorkflowRequest(t, tc.action,
-				map[string]any{"id": "task-b"}))
+			resp, err := tc.call(h, ctx, wsWorkflowRequest(t, tc.action, requestPayload))
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeResponse, resp.Type)
 			var payload map[string]any

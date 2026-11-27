@@ -61,8 +61,8 @@ func BuildSnapshot(ctx context.Context, repo TaskReader, taskSessionID, kandevVe
 		Version:       SnapshotVersion,
 		KandevVersion: kandevVersion,
 		ExportedAt:    time.Now().UTC(),
-		Task:          taskMeta(task),
-		Session:       sessionMeta(session),
+		Task:          taskMeta(task, red),
+		Session:       sessionMeta(session, red),
 		Messages:      mapMessages(messages, red),
 	}
 	snap.Redaction.AppliedRules = red.Applied()
@@ -79,21 +79,21 @@ func isShareableState(s models.TaskSessionState) bool {
 	return true
 }
 
-func taskMeta(t *models.Task) TaskMeta {
+func taskMeta(t *models.Task, red *Redactor) TaskMeta {
 	if t == nil {
 		return TaskMeta{}
 	}
 	return TaskMeta{
-		Title:        t.Title,
+		Title:        red.String(t.Title),
 		WorkflowStep: t.WorkflowStepID,
 	}
 }
 
-func sessionMeta(s *models.TaskSession) SessionMeta {
+func sessionMeta(s *models.TaskSession, red *Redactor) SessionMeta {
 	return SessionMeta{
-		AgentType:    snapshotString(s.AgentProfileSnapshot, "agent_type"),
-		Model:        snapshotString(s.AgentProfileSnapshot, "model"),
-		ExecutorType: snapshotString(s.ExecutorSnapshot, "type"),
+		AgentType:    red.String(snapshotString(s.AgentProfileSnapshot, "agent_type")),
+		Model:        red.String(snapshotString(s.AgentProfileSnapshot, "model")),
+		ExecutorType: red.String(snapshotString(s.ExecutorSnapshot, "type")),
 		StartedAt:    s.StartedAt,
 		CompletedAt:  s.CompletedAt,
 	}

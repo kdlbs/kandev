@@ -53,7 +53,10 @@ func TestStatsRepositoryAndDailyAggregatesAvoidTurnsMessagesProduct(t *testing.T
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
 
-	now := time.Now().UTC()
+	// Keep every seeded turn inside the current UTC day so the daily query's
+	// date range includes the complete fixture even when the test runs near UTC
+	// midnight.
+	now := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
 	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-heavy', 'Heavy', ?, ?)`, now, now)
 	execOrFatal(t, dbConn, `INSERT INTO repositories (id, workspace_id, name, created_at, updated_at) VALUES ('repo-heavy', 'ws-heavy', 'Heavy', ?, ?)`, now, now)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-heavy', 'ws-heavy', 'board-heavy', 'Heavy', 0, ?, ?)`, now, now)
@@ -347,8 +350,8 @@ func assertStatsAggregateParity(t *testing.T, repo *Repository, fixture statsPar
 		activityByDate[activity.Date] = activity
 	}
 	assertDailyActivity(t, activityByDate[fixture.rangeStart.Format("2006-01-02")], 3, 5, 1)
-	assertDailyActivity(t, activityByDate[fixture.today.Add(-24*time.Hour).Format("2006-01-02")], 1, 2, 1)
-	assertDailyActivity(t, activityByDate[fixture.today.Add(-72*time.Hour).Format("2006-01-02")], 0, 0, 0)
+	assertDailyActivity(t, activityByDate[fixture.today.Add(-24*time.Hour).Format("2006-01-02")], 1, 3, 1)
+	assertDailyActivity(t, activityByDate[fixture.today.Add(-72*time.Hour).Format("2006-01-02")], 0, 1, 0)
 }
 
 func assertTaskStats(t *testing.T, stat *models.TaskStats, sessions, turns, messages, userMessages, toolCalls int, totalDuration, elapsedSpan int64) {

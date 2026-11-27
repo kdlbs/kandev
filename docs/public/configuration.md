@@ -28,6 +28,27 @@ This page is the startup-configuration reference. Executor-specific fields are c
 
 Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
+Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
+
+## Startup progress and restored conversations
+
+Kandev finishes database initialization and local housekeeping before activating
+background schedulers, integrations, and conversation restoration. While startup
+is in progress, the browser startup page and restart dialog show the current
+operation, its elapsed time, and recent startup timings. Incomplete timing records
+are marked explicitly. The total startup time stops at readiness.
+
+Remote executors that cannot be reached remain pending for that session while
+Kandev becomes ready. Restoring independent conversations uses up to two slots;
+the visible selected conversation gets priority for the next available slot.
+Restoration keeps the original conversation and does not send an instruction or
+release queued messages. An interrupted instruction can retain an unknown outcome.
+
+The launcher also reports startup progress. `/ready` includes an optional bounded
+`startup.completed_steps` history for the current backend process. It contains
+step identifiers, labels, elapsed milliseconds, activation sequence numbers, and
+completion flags. History resets on the next backend start.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -75,12 +96,18 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 | `server.host`           | `KANDEV_SERVER_HOST`                                                | `0.0.0.0`   | HTTP listen address. It accepts one hostname/IP or a comma-separated list. Use `127.0.0.1` for local-only access.                                                                                                                                                                                                                                                                                  |
 | `server.port`           | `KANDEV_SERVER_PORT` (`KANDEV_BACKEND_PORT`, `KANDEV_PORT` aliases) | `38429`     | UI, HTTP API, WebSocket, and MCP port; must be `1`-`65535`. The launcher normally supplies its selected port.                                                                                                                                                                                                                                                                                      |
 | `server.readTimeout`    | `KANDEV_SERVER_READTIMEOUT`                                         | `30`        | HTTP read timeout in seconds.                                                                                                                                                                                                                                                                                                                                                                      |
-| `server.writeTimeout`   | `KANDEV_SERVER_WRITETIMEOUT`                                        | `30`        | HTTP write timeout in seconds.                                                                                                                                                                                                                                                                                                                                                                     |
+| `server.writeTimeout`   | `KANDEV_SERVER_WRITETIMEOUT`                                        | `30`        | HTTP write timeout in seconds. URL plugin installs get a fresh timeout for the final response after processing; downloads are limited to 60 seconds.                                                                                                                                                                                                                                                                                                                                                                     |
 | `server.webInternalUrl` | `KANDEV_WEB_INTERNAL_URL`                                           | empty       | Development reverse-proxy target for a separately running web app. Installed releases normally serve embedded assets.                                                                                                                                                                                                                                                                              |
 | `server.webTitlePrefix` | `KANDEV_WEB_TITLE_PREFIX`                                           | empty       | Prefixes the browser tab title as `<prefix> Kandev` (for example `TEST` renders `TEST Kandev`), so several instances stay distinguishable in adjacent tabs. `make dev` defaults to `Dev`; `make start-debug` keeps production defaults, enables diagnostics, and defaults to `Debug`; PR previews use `Preview`. An explicit value overrides these defaults. Empty keeps the plain `Kandev` title. |
 | `server.trustedProxies` | `KANDEV_TRUSTED_PROXIES`                                            | empty list  | IP addresses or CIDR ranges for proxies whose forwarded client headers Kandev accepts. See [Trusted proxies](#trusted-proxies-for-x-forwarded-for).                                                                                                                                                                                                                                                |
 
 When `server.host` is unset, `server.hosts` may provide a YAML list of bind addresses. The launcher derives its health targets and access URL from this resolved set. It probes an IPv4 wildcard through `127.0.0.1` and keeps `localhost` as the default browser/access URL, while it probes and accesses an IPv6 wildcard through `[::1]`. The backend still listens on every interface for a wildcard bind. The current local product path must not be treated as an authenticated multi-user perimeter. For remote access, bind to loopback and use a trusted authenticated tunnel/proxy, or isolate the network at the deployment layer.
+
+### Notifications
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webhookAllowPrivateNetworks` | `KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS` | `false` | Allows webhook providers to send to private or local destinations. This setting applies to the backend process. Keep it disabled unless the destination needs it. Restart the backend after a change. |
 
 ### Database
 
@@ -96,10 +123,21 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 | `database.sslMode`  | `KANDEV_DATABASE_SSLMODE`  | `disable`               | `disable`, `require`, `verify-ca`, or `verify-full`.                      |
 | `database.maxConns` | `KANDEV_DATABASE_MAXCONNS` | `25`                    | PostgreSQL maximum pool size.                                             |
 | `database.minConns` | `KANDEV_DATABASE_MINCONNS` | `5`                     | PostgreSQL minimum pool size.                                             |
+| `database.sqliteReaderConns` | `KANDEV_SQLITE_READER_CONNS` | `4` | SQLite read-only pool size. Startup-only; accepts `1`-`64` and sets both maximum open and idle readers. Invalid values fail startup when SQLite is selected. Ignored for PostgreSQL and does not reject PostgreSQL startup. |
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
 
-`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
+`database.sqliteReaderConns` is an opt-in startup override for installations where concurrent interactive reads exhaust the default four-connection SQLite read pool. It changes only the read-only pool size and requires a restart. It does not change the single-writer connection, database health probing, or PostgreSQL pool sizing. Invalid values reject a SQLite startup; a PostgreSQL selection is not rejected by this SQLite-only setting.
+
+Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
+Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
+application database role cannot install extensions, a database administrator can
+run `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;` in the Kandev
+database, then restart Kandev. Missing text-index support disables conversation
+search while task metadata search remains available. History is indexed after
+startup; the index uses additional disk space.
+
+`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
 ### Default SQLite continuity
 
@@ -118,7 +156,7 @@ merge the databases. An explicit database path bypasses legacy discovery.
 
 One backend owns a Kandev home at a time. When SQLite uses a custom path outside that home, the backend also owns that database path, so separate homes alone do not permit concurrent backends against one SQLite file. Use a separate home and database for an intentional second instance. Ownership is released when the backend exits.
 
-Database-only snapshots also omit `<home>/data/master.key`, the AES-256 key used to decrypt stored secrets. Preserve that owner-only key with an independently secured home/data backup; restoring the database without its matching key leaves encrypted credentials unreadable. See [Operations](operations.md).
+Database-only snapshots also omit `<home>/data/master.key`. This owner-only AES-256 key decrypts stored secrets and signs the default managed Git reissue capabilities through a derived signer. Preserve the matching key with an independently secured home/data backup. If Kandev cannot load a valid 32-byte key at startup, it attempts to generate and save a replacement; the replacement cannot decrypt existing secrets or verify outstanding default capabilities. See [Operations](operations.md).
 
 ### Event bus and NATS
 
@@ -134,23 +172,24 @@ An external NATS URL moves event traffic across the configured network and can e
 
 ### Docker runtime
 
+Every `docker.*` key configures Kandev **as a Docker client**, driving the daemon it creates task containers on. None of them configures the container Kandev itself runs in. The network a task container is created on is an executor-profile setting, not a global one; see [Executors](executors.md#container-networks). When you run Kandev from the published image, its own network comes from `docker run --network` or your Compose `networks:` block, and the Docker executor is off by default (`KANDEV_DOCKER_ENABLED=false`) until you mount a daemon socket. See [Docker](docker.md).
+
 | YAML key                | Environment variable           | Default                                                                       | Current behavior                                                                                                                       |
 | ----------------------- | ------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `docker.enabled`        | `KANDEV_DOCKER_ENABLED`        | `true`                                                                        | Registers the local Docker executor. The client connects lazily, so startup can succeed without a daemon.                              |
 | `docker.host`           | `KANDEV_DOCKER_HOST`           | `DOCKER_HOST`, otherwise platform socket                                      | Docker endpoint used by the client. Defaults to `unix:///var/run/docker.sock` on Unix and `npipe:////./pipe/docker_engine` on Windows. |
 | `docker.apiVersion`     | `KANDEV_DOCKER_APIVERSION`     | empty                                                                         | Empty uses Docker API negotiation.                                                                                                     |
 | `docker.tlsVerify`      | `KANDEV_DOCKER_TLSVERIFY`      | `false`                                                                       | Accepted compatibility field; not wired into the current client.                                                                       |
-| `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network`                                                              | Accepted compatibility field; not wired into current executor networking.                                                              |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement.                                                        |
 
 The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](docker.md) and [Executors](executors.md).
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                                                  |
-| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                  |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. `agentctl` and its per-session servers listen only on this host, so they stay on loopback by default. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.                                                                                                                                        |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -195,14 +234,56 @@ environment value falls back to `2h`, and non-positive values from a profile
 default are ignored, leaving the `2h` default in effect. The environment
 variable overrides YAML, and changes require a backend restart.
 
+### Backend delivery retention
+
+These startup values apply to SQLite and PostgreSQL. Restart the backend after a change.
+Invalid durations, zero values, and values outside the ranges stop startup.
+Environment values override YAML. These values do not configure the agentctl journal.
+
+| YAML key                               | Environment variable                           | Default   | Range              |
+| -------------------------------------- | ---------------------------------------------- | --------- | ------------------ |
+| `tasks.deliveryRetention.payloadGrace` | `KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE` | `1h`      | `1m` to `720h`     |
+| `tasks.deliveryRetention.replayAge`    | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE`    | `24h`     | `1h` to `720h`     |
+| `tasks.deliveryRetention.replayEvents` | `KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS` | `10000`   | 100 to 100000      |
+| `tasks.deliveryRetention.interval`     | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL`      | `1m`      | `10s` to `1h`      |
+| `tasks.deliveryRetention.batchRows`    | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS`    | `200`     | 1 to 200           |
+| `tasks.deliveryRetention.batchBytes`   | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES`   | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
+
+`batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
+
+If a batch exceeds its SQL deadline, subsequent attempts halve that cleanup phase's candidate ceiling, down to one. Other phases keep their limits. A new worker starts from the configured ceilings. Deadline failures still use retry backoff; this adjustment does not change retention eligibility, byte limits or transaction deadlines.
+
+Automatic cleanup preserves canonical history and unresolved recovery evidence.
+Grace controls eligible raw payload removal. Replay age and event count bound recent duplicate receipts.
+Safety checks apply at every configured value. Protected data has no forced expiry.
+See [delivery retention operations](operations.md#backend-delivery-retention) for backups, rollback, logs, and physical reclamation.
+
 ### Capacity and managed-process startup settings
+
+Settings > Task Behavior keeps session capacity disabled by default. Its
+automatic-only policy preserves manual-start overrides. Administrators can
+explicitly select the all-execution policy and save a total maximum plus
+per-grade limits, up to 64 grades; existing admitted work continues while later
+launches wait.
+A grade maximum of zero pauses new admissions for that grade. Ordinary message
+turns use both limits before warm dispatch or a cold resume. Their admitted grade
+is retained through the resume.
+
+Profiles and tasks expose an optional `execution_grade` through their existing
+APIs. A nonempty task grade takes precedence over its selected logical profile.
+The grade is fixed when the session is admitted. Under all-execution policy,
+unconfigured grades and unavailable population information are reported as such
+in queue status. The existing `KANDEV_MAX_CONCURRENT_SESSIONS` override retains
+automatic-only behavior and locks the Settings editor until removed and restarted.
 
 | YAML key                                   | Environment variable                              | Type and default                  | Current behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------------ | ------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `credentials.file`                         | `KANDEV_CREDENTIALS_FILE`                         | path, empty                       | Optional fallback JSON credential file. The file is read lazily and must be restricted to the Kandev service account.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `limits.ghMaxConcurrent`                   | `KANDEV_GH_MAX_CONCURRENT`                        | positive integer, `8`             | Process-wide `gh` subprocess admission cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `limits.gitMaxConcurrent`                  | `KANDEV_GIT_MAX_CONCURRENT`                       | positive integer, `12`            | Process-wide `git` subprocess admission cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `limits.lspMaxConnections`                 | `KANDEV_LSP_MAX_CONNECTIONS`                      | positive integer, `8`             | Maximum active and detached task-host language-server leases when browser continuity is enabled. At capacity, Kandev evicts the least-recently detached lease; if all leases are attached, it rejects the new request.                                                                                                                                                                                                                                                                                                                     |
+| `limits.lspMaxConnections`                 | `KANDEV_LSP_MAX_CONNECTIONS`                      | positive integer, `8`             | Maximum active and detached task-host language-server leases, which is the shipped default. At capacity, Kandev evicts the least-recently detached lease; if all leases are attached, it rejects the new request.                                                                                                                                                                                                                                                                                              |
 | `messageQueue.maxPerSession`               | `KANDEV_QUEUE_MAX_PER_SESSION`                    | integer `>= 0`, `10`              | Per-session pending-message cap. Zero means unlimited. A non-negative YAML or environment value locks capacity in Settings; a negative environment value means unlimited, and invalid environment input falls through to the lower-precedence source.                                                                                                                                                                                                                                                                                      |
 | `agentctl.idleTimeout`                     | `KANDEV_ACP_IDLE_TIMEOUT`                         | Go duration, `1h`                 | Idle managed-agent reaping timeout. Zero disables reaping.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `agentctl.idleReaperInterval`              | `KANDEV_ACP_IDLE_REAPER_INTERVAL`                 | Go duration, `1m`                 | Interval between idle-agent scans.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -234,7 +315,9 @@ through a private process contract.
 | `auth.sessionTTLHours`                 | `KANDEV_AUTH_SESSIONTTLHOURS`                     | `720`            | Compatibility session lifetime setting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `auth.cookieName`                      | `KANDEV_AUTH_COOKIE_NAME`                         | empty            | Session cookie base name. Empty (default) means the effective name is derived from the request host: `kandev_session` on a default-port host, `kandev_session_<port>` on a ported host. This isolates multiple instances on one host (see [authentication](authentication.md#multiple-instances-on-one-host)). A non-empty value is used verbatim (never port-suffixed) and disables automatic isolation, so it must be unique per cookie host. Precedence: environment over config file over default. |
 | `office.jwtSigningKey`                 | `KANDEV_OFFICE_JWTSIGNINGKEY`                     | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL used by remote executors to resolve GitHub credentials. Loopback HTTP is allowed for development.                                                                                                                                                                                                                                                                                                                                                                                |
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty            | Public HTTPS base URL of Kandev, used by remote executors to resolve GitHub credentials and by plugin remote executors to call the Kandev API. Loopback HTTP is allowed for development; plugin remote executors require a non-local HTTPS URL.                                                                                                                                                                                                                                                        |
+| `githubCredentialBroker.reissueSigningKey` | `KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY` | empty | Sensitive startup-only override for the managed Git reissue signer. By default, Kandev derives the signer from `<home>/data/master.key`. Environment values override YAML. Changing the active signer makes outstanding capabilities unusable; restart the backend after a change. |
+| `githubCredentialBroker.disableReissue` | `KANDEV_GITHUB_CREDENTIAL_BROKER_DISABLE_REISSUE` | `false` | Startup-only switch that suspends managed Git capability issuance and exchange. Ordinary lease issuance and resolution continue. Environment values override YAML; restart the backend after a change. |
 
 Runtime feature flags are documented in [Runtime feature toggles](#runtime-feature-toggles); they are profile, environment, and database-backed controls, not canonical YAML settings.
 
@@ -310,6 +393,22 @@ kandev.service`) or the container environment. The supervisor manifest at
 `~/.kandev/supervisor/launch.json` is generated by the launcher on every
 launch and is not an environment configuration source.
 
+### Web Push
+
+Web Push uses a VAPID contact address and accepts browser push endpoints from
+known push services. Use these settings only when you operate the Kandev
+backend.
+
+| YAML key | Environment variable | Default | Current behavior |
+| --- | --- | --- | --- |
+| `notifications.webPushSubject` | `KANDEV_WEBPUSH_SUBJECT` | `mailto:admin@localhost.invalid` | Contact address sent to the push service. Use a `mailto:` or `https:` URL. A plain email address becomes a `mailto:` URL. |
+| `notifications.webPushAllowedHosts` | `KANDEV_WEBPUSH_ALLOWED_HOSTS` | empty | Comma-separated DNS suffixes for a self-hosted push service. Kandev also allows the standard Google, Mozilla, Apple, and Windows push hosts. |
+
+Only add a host suffix for a push service that you operate and trust. Users
+with accounts can register endpoints under each configured suffix. Do not add
+private application hosts or broad domains. This setting controls where the
+backend can send push requests.
+
 ### Logging
 
 | YAML key         | Environment variable    | Default                                    | Current behavior                                                                                                               |
@@ -324,6 +423,13 @@ Active and closed backend files use at most 256 MiB in total. Kandev removes the
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
+
+Managed agentctl children use `AGENTCTL_LOG_FORMAT=json` so their stdout
+records pass through the backend relay's privacy projection. Approved probe
+diagnostics remain in the message; unrelated structured fields are omitted. The
+backend overrides an inherited value. `AGENTCTL_LOG_FORMAT` still configures
+agentctl processes started independently; it does not change the backend's
+`logging.format` setting.
 
 ### Repository, worktree, and clone paths
 
@@ -373,7 +479,13 @@ select **Validate**; this explicit check is independent of discovery roots.
 `KANDEV_DEBUG_DEV_MODE=true` selects the `dev` profile. `make dev` sets that
 selector and defaults the browser title to `Dev Kandev`. `make start-debug`
 enables pprof and debug logging without selecting the `dev` profile, and
-defaults the browser title to `Debug Kandev`. Debug mode is high risk. It
+defaults the browser title to `Debug Kandev`. Source startup compiles the
+frontend as production React regardless of an inherited `NODE_ENV` value.
+Runtime diagnostics do not depend on that build mode, so `make start-debug`
+keeps debug logging and pprof while React development warnings and default
+performance-track instrumentation stay out of the bundle. Use `make dev` for
+development React when `NODE_ENV` is unset or set to `development`. Debug mode
+is high risk. It
 enables local diagnostic surfaces and implies
 `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true` when
 not explicitly locked by the environment. ACP JSONL frames include complete
@@ -424,6 +536,9 @@ server:
   webInternalUrl: ""
   webTitlePrefix: ""
 
+notifications:
+  webhookAllowPrivateNetworks: false
+
 database:
   driver: "sqlite"
   path: ""
@@ -450,7 +565,6 @@ docker:
   host: "unix:///var/run/docker.sock" # use the Windows named pipe on Windows
   apiVersion: ""
   tlsVerify: false # compatibility-only today
-  defaultNetwork: "kandev-network" # compatibility-only today
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:
@@ -536,11 +650,14 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | -------------------------------- | ----------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `features.auth`                  | `KANDEV_FEATURES_AUTH`                    | off                | Experimental authentication, users, per-user workspaces, and team access.                                                                                                                                                                                                                                                                                                                                      |
 | `features.multiTenancy`          | `KANDEV_FEATURES_MULTI_TENANCY`           | off                | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise.                                                                                                                                                                                                                                                                                                  |
-| `features.dynamicAgentRouting`   | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING`   | off                | Experimental dynamic profiles with ordered provider-error fallback.                                                                                                                                                                                                                                                                                                                                            |
-| `features.canvases`              | `KANDEV_FEATURES_CANVASES`                | off                | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk.                                                                                                                                                                                                                                                                                                                     |
+| `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback and shared circuit admission for fixed profiles. Shared resource circuits use the default 1, 5, 15, and 30 minute ladder, then 1, 2, and 4 hours. A clean completed turn resets the count; a later provider reset time can extend the wait. This flag remains off in prod, dev, and e2e and requires a restart. |
+| `features.canvases`              | `KANDEV_FEATURES_CANVASES`                | on                 | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk.                                                                                                                                                                                                                                                                                                                     |
 | `features.needsYouInbox`         | `KANDEV_FEATURES_NEEDS_YOU_INBOX`         | off                | Inbox for clarification questions and failed tasks in the active workspace. The Failed tab shows a bounded list with its own count.                                                                                                                                                                                                                                                                            |
-| `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | on                 | Office participant sessions: each participant agent gets its own session per task. The live `(task_id, agent_profile_id)` pair is guarded in-transaction, not by a table-level index. Pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file.                                                                                            |
 | `features.agentSurvival`         | `KANDEV_FEATURES_AGENT_SURVIVAL`          | off                | Experimental. Lets the `agentctl` control server and its running agents outlive a backend restart or upgrade, for the `local_pc` and worktree executors only. The restarted backend takes the surviving server over and reconnects to the sessions still running on it. **Unavailable on Windows**, where surviving the backend means giving up the Job Object that guarantees agent processes are cleaned up. |
+| `features.acpV2` | `KANDEV_FEATURES_ACP_V2` | off | Uses ACP v2 for [qualified local structured sessions](agents-and-profiles.md#acp-v2-preview). Restart required. |
+| `features.agentBackgroundWork`   | `KANDEV_FEATURES_AGENT_BACKGROUND_WORK`   | on                 | Shared background-work inspection chip, summary, detail views, and retained history for supported providers. On by default in `prod`, `dev`, and `e2e`; the toggle remains an operator off switch that also gates the read and action endpoints. Provider jobs stay observation-only when the runtime advertises no controls. |
+| `features.opencodePlugin`        | `KANDEV_FEATURES_OPENCODE_PLUGIN`         | off                | Supplies the Kandev integration plugin to supported OpenCode v2 2.2.0 task launches so native shell terminal outcomes can settle existing jobs. Off in `prod`, `dev`, and `e2e`; restart required. V1, unsupported versions, and conflicting inline configuration keep ordinary ACP behavior. Requires `features.agentBackgroundWork` for shell observations. |
+| `features.workspaceCollaboration` | `KANDEV_FEATURES_WORKSPACE_COLLABORATION` | off | Experimental. Narrows verified conversation callers by workspace and independent read, report, prompt, and control grants, intersecting native permissions. Off in `prod`, `dev`, and `e2e`; restart required. With the flag off, native APIs keep their existing behavior and saved grants are retained. |
 | `debug.devMode`                  | `KANDEV_DEBUG_DEV_MODE`                   | off                | High-risk diagnostic endpoints and ACP frame logging.                                                                                                                                                                                                                                                                                                                                                          |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -555,9 +672,9 @@ build or platform cannot support it, so the control is disabled and shows the
 reason rather than accepting a value. Neither an environment variable nor a
 database override enables an unavailable toggle.
 
-`features.canvases` is off in the `prod`, `dev`, and `e2e` profiles. Restart Kandev
-after enabling or disabling it. The restart is required because Kandev registers
-canvas MCP tools and composes the canvas backend at startup. With the flag off,
+Canvases are on in the `prod`, `dev`, and `e2e` profiles. To disable canvases, turn off
+`features.canvases` or set `KANDEV_FEATURES_CANVASES=false`. Restart Kandev after
+changing the toggle. With the flag off,
 Kandev exposes no canvas tools, routes, events, background work, or navigation.
 The database can contain canvas migrations, but Kandev does not read or change
 canvas data while the flag is off. See [Agent-authored Canvases](canvases.md)
@@ -567,6 +684,13 @@ for the experimental user workflow.
 development and E2E profiles. Restart Kandev after changing it because the
 backend registers the Inbox routes at startup. With the flag off, the Inbox
 routes, boot count, sidebar entry, and page are unavailable.
+
+`features.workspaceCollaboration` is off in the `prod`, `dev`, and `e2e`
+profiles and requires a restart. When enabled, conversation callers are limited
+to their own workspace plus explicit grants that a native workspace manager sets
+on the task. Read, report, prompt, and control are independent and never widen
+native permissions. Turning the flag off restores native behavior without
+deleting saved grants.
 
 For a risky release feature that has not graduated, keep the flag off in the
 shipped profiles, enable it only on a selected install through an admin override
@@ -581,7 +705,7 @@ The source checkout's `make dev` activates the embedded development profile, whi
 
 ## Credentials and product settings
 
-The **Unread Messages** preference in **Settings > Preferences > Task Behavior > Conversation** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
+The **Show New divider in transcripts** preference in **Settings > Preferences > Task Behavior > Conversation** controls the Slack-style **New** divider in session transcripts. The **Show unread dot on tasks** preference directly below it controls the unread dot on task rows in the desktop task sidebar and the mobile task switcher. Both default off for each user, persist with user settings, and take effect immediately. While either is on, that user's active transcript view advances the session read cursor. A task row shows the dot when one of its sessions has an agent message you have not seen, including sessions you have never opened; your own messages never count. Reading a session to its end clears its contribution, including messages the transcript hides. The task you have open keeps its dot while another of its sessions is unread. When you open a task that shows the dot, the dot stays for the **Unread dot hide delay**, then clears. The delay appears only while the dot is on, defaults to 2 seconds, accepts 0 to 60 seconds (0 clears it immediately), and changes only how long the dot stays visible: messages are marked read as soon as you view them. Setup output, subagent messages, session start and resume notices, recovery cards, action notices, and permission or clarification requests do not set the dot. Read cursors are shared by every user of a session, so reading a task in one window clears its dot in the others.
 
 Most integrations, executor profiles, agent profiles, MCP servers, repository settings, and UI preferences are persistent database records edited under **Settings**. They are not fields in `config.yaml`. Secret values use an encrypted secret store backed by `<home>/data/master.key`; filesystem permissions, database backups, and key backup are part of the security boundary.
 
@@ -619,7 +743,7 @@ overrides.
 | ------------------------------------ | -------------------------------------------- | -------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `limits.ghMaxConcurrent`             | `KANDEV_GH_MAX_CONCURRENT`                   |      `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default.                                                                                                                                                                                                          |
 | `limits.gitMaxConcurrent`            | `KANDEV_GIT_MAX_CONCURRENT`                  |     `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default.                                                                                                                                                                                                         |
-| `limits.lspMaxConnections`           | `KANDEV_LSP_MAX_CONNECTIONS`                 |      `8` | Positive integer cap for active and detached task-host language-server leases when continuity is enabled; Kandev evicts the least-recently detached lease or rejects the request if all leases are attached. Invalid/non-positive uses default.                                                      |
+| `limits.lspMaxConnections`           | `KANDEV_LSP_MAX_CONNECTIONS`                 |      `8` | Positive integer cap for active and detached task-host language-server leases. At capacity, Kandev evicts the lease detached longest. If all leases are attached, Kandev rejects the request. Invalid values use the default.                       |
 | `messageQueue.maxPerSession`         | `KANDEV_QUEUE_MAX_PER_SESSION`               |     `10` | Pending messages per session. A non-negative YAML value locks the saved UI capacity; a valid environment value overrides YAML and locks it; a negative environment value means unlimited; malformed environment input falls through to YAML, the saved setting, or default.                          |
 | `agentctl.idleTimeout`               | `KANDEV_ACP_IDLE_TIMEOUT`                    |     `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default.                                                                                                                                                                                              |
 | `agentctl.idleReaperInterval`        | `KANDEV_ACP_IDLE_REAPER_INTERVAL`            |     `1m` | Go duration between idle scans.                                                                                                                                                                                                                                                                      |
@@ -679,6 +803,7 @@ no public YAML key:
   `KANDEV_FEATURES_AUTH`,
   `KANDEV_FEATURES_MULTI_TENANCY`,
   `KANDEV_FEATURES_NEEDS_YOU_INBOX`,
+  `KANDEV_FEATURES_WORKSPACE_COLLABORATION`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,

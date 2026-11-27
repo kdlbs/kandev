@@ -3,6 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { attachMainFrameNavigationCapture } from "../../helpers/document-navigation";
+import {
+  countSessionStatusRequests,
+  expectOwnedSessionStatusRequests,
+} from "../../helpers/session-status-ownership";
+import { attachSessionStatusRequestCapture } from "../../helpers/ws-capture";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
@@ -117,26 +124,37 @@ test.describe("Subtask basics", () => {
     seedData,
     prCapture,
   }) => {
-    // Create a task with an agent so we have a session to navigate to
+    // Distinct prompt markers prove the child chat is not the stale parent
+    // conversation. Both resolve to the simple-message mock scenario.
+    const runMarker = Date.now();
+    const parentPrompt = `/e2e:simple-message parent-conversation-${runMarker}`;
+    const childPrompt = `/e2e:simple-message child-activation-${runMarker}`;
+
+    // The dialog inherits the active session's branch, but the agent does not
+    // need to finish before the task context menu can be exercised.
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Subtask Parent",
       seedData.agentProfileId,
       {
-        description: "/e2e:simple-message",
+        description: parentPrompt,
         workflow_id: seedData.workflowId,
         repository_ids: [seedData.repositoryId],
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
+
+    const statusRequests = attachSessionStatusRequestCapture(testPage);
 
     // Navigate to the session page
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-
-    // Wait for agent to complete
-    await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 
@@ -180,14 +198,77 @@ test.describe("Subtask basics", () => {
     // Fill prompt and submit
     const promptInput = testPage.getByTestId("subtask-prompt-input");
     await expect(promptInput).toBeVisible();
-    await promptInput.fill("/e2e:simple-message");
+    await promptInput.fill(childPrompt);
 
     const submitBtn = testPage.getByRole("button", { name: "Create Subtask" });
+    const createdResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+    // Arm before submission: the handoff must stay client-side. Any main-frame
+    // document navigation here would mean a reload recovered the page.
+    const documentNavigations = attachMainFrameNavigationCapture(testPage);
     await submitBtn.click();
+    const created = (await (await createdResponse).json()) as {
+      id: string;
+      title: string;
+      session_id?: string;
+      primary_session_id?: string;
+    };
+    const childSessionId = created.session_id ?? created.primary_session_id;
+    if (!childSessionId) throw new Error("creation must return the child session");
     await expect(titleInput).not.toBeVisible({ timeout: 10_000 });
 
-    // After creation, we navigate to the new subtask's session
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The child's own route and conversation, not the parent route the local
+    // URL helper previously left behind. These assertions are passive: they
+    // cannot reload the document or recover a broken handoff.
+    const childUrl = new RegExp(`/t/${created.id}\\?sessionId=${childSessionId}$`);
+    await expect(testPage).toHaveURL(childUrl, { timeout: 15_000 });
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText(created.title);
+    const childChat = testPage.locator('[data-testid="session-chat"]:visible');
+    await expect(childChat).toHaveCount(1);
+    await expect(childChat).toHaveAttribute("data-session-id", childSessionId);
+    await expect(childChat.getByText(childPrompt)).toBeVisible();
+    await expect(childChat.getByText(parentPrompt)).toHaveCount(0);
+    await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+    await expect(testPage.getByText(/does not belong to task/i)).toHaveCount(0);
+    await expect
+      .poll(() => countSessionStatusRequests(statusRequests.frames, created.id, childSessionId))
+      .toBeGreaterThan(0);
+    await expectOwnedSessionStatusRequests(apiClient, statusRequests.frames, [
+      { taskId: task.id },
+      { taskId: created.id, sessionIds: [childSessionId] },
+    ]);
+    expect(
+      documentNavigations.requests,
+      `the child conversation must appear before any document reload: ${JSON.stringify(
+        documentNavigations.requests,
+      )}`,
+    ).toEqual([]);
+    await prCapture.screenshot("desktop-subtask-child-conversation", {
+      caption: "Desktop child task conversation opened directly after subtask creation",
+    });
+
+    // Reload after the handoff assertions as a separate persistence check and
+    // repeat the exact child-session/content assertions.
+    const childStatusRequestsBeforeReload = countSessionStatusRequests(
+      statusRequests.frames,
+      created.id,
+      childSessionId,
+    );
+    await testPage.reload();
+    const reloadedChildChat = testPage.locator('[data-testid="session-chat"]:visible');
+    await expect(reloadedChildChat).toHaveCount(1);
+    await expect(reloadedChildChat).toHaveAttribute("data-session-id", childSessionId);
+    await expect(reloadedChildChat.getByText(childPrompt)).toBeVisible();
+    await expect(reloadedChildChat.getByText(parentPrompt)).toHaveCount(0);
+    await expect(testPage).toHaveURL(childUrl);
+    await expect(testPage.getByTestId("task-topbar-title")).toHaveText(created.title);
+    await expect
+      .poll(() => countSessionStatusRequests(statusRequests.frames, created.id, childSessionId))
+      .toBeGreaterThan(childStatusRequestsBeforeReload);
+    await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+    await expectOwnedSessionStatusRequests(apiClient, statusRequests.frames, [
+      { taskId: task.id },
+      { taskId: created.id, sessionIds: [childSessionId] },
+    ]);
 
     // Verify the subtask card appears on the kanban board with "Subtask" badge
     const kanban = new KanbanPage(testPage);
@@ -388,8 +469,32 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
-    const subtaskTitle = "MCP-subtask-e2e-verify";
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const subtaskTitle = `MCP-subtask-e2e-verify-${Date.now()}`;
+    const settingsBefore = await apiClient.getUserSettings();
+    const baselineLayout =
+      settingsBefore.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: baselineLayout?.revision ?? 0,
+        layout: {
+          version: 1,
+          revision: 0,
+          navigation_height: 0,
+          navigation_expanded: false,
+          nodes: [
+            { id: "home", kind: "builtin", destination_id: "home", visible: true },
+            { id: "new-task", kind: "builtin", destination_id: "new_task", visible: true },
+            { id: "integrations", kind: "builtin", destination_id: "integrations", visible: true },
+          ],
+        },
+      },
+    });
 
     const script = [
       'e2e:thinking("Planning subtasks...")',
@@ -399,36 +504,81 @@ test.describe("MCP subtask creation", () => {
       'e2e:message("Done.")',
     ].join("\n");
 
-    // 1. Create parent task via UI dialog
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    try {
+      await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
+      await expect(testPage.getByTestId("sidebar-navigation-split")).toBeVisible();
+      const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
+      const layoutSaved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await navigationExpand.click();
+      expect((await layoutSaved).ok()).toBeTruthy();
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
 
-    await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
-    await testPage.getByTestId("task-description-input").fill(script);
+      // 1. Create parent task via UI dialog
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+      await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
+      await testPage.getByTestId("task-description-input").fill(script);
 
-    // 2. Sidebar task creation navigates directly to the parent session.
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      await startBtn.click();
+      await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 3. Wait for the agent to complete — the MCP create_task call happens during execution
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      // 2. Sidebar task creation navigates directly to the parent session.
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const parentTaskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)/)?.[1];
+      expect(parentTaskId).toBeTruthy();
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
-    await kanban.goto();
+      // 3. Wait for the agent to complete — the MCP create_task call happens during execution
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+      // 4. Confirm the created task is related to its parent and visible in the
+      // sidebar hierarchy, which is independent of the current Kanban workflow filter.
+      await expect
+        .poll(async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.find((task) => task.title === subtaskTitle)?.id ?? null;
+        })
+        .not.toBeNull();
+      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+      const child = tasks.find((task) => task.title === subtaskTitle);
+      expect(child).toBeDefined();
+      const childDetails = await apiClient.getTask(child!.id);
+      expect(childDetails.parent_id).toBe(parentTaskId);
+
+      const sidebar = testPage.getByTestId("task-sidebar");
+      const parentRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${parentTaskId}"]`,
+      );
+      await expect(parentRow).toBeVisible();
+      const subtaskToggle = parentRow.getByTestId("sidebar-subtask-toggle");
+      if ((await subtaskToggle.getAttribute("aria-expanded")) !== "true") {
+        await subtaskToggle.click();
+      }
+      await expect(subtaskToggle).toHaveAttribute("aria-expanded", "true");
+      const childRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${child!.id}"]`,
+      );
+      await expect(childRow).toBeVisible({ timeout: 10_000 });
+      await expect(childRow).toContainText(subtaskTitle);
+    } finally {
+      const currentLayout = (await apiClient.getUserSettings()).settings
+        .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: currentLayout?.revision ?? 0,
+          layout: baselineLayout ?? null,
+        },
+      });
+    }
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({
@@ -897,6 +1047,10 @@ test.describe("Subtask dialog feature parity", () => {
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync("git init -b main", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git remote add origin https://github.com/subtask-owner/subtask-repo.git", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     const ghRepo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "subtask-owner/subtask-repo",
       provider: "github",
@@ -1262,8 +1416,8 @@ test.describe("Subtask inheritance", () => {
           .toBe(creatorProfile.id);
 
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        const createdSession = sessions[0] as SessionInfo;
-        expect(effectiveRuntimeConfig(createdSession)).toEqual({
+        const { session: createdSession } = await apiClient.getTaskSession(sessions[0].id);
+        expect(effectiveRuntimeConfig(createdSession as SessionInfo)).toEqual({
           model: "mock-smart",
           mode: "plan-mock",
           config_options: { effort: "max" },

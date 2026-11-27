@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { createShardPlan } from "./plan-shards";
 import {
   buildTimingProfile,
   collectEligibleSamples,
@@ -91,6 +92,66 @@ describe("e2e timing collection", () => {
     expect(readBlobReportJsonl(filePath)).toBe(reportJsonl());
   });
 
+  it("uses helper timings for each owning spec's shard estimate", () => {
+    const catalog = ["first", "second"].map((name) => ({
+      project: "chromium",
+      file: `tests/chat/${name}.spec.ts`,
+      fileHash: `hash-${name}`,
+      testCount: 1,
+    }));
+    const helperLocation = { file: "tests/chat/shared-cases.ts", line: 10, column: 1 };
+    const suites = catalog.map((unit, index) => ({
+      title: "",
+      location: { file: unit.file, line: 0, column: 0 },
+      entries: [
+        {
+          title: "shared suite",
+          location: helperLocation,
+          entries: [{ testId: `helper-${index}`, title: "works", location: helperLocation }],
+        },
+      ],
+    }));
+    const observations = parseBlobReportJsonl(
+      [
+        event("onProject", { project: { name: "chromium", suites } }),
+        ...catalog.flatMap((_, index) => [
+          event("onTestBegin", {
+            testId: `helper-${index}`,
+            result: { id: `result-${index}`, retry: 0 },
+          }),
+          event("onTestEnd", {
+            test: { testId: `helper-${index}`, expectedStatus: "passed" },
+            result: { id: `result-${index}`, duration: (index + 1) * 1200, status: "passed" },
+          }),
+        ]),
+      ].join("\n"),
+    );
+    const profile = buildTimingProfile(undefined, observations, {
+      branch: "main",
+      sha: "helper-sha",
+      runId: "13",
+      generatedAt: "2026-10-14T00:00:00.000Z",
+      fileHashes: new Map(catalog.map((unit) => [unit.file, unit.fileHash])),
+    });
+    const plan = createShardPlan(catalog, { cohort: "normal", shardCount: 2, profile });
+
+    expect(profile.entries).toHaveLength(2);
+    expect(plan.shards.flatMap((shard) => shard.units)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ...catalog[0],
+          estimatedSeconds: 1.2,
+          classification: "profile",
+        }),
+        expect.objectContaining({
+          ...catalog[1],
+          estimatedSeconds: 2.4,
+          classification: "profile",
+        }),
+      ]),
+    );
+  });
+
   it("uses only first-attempt passing results as baseline samples", () => {
     const observations = parseBlobReportJsonl(reportJsonl());
 
@@ -130,12 +191,19 @@ describe("e2e timing collection", () => {
       unitIds: [],
     });
     const complete = [
-      ...Array.from({ length: 14 }, (_, index) => metadata("normal", index + 1, 14)),
+      ...Array.from({ length: 28 }, (_, index) => metadata("normal", index + 1, 28)),
       ...Array.from({ length: 6 }, (_, index) => metadata("containers", index + 1, 6)),
     ];
 
     expect(hasCompleteShardSet(complete)).toBe(true);
     expect(hasCompleteShardSet(complete.slice(0, -1))).toBe(false);
+    expect(hasCompleteShardSet([...complete, complete[0]!])).toBe(false);
+    expect(
+      hasCompleteShardSet([
+        ...Array.from({ length: 14 }, (_, index) => metadata("normal", index + 1, 14)),
+        ...complete.filter((entry) => entry.cohort === "containers"),
+      ]),
+    ).toBe(false);
   });
 
   it("merges and bounds timing history", () => {

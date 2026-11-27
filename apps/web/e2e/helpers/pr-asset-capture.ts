@@ -44,6 +44,20 @@ function ensureDir(dir: string): void {
   }
 }
 
+async function waitForFiniteAnimations(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const finiteAnimations = document.getAnimations({ subtree: true }).filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return (
+        animation.playState === "running" && iterations !== undefined && Number.isFinite(iterations)
+      );
+    });
+    await Promise.all(
+      finiteAnimations.map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
+}
+
 function readManifest(outputDir: string): AssetManifest {
   const manifestPath = path.join(outputDir, "manifest.json");
   if (fs.existsSync(manifestPath)) {
@@ -147,8 +161,10 @@ export class PrAssetCapture {
     const safeName = sanitizeName(name);
     const fileName = `${this.testSlug}--${safeName}.png`;
     const filePath = path.join(this.outputDir, fileName);
+    const page = opts?.page ?? this.page;
 
-    await (opts?.page ?? this.page).screenshot({
+    await waitForFiniteAnimations(page);
+    await page.screenshot({
       path: filePath,
       fullPage: opts?.fullPage ?? false,
     });

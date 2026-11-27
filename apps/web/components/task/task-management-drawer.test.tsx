@@ -6,8 +6,9 @@ import { TaskManagementDrawer } from "./task-management-drawer";
 afterEach(cleanup);
 describe("task drawer navigation", () => {
   // @covers AC-TASKS-THREADS-ACTIONS-004.3, AC-TASKS-THREADS-ACTIONS-004.6, AC-TASKS-THREADS-ACTIONS-001.3
-  it("chooses a workflow step in one surface and backs through nested pages", () => {
+  it("opens the change form directly and keeps same-workflow step navigation separate", () => {
     const onMove = vi.fn();
+    const onChangeWorkflow = vi.fn();
     render(
       <StateProvider>
         <TaskManagementDrawer
@@ -24,6 +25,7 @@ describe("task drawer navigation", () => {
             two: [{ id: "s3", title: "Build" }],
           }}
           onMove={onMove}
+          onChangeWorkflow={onChangeWorkflow}
           onPriority={vi.fn()}
           onArchive={vi.fn()}
           onDelete={vi.fn()}
@@ -33,15 +35,11 @@ describe("task drawer navigation", () => {
         />
       </StateProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Send to workflow" }));
-    fireEvent.click(screen.getByRole("button", { name: "Two" }));
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("button", { name: "Two" })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Two" }));
-    fireEvent.click(screen.getByRole("button", { name: "Two" }));
-    fireEvent.click(screen.getByRole("button", { name: "Build" }));
-    expect(onMove).toHaveBeenCalledWith("two", "s3");
+    fireEvent.click(screen.getByRole("button", { name: "Change workflow..." }));
+    expect(onChangeWorkflow).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("task-management-page-steps"));
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(onMove).toHaveBeenCalledWith("one", "s2");
   });
 
   it("keeps current lifecycle status outside the disabled step choice", () => {
@@ -64,6 +62,7 @@ describe("task drawer navigation", () => {
             ],
           }}
           onMove={vi.fn()}
+          onChangeWorkflow={vi.fn()}
           onPriority={vi.fn()}
           onArchive={vi.fn()}
           onDelete={vi.fn()}

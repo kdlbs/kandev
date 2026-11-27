@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-08-04
 owners:
@@ -27,6 +27,7 @@ Preserve the observable behavior documented for Repair PR-only commit details.
 - **AC-UI-PR-ONLY-COMMIT-DETAILS-001.6:** Desktop and mobile commit details render the same source-aware data.
 - **AC-UI-PR-ONLY-COMMIT-DETAILS-001.7:** GitHub-only commit details are read-only relative to the task worktree. They do not expose reset, revert, amend, open-current-worktree-file, or local context-expansion controls.
 - **AC-UI-PR-ONLY-COMMIT-DETAILS-001.8:** A GitHub request failure produces the existing visible error treatment and never silently falls back to local `git show` data.
+- **AC-UI-PR-ONLY-COMMIT-DETAILS-001.9:** On desktop and phone, after a commit reader closes or its request target is replaced, retired requests shall publish no files, metadata, error, loading completion, toast, or frontend error report. A retained retry action from the retired reader or target shall dispatch no request. A current reader shall retain retry, current error feedback, and latest-request behavior independently of other readers, including after closing and reopening the same commit.
 
 ## Migrated source detail
 
@@ -121,6 +122,14 @@ reason to consult the local worktree.
   current binary, unavailable, or truncated-patch treatment.
 - Route any changed user-facing copy through i18n. No new explanatory copy is
   required for this repair.
+
+Reader retirement is local to the mounted view and its committed request
+target. It does not cancel transport work or change provider error policy.
+Collapsing an inline list that retains its mounted reader does not close it.
+
+## Implementation plans
+
+- [Commit-detail reader lifetime](../../../plans/commit-detail-reader-lifetime/plan.md)
 
 ## Out of scope
 

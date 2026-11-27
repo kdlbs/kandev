@@ -1,20 +1,38 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { openTaskSession } from "../../helpers/session";
-import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import { openTaskSession, waitForSessionDone } from "../../helpers/session";
+import { assertVerticalCentersAligned } from "../../helpers/layout-assertions";
+import {
+  createSettledHistoryTask,
+  routeSessionEntryRecovery,
+} from "../../helpers/session-entry-recovery";
 
 async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: string) {
-  return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
-    description: "/e2e:simple-message",
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-    repository_ids: [seedData.repositoryId],
-  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("entry fixture did not return a session_id");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the seeded entry conversation to settle",
+    45_000,
+  );
+  return task;
 }
 
 test.describe("session entry recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("completes entry when status and subscription acknowledgements take seven seconds", async ({
     testPage,
@@ -75,9 +93,13 @@ test.describe("session entry recovery", () => {
   }) => {
     test.setTimeout(150_000);
     const proxy = await routeSessionEntryRecovery(testPage);
-    const task = await createEntryTask(apiClient, seedData, `History recovery ${Date.now()}`);
+    const task = await createSettledHistoryTask(
+      apiClient,
+      seedData,
+      `History recovery ${Date.now()}`,
+    );
 
-    proxy.dropNextResponses("message.list", 2);
+    proxy.failResponses("message.list", "Injected history read failure");
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
@@ -86,17 +108,78 @@ test.describe("session entry recovery", () => {
       session.activeChat().getByText("No messages yet. Start the conversation!", { exact: true }),
     ).toHaveCount(0);
 
-    const details = session.activeChat().getByTestId("session-history-details");
-    await expect(details).toBeVisible();
-    await expect(details).not.toHaveAttribute("open", "");
-    await details.getByTestId("session-history-details-summary").click();
-    await expect(details).toHaveAttribute("open", "");
-    await expect(details).toContainText("WebSocket request timed out: message.list");
-
-    await historyNotice.getByTestId("session-history-retry").click();
+    await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
+    proxy.allowResponses("message.list");
+    const retry = historyNotice.getByTestId("session-history-retry");
+    const requestsBeforeRetry = proxy.requestCount("message.list");
+    await retry.click();
+    await expect
+      .poll(() => proxy.requestCount("message.list"))
+      .toBeGreaterThan(requestsBeforeRetry);
     await expect(historyNotice).toHaveCount(0);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.requestCount("message.list")).toBeGreaterThanOrEqual(2);
+    expect(proxy.failedResponseCount("message.list")).toBeGreaterThan(0);
+  });
+
+  test("centers conversation progress during loading and manual recovery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const proxy = await routeSessionEntryRecovery(testPage);
+    const task = await createSettledHistoryTask(
+      apiClient,
+      seedData,
+      `History progress alignment ${Date.now()}`,
+    );
+
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
+    const session = await openTaskSession(testPage, task.id);
+    const chat = session.activeChat();
+    try {
+      const loading = chat.getByTestId("session-history-loading");
+      await expect(loading).toBeVisible();
+      await assertVerticalCentersAligned(
+        loading.locator(".spinner-grid"),
+        loading.locator(":scope > span").nth(1),
+        "loading conversation",
+      );
+    } finally {
+      proxy.releaseHeldResponses("message.list");
+    }
+    await expect(chat.getByTestId("session-history-loading")).toHaveCount(0);
+    await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
+
+    const failedResponsesBeforeReload = proxy.failedResponseCount("message.list");
+    proxy.failResponses("message.list", "Injected alignment test history failure");
+    await testPage.reload();
+    await expect
+      .poll(() => proxy.failedResponseCount("message.list"), {
+        timeout: 30_000,
+        message: "Waiting for the reloaded history request to receive the injected failure",
+      })
+      .toBeGreaterThan(failedResponsesBeforeReload);
+    const unavailable = chat.getByTestId("session-history-unavailable");
+    await expect(unavailable).toBeVisible();
+    await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
+    proxy.allowResponses("message.list");
+    proxy.holdResponses("message.list", { sessionId: task.session_id });
+    try {
+      await unavailable.getByTestId("session-history-retry").click();
+      const retrying = chat.getByTestId("session-history-loading");
+      await expect(retrying).toBeVisible();
+      await assertVerticalCentersAligned(
+        retrying.locator(".spinner-grid"),
+        retrying.locator(":scope > span").nth(1),
+        "retrying conversation",
+      );
+    } finally {
+      proxy.releaseHeldResponses("message.list");
+    }
+    await expect(chat.getByTestId("session-history-loading")).toHaveCount(0);
+    await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({

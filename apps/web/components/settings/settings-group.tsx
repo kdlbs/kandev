@@ -57,7 +57,7 @@ function SettingsGroupHeading({
       <span className="flex items-center gap-2">
         <svg
           aria-hidden="true"
-          className="size-4 shrink-0 transition-transform group-open:rotate-90"
+          className="size-4 shrink-0 transition-transform group-open/settings-disclosure:rotate-90"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -129,7 +129,7 @@ function SettingsGroupContent({
     );
   }
   return (
-    <SettingsCard isDirty={isDirty} className="min-w-0 w-full" data-settings-group-card="true">
+    <SettingsCard isDirty={isDirty} className="min-w-0 w-full py-0" data-settings-group-card="true">
       <div className={cn("divide-y divide-border/70 px-4 py-2", contentClassName)}>{children}</div>
     </SettingsCard>
   );
@@ -197,12 +197,13 @@ export function SettingsGroup({
           >
             {collapsible ? (
               <details
+                className="group/settings-disclosure"
                 ref={detailsRef}
                 open={open}
                 onToggle={(event) => setOpen(event.currentTarget.open)}
                 data-settings-group-disclosure="true"
               >
-                <summary className="group flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                   <SettingsGroupHeading
                     title={title}
                     description={description}

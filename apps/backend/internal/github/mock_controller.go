@@ -45,6 +45,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/issues", c.addIssues)
 	api.POST("/orgs", c.addOrgs)
 	api.POST("/repos", c.addRepos)
+	api.PUT("/repository-details", c.setRepositoryDetails)
 	api.POST("/reviews", c.addReviews)
 	api.POST("/comments", c.addComments)
 	api.POST("/checks", c.addCheckRuns)
@@ -74,6 +75,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 }
 
 type mockWorkspaceConnectionRequest struct {
+	GitHubHost               string                       `json:"github_host"`
 	Source                   ConnectionSource             `json:"source"`
 	Status                   ConnectionStatus             `json:"status"`
 	Login                    string                       `json:"login"`
@@ -108,7 +110,7 @@ func (c *MockController) setWorkspaceConnection(ctx *gin.Context) {
 		return
 	}
 	connection := &WorkspaceConnection{
-		WorkspaceID: workspaceID, Source: req.Source, GitHubHost: defaultGitHubHost,
+		WorkspaceID: workspaceID, Source: req.Source, GitHubHost: req.GitHubHost,
 		Login: req.Login, InstallationID: req.InstallationID,
 		InstallationAccountLogin: req.InstallationAccountLogin,
 		InstallationAccountType:  req.InstallationAccountType,
@@ -129,6 +131,13 @@ func (c *MockController) setWorkspaceConnection(ctx *gin.Context) {
 }
 
 func validateMockWorkspaceConnectionRequest(req *mockWorkspaceConnectionRequest) error {
+	if req != nil {
+		host, err := connectionHost(req.GitHubHost)
+		if err != nil {
+			return err
+		}
+		req.GitHubHost = host.String()
+	}
 	if req == nil || !validMockConnectionSource(req.Source) || !validMockConnectionStatus(req.Status) {
 		return errors.New(errMsgInvalidPayload)
 	}
@@ -223,7 +232,7 @@ func (c *MockController) setPersonalConnection(ctx *gin.Context) {
 		AccessExpiresAt time.Time        `json:"access_expires_at"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Login) == "" ||
-		req.GitHubUserID <= 0 || req.AccessExpiresAt.IsZero() ||
+		req.GitHubUserID <= 0 ||
 		(req.Status != ConnectionStatusActive && req.Status != ConnectionStatusInvalid && req.Status != ConnectionStatusRevoked) {
 		respondInvalidPayload(ctx)
 		return
@@ -292,6 +301,7 @@ func (c *MockController) setCLIAccounts(ctx *gin.Context) {
 
 func (c *MockController) setAppRegistration(ctx *gin.Context) {
 	var req struct {
+		GitHubHost  string `json:"github_host"`
 		DisplayName string `json:"display_name"`
 		AppID       int64  `json:"app_id"`
 	}
@@ -305,10 +315,15 @@ func (c *MockController) setAppRegistration(ctx *gin.Context) {
 		ctx.JSON(http.StatusConflict, gin.H{errKey: "mock GitHub App storage is unavailable"})
 		return
 	}
+	host, err := connectionHost(req.GitHubHost)
+	if err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
 	now := time.Now().UTC()
 	registration := &AppRegistration{
 		ID: registrationID, Source: AppRegistrationSourceImported, DisplayName: req.DisplayName,
-		GitHubHost: defaultGitHubAppHost, AppID: req.AppID, ClientID: "mock-client-" + registrationID,
+		GitHubHost: host.String(), AppID: req.AppID, ClientID: "mock-client-" + registrationID,
 		Slug: "mock-" + registrationID, OwnerLogin: "mock-owner",
 		OwnerType: AppRegistrationOwnerOrganization, Visibility: AppRegistrationVisibilityPrivate,
 		PublicBaseURL: "https://kandev.example", CredentialGeneration: 1,
@@ -324,10 +339,7 @@ func (c *MockController) setAppRegistration(ctx *gin.Context) {
 		return
 	}
 	c.service.mu.Lock()
-	c.service.appRegistrationRuntimes[registrationID] = &githubAppRuntime{
-		registrationID: registrationID, source: DeploymentAppSourceManaged,
-		generation: 1, appID: req.AppID,
-	}
+	c.service.appRegistrationRuntimes[registrationID] = c.service.mockAppRuntime(registration)
 	c.service.mu.Unlock()
 	ctx.JSON(http.StatusOK, registration)
 }
@@ -726,12 +738,15 @@ type associateTaskPRRequest struct {
 	BaseBranch                            string     `json:"base_branch"`
 	AuthorLogin                           string     `json:"author_login"`
 	State                                 string     `json:"state"`
+	MergedAt                              *time.Time `json:"merged_at,omitempty"`
+	ClosedAt                              *time.Time `json:"closed_at,omitempty"`
 	HeadSHA                               string     `json:"head_sha,omitempty"`
 	HeadRepoOwner                         string     `json:"head_repo_owner,omitempty"`
 	HeadRepoName                          string     `json:"head_repo_name,omitempty"`
 	ReviewState                           string     `json:"review_state"`
 	ChecksState                           string     `json:"checks_state"`
 	MergeableState                        string     `json:"mergeable_state"`
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts,omitempty"`
 	MergeQueueState                       string     `json:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position,omitempty"`
 	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
@@ -805,6 +820,7 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		ReviewState:                           req.ReviewState,
 		ChecksState:                           req.ChecksState,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
 		MergeQueueState:                       req.MergeQueueState,
 		MergeQueuePosition:                    req.MergeQueuePosition,
 		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
@@ -814,6 +830,8 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
 		Additions:                             req.Additions,
 		Deletions:                             req.Deletions,
+		MergedAt:                              req.MergedAt,
+		ClosedAt:                              req.ClosedAt,
 		CreatedAt:                             now,
 	}
 	if req.ReviewCount != nil {
@@ -863,6 +881,8 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		BaseBranch:                            req.BaseBranch,
 		AuthorLogin:                           req.AuthorLogin,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
+		HasMergeConflictsObserved:             req.HasMergeConflicts != nil,
 		RepoOwner:                             req.Owner,
 		RepoName:                              req.Repo,
 		Additions:                             req.Additions,
@@ -909,10 +929,11 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 		return
 	}
 	headSHA := mockHeadSHA(req.Owner, req.Repo, req.PRNumber)
-	// If associateTaskPR ran first, an underlying PR row exists with this
-	// HeadSHA. Otherwise synthesize a minimal one so getPRFeedback's GetPR
-	// call doesn't fail.
-	if pr, err := c.mock.GetPR(ctx.Request.Context(), req.Owner, req.Repo, req.PRNumber); err != nil || pr == nil {
+	// Feedback checks are looked up by the provider PR's head SHA. Create a
+	// minimal PR when no provider row exists yet.
+	if existingHeadSHA, found := c.mock.ensurePRHeadSHA(req.Owner, req.Repo, req.PRNumber, headSHA); found {
+		headSHA = existingHeadSHA
+	} else {
 		c.mock.AddPR(&PR{
 			Number:    req.PRNumber,
 			RepoOwner: req.Owner,
@@ -921,8 +942,6 @@ func (c *MockController) seedPRFeedback(ctx *gin.Context) {
 			CreatedAt: time.Now().UTC(),
 			UpdatedAt: time.Now().UTC(),
 		})
-	} else if pr.HeadSHA != "" {
-		headSHA = pr.HeadSHA
 	}
 	// Replace prior seeded checks/reviews/comments so a follow-up call gives
 	// deterministic state; helpful for tests that drive a "then a check

@@ -7,6 +7,7 @@ import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet"
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import type { TaskRepoRow } from "./task-create-dialog-types";
 import type { Branch, LocalRepository, Repository } from "@/lib/types/http";
 import {
   useRepositoryCloneSource,
@@ -18,7 +19,7 @@ import type {
   UseRemoteRepositoriesResult,
 } from "@/hooks/domains/integrations/use-remote-repositories";
 import { RemoteRepositoryProviderIcon } from "@/components/task-create-dialog-remote-repo-provider-tabs";
-import { getRemoteRepositoryProviderLabel } from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import { useRemoteRepositoryProviderLabel } from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import {
   looksLikeURL,
   looksLikeSupportedRemoteURL,
@@ -50,6 +51,7 @@ export type LocalRepositoryChoice = {
 export type RepositoryPickerProps = {
   repositories: Repository[];
   discoveredRepositories: LocalRepository[];
+  selectedLocalRows?: TaskRepoRow[];
   accessible: UseRemoteRepositoriesResult;
   workspaceId?: string | null;
   remoteOriginMode?: boolean;
@@ -71,6 +73,7 @@ export type RepositoryPickerProps = {
 export function RepositoryPicker({
   repositories,
   discoveredRepositories,
+  selectedLocalRows,
   accessible,
   workspaceId,
   remoteOriginMode = false,
@@ -98,8 +101,8 @@ export function RepositoryPicker({
   }, [query, search]);
 
   const localChoices = useMemo(
-    () => filterLocalChoices(repositories, discoveredRepositories, query),
-    [discoveredRepositories, query, repositories],
+    () => filterLocalChoices(repositories, discoveredRepositories, query, selectedLocalRows),
+    [discoveredRepositories, query, repositories, selectedLocalRows],
   );
   const cloneSourceCandidates = useMemo(
     () =>
@@ -194,13 +197,11 @@ function RepositorySourceTabs({
         testId="task-repository-source-local"
       />
       {providerIds.map((provider) => (
-        <SourceTab
+        <RemoteSourceTab
           key={provider}
+          provider={provider}
           active={activeSource === provider}
-          label={getRemoteRepositoryProviderLabel(provider)}
-          icon={<RemoteRepositoryProviderIcon provider={provider} />}
           onClick={() => onSelect(provider)}
-          testId={`task-repository-source-${provider}`}
         />
       ))}
     </div>
@@ -323,7 +324,7 @@ function RepositoryPickerResults({
 }: {
   activeSource: RepositorySource;
   mobile: boolean;
-  localChoices: Array<{ key: string; label: string; path: string; choice: LocalRepositoryChoice }>;
+  localChoices: RepositoryPickerLocalChoice[];
   cloneSourceStates: Record<string, RepositoryCloneSourceState>;
   remoteOriginMode?: boolean;
   remoteChoices: RemoteRepository[];
@@ -457,6 +458,27 @@ function useReadyProviderIds(accessible: UseRemoteRepositoriesResult): RemoteRep
   }, [accessible.availableProviders, accessible.providerCatalog]);
 }
 
+function RemoteSourceTab({
+  provider,
+  active,
+  onClick,
+}: {
+  provider: RemoteRepositoryProvider;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const label = useRemoteRepositoryProviderLabel(provider);
+  return (
+    <SourceTab
+      active={active}
+      label={label}
+      icon={<RemoteRepositoryProviderIcon provider={provider} />}
+      onClick={onClick}
+      testId={`task-repository-source-${provider}`}
+    />
+  );
+}
+
 function SourceTab({
   active,
   label,
@@ -494,15 +516,14 @@ function filterLocalChoices(
   repositories: Repository[],
   discoveredRepositories: LocalRepository[],
   query: string,
+  selectedRows: TaskRepoRow[] = [],
 ): RepositoryPickerLocalChoice[] {
   const needle = query.trim().toLowerCase();
-  const localRepositories = repositories.filter(
-    (repository) => repository.local_path.trim() !== "",
-  );
+  const registered = repositories.filter((repository) => repository.local_path?.trim());
   const workspacePaths = new Set(
-    localRepositories.map((repository) => normalizeRepoPath(repository.local_path)),
+    registered.map((repository) => normalizeRepoPath(repository.local_path)),
   );
-  const workspace = localRepositories.map((repository) => ({
+  const workspace = registered.map((repository) => ({
     key: `workspace:${repository.id}`,
     label: repository.name,
     path: repository.local_path,
@@ -516,9 +537,19 @@ function filterLocalChoices(
       path: repository.path,
       choice: { localPath: repository.path, defaultBranch: repository.default_branch },
     }));
-  return [...workspace, ...discovered].filter((option) =>
-    needle ? `${option.label} ${option.path}`.toLowerCase().includes(needle) : true,
+  const selectedIds = new Set(selectedRows.map((row) => row.repositoryId));
+  const selectedPaths = new Set(
+    selectedRows.flatMap((row) => (row.localPath ? [normalizeRepoPath(row.localPath)] : [])),
   );
+  const choices: RepositoryPickerLocalChoice[] = [...workspace, ...discovered];
+  return choices
+    .filter((option) => !needle || `${option.label} ${option.path}`.toLowerCase().includes(needle))
+    .map((option) => ({
+      ...option,
+      alreadyAdded:
+        (option.choice.repositoryId !== undefined && selectedIds.has(option.choice.repositoryId)) ||
+        selectedPaths.has(normalizeRepoPath(option.path)),
+    }));
 }
 
 function matchesRepositoryQuery(repository: RemoteRepository, query: string): boolean {

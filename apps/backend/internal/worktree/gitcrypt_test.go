@@ -540,7 +540,7 @@ func initGitCryptRepoWithSubmodule(t *testing.T) (repoPath, submodulePath string
 	repoPath = initGitCryptRepo(t)
 
 	// Add the submodule.
-	runGit(t, repoPath, "submodule", "add", submodulePath, "schemas/proto")
+	runGitWithFileProtocol(t, repoPath, "submodule", "add", submodulePath, "schemas/proto")
 	runGit(t, repoPath, "commit", "-m", "add submodule")
 
 	return repoPath, submodulePath

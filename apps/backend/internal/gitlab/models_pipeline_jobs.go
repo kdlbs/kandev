@@ -20,19 +20,24 @@ const (
 	pipelineJobBucketFailed     = "failed"
 )
 
-// pipelineJobBucket classifies a single job's raw status. A job with
-// allow_failure=true never buckets as failed, mirroring GitLab's own
-// pipeline-status rollup (an allowed-to-fail job doesn't fail the pipeline).
+// pipelineJobBucket classifies progress without changing raw execution status.
+// The passed bucket includes skipped jobs, allowed failures and optional manual
+// jobs. Other nonterminal jobs remain in progress even when allowed to fail.
 func pipelineJobBucket(job PipelineJob) string {
 	switch job.Status {
 	case pipelineStatusSuccess, pipelineStatusSkipped:
 		return pipelineJobBucketPassed
+	case "manual":
+		if job.AllowFailure {
+			return pipelineJobBucketPassed
+		}
+		return pipelineJobBucketInProgress
 	case pipelineStatusFailed, pipelineStatusCanceled:
 		if job.AllowFailure {
 			return pipelineJobBucketPassed
 		}
 		return pipelineJobBucketFailed
-	default: // running, pending, created, manual, scheduled, ...
+	default: // running, pending, created, scheduled, ...
 		return pipelineJobBucketInProgress
 	}
 }

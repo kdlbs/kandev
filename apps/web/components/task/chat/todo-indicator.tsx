@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef 
 import { IconCheck, IconCircle, IconCircleFilled, IconListCheck, IconX } from "@tabler/icons-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Popover, PopoverTrigger, PopoverContent } from "@kandev/ui/popover";
-import { useCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
+import { useCompactTaskChrome, useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
@@ -130,7 +130,7 @@ const TodoIndicatorTrigger = forwardRef<HTMLButtonElement, TodoIndicatorButtonPr
         data-testid="todo-indicator"
         aria-expanded={open}
         className={cn(
-          "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
+          "flex h-6 items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
           allComplete
             ? "text-green-500 hover:text-green-400"
             : "text-muted-foreground hover:text-foreground",
@@ -147,6 +147,7 @@ const TodoIndicatorTrigger = forwardRef<HTMLButtonElement, TodoIndicatorButtonPr
 
 export function TodoIndicator({ todos }: TodoIndicatorProps) {
   const usesCompactTaskChrome = useCompactTaskChrome();
+  const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
 
   if (!todos.length) return null;
@@ -156,7 +157,7 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
   const progress = Math.round((completed / todos.length) * 100);
   const content = <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />;
 
-  if (!usesCompactTaskChrome) {
+  if (!usesCompactTaskChrome && !usesTouchDrawer) {
     return (
       <HoverCard openDelay={200} closeDelay={100}>
         <HoverCardTrigger asChild>

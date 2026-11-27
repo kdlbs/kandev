@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth"
@@ -15,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -111,11 +112,11 @@ func seedOfficeResources(t *testing.T, repo *officesqlite.Repository, workspaceI
 	exec(`INSERT INTO office_labels (id, workspace_id, name) VALUES (?, ?, ?)`,
 		"label-"+suffix, workspaceID, "l-"+suffix)
 	exec(`INSERT INTO office_task_labels (task_id, label_id) VALUES (?, ?)`, "task-"+suffix, "label-"+suffix)
-	if err := repo.CreateRun(ctx, &models.Run{
+	if err := repo.CreateRun(ctx, &runsmodels.Run{
 		ID:             "run-" + suffix,
 		AgentProfileID: "agent-" + suffix,
 		Reason:         "task_assigned",
-		Status:         models.RunStatus("queued"),
+		Status:         runsmodels.RunStatus("queued"),
 		CoalescedCount: 1,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)
@@ -162,6 +163,8 @@ func officeScopeCases() []officeScopeCase {
 		{"workspace", http.MethodGet, "/api/v1/office/workspaces/:wsId/agents", "", ""},
 		{"workspace-pause", http.MethodPost, "/api/v1/office/workspaces/:wsId/pause", "", `{"reason":"incident"}`},
 		{"workspace-resume", http.MethodPost, "/api/v1/office/workspaces/:wsId/resume", "", `{}`},
+		{"workspace-author-exclusion", http.MethodPut, "/api/v1/office/workspaces/:wsId/routing/author-exclusion", "",
+			`{"changes":[{"step_id":"s","role":"reviewer","enabled":true}]}`},
 		{"inbox-dismiss", http.MethodPost, "/api/v1/office/inbox/dismiss", "/api/v1/office/inbox/dismiss",
 			`{"kind":"agent_run_failed","item_id":"run-user-a"}`},
 	}
@@ -185,6 +188,8 @@ func officeMixedParamCases() []officeScopeCase {
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels", ""},
 		{"task-label-remove", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels/:labelName",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels/l-user-a", ""},
+		{"task-label-remove-query", http.MethodDelete, "/api/v1/office/workspaces/:wsId/tasks/:taskId/labels",
+			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/labels?name=area%2Fbackend", ""},
 		{"task-quorum", http.MethodGet, "/api/v1/office/workspaces/:wsId/tasks/:taskId/quorum",
 			"/api/v1/office/workspaces/{ws}/tasks/task-user-a/quorum", ""},
 	}
@@ -320,6 +325,11 @@ func TestOfficeScopeRequiresWorkspaceManageForPauseMutations(t *testing.T) {
 	for _, tc := range []officeScopeCase{
 		{name: "pause", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/pause", body: `{"reason":"incident"}`},
 		{name: "resume", method: http.MethodPost, pattern: "/api/v1/office/workspaces/:wsId/resume", body: `{}`},
+		{
+			name: "review on a different provider", method: http.MethodPut,
+			pattern: "/api/v1/office/workspaces/:wsId/routing/author-exclusion",
+			body:    `{"changes":[{"step_id":"s","role":"reviewer","enabled":true}]}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reached string

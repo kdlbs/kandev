@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -14,6 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/copilotplugins"
+	"github.com/kandev/kandev/internal/agent/profileenv"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -21,11 +22,74 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 const dynamicProfileKind = "dynamic"
 
+func cursorMCPAuthEnabled(value *bool) bool {
+	return value == nil || *value
+}
+
+func cursorPluginsMCPEnabled(value *bool) bool {
+	return value == nil || *value
+}
+
+func mcpSelectionModeOrInherit(mode *string) string {
+	if mode == nil || *mode == "" {
+		return dto.MCPSelectionModeInherit
+	}
+	return *mode
+}
+
+func selectedServersOrEmpty(servers *[]string) []string {
+	if servers == nil {
+		return []string{}
+	}
+	return append([]string{}, (*servers)...)
+}
+
+func mcpSelectionValues(mode *string, servers *[]string) (string, []string) {
+	return mcpSelectionModeOrInherit(mode), selectedServersOrEmpty(servers)
+}
+
+// normalizeCopilotPluginSelection validates applicability and returns a
+// deterministic canonical set. A nil request means the caller omitted the
+// field: creation defaults to an empty set and updates keep the committed
+// value. An explicit empty list clears the selection on any profile so shared
+// clients can normalize their payloads.
+func normalizeCopilotPluginSelection(agentName string, requested *[]string, existing []string) ([]string, error) {
+	if requested == nil {
+		if existing == nil {
+			return []string{}, nil
+		}
+		return append([]string{}, existing...), nil
+	}
+	if len(*requested) == 0 {
+		return []string{}, nil
+	}
+	if agentName != agents.CopilotACPAgentID {
+		return nil, fmt.Errorf("copilot_selected_plugins requires a concrete Copilot profile")
+	}
+	if err := copilotplugins.ValidateSelection(*requested); err != nil {
+		return nil, fmt.Errorf("copilot_selected_plugins is invalid: %w", err)
+	}
+	return copilotplugins.SortSelection(*requested), nil
+}
+
+func (c *Controller) agentNameForProfile(ctx context.Context, profile *models.AgentProfile) (string, error) {
+	agent, err := c.repo.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return "", err
+	}
+	if agent == nil {
+		return "", errors.New("agent not found for profile")
+	}
+	return agent.Name, nil
+}
+
 type CreateProfileRequest struct {
+	ExecutionGrade    string
 	AgentID           string
 	Name              string
 	Model             string
@@ -43,18 +107,47 @@ type CreateProfileRequest struct {
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// DevinSandboxInherited is a request-only intent flag. It marks an explicit
+	// "Use CLI settings" choice on a new Devin profile so creation does not add
+	// the default disabled override.
+	DevinSandboxInherited bool
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
 	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
 	// injected OpenAI-compatible provider. Empty ProviderKind = native.
-	ProviderKind           string
-	ProviderBaseURL        string
-	ProviderAPIKeySecretID string
-	Dynamic                *dto.DynamicAgentProfileDTO
+	ProviderKind            string
+	ProviderBaseURL         string
+	ProviderAPIKeySecretID  string
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	MCPSelectionMode        *string
+	MCPSelectedServers      *[]string
+	CopilotSelectedPlugins  *[]string
+	Dynamic                 *dto.DynamicAgentProfileDTO
+}
+
+// AgentProfileExists reports whether id names a profile. It exists so callers
+// that only need to validate a caller-supplied ID do not have to read and
+// discard a whole profile, and so a missing row is not reported as an error.
+func (c *Controller) AgentProfileExists(ctx context.Context, id string) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	profile, err := c.repo.GetAgentProfile(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return profile != nil, nil
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return nil, err
+	}
 	// Model is optional — the profile reconciler fills it from the host
 	// utility probe cache on boot, and session start applies it via
 	// ACP model selection. An empty model means "use the agent's default".
@@ -66,7 +159,17 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if !agOk {
 		return nil, fmt.Errorf("unknown agent: %s", agent.Name)
 	}
+	if isDisabledOptionalAgent(agentConfig) {
+		return nil, ErrAgentFeatureDisabled
+	}
 	if err := validateRequireExactModelPolicy(req.Model, req.RequireExactModel, req.CLIPassthrough, agent.Name == agents.DynamicAgentID); err != nil {
+		return nil, err
+	}
+	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
+		return nil, err
+	}
+	copilotPlugins, err := normalizeCopilotPluginSelection(agent.Name, req.CopilotSelectedPlugins, nil)
+	if err != nil {
 		return nil, err
 	}
 	displayName, err := c.resolveDisplayName(agentConfig, agent.Name)
@@ -81,7 +184,10 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		cliFlags = seedCLIFlags(agentConfig)
 	} else if err := validateCLIFlagDTOs(req.CLIFlags); err != nil {
 		return nil, err
+	} else if err := validatePassthroughOnlyCLIFlags(agentConfig, req.CLIFlags, req.CLIPassthrough); err != nil {
+		return nil, err
 	}
+	cliFlags = normalizeAntigravityCLIFlags(agentConfig.ID(), cliFlags)
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
 	}
@@ -91,28 +197,48 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
 		return nil, err
 	}
-	profile := &models.AgentProfile{
-		AgentID:                req.AgentID,
-		Name:                   req.Name,
-		AgentDisplayName:       displayName,
-		Model:                  req.Model,
-		FallbackModel:          strings.TrimSpace(req.FallbackModel),
-		AutoFallback:           req.AutoFallback,
-		RequireExactModel:      req.RequireExactModel,
-		Mode:                   req.Mode,
-		ConfigOptions:          profileconfig.SanitizeConfigOptions(req.ConfigOptions),
-		AllowIndexing:          req.AllowIndexing,
-		AutoApprove:            req.AutoApprove,
-		CLIPassthrough:         req.CLIPassthrough,
-		Enabled:                true,
-		CLIFlags:               cliFlags,
-		EnvVars:                envVarsFromDTO(req.EnvVars),
-		CommandPrefix:          strings.TrimSpace(req.CommandPrefix),
-		ProviderKind:           req.ProviderKind,
-		ProviderBaseURL:        req.ProviderBaseURL,
-		ProviderAPIKeySecretID: req.ProviderAPIKeySecretID,
-		UserModified:           true,
+	mcpSelectionMode, mcpSelectedServers := mcpSelectionValues(req.MCPSelectionMode, req.MCPSelectedServers)
+	mode, envVars := devinProfilePermissionDefaults(
+		agent.Name, req.Mode, req.EnvVars, !req.DevinSandboxInherited,
+	)
+	if err := validateProfileEnvVarDTOs(envVars); err != nil {
+		return nil, err
 	}
+	if err := validateClaudeExactModelAliasConflict(agent.Name, req.Model, req.RequireExactModel, envVarsFromDTO(envVars)); err != nil {
+		return nil, err
+	}
+	if err := validateDevinProfilePermissionIntent(agent.Name, mode, envVars); err != nil {
+		return nil, err
+	}
+	profile := &models.AgentProfile{
+		AgentID:                 req.AgentID,
+		Name:                    req.Name,
+		ExecutionGrade:          req.ExecutionGrade,
+		AgentDisplayName:        displayName,
+		Model:                   req.Model,
+		FallbackModel:           strings.TrimSpace(req.FallbackModel),
+		AutoFallback:            req.AutoFallback,
+		RequireExactModel:       req.RequireExactModel,
+		Mode:                    mode,
+		ConfigOptions:           profileconfig.SanitizeConfigOptions(req.ConfigOptions),
+		AllowIndexing:           req.AllowIndexing,
+		AutoApprove:             req.AutoApprove,
+		CLIPassthrough:          req.CLIPassthrough,
+		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
+		CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(req.CursorPluginsMCPEnabled),
+		MCPSelectionMode:        mcpSelectionMode,
+		MCPSelectedServers:      mcpSelectedServers,
+		CopilotSelectedPlugins:  copilotPlugins,
+		Enabled:                 true,
+		CLIFlags:                cliFlags,
+		EnvVars:                 envVarsFromDTO(envVars),
+		CommandPrefix:           strings.TrimSpace(req.CommandPrefix),
+		ProviderKind:            req.ProviderKind,
+		ProviderBaseURL:         req.ProviderBaseURL,
+		ProviderAPIKeySecretID:  req.ProviderAPIKeySecretID,
+		UserModified:            true,
+	}
+	canonicalizePiThinkingProfile(agent.Name, profile, false)
 	if err := c.normalizeProviderConfig(ctx, profile, agent.Name); err != nil {
 		return nil, err
 	}
@@ -141,14 +267,19 @@ func (c *Controller) createDynamicProfile(
 		return nil, err
 	}
 	profile := &models.AgentProfile{
-		ID:               uuid.NewString(),
-		AgentID:          agent.ID,
-		Name:             strings.TrimSpace(req.Name),
-		AgentDisplayName: displayName,
-		Enabled:          true,
-		CLIFlags:         []models.CLIFlag{},
-		EnvVars:          []models.ProfileEnvVar{},
-		UserModified:     true,
+		ID:                      uuid.NewString(),
+		AgentID:                 agent.ID,
+		Name:                    strings.TrimSpace(req.Name),
+		ExecutionGrade:          req.ExecutionGrade,
+		AgentDisplayName:        displayName,
+		Enabled:                 true,
+		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
+		CursorPluginsMCPEnabled: cursorPluginsMCPEnabled(req.CursorPluginsMCPEnabled),
+		MCPSelectionMode:        mcpSelectionModeOrInherit(req.MCPSelectionMode),
+		MCPSelectedServers:      selectedServersOrEmpty(req.MCPSelectedServers),
+		CLIFlags:                []models.CLIFlag{},
+		EnvVars:                 []models.ProfileEnvVar{},
+		UserModified:            true,
 	}
 	routes, err := c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 	if err != nil {
@@ -339,6 +470,7 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 }
 
 type UpdateProfileRequest struct {
+	ExecutionGrade    *string
 	ID                string
 	Name              *string
 	Model             *string
@@ -362,11 +494,16 @@ type UpdateProfileRequest struct {
 	CommandPrefix *string
 	// Provider* replace their value when non-nil. When any of the three is
 	// non-nil the provider configuration is re-validated and normalized.
-	ProviderKind           *string
-	ProviderBaseURL        *string
-	ProviderAPIKeySecretID *string
-	Dynamic                *dto.DynamicAgentProfileDTO
-	Force                  bool
+	ProviderKind            *string
+	ProviderBaseURL         *string
+	ProviderAPIKeySecretID  *string
+	CursorMCPAuthEnabled    *bool
+	CursorPluginsMCPEnabled *bool
+	MCPSelectionMode        *string
+	MCPSelectedServers      *[]string
+	CopilotSelectedPlugins  *[]string
+	Dynamic                 *dto.DynamicAgentProfileDTO
+	Force                   bool
 }
 
 func (req UpdateProfileRequest) touchesProvider() bool {
@@ -375,16 +512,55 @@ func (req UpdateProfileRequest) touchesProvider() bool {
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
-		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
+		req.ExecutionGrade == nil && req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil && !req.touchesProvider() && req.Dynamic == nil
+		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
+		req.CursorPluginsMCPEnabled == nil && req.MCPSelectionMode == nil && req.MCPSelectedServers == nil &&
+		req.CopilotSelectedPlugins == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
+	ctx = store.WithExecutionGradeUpdate(ctx, req.ExecutionGrade)
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
+	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
+		return nil, err
+	}
 	profile, err := c.repo.GetAgentProfile(ctx, req.ID)
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
+	}
+	savedModel := profile.Model
+	savedRequireExactModel := profile.RequireExactModel
+	savedEnvVars := append([]models.ProfileEnvVar(nil), profile.EnvVars...)
+	var resolvedAgentName string
+	agentNameResolved := false
+	resolveAgentName := func() (string, error) {
+		if agentNameResolved {
+			return resolvedAgentName, nil
+		}
+		name, err := c.agentNameForProfile(ctx, profile)
+		if err != nil {
+			return "", err
+		}
+		resolvedAgentName = name
+		agentNameResolved = true
+		return resolvedAgentName, nil
+	}
+	if req.CopilotSelectedPlugins != nil {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		selection, validateErr := normalizeCopilotPluginSelection(agentName, req.CopilotSelectedPlugins, profile.CopilotSelectedPlugins)
+		if validateErr != nil {
+			return nil, validateErr
+		}
+		profile.CopilotSelectedPlugins = selection
 	}
 	isDynamic := profileKind(profile) == dynamicProfileKind
 	if isDynamic && !c.dynamicAgentRoutingEnabled {
@@ -439,6 +615,19 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
 	}
+	if req.CursorMCPAuthEnabled != nil {
+		profile.CursorMCPAuthEnabled = *req.CursorMCPAuthEnabled
+	}
+	if req.CursorPluginsMCPEnabled != nil {
+		profile.CursorPluginsMCPEnabled = *req.CursorPluginsMCPEnabled
+	}
+	if req.MCPSelectionMode != nil {
+		profile.MCPSelectionMode = *req.MCPSelectionMode
+	}
+	if req.MCPSelectedServers != nil {
+		profile.MCPSelectedServers = append([]string{}, (*req.MCPSelectedServers)...)
+	}
+
 	if err := validateRequireExactModelPolicy(profile.Model, profile.RequireExactModel, profile.CLIPassthrough, isDynamic); err != nil {
 		return nil, err
 	}
@@ -447,16 +636,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
-		if !*req.Enabled && !req.Force && len(dynamicRefs) > 0 {
-			return nil, &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
-		}
-		if !*req.Enabled && !req.Force && c.utilityDeps != nil {
-			refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
-			if err != nil {
-				return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+		if !*req.Enabled && !req.Force {
+			detail := &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
+			if c.utilityDeps != nil {
+				detail.UtilityAgents, err = c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
+				if err != nil {
+					return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+				}
 			}
-			if len(refs) > 0 {
-				return nil, &ErrProfileInUseDetail{UtilityAgents: refs}
+			if len(detail.DynamicProfiles) > 0 || len(detail.UtilityAgents) > 0 {
+				return nil, detail
 			}
 		}
 		profile.Enabled = *req.Enabled
@@ -478,6 +667,21 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.CLIFlags = cliFlagsFromDTO(*req.CLIFlags)
 	}
+	// Judge the flags the profile ends up with against the passthrough mode it
+	// ends up in. Validating only the submitted list let a partial update that
+	// just turns passthrough off keep an enabled flag that cannot reach the
+	// agent over ACP. profile.CLIPassthrough already carries the requested
+	// value at this point.
+	if req.CLIFlags != nil || req.CLIPassthrough != nil {
+		if agentConfig, ok := c.agentConfigForProfile(ctx, profile); ok {
+			profile.CLIFlags = normalizeAntigravityCLIFlags(agentConfig.ID(), profile.CLIFlags)
+			if err := validatePassthroughOnlyCLIFlags(
+				agentConfig, cliFlagsToDTO(profile.CLIFlags), profile.CLIPassthrough,
+			); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if req.EnvVars != nil {
 		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
 			return nil, err
@@ -486,6 +690,24 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
+	}
+	if (req.Model != nil || req.RequireExactModel != nil || req.EnvVars != nil) &&
+		isNewClaudeExactModelAliasConflict(
+			profile.Model, profile.RequireExactModel, profile.EnvVars,
+			savedModel, savedRequireExactModel, savedEnvVars,
+		) {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if err := validateClaudeExactModelAliasConflict(
+			agentName, profile.Model, profile.RequireExactModel, profile.EnvVars,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if req.ExecutionGrade != nil {
+		profile.ExecutionGrade = *req.ExecutionGrade
 	}
 	if req.CommandPrefix != nil {
 		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
@@ -496,10 +718,26 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if err := c.applyProviderConfigUpdate(ctx, req, profile); err != nil {
 		return nil, err
 	}
+	if req.Mode != nil || req.ConfigOptions != nil {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		canonicalizePiThinkingProfile(agentName, profile, req.ConfigOptions == nil)
+	}
+	if req.Mode != nil || req.EnvVars != nil {
+		agentName, agentErr := resolveAgentName()
+		if agentErr != nil {
+			return nil, agentErr
+		}
+		if err := validateDevinProfilePermissionIntent(agentName, profile.Mode, envVarsToDTO(profile.EnvVars)); err != nil {
+			return nil, err
+		}
+	}
 	profile.UserModified = true
 	if dynamic != nil {
 		result, handled, atomicErr := c.updateDynamicProfileAtomically(
-			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes,
+			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes, req.Enabled,
 		)
 		if atomicErr != nil {
 			return nil, atomicErr
@@ -513,7 +751,15 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 	}
-	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+	selectionIntent := req.CopilotSelectedPlugins
+	if selectionIntent != nil {
+		selectionIntent = &profile.CopilotSelectedPlugins
+	}
+	if intent, ok := c.repo.(store.AgentProfileSelectionIntent); ok {
+		if err := intent.UpdateAgentProfileWithSelectionIntent(ctx, profile, req.Enabled, selectionIntent); err != nil {
+			return nil, err
+		}
+	} else if err := c.repo.UpdateAgentProfileWithEnabledIntent(ctx, profile, req.Enabled); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
@@ -583,12 +829,13 @@ func (c *Controller) updateDynamicProfileAtomically(
 	dynamic *models.DynamicAgentProfile,
 	version int64,
 	routes []models.DynamicAgentRoute,
+	enabled *bool,
 ) (*dto.AgentProfileDTO, bool, error) {
 	atomicRepo, ok := c.repo.(store.AtomicDynamicProfileRepository)
 	if !ok {
 		return nil, false, nil
 	}
-	if err := atomicRepo.UpdateAgentProfileWithDynamic(ctx, profile, dynamic, version, routes); err != nil {
+	if err := atomicRepo.UpdateAgentProfileWithDynamicEnabledIntent(ctx, profile, dynamic, version, routes, enabled); err != nil {
 		return nil, true, err
 	}
 	result := toProfileDTO(profile)
@@ -640,6 +887,13 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	}
 	if profileKind(source) == dynamicProfileKind {
 		return nil, ErrDynamicProfileDuplicationUnsupported
+	}
+	if storedAgent, err := c.repo.GetAgent(ctx, source.AgentID); err == nil && storedAgent != nil {
+		if agentConfig, ok := c.agentRegistry.Get(storedAgent.Name); ok && isDisabledOptionalAgent(agentConfig) {
+			return nil, ErrAgentFeatureDisabled
+		}
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
 	}
 	for attempt := 0; ; attempt++ {
 		// A source without an MCP row leaves the copy without one: the
@@ -693,6 +947,14 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	}
 }
 
+func isDisabledOptionalAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || agentConfig.Enabled() {
+		return false
+	}
+	preserver, ok := agentConfig.(agents.StoredProfilePreserver)
+	return ok && preserver.PreserveStoredProfilesWhenDisabled()
+}
+
 // maxDuplicateRetries bounds the number of re-attempts after a concurrent
 // source change. One retry covers the common single-writer race; the cap
 // prevents a hot loop under sustained concurrent edits.
@@ -716,6 +978,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 	return &models.AgentProfile{
 		AgentID:                    source.AgentID,
 		Name:                       strings.TrimSpace(source.Name) + " Copy",
+		ExecutionGrade:             source.ExecutionGrade,
 		AgentDisplayName:           source.AgentDisplayName,
 		Model:                      source.Model,
 		FallbackModel:              strings.TrimSpace(source.FallbackModel),
@@ -732,6 +995,11 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		ProviderKind:               source.ProviderKind,
 		ProviderBaseURL:            source.ProviderBaseURL,
 		ProviderAPIKeySecretID:     source.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:       source.CursorMCPAuthEnabled,
+		CursorPluginsMCPEnabled:    source.CursorPluginsMCPEnabled,
+		MCPSelectionMode:           mcpSelectionModeOrInherit(&source.MCPSelectionMode),
+		MCPSelectedServers:         append([]string{}, source.MCPSelectedServers...),
+		CopilotSelectedPlugins:     append([]string{}, source.CopilotSelectedPlugins...),
 		UserModified:               true,
 		Enabled:                    source.Enabled,
 		WorkspaceID:                source.WorkspaceID,
@@ -954,6 +1222,7 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 		}
 		return nil, err
 	}
+	c.removeStaleDynamicRoutes(ctx, id)
 	// Watchers, by contrast, are disabled only AFTER the row is gone, so a
 	// failed delete never strands watchers disabled against a still-live
 	// profile. They can afford that ordering because they have a genuine second
@@ -974,89 +1243,117 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	return &result, nil
 }
 
-// prepareProfileDeletion blocks every routing-tier reference, then checks for
-// active sessions and referencing watchers before cleaning up ephemeral tasks.
+// prepareProfileDeletion collects every reference to the profile and returns a
+// single *ErrProfileInUseDetail so the UI shows all blockers at once. A
+// soft-deleted dynamic profile holds no live route, so it never blocks.
 // Routing-tier references are hard blockers even when force=true because a
-// deleted profile would orphan workspace tier mappings. When force is false,
-// active sessions and watchers return *ErrProfileInUseDetail so the UI can
-// render a confirmation dialog. force=true skips only those soft blockers.
-// Neither branch disables anything: DeleteProfile disables referencing
-// automations before the row goes away and referencing watchers after it does.
+// deleted profile would orphan workspace tier mappings; they are reported
+// together with the soft blockers so the dialog can list both. force=true
+// skips only the soft blockers, which DeleteProfile then clears: it disables
+// referencing automations before the row goes away and referencing watchers
+// after it does.
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
-	dynamicRefs, err := c.listDynamicProfileReferences(ctx, profileID)
+	detail, err := c.collectProfileReferences(ctx, profileID, force)
 	if err != nil {
 		return err
 	}
-	if !force && len(dynamicRefs) > 0 {
-		return &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
-	}
-	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
-	if err != nil {
-		return err
-	}
-	if len(routingTierRefs) > 0 {
-		return &ErrProfileInUseDetail{RoutingTiers: routingTierRefs}
-	}
-	var utilityRefs []UtilityAgentReference
-	if c.utilityDeps != nil {
-		refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID)
-		if err != nil {
-			return fmt.Errorf("check utility agents using this profile: %w", err)
-		}
-		utilityRefs = refs
-	}
-	if c.sessionChecker == nil {
-		if !force && len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs, DynamicProfiles: dynamicRefs}
-		}
-		return nil
-	}
-	if !force {
-		activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID)
-		if err != nil {
-			return err
-		}
-		var watcherRefs []WatcherReference
-		if c.watcherDeps != nil {
-			refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
-			if err != nil {
-				c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
-					zap.String("profile_id", profileID), zap.Error(err))
-			} else {
-				watcherRefs = refs
-			}
-		}
-		var automationRefs []AutomationReference
-		if c.automationDeps != nil {
-			refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
-			if err != nil {
-				// Fails closed, unlike the watcher lookup above. A watcher this
-				// path misses is disabled anyway by the force pass afterwards;
-				// an automation is not, so a lookup that silently returned
-				// nothing would orphan exactly the references this check was
-				// added to catch. Refusing is recoverable — the user retries.
-				return fmt.Errorf("check automations using this profile: %w", err)
-			}
-			automationRefs = refs
-		}
-		// An enabled automation is a standing instruction to launch against this
-		// profile. Nothing is running, so it never appears in the active-session
-		// list, but its next firing would go looking for a profile that is gone —
-		// and a schedule fails quietly, hours later, with nobody watching.
-		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 || len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{
-				ActiveSessions:  activeTasks,
-				Watchers:        watcherRefs,
-				Automations:     automationRefs,
-				UtilityAgents:   utilityRefs,
-				DynamicProfiles: dynamicRefs,
-			}
-		}
+	if len(detail.RoutingTiers) > 0 || (!force && hasSoftProfileReferences(detail)) {
+		return detail
 	}
 	// Clean up ephemeral tasks (quick chat, config chat) using this profile.
 	// Done after the force check since these don't need user confirmation.
 	c.cleanupEphemeralTasks(ctx, profileID)
 	return nil
+}
+
+// collectProfileReferences gathers every reference a delete must report.
+// Session, watcher, and automation lookups only matter when force is false,
+// because force skips those blockers.
+func (c *Controller) collectProfileReferences(ctx context.Context, profileID string, force bool) (*ErrProfileInUseDetail, error) {
+	detail := &ErrProfileInUseDetail{}
+	var err error
+	if detail.DynamicProfiles, err = c.listDynamicProfileReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	if detail.RoutingTiers, err = c.listRoutingTierReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	if c.utilityDeps != nil {
+		if detail.UtilityAgents, err = c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID); err != nil {
+			return nil, fmt.Errorf("check utility agents using this profile: %w", err)
+		}
+	}
+	if force || c.sessionChecker == nil {
+		return detail, nil
+	}
+	if detail.ActiveSessions, err = c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID); err != nil {
+		return nil, err
+	}
+	detail.Watchers = c.listWatcherReferences(ctx, profileID)
+	if detail.Automations, err = c.listAutomationReferences(ctx, profileID); err != nil {
+		return nil, err
+	}
+	return detail, nil
+}
+
+// hasSoftProfileReferences reports blockers that force may skip. An enabled
+// automation is one: nothing is running, so it never appears in the
+// active-session list, but its next firing would go looking for a profile that
+// is gone, and a schedule fails quietly, hours later, with nobody watching.
+func hasSoftProfileReferences(detail *ErrProfileInUseDetail) bool {
+	return len(detail.DynamicProfiles) > 0 || len(detail.UtilityAgents) > 0 ||
+		len(detail.ActiveSessions) > 0 || len(detail.Watchers) > 0 || len(detail.Automations) > 0
+}
+
+func (c *Controller) listWatcherReferences(ctx context.Context, profileID string) []WatcherReference {
+	if c.watcherDeps == nil {
+		return nil
+	}
+	refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
+	if err != nil {
+		c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return nil
+	}
+	return refs
+}
+
+func (c *Controller) listAutomationReferences(ctx context.Context, profileID string) ([]AutomationReference, error) {
+	if c.automationDeps == nil {
+		return nil, nil
+	}
+	refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
+	if err != nil {
+		// Fails closed, unlike the watcher lookup above. A watcher this
+		// path misses is disabled anyway by the force pass afterwards;
+		// an automation is not, so a lookup that silently returned
+		// nothing would orphan exactly the references this check was
+		// added to catch. Refusing is recoverable — the user retries.
+		return nil, fmt.Errorf("check automations using this profile: %w", err)
+	}
+	return refs, nil
+}
+
+// removeStaleDynamicRoutes drops candidate rows that point at the deleted
+// profile from dynamic parents that were already soft-deleted. Those routes
+// can never run, and leaving them behind would keep reporting a dependency on
+// a profile that no longer exists. Best-effort: the profile row is already
+// gone, so a failure is logged rather than turned into a delete error.
+func (c *Controller) removeStaleDynamicRoutes(ctx context.Context, profileID string) {
+	dynamicRepo, ok := c.repo.(store.DynamicProfileRepository)
+	if !ok {
+		return
+	}
+	removed, err := dynamicRepo.DeleteDynamicAgentRoutesForDeletedProfiles(ctx, profileID)
+	if err != nil {
+		c.logger.Warn("failed to remove stale dynamic profile routes",
+			zap.String("profile_id", profileID), zap.Error(err))
+		return
+	}
+	if removed > 0 {
+		c.logger.Info("removed stale dynamic profile routes on profile delete",
+			zap.String("profile_id", profileID), zap.Int64("count", removed))
+	}
 }
 
 func (c *Controller) listRoutingTierReferences(ctx context.Context, profileID string) ([]RoutingTierReference, error) {
@@ -1081,11 +1378,7 @@ func (c *Controller) listDynamicProfileReferences(ctx context.Context, profileID
 	}
 	out := make([]DynamicProfileReference, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, DynamicProfileReference{
-			ID:      ref.ProfileID,
-			Name:    ref.Name,
-			Deleted: ref.DeletedAt != nil,
-		})
+		out = append(out, DynamicProfileReference{ID: ref.ProfileID, Name: ref.Name})
 	}
 	return out, nil
 }
@@ -1273,31 +1566,37 @@ func (c *Controller) decorateAgentDTO(ctx context.Context, result *dto.AgentDTO)
 
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:                     profile.ID,
-		AgentID:                profile.AgentID,
-		Kind:                   profileKind(profile),
-		Name:                   profile.Name,
-		AgentDisplayName:       profile.AgentDisplayName,
-		Model:                  profile.Model,
-		FallbackModel:          profile.FallbackModel,
-		AutoFallback:           profile.AutoFallback,
-		RequireExactModel:      profile.RequireExactModel,
-		Mode:                   profile.Mode,
-		ConfigOptions:          profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
-		AllowIndexing:          profile.AllowIndexing,
-		AutoApprove:            profile.AutoApprove,
-		CLIFlags:               cliFlagsToDTO(profile.CLIFlags),
-		EnvVars:                envVarsToDTO(profile.EnvVars),
-		CLIPassthrough:         profile.CLIPassthrough,
-		Enabled:                profile.Enabled,
-		CommandPrefix:          profile.CommandPrefix,
-		ProviderKind:           profile.ProviderKind,
-		ProviderBaseURL:        profile.ProviderBaseURL,
-		ProviderAPIKeySecretID: profile.ProviderAPIKeySecretID,
-		UserModified:           profile.UserModified,
-		WorkspaceID:            profile.WorkspaceID,
-		CreatedAt:              profile.CreatedAt,
-		UpdatedAt:              profile.UpdatedAt,
+		ID:                      profile.ID,
+		AgentID:                 profile.AgentID,
+		Kind:                    profileKind(profile),
+		Name:                    profile.Name,
+		AgentDisplayName:        profile.AgentDisplayName,
+		Model:                   profile.Model,
+		FallbackModel:           profile.FallbackModel,
+		AutoFallback:            profile.AutoFallback,
+		RequireExactModel:       profile.RequireExactModel,
+		Mode:                    profile.Mode,
+		ConfigOptions:           profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
+		AllowIndexing:           profile.AllowIndexing,
+		AutoApprove:             profile.AutoApprove,
+		CLIFlags:                cliFlagsToDTO(profile.CLIFlags),
+		EnvVars:                 envVarsToDTO(profile.EnvVars),
+		ExecutionGrade:          profile.ExecutionGrade,
+		CLIPassthrough:          profile.CLIPassthrough,
+		Enabled:                 profile.Enabled,
+		CommandPrefix:           profile.CommandPrefix,
+		ProviderKind:            profile.ProviderKind,
+		ProviderBaseURL:         profile.ProviderBaseURL,
+		ProviderAPIKeySecretID:  profile.ProviderAPIKeySecretID,
+		CursorMCPAuthEnabled:    profile.CursorMCPAuthEnabled,
+		CursorPluginsMCPEnabled: profile.CursorPluginsMCPEnabled,
+		MCPSelectionMode:        mcpSelectionModeOrInherit(&profile.MCPSelectionMode),
+		MCPSelectedServers:      append([]string{}, profile.MCPSelectedServers...),
+		CopilotSelectedPlugins:  append([]string{}, profile.CopilotSelectedPlugins...),
+		UserModified:            profile.UserModified,
+		WorkspaceID:             profile.WorkspaceID,
+		CreatedAt:               profile.CreatedAt,
+		UpdatedAt:               profile.UpdatedAt,
 	}
 }
 
@@ -1370,69 +1669,16 @@ func envVarsFromDTO(in []dto.ProfileEnvVarDTO) []models.ProfileEnvVar {
 }
 
 const (
-	maxProfileEnvVars           = 100
-	maxProfileEnvVarKeyLen      = 256
-	maxProfileEnvVarValueLen    = 8 * 1024
-	reservedProfileEnvVarKey    = "TASK_DESCRIPTION"
-	reservedProfileEnvVarPrefix = "KANDEV_"
+	maxProfileEnvVars = profileenv.MaxEntries
 )
 
-var posixEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
-	if len(in) > maxProfileEnvVars {
-		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
-	}
-	seen := make(map[string]int, len(in))
+	entries := make([]models.ProfileEnvVar, len(in))
 	for i, ev := range in {
-		key := strings.TrimSpace(ev.Key)
-		if key != ev.Key {
-			return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
-		}
-		if err := validateEnvVarKey(key, i, seen); err != nil {
-			return err
-		}
-		seen[key] = i
-		if err := validateEnvVarValue(ev, i); err != nil {
-			return err
-		}
+		entries[i] = models.ProfileEnvVar{Key: ev.Key, Value: ev.Value, SecretID: ev.SecretID}
 	}
-	return nil
-}
-
-func validateEnvVarKey(key string, i int, seen map[string]int) error {
-	if key == "" {
-		return fmt.Errorf("%w: env_vars[%d].key is required", ErrInvalidProfileEnvVars, i)
-	}
-	if len(key) > maxProfileEnvVarKeyLen {
-		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
-	}
-	if !posixEnvIdentifier.MatchString(key) {
-		return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
-	}
-	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
-		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)
-	}
-	if first, exists := seen[key]; exists {
-		return fmt.Errorf("%w: env_vars[%d].key duplicates env_vars[%d].key", ErrInvalidProfileEnvVars, i, first)
-	}
-	return nil
-}
-
-func validateEnvVarValue(ev dto.ProfileEnvVarDTO, i int) error {
-	if ev.SecretID != "" && ev.Value != "" {
-		return fmt.Errorf("%w: env_vars[%d]: set value or secret_id, not both", ErrInvalidProfileEnvVars, i)
-	}
-	if ev.SecretID == "" && ev.Value == "" {
-		return fmt.Errorf("%w: env_vars[%d]: must set either value or secret_id", ErrInvalidProfileEnvVars, i)
-	}
-	if ev.Value != "" {
-		if len(ev.Value) > maxProfileEnvVarValueLen {
-			return fmt.Errorf("%w: env_vars[%d].value exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarValueLen)
-		}
-		if strings.Contains(ev.Value, "\x00") {
-			return fmt.Errorf("%w: env_vars[%d].value must not contain null bytes", ErrInvalidProfileEnvVars, i)
-		}
+	if err := profileenv.Validate(entries); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProfileEnvVars, err)
 	}
 	return nil
 }

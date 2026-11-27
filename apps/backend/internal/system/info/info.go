@@ -39,13 +39,27 @@ type Service struct {
 
 // NewService constructs a Service from the ldflag-injected build values.
 func NewService(version, commit, buildTime string) *Service {
+	return NewServiceWithBootID(version, commit, buildTime, newBootID())
+}
+
+// NewServiceWithBootID constructs a Service with a boot identity shared by
+// other process-owned runtime state.
+func NewServiceWithBootID(version, commit, buildTime, bootID string) *Service {
+	if bootID == "" {
+		bootID = newBootID()
+	}
 	return &Service{
 		Version:   version,
 		Commit:    commit,
 		BuildTime: buildTime,
-		BootID:    newBootID(),
+		BootID:    bootID,
 		StartedAt: time.Now().UTC(),
 	}
+}
+
+// NewBootID returns a fresh identifier for one backend process lifetime.
+func NewBootID() string {
+	return newBootID()
 }
 
 // Info renders the response payload.

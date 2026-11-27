@@ -21,6 +21,7 @@ vi.mock("@/hooks/domains/workspace/use-repository", () => ({ useRepository: () =
 vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
   useSessionGitStatus: () => null,
 }));
+vi.mock("./file-browser-tree-state", () => ({ useFileTreeCacheBinding: () => undefined }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({

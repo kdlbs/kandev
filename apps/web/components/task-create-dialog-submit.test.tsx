@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- submit lifecycle regressions share one fixture. */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { ApiError } from "@/lib/api/client";
 import { WebSocketRequestError } from "@/lib/ws/client";
@@ -13,11 +13,13 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 // create call; non-empty prompt → call with that prompt in the payload.
 
 let autoFocusNewTasks = true;
+const ensureFreshBranchConsentMock = vi.hoisted(() => vi.fn(async () => [] as string[] | null));
 const pushMock = vi.fn();
 const TASK_ID = "task-1";
 const RENAMED_TITLE = "Renamed task";
 const ORIGINAL_PROMPT = "Original prompt";
 const UPDATED_PROMPT = "Updated prompt";
+const CREATE_TASK_PROMPT = "create this task";
 const ORIGINAL_TITLE = "Original title";
 const RAW_REPOSITORY_PROVIDER_FAILURE = "raw repository provider failure";
 const MAIN_BRANCH = "main";
@@ -70,6 +72,8 @@ type BuildCreateTaskPayloadCall = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
+  initialWorkspaceLayout?: "repository" | "task_root";
+  mcpServerIds?: string[];
   withAgent: boolean;
   trimmedDescription: string;
 };
@@ -120,7 +124,7 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
     createTask?: (payload: unknown) => Promise<{ id: string; session_id?: string }>;
   }) => ({
     pendingDiscard: null,
-    ensureFreshBranchConsent: vi.fn(async () => []),
+    ensureFreshBranchConsent: ensureFreshBranchConsentMock,
     createTaskWithFreshBranchRetry: (...args: unknown[]) => {
       const buildPayload = args[0] as (consented: string[]) => unknown;
       return options.createTask
@@ -193,14 +197,19 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     setRemoteRepos: vi.fn(),
     setAgentProfileId: vi.fn(),
     setExecutorId: vi.fn(),
+    setMcpServerIds: vi.fn(),
+    setMcpServerIdsDirty: vi.fn(),
     setSelectedWorkflowId: vi.fn(),
     setFetchedSteps: vi.fn(),
+    setInitialWorkspaceLayout: vi.fn(),
     clearDraft: vi.fn(),
     freshBranchEnabled: false,
     isLocalExecutor: false,
     repositoryLocalPath: "",
     noRepository: true,
     workspacePath: "",
+    mcpServerIds: [],
+    mcpServerIdsDirty: false,
     ...overrides,
   };
 }
@@ -212,6 +221,8 @@ beforeEach(() => {
   buildRepositoriesPayloadMock.mockReset();
   buildRepositoriesPayloadMock.mockReturnValue([]);
   validateCreateInputsMock.mockClear();
+  ensureFreshBranchConsentMock.mockReset();
+  ensureFreshBranchConsentMock.mockResolvedValue([]);
   createTaskRetryMock.mockClear();
   updateTaskMock.mockReset();
   updateTaskMock.mockResolvedValue({ id: TASK_ID, title: RENAMED_TITLE });
@@ -221,6 +232,124 @@ beforeEach(() => {
   recordRecentUseMock.mockClear();
   switchTaskRunnerMock.mockClear();
   switchTaskRunnerMock.mockResolvedValue({ id: TASK_ID });
+});
+
+function deferredMCPWrite() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function mcpEditDeps(overrides: Partial<SubmitHandlersDeps> = {}) {
+  return makeDeps({
+    isEditMode: true,
+    editingTask: {
+      id: TASK_ID,
+      title: ORIGINAL_TITLE,
+      description: ORIGINAL_PROMPT,
+      workflowStepId: "step-1",
+      state: TODO_STATE,
+    },
+    descriptionInputRef: makeRef(UPDATED_PROMPT),
+    mcpServerIds: ["mcp-first"],
+    mcpServerIdsDirty: true,
+    ...overrides,
+  });
+}
+
+function submitEdit(handlers: ReturnType<typeof useTaskSubmitHandlers>, start: boolean) {
+  return start
+    ? handlers.handleSubmit({ preventDefault: vi.fn() } as never)
+    : handlers.handleUpdateWithoutAgent();
+}
+
+describe("task edit MCP save transaction", () => {
+  it.each([false, true])(
+    "retains a failed draft and waits for retry before success (start=%s)",
+    async (start) => {
+      const first = deferredMCPWrite();
+      const retry = deferredMCPWrite();
+      const save = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(retry.promise);
+      const dependencies = vi.fn(async () => undefined);
+      const deps = mcpEditDeps({
+        saveTaskMCPSelections: save,
+        editDependencies: { isDirty: true, ready: true, save: dependencies },
+      });
+      const { result, rerender } = renderHook((props) => useTaskSubmitHandlers(props), {
+        initialProps: deps,
+      });
+      let pending!: Promise<void>;
+      act(() => {
+        pending = submitEdit(result.current, start);
+      });
+      await waitFor(() => expect(save).toHaveBeenCalledWith(["mcp-first"]));
+      expect(updateTaskMock).toHaveBeenCalledOnce();
+      expect(dependencies).not.toHaveBeenCalled();
+      expect(launchSessionMock).not.toHaveBeenCalled();
+      expect(deps.onOpenChange).not.toHaveBeenCalled();
+      await act(async () => {
+        first.reject(new Error("MCP selection rejected"));
+        await pending;
+      });
+      expect(toastMock).toHaveBeenCalledWith(
+        expect.objectContaining({ description: "MCP selection rejected", variant: "error" }),
+      );
+      expect(deps.onSuccess).not.toHaveBeenCalled();
+      expect(deps.onOpenChange).not.toHaveBeenCalled();
+      expect(deps.clearDraft).not.toHaveBeenCalled();
+      expect(deps.setMcpServerIds).not.toHaveBeenCalled();
+      expect(deps.setIsCreatingTask).toHaveBeenLastCalledWith(false);
+      rerender({ ...deps, taskName: "Latest draft", mcpServerIds: ["mcp-latest"] });
+      act(() => {
+        pending = submitEdit(result.current, start);
+      });
+      await waitFor(() => expect(save).toHaveBeenLastCalledWith(["mcp-latest"]));
+      expect(updateTaskMock).toHaveBeenLastCalledWith(
+        TASK_ID,
+        expect.objectContaining({ title: "Latest draft" }),
+      );
+      expect(dependencies).not.toHaveBeenCalled();
+      expect(launchSessionMock).not.toHaveBeenCalled();
+      expect(deps.onSuccess).not.toHaveBeenCalled();
+      await act(async () => {
+        retry.resolve();
+        await pending;
+      });
+      expect(dependencies).toHaveBeenCalledOnce();
+      expect(launchSessionMock).toHaveBeenCalledTimes(start ? 1 : 0);
+      expect(deps.onSuccess).toHaveBeenCalledOnce();
+      expect(deps.onOpenChange).toHaveBeenCalledWith(false);
+    },
+  );
+
+  it.each([
+    { dirty: true, started: false, writes: 1 },
+    { dirty: false, started: false, writes: 0 },
+    { dirty: true, started: true, writes: 0 },
+  ])(
+    "persists an explicit empty selection only for dirty unstarted edits: %j",
+    async ({ dirty, started, writes }) => {
+      const save = vi.fn(async () => undefined);
+      const deps = mcpEditDeps({
+        mcpServerIds: [],
+        mcpServerIdsDirty: dirty,
+        saveTaskMCPSelections: save,
+      });
+      if (started) deps.editingTask = { ...deps.editingTask!, state: "IN_PROGRESS" };
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+      await act(async () => {
+        await result.current.handleUpdateWithoutAgent();
+      });
+      expect(save).toHaveBeenCalledTimes(writes);
+      if (writes) expect(save).toHaveBeenCalledWith([]);
+      expect(deps.onSuccess).toHaveBeenCalledOnce();
+      expect(deps.onOpenChange).toHaveBeenCalledWith(false);
+    },
+  );
 });
 
 // eslint-disable-next-line max-lines-per-function -- grouped edit regressions share one fixture.
@@ -802,6 +931,46 @@ describe("useTaskSubmitHandlers — repository selection edit failures", () => {
 
 // eslint-disable-next-line max-lines-per-function -- create-mode parity cases share transport setup.
 describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () => {
+  it("does not call the success handler when task creation fails", async () => {
+    const onSuccess = vi.fn();
+    const createTask = vi.fn().mockRejectedValue(new Error("request failed"));
+    const deps = makeDeps({
+      createTask,
+      onSuccess,
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(createTask).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not call the success handler when fresh-branch consent is canceled", async () => {
+    const onSuccess = vi.fn();
+    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID });
+    ensureFreshBranchConsentMock.mockResolvedValueOnce(null);
+    const deps = makeDeps({
+      createTask,
+      onSuccess,
+      freshBranchEnabled: true,
+      isLocalExecutor: true,
+      repositoryLocalPath: "/repo",
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(createTask).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it("refreshes stale policy options and keeps the dialog open", async () => {
     const refreshBranchPolicies = vi.fn(async () => undefined);
     const onOpenChange = vi.fn();
@@ -925,6 +1094,46 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
     expect(payloadArg.trimmedDescription).toBe("refactor module");
   });
 
+  it.each([false, true])(
+    "preserves MCP choices and workspace layout when creating (start=%s)",
+    async (start) => {
+      const deps = makeDeps({
+        initialWorkspaceLayout: "task_root",
+        mcpServerIds: ["mcp-selected"],
+        mcpServerIdsDirty: true,
+        descriptionInputRef: makeRef("use the parent workspace"),
+      });
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+      await act(async () => {
+        if (start) await result.current.handleSubmit({ preventDefault: () => {} } as never);
+        else await result.current.handleCreateWithoutAgent();
+      });
+
+      expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initialWorkspaceLayout: "task_root",
+          mcpServerIds: ["mcp-selected"],
+          withAgent: start,
+        }),
+      );
+    },
+  );
+
+  it("clears MCP choices and workspace layout when cancelling the draft", () => {
+    const deps = makeDeps({
+      initialWorkspaceLayout: "task_root",
+      mcpServerIds: ["mcp-selected"],
+      mcpServerIdsDirty: true,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+    act(() => result.current.handleCancel());
+    expect(deps.setInitialWorkspaceLayout).toHaveBeenCalledWith("repository");
+    expect(deps.setMcpServerIds).toHaveBeenCalledWith([]);
+    expect(deps.setMcpServerIdsDirty).toHaveBeenCalledWith(false);
+    expect(deps.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("replaces the queued last-used overlay with the final create payload", async () => {
     syncTaskCreateLastUsed({
       repository_id: null,
@@ -984,7 +1193,7 @@ describe("useTaskSubmitHandlers — workflow override submit guard", () => {
       createTask,
       executorId: "remote-executor",
       workflowAgentOverridesBlockedReason: "replacement profile is unavailable",
-      descriptionInputRef: makeRef("create this task"),
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 
@@ -1001,7 +1210,7 @@ describe("useTaskSubmitHandlers — workflow override submit guard", () => {
     const deps = makeDeps({
       createTask,
       workflowAgentOverridesBlockedReason: "workflow agents could not be loaded",
-      descriptionInputRef: makeRef("create this task"),
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 

@@ -38,7 +38,7 @@ func TestSetWriteDepsIsWiredOutsideOfficeGate(t *testing.T) {
 			continue
 		}
 		count := countSetWriteDepsCalls(fn)
-		if fn.Name.Name == "initOfficeServices" {
+		if fn.Name.Name == "constructOfficeServices" {
 			foundOfficeInit = true
 			callsInOfficeInit += count
 			continue
@@ -47,16 +47,16 @@ func TestSetWriteDepsIsWiredOutsideOfficeGate(t *testing.T) {
 	}
 
 	// Without this the test degrades silently: rename or move
-	// initOfficeServices and every assertion below still "passes" while
+	// constructOfficeServices and every assertion below still "passes" while
 	// guarding nothing. Fail loudly instead so whoever renames it has to
 	// re-point the guard at the Office-gated function.
 	if !foundOfficeInit {
-		t.Fatal("initOfficeServices not found in main.go; re-point this guard at the Office-gated function")
+		t.Fatal("constructOfficeServices not found in main.go; re-point this guard at the Office-gated function")
 	}
 
 	if callsInOfficeInit > 0 {
 		t.Errorf(
-			"SetWriteDeps is called %d time(s) inside initOfficeServices, which returns early when "+
+			"SetWriteDeps is called %d time(s) inside constructOfficeServices, which returns early when "+
 				"features.office=false (the production default). Plugins start regardless of that flag, so the "+
 				"write deps would never be wired on a default production backend: Host.Messages().Send would "+
 				"return Unimplemented and CreateTask start_agent would silently no-op. Wire it outside the Office gate.",

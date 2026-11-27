@@ -55,7 +55,7 @@ Release bundles also include `agentctl` helpers for task environments.
 - **Multi-repository tasks** - Span a single task across multiple repositories, with one worktree per repo, per-repo branches, per-repo PRs, and per-repo grouping in the Changes panel and review dialog
 - **Flexible runtimes** - Run agents as local processes, in isolated Docker containers, on remote servers via SSH, or in cloud executors like sprites.dev
 - **Runtime settings** - Executor profiles, secrets, custom prompts, utility agents, and resource metrics are configurable from Settings
-- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks
+- **Task-agent MCP** - Agents can create subtasks, target sibling repos, attach extra branches for multiple PRs, message other tasks, read conversations, and inspect related tasks. Choose [native tool packages](docs/public/builtin-mcp-packages.md), including explicit Configuration access for a task.
 - **External MCP** - Manage Kandev from outside coding agents over streamable HTTP or SSE, with copyable config snippets for popular agent CLIs
 - **Plugin marketplace and management** - Browse, install, update, enable, disable, and configure plugins from Settings, including MCP Explorer and the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket)
 - **Workflow portability** - Export and import workflows as portable YAML across workspaces or Kandev installs
@@ -67,7 +67,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
 
 ### In progress: Office mode
 
-We're working on **Office mode**, a feature-flagged autonomy layer for persistent agent teams. The direction is agent instances with roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. We'll document Office as a supported feature after it is live.
+**Office mode** is an experimental autonomy layer for persistent agent teams, disabled by default in production. It includes agent roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. The [Office guide](docs/public/office.md) covers explicit enablement, setup, and evaluation of the current implementation; Office is not yet a stable production contract.
 
 ## Integrations
 
@@ -81,19 +81,20 @@ We're working on **Office mode**, a feature-flagged autonomy layer for persisten
   <a href="https://slack.com/"><img src="https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="Slack"></a>
 </p>
 
-Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket).
+Connect Kandev to GitHub, GitLab, Jira, Linear, and Sentry to pull issues into the kanban, link tasks to PRs, and surface review activity inline. Bitbucket and Azure DevOps support is available through the [Bitbucket plugin](https://github.com/kdlbs/kandev-plugin-bitbucket) and the [Azure DevOps plugin](https://github.com/JnManso/kandev-plugin-azure-devops).
 
-## Supported ACP Agents
+## Supported Agent CLIs
 
 | Agent | Package / command |
 |:-------:|:----------:|
 | **Claude Code** | `@agentclientprotocol/claude-agent-acp` |
 | **Codex** | `@agentclientprotocol/codex-acp` |
+| **Codex app server** | `@openai/codex` *(experimental; enable in System > Feature Toggles)* |
 | **GitHub Copilot** | `@github/copilot` |
 | **Gemini CLI** | `@google/gemini-cli` |
 | **Amp** | `amp-acp` |
 | **Auggie** | `@augmentcode/auggie` |
-| **OpenCode** | `opencode-ai` |
+| **OpenCode** | v2: `@opencode/cli`; existing v1: `opencode-ai` |
 | **Cursor** | `cursor-agent` *(requires Cursor Pro)* |
 | **Devin** | `devin` *(install Devin CLI from Devin Desktop or standalone installer)* |
 | **Qwen** | `@qwen-code/qwen-code` |
@@ -108,16 +109,20 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 | **Oh My Pi** | `omp` *(install `@oh-my-pi/pi-coding-agent` with Bun)* |
 | **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
 | **Hermes** | `hermes` *(install with the official Hermes installer)* |
-| **Antigravity** | `agy_acp_server.par` / `.exe` *(no automated install; download from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp), extract both archive entries into one directory, and put that directory on PATH)* |
+| **Antigravity** | Local and worktree sessions use `agy acp` 1.5.0 or later when `agy acp --help` advertises `--process-per-session`. Kandev adds this flag to each local CLI launch. If the CLI does not qualify, **Settings > Agents > Browse** installs the pinned standalone ACP bundle from the [ACP registry](https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp). The runtimes keep separate Google sign-ins. |
 
-> All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
+> Most structured agent integrations communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Codex app-server is a separate experimental native integration. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/public/add-agent-cli.md) for a step-by-step guide.
 
-Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
-Copilot, or Gemini. Normal launches can reuse npm's best-effort execution
-cache. To deliberately fetch an upstream release, use **Update agent** in
-**Settings > Agents**; Kandev updates the host runtime and refreshes its
+Managed npm runtimes have reviewed defaults. To fetch a selected upstream
+release, use **Update agent** in **Settings > Agents**. Kandev refreshes its
 advertised models and modes for future sessions without restarting active
-sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+sessions. Background notices cover enabled, available registered runtimes, with optional automatic
+updates for supported managed installations and manual guidance for external CLIs.
+See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+
+Fresh OpenCode installs use managed v2 (`@opencode/cli`). Existing v1
+selections remain on `opencode-ai` until you choose the explicit migration
+action. Kandev leaves a separately installed `opencode` CLI unchanged.
 
 ### Bring your own TUI agents
 
@@ -133,7 +138,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
-Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
+Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. On shared instances, [private executor ownership](docs/public/executors.md#private-executors-and-profiles) limits compute and profile access to the owner and configuration administrators. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
 
 ## Quick Start
 
@@ -168,6 +173,10 @@ Requires npm 7+. Installs the CLI plus a platform-matched runtime bundle in one 
 npm install -g kandev@latest
 kandev
 ```
+
+### Run your first task
+
+Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) to add a local repository, configure an agent, and start a task.
 
 ### Updates
 

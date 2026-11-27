@@ -18,6 +18,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isFinePointer: mocks.finePointer }),
 }));
 
+vi.mock("../sidebar-presentation-settings", () => ({
+  SidebarPresentationSettings: () => <div data-testid="sidebar-presentation-settings" />,
+}));
+
 vi.mock("@/components/settings/settings-save-provider", () => ({
   useSettingsSaveContributor: vi.fn(),
   SettingsSaveDirtyScope: ({ children }: { children: (isDirty: boolean) => React.ReactNode }) =>

@@ -1,3 +1,4 @@
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import { useMemo, useCallback } from "react";
 import type { DiffComment, DiffCommentUpdate } from "./types";
 
@@ -11,6 +12,7 @@ export function buildDiffComment(params: {
   side: DiffComment["side"];
   text: string;
   codeContent?: string;
+  attachments?: MessageAttachment[];
 }): DiffComment {
   return {
     id: `${params.filePath}-${Date.now()}`,
@@ -23,6 +25,7 @@ export function buildDiffComment(params: {
     side: params.side,
     codeContent: params.codeContent ?? "",
     text: params.text,
+    ...(params.attachments?.length && { attachments: params.attachments }),
     createdAt: new Date().toISOString(),
     status: "pending",
   };
@@ -78,8 +81,8 @@ export function useCommentActions(params: {
   );
 
   const handleCommentUpdate = useCallback(
-    (commentId: string, content: string) => {
-      const updates = { text: content };
+    (commentId: string, content: string, attachments?: MessageAttachment[]) => {
+      const updates = { text: content, ...(attachments && { attachments }) };
       if (externalComments !== undefined) {
         if (onCommentUpdate) {
           onCommentUpdate(commentId, updates);

@@ -6,6 +6,7 @@ import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { useRouter } from "@/lib/routing/client-router";
 import { useMarketplace } from "@/hooks/domains/plugins/use-marketplace";
 import type { CatalogQuery } from "@/lib/api/domains/marketplace-api";
 import type { MarketplaceCatalog, MarketplaceEntry, MarketplaceSource } from "@/lib/types/plugins";
@@ -22,6 +23,22 @@ type MarketplaceBrowserProps = {
 
 /** The "Browse" tab: search/filter/sort the catalog and install from it. */
 export function MarketplaceBrowser({ onInstallUrl, canManage = true }: MarketplaceBrowserProps) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [extension, setExtension] = useState(() => {
+    const ext =
+      new URLSearchParams(window.location.search)
+        .get("extension")
+        ?.toLowerCase()
+        .replace(/^\./, "") ?? "";
+    return /^[a-z0-9][a-z0-9_-]{0,31}$/.test(ext) ? ext : "";
+  });
+  const clearExtension = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("extension");
+    router.replace(`${url.pathname}${url.search}${url.hash}`, { scroll: false });
+    setExtension("");
+  };
   const [text, setText] = useState("");
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [sort, setSort] = useState<CatalogQuery["sort"]>("stars");
@@ -32,6 +49,7 @@ export function MarketplaceBrowser({ onInstallUrl, canManage = true }: Marketpla
   // category-narrowed catalog would shrink the category dropdown to just the
   // selected value, trapping the user. Search + sort stay server-side.
   const { catalog, loading, error, reload, softReload } = useMarketplace({
+    extension: extension || undefined,
     q: text.trim() || undefined,
     sort,
   });
@@ -53,6 +71,11 @@ export function MarketplaceBrowser({ onInstallUrl, canManage = true }: Marketpla
 
   return (
     <div className="space-y-4">
+      {extension && (
+        <Button variant="outline" onClick={clearExtension}>
+          {t("plugins:viewerExtensionFilter", { extension })}
+        </Button>
+      )}
       <MarketplaceToolbar
         text={text}
         onText={setText}
@@ -72,7 +95,7 @@ export function MarketplaceBrowser({ onInstallUrl, canManage = true }: Marketpla
         entries={visible}
         loading={loading}
         error={error}
-        filtered={Boolean(text.trim() || category !== ALL_CATEGORIES)}
+        filtered={Boolean(text.trim() || category !== ALL_CATEGORIES || extension)}
         installingId={installingId}
         onInstall={install}
         canManage={canManage}

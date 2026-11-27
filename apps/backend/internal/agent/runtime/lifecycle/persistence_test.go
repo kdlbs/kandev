@@ -2,7 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -15,13 +18,18 @@ import (
 type captureExecutorRunningWriter struct {
 	prior       *models.ExecutorRunning
 	running     *models.ExecutorRunning
+	readErr     error
 	upsertErr   error
 	deleteCalls int
+	repairCalls int
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 	context.Context, string,
 ) (*models.ExecutorRunning, error) {
+	if w.readErr != nil {
+		return nil, w.readErr
+	}
 	if w.prior == nil {
 		return nil, models.ErrExecutorRunningNotFound
 	}
@@ -39,6 +47,7 @@ func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ contex
 }
 
 func (w *captureExecutorRunningWriter) RepairExecutorRunningDead(_ context.Context, _ string) error {
+	w.repairCalls++
 	return nil
 }
 
@@ -78,6 +87,22 @@ func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
 
 	if running.ExecutorID != "executor-1" {
 		t.Fatalf("ExecutorID = %q, want executor-1", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsTaskEnvironmentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-env-identity", TaskID: "task-env-identity", SessionID: "session-env-identity",
+		TaskEnvironmentID: "environment-original",
+	}, nil)
+	if got := getMetadataString(running.Metadata, "task_environment_id"); got != "environment-original" {
+		t.Fatalf("persisted task environment identity = %q, want environment-original", got)
+	}
+	if !ShouldPersistMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not retained in executor runtime inventory")
+	}
+	if !IsSessionScopedMetadataKey(MetadataKeyTaskEnvironmentID) {
+		t.Fatal("task environment identity is not scoped to the runtime session")
 	}
 }
 
@@ -201,6 +226,45 @@ func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {
 	if err == nil || !errors.Is(err, writer.upsertErr) {
 		t.Fatalf("persistExecutorRunning error = %v, want %v", err, writer.upsertErr)
 	}
+}
+
+func TestPersistExecutorRunningDoesNotRestoreRevokedPassthroughMCPClaim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".pi", "mcp.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	content := []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:43210/mcp"}}}`)
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+
+	prior := &models.ExecutorRunning{
+		AgentExecutionID: "exec-old",
+		SessionID:        "session-1",
+		Metadata: map[string]interface{}{
+			metadataKeyPassthroughMCPClaims: []interface{}{
+				map[string]interface{}{
+					"path":        path,
+					"fingerprint": passthroughMCPFingerprint(content),
+					"owned":       true,
+				},
+			},
+		},
+	}
+	writer := &captureExecutorRunningWriter{prior: prior}
+	manager := newTestManager(t)
+	manager.SetExecutorRunningWriter(writer)
+	require.NoError(t, manager.persistExecutorRunningResult(context.Background(), &AgentExecution{
+		ID: "exec-current", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}))
+	require.NotNil(t, writer.running)
+
+	encoded, err := json.Marshal(writer.running.Metadata)
+	require.NoError(t, err)
+	var recoveredMetadata map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &recoveredMetadata))
+	recovered := &AgentExecution{ID: "exec-current", SessionID: "session-1", metadata: recoveredMetadata}
+	newTestManager(t).cleanupPassthroughMCPConfig(recovered)
+
+	_, err = os.Stat(path)
+	require.NoError(t, err, "recovery must not restore a revoked claim and delete the user file")
 }
 
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {

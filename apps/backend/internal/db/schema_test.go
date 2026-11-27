@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -20,6 +21,9 @@ func TestTableColumnsAndExistsSQLite(t *testing.T) {
 		created_at DATETIME NOT NULL
 	)`); err != nil {
 		t.Fatalf("create table: %v", err)
+	}
+	if _, err := database.Exec(`CREATE INDEX sample_schema_id_idx ON sample_schema(id)`); err != nil {
+		t.Fatalf("create index: %v", err)
 	}
 
 	exists, err := TableExists(database, "sample_schema")
@@ -68,5 +72,20 @@ func TestTableColumnsAndExistsSQLite(t *testing.T) {
 	}
 	if len(missingColumns) != 0 {
 		t.Fatalf("missing table columns = %#v, want empty", missingColumns)
+	}
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{name: "sample_schema_id_idx", want: true},
+		{name: "missing_schema_idx", want: false},
+	} {
+		got, err := IndexExistsContext(context.Background(), database, test.name)
+		if err != nil {
+			t.Fatalf("index %s exists: %v", test.name, err)
+		}
+		if got != test.want {
+			t.Errorf("IndexExistsContext(%q) = %v, want %v", test.name, got, test.want)
+		}
 	}
 }

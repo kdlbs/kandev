@@ -1,8 +1,10 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -12,7 +14,18 @@ import (
 	"go.uber.org/zap"
 )
 
-const acpUserRole = "user"
+const (
+	acpAssistantRole                    = "assistant"
+	acpUserRole                         = "user"
+	availableCommandKindSkill           = "skill"
+	codexPlanCommandName                = "plan"
+	codexSetConfigOptionActionKind      = "setConfigOption"
+	codexCollaborationModeConfigID      = "collaboration_mode"
+	codexPlanModeValue                  = "plan"
+	codexDefaultModeValue               = "default"
+	codexPlanModePresentation           = "state"
+	normalizedSetConfigOptionActionKind = "set_config_option"
+)
 
 // notifWork is the item type carried on notifQueue. notif is populated for a
 // real SDK notification (the common case); sync identifies a barrier and may
@@ -20,6 +33,7 @@ const acpUserRole = "user"
 // callback, releasing the waiter once everything queued ahead has completed.
 type notifWork struct {
 	notif            acp.SessionNotification
+	native           *decodedCopilotNativeEvent
 	sync             chan struct{}
 	afterBarrier     func()
 	promptGeneration uint64
@@ -83,6 +97,37 @@ func (a *Adapter) syncNotifQueueThen(afterBarrier func()) bool {
 	}
 }
 
+func (a *Adapter) discardPendingSessionStartupWarnings() {
+	a.mu.Lock()
+	a.sessionCreationPending = false
+	a.pendingSessionStartupWarnings = nil
+	a.mu.Unlock()
+}
+
+// syncNotifQueueThenBounded queues a FIFO barrier and waits only within the
+// caller's deadline and timeout. If the wait expires, the barrier remains
+// queued and afterBarrier still runs when the worker reaches it.
+func (a *Adapter) syncNotifQueueThenBounded(
+	ctx context.Context,
+	timeout time.Duration,
+	afterBarrier func(),
+) bool {
+	done := make(chan struct{})
+	go func() {
+		a.syncNotifQueueThen(afterBarrier)
+		close(done)
+	}()
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		return false
+	}
+}
+
 // startUpdateWorker spawns the goroutine that drains notifQueue and calls
 // handleACPUpdate for each notification. Called exactly once from
 // NewAdapter so the queue always has a consumer for the adapter's
@@ -100,16 +145,28 @@ func (a *Adapter) startUpdateWorker() {
 // matching the SDK's own serial delivery contract.
 func (a *Adapter) runUpdateWorker() {
 	defer a.workerWg.Done()
+	defer a.discardShellSnapshot()
+	var snapshotTick <-chan time.Time
+	if a.shellSnapshotTimer != nil {
+		snapshotTick = a.shellSnapshotTimer.C
+	}
 	for {
 		select {
 		case <-a.lifetimeCtx.Done():
 			return
+		case <-snapshotTick:
+			a.flushDueShellSnapshot()
 		case item := <-a.notifQueue:
 			if item.sync != nil {
+				a.flushShellSnapshot()
 				if item.afterBarrier != nil && a.lifetimeCtx.Err() == nil {
 					item.afterBarrier()
 				}
 				close(item.sync)
+				continue
+			}
+			if item.native != nil {
+				a.handleCopilotNativeWork(*item.native)
 				continue
 			}
 			a.handleACPUpdate(item.notif, item.promptGeneration)
@@ -127,17 +184,35 @@ func (a *Adapter) handleACPUpdate(
 	n acp.SessionNotification,
 	promptGeneration uint64,
 ) {
+	sessionID := string(n.SessionId)
+	startupWarning, isStartupWarning := codexMCPStartupWarningEvent(a.agentID, sessionID, n.Update.ToolCall)
+	a.mu.Lock()
+	if isStartupWarning && a.sessionCreationPending && !a.closed {
+		a.pendingSessionStartupWarnings = append(a.pendingSessionStartupWarnings, *startupWarning)
+		a.mu.Unlock()
+		return
+	}
+	isLoading := a.isLoadingSession
+	startupWarningOwned := !a.closed &&
+		((isLoading && a.loadingSessionID == sessionID) || (!isLoading && a.sessionID == sessionID))
+	a.mu.Unlock()
+	copilotNotice := a.observeCopilotInterruptionUpdate(sessionID, n.Update, promptGeneration)
+	if isStartupWarning && !startupWarningOwned {
+		startupWarning = nil
+		if !isLoading {
+			a.logger.Debug("ignoring Codex MCP startup report outside the bound session",
+				zap.String("event_session_id", sessionID))
+			return
+		}
+	}
+
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification
 	// queue if the per-item handler is slow. Check the loading flag first and
 	// skip json.Marshal + LogRawEvent for replay notifications we'd suppress
 	// anyway. We still capture the Plan + Monitor state needed to reconcile
 	// after replay.
-	a.mu.RLock()
-	isLoading := a.isLoadingSession
-	a.mu.RUnlock()
-
-	if isLoading {
+	if isLoading && startupWarning == nil {
 		u := n.Update
 		// Capture the last Plan from replay so we can re-emit it after load completes.
 		a.mu.Lock()
@@ -159,9 +234,26 @@ func (a *Adapter) handleACPUpdate(
 		// the last one as authoritative (last-write-wins).
 		if u.AgentMessageChunk != nil || u.UserMessageChunk != nil || u.AgentThoughtChunk != nil ||
 			u.ToolCall != nil || u.ToolCallUpdate != nil ||
+			u.CompactionUpdate != nil || u.CompactionSummaryChunk != nil ||
 			u.Plan != nil || u.CurrentModeUpdate != nil || u.ConfigOptionUpdate != nil {
 			return
 		}
+	}
+
+	if startupWarning == nil {
+		a.observeContinuationSafety(n, promptGeneration)
+		a.observeCapacityContinuation(n, promptGeneration)
+	}
+	if startupWarning != nil {
+		rawData, _ := json.Marshal(n)
+		if len(rawData) > 0 {
+			shared.LogRawEvent(shared.ProtocolACP, a.agentID, sessionID, "session_notification", rawData)
+		}
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, startupWarning)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			startupWarning.Type, rawData, startupWarning)
+		a.sendUpdate(*startupWarning)
+		return
 	}
 
 	// Marshal once for both debug logging and tracing.
@@ -170,19 +262,51 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogRawEvent(shared.ProtocolACP, a.agentID, string(n.SessionId), "session_notification", rawData)
 	}
 
-	sessionID := string(n.SessionId)
-
+	if n.Update.ConfigOptionUpdate != nil {
+		a.observeConfigurationCommandOptions(
+			sessionID,
+			promptGeneration,
+			convertACPConfigOptions(n.Update.ConfigOptionUpdate.ConfigOptions),
+		)
+	}
+	if n.Update.CurrentModeUpdate != nil {
+		a.observeConfigurationCommandMode(sessionID, promptGeneration, string(n.Update.CurrentModeUpdate.CurrentModeId))
+	}
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
-	var event, leadingEvent *AgentEvent
+	var cursorWatchEvent *AgentEvent
 	if !suppressed {
-		event = a.convertNotification(n)
+		cursorWatchEvent = a.observeCursorShellWatch(sessionID, n.Update, promptGeneration)
+		handled = handled || cursorWatchEvent != nil
+	}
+	var event, leadingEvent *AgentEvent
+	var claudeResumeUpdate *AgentEvent
+	if !suppressed {
+		event = a.convertNotificationForGeneration(n, promptGeneration)
+		if copilotNotice != "" && event != nil {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataCopilotInterruptionNotice] = copilotNotice
+		}
+		if a.copilotNativeActive.Load() && n.Update.UsageUpdate != nil &&
+			event != nil && event.Type == streams.EventTypeContextWindow {
+			// The native usage_info stream owns the Copilot gauge. The ordinary
+			// mixed stream already updated accounting above; it must not emit a
+			// competing parent/child context reading.
+			event = nil
+			handled = true
+		}
+		claudeResumeUpdate = a.claudeSubagentResumeEvent(n, promptGeneration)
 		if a.observesResponseAttemptReset(promptGeneration, event) {
 			leadingEvent = &AgentEvent{
 				Type:             streams.EventTypeResponseAttemptReset,
 				SessionID:        sessionID,
 				PromptGeneration: promptGeneration,
 			}
+		}
+		if event != nil && event.Type == streams.EventTypeSessionModels && n.Update.ConfigOptionUpdate != nil {
+			leadingEvent = a.modeEventForConfigSnapshot(*event)
 		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
@@ -197,6 +321,11 @@ func (a *Adapter) handleACPUpdate(
 				n.Update.UsageUpdate.Meta,
 				promptGeneration,
 			)
+			// An origin-bearing usage frame is the provider's explicit
+			// end-of-turn boundary for an agent-started turn.
+			if lifecycleEvent != nil {
+				a.noteAsyncTurnProviderBoundary(sessionID)
+			}
 			// Generation zero identifies synthetic/legacy turns such as
 			// ScheduleWakeup. They cannot transfer human prompt ownership, but
 			// their foreground-idle activity event must still close the wakeup
@@ -211,6 +340,27 @@ func (a *Adapter) handleACPUpdate(
 				leadingEvent, event = event, lifecycleEvent
 			}
 		}
+	}
+	a.stampUpdateTurnIdentity(leadingEvent, promptGeneration)
+	a.stampUpdateTurnIdentity(event, promptGeneration)
+	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
+	if n.Update.ToolCallUpdate != nil {
+		for _, controlUpdate := range a.codexControlCardUpdates(sessionID, n.Update.ToolCallUpdate) {
+			a.stampUpdateTurnIdentity(&controlUpdate, promptGeneration)
+			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, &controlUpdate)
+			a.sendUpdate(controlUpdate)
+		}
+	}
+	if claudeResumeUpdate != nil {
+		a.stampUpdateTurnIdentity(claudeResumeUpdate, promptGeneration)
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, claudeResumeUpdate)
+		a.sendUpdate(*claudeResumeUpdate)
+	}
+	if cursorWatchEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, cursorWatchEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			cursorWatchEvent.Type, rawData, cursorWatchEvent)
+		a.sendUpdate(*cursorWatchEvent)
 	}
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
@@ -230,7 +380,12 @@ func (a *Adapter) handleACPUpdate(
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)
-		a.sendUpdate(*event)
+		event.ShellOutputEligible = shellOutputCompactEligible(n, event)
+		if shellSnapshotEligible(n, event) {
+			a.sendShellSnapshot(*event, promptGeneration)
+		} else {
+			a.sendUpdate(*event)
+		}
 		a.maybeScheduleAsyncTurnComplete(*event)
 	} else if !handled {
 		if updateJSON, err := json.Marshal(n.Update); err == nil {
@@ -245,6 +400,33 @@ func (a *Adapter) handleACPUpdate(
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
 	}
+}
+
+func (a *Adapter) stampSessionSettingsReports(sessionID string, events ...*AgentEvent) {
+	needsStamp := false
+	for _, event := range events {
+		if event != nil && event.SessionSettingsGeneration == 0 &&
+			(event.Type == streams.EventTypeSessionMode || event.Type == streams.EventTypeSessionModels) {
+			needsStamp = true
+			break
+		}
+	}
+	if !needsStamp {
+		return
+	}
+	a.mu.Lock()
+	if a.sessionID == sessionID && !a.closed {
+		a.sessionSettingsGeneration++
+		for _, event := range events {
+			if event == nil || event.SessionSettingsGeneration != 0 ||
+				(event.Type != streams.EventTypeSessionMode && event.Type != streams.EventTypeSessionModels) {
+				continue
+			}
+			event.SessionSettingsPolicy = providerRestoredPolicy(a.sessionSettingsPolicy)
+			event.SessionSettingsGeneration = a.sessionSettingsGeneration
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {
@@ -266,7 +448,12 @@ func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event 
 	}
 	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole &&
 		isCursorRetriableStreamReset(event.Text) {
-		turn.setCursorRetriable()
+		sanitized := streams.SanitizeProviderMessage(event.Text)
+		if sanitized == "" {
+			sanitized = "Error: RetriableError: Provider error"
+		}
+		complete := streams.IsCompleteProviderDiagnostic(event.Text)
+		turn.setCursorRetriable(sanitized, complete)
 		return true
 	}
 	if cursorProviderProgress(event) {
@@ -295,6 +482,27 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	turn := a.currentPromptTurn()
 	if turn == nil || turn.promptGeneration != promptGeneration {
 		return false
+	}
+	if event.Type == streams.EventTypeMessageChunk && event.ProviderDiagnosticCandidate {
+		classified := routingerr.Classify(routingerr.Input{
+			Phase:      routingerr.PhasePromptSend,
+			ProviderID: codexAgentID,
+			Stderr:     event.Text,
+		})
+		if classified.Code == routingerr.CodeQuotaLimited &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed {
+			message := streams.SanitizeProviderMessage(event.Text)
+			if message != "" {
+				providerError := streams.ProviderError{
+					Source:     streams.ProviderErrorSourceCodexACP,
+					ProviderID: codexAgentID,
+					Message:    message,
+					OccurredAt: time.Now().UTC(),
+					ResetAt:    classified.ResetHint,
+				}
+				turn.observeCodexUsageLimit(providerError)
+			}
+		}
 	}
 	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
 	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
@@ -348,6 +556,21 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 
 // convertNotification converts an ACP SessionNotification to an AgentEvent.
 func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
+	return a.convertNotificationForGeneration(n, a.currentPromptGeneration())
+}
+
+func (a *Adapter) convertNotificationForGeneration(n acp.SessionNotification, promptGeneration uint64) *AgentEvent {
+	if event, handled := a.convertACPContentNotification(n, promptGeneration); handled {
+		return event
+	}
+	event, _ := a.convertACPSessionNotification(n)
+	return event
+}
+
+func (a *Adapter) convertACPContentNotification(
+	n acp.SessionNotification,
+	promptGeneration uint64,
+) (*AgentEvent, bool) {
 	u := n.Update
 	sessionID := string(n.SessionId)
 
@@ -356,9 +579,9 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 		return a.convertMessageChunkWithProtocolID(
 			sessionID,
 			u.AgentMessageChunk.Content,
-			"assistant",
+			acpAssistantRole,
 			derefStr(u.AgentMessageChunk.MessageId),
-		)
+		), true
 
 	case u.UserMessageChunk != nil:
 		return a.convertMessageChunkWithProtocolID(
@@ -366,7 +589,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			u.UserMessageChunk.Content,
 			acpUserRole,
 			derefStr(u.UserMessageChunk.MessageId),
-		)
+		), true
 
 	case u.AgentThoughtChunk != nil:
 		if u.AgentThoughtChunk.Content.Text != nil {
@@ -375,15 +598,30 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 				SessionID:         sessionID,
 				ProtocolMessageID: derefStr(u.AgentThoughtChunk.MessageId),
 				ReasoningText:     u.AgentThoughtChunk.Content.Text.Text,
-			}
+			}, true
 		}
+		return nil, true
 
 	case u.ToolCall != nil:
-		return a.convertToolCallUpdate(sessionID, u.ToolCall)
+		return a.convertToolCallUpdateForGeneration(sessionID, u.ToolCall, promptGeneration), true
 
 	case u.ToolCallUpdate != nil:
-		return a.convertToolCallResultUpdate(sessionID, u.ToolCallUpdate)
+		return a.convertToolCallResultUpdateForGeneration(sessionID, u.ToolCallUpdate, promptGeneration), true
 
+	case u.CompactionUpdate != nil:
+		return a.convertCompactionUpdate(sessionID, u.CompactionUpdate), true
+
+	case u.CompactionSummaryChunk != nil:
+		return a.convertCompactionSummaryChunk(sessionID, u.CompactionSummaryChunk), true
+	}
+	return nil, false
+}
+
+func (a *Adapter) convertACPSessionNotification(n acp.SessionNotification) (*AgentEvent, bool) {
+	u := n.Update
+	sessionID := string(n.SessionId)
+
+	switch {
 	case u.Plan != nil:
 		entries := make([]PlanEntry, len(u.Plan.Entries))
 		for i, e := range u.Plan.Entries {
@@ -397,38 +635,56 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			Type:        streams.EventTypePlan,
 			SessionID:   sessionID,
 			PlanEntries: entries,
-		}
+		}, true
 
 	case u.AvailableCommandsUpdate != nil:
-		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate)
+		return a.convertAvailableCommands(sessionID, u.AvailableCommandsUpdate), true
 
 	case u.CurrentModeUpdate != nil:
+		if !a.noteCurrentMode(sessionID, string(u.CurrentModeUpdate.CurrentModeId)) {
+			return nil, true
+		}
 		return &AgentEvent{
 			Type:          streams.EventTypeSessionMode,
 			SessionID:     sessionID,
 			CurrentModeID: string(u.CurrentModeUpdate.CurrentModeId),
-		}
+		}, true
 
 	case u.ConfigOptionUpdate != nil:
 		configOptions := convertACPConfigOptions(u.ConfigOptionUpdate.ConfigOptions)
-		if len(configOptions) > 0 {
+		if len(configOptions) > 0 || a.agentID == acpcompat.PiAgentID {
 			// Refresh the cached config options so emitSetModelEvent
 			// (called from SetModel) doesn't reuse the stale snapshot from
 			// session/new. Include the cached available models so the event
 			// doesn't overwrite the model list set during session init.
 			a.mu.Lock()
+			if a.sessionID != sessionID || a.closed {
+				a.mu.Unlock()
+				return nil, true
+			}
 			cachedModels := a.availableModels
 			a.availableConfigOptions = configOptions
-			a.mu.Unlock()
-			return &AgentEvent{
-				Type:           streams.EventTypeSessionModels,
-				SessionID:      sessionID,
-				CurrentModelID: currentModelFromConfig(configOptions),
-				SessionModels:  convertSessionModels(cachedModels),
-				ConfigOptions:  configOptions,
-				Data:           map[string]any{"config_options_source": "provider_update"},
+			a.clearUnknownThinkingModeLocked(configOptions)
+			if modes, found := a.sessionModesFromConfig(configOptions); found {
+				a.availableModes = modes
 			}
+			a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), false)
+			a.sessionSettingsGeneration++
+			event := &AgentEvent{
+				Type:                      streams.EventTypeSessionModels,
+				SessionID:                 sessionID,
+				CurrentModelID:            currentModelFromConfig(configOptions),
+				SessionModels:             convertSessionModels(cachedModels),
+				ConfigOptions:             configOptions,
+				SessionSettingsPolicy:     providerRestoredPolicy(a.sessionSettingsPolicy),
+				SessionSettingsGeneration: a.sessionSettingsGeneration,
+				Data:                      map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceProviderUpdate},
+			}
+			a.stampModelCatalogLocked(event, u.ConfigOptionUpdate.ConfigOptions, "")
+			a.mu.Unlock()
+			return event, true
 		}
+		return nil, true
 
 	case u.SessionInfoUpdate != nil:
 		return &AgentEvent{
@@ -437,13 +693,13 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 			SessionTitle:     derefStr(u.SessionInfoUpdate.Title),
 			SessionUpdatedAt: derefStr(u.SessionInfoUpdate.UpdatedAt),
 			SessionMeta:      u.SessionInfoUpdate.Meta,
-		}
+		}, true
 
 	case u.UsageUpdate != nil:
-		return a.convertUsageUpdate(sessionID, u.UsageUpdate)
+		return a.convertUsageUpdate(sessionID, u.UsageUpdate), true
 	}
 
-	return nil
+	return nil, false
 }
 
 // usageTracker carries the latest cumulative ACP usage sample and the sample
@@ -532,6 +788,7 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 		tr.maxSize = 0
 	}
 	delete(a.contextSamples, sessionID)
+	delete(a.nativeGaugeMaxSize, sessionID)
 }
 
 // consumeUsageDelta returns nonnegative growth in context occupancy since the
@@ -642,7 +899,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// own assistant text. Parse those out into proper Monitor events and
 		// strip them from the chat text. Assistant role only — genuine user
 		// messages don't carry these.
-		if role == "assistant" {
+		if role == acpAssistantRole {
 			cleaned := a.routeMonitorEvents(sessionID, text)
 			monitorTextRemoved := cleaned != text
 			text = cleaned
@@ -659,7 +916,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
-		event.ProviderDiagnosticCandidate = role == "assistant" &&
+		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
@@ -721,14 +978,56 @@ func (a *Adapter) convertAvailableCommands(sessionID string, update *acp.Session
 			Name:        cmd.Name,
 			Description: acpcompat.NormalizeCommandDescription(a.agentID, cmd.Description),
 		}
+		ac.Kind, ac.Action = normalizeAvailableCommandMetadata(a.agentID, cmd)
 		if cmd.Input != nil && cmd.Input.Unstructured != nil {
 			ac.InputHint = cmd.Input.Unstructured.Hint
 		}
 		commands = append(commands, ac)
 	}
+	a.mu.Lock()
+	if !a.closed {
+		if a.availableCommandsBySession == nil {
+			a.availableCommandsBySession = make(map[string][]streams.AvailableCommand)
+		}
+		a.availableCommandsBySession[sessionID] = append([]streams.AvailableCommand(nil), commands...)
+	}
+	a.mu.Unlock()
 	return &AgentEvent{
 		Type:              streams.EventTypeAvailableCommands,
 		SessionID:         sessionID,
 		AvailableCommands: commands,
 	}
+}
+
+func normalizeAvailableCommandMetadata(agentID string, cmd acp.AvailableCommand) (string, *streams.AvailableCommandAction) {
+	if agentID != codexAgentID {
+		return "", nil
+	}
+	if strings.HasPrefix(cmd.Name, "$") && len(cmd.Name) > 1 {
+		return availableCommandKindSkill, nil
+	}
+	if cmd.Name != codexPlanCommandName {
+		return "", nil
+	}
+	metadata, ok := cmd.Meta["commandAction"].(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	if !isCodexPlanCommandAction(metadata) {
+		return "", nil
+	}
+	return "", &streams.AvailableCommandAction{
+		Kind:       normalizedSetConfigOptionActionKind,
+		ConfigID:   codexCollaborationModeConfigID,
+		Value:      codexPlanModeValue,
+		ResetValue: codexDefaultModeValue,
+	}
+}
+
+func isCodexPlanCommandAction(metadata map[string]any) bool {
+	return metadata["kind"] == codexSetConfigOptionActionKind &&
+		metadata["configId"] == codexCollaborationModeConfigID &&
+		metadata["value"] == codexPlanModeValue &&
+		metadata["resetValue"] == codexDefaultModeValue &&
+		metadata["presentation"] == codexPlanModePresentation
 }

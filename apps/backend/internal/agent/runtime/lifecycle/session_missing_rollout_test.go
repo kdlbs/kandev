@@ -89,11 +89,45 @@ func TestIsMissingProviderSessionErrRequiresMatchingStructuredEvidence(t *testin
 				Data:    map[string]any{"details": "Session not found: SAVED-SESSION"},
 			},
 		},
+		{
+			name: "matching codex archived session",
+			err: fmt.Errorf("load failed: %w", &acp.RequestError{
+				Code:    -32603,
+				Message: "Internal error",
+				Data: map[string]any{
+					"details": "session saved-session is archived. Run `codex unarchive saved-session` to unarchive it first.",
+				},
+			}),
+			want: true,
+		},
+		{
+			name: "matching codex archived session in json string",
+			err: errors.New(
+				`load session failed: failed to load session: {"code":-32603,"message":"Internal error","data":{"details":"session saved-session is archived. It can no longer be loaded."}}`,
+			),
+			want: true,
+		},
+		{
+			name: "codex archived session for different session",
+			err: &acp.RequestError{
+				Code:    -32603,
+				Message: "Internal error",
+				Data:    map[string]any{"details": "session other-session is archived. Run `codex unarchive other-session` to unarchive it first."},
+			},
+		},
+		{
+			name: "internal error naming the session but not archived",
+			err: &acp.RequestError{
+				Code:    -32603,
+				Message: "Internal error",
+				Data:    map[string]any{"details": "session saved-session could not be read"},
+			},
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := isMissingProviderSessionErr(test.err, "saved-session"); got != test.want {
+			if got := isMissingProviderSessionErr(test.err, "saved-session", "codex-acp"); got != test.want {
 				t.Fatalf("isMissingProviderSessionErr() = %t, want %t", got, test.want)
 			}
 		})

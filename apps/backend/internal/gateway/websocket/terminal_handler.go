@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
@@ -14,8 +16,12 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
 
 // UserService interface for getting user preferences.
@@ -29,7 +35,15 @@ type TerminalHandler struct {
 	lifecycleMgr  *lifecycle.Manager
 	userService   UserService
 	scriptService scripts.ScriptService
+	terminalSvc   *terminalservice.Service
 	logger        *logger.Logger
+	keepalive     wskeepalive.Timing
+}
+
+// SetTerminalService enables server-side recovery of persisted ordinary
+// terminal launch commands. Those commands are never sent by the client.
+func (h *TerminalHandler) SetTerminalService(svc *terminalservice.Service) {
+	h.terminalSvc = svc
 }
 
 // NewTerminalHandler creates a new TerminalHandler instance.
@@ -39,6 +53,7 @@ func NewTerminalHandler(lifecycleMgr *lifecycle.Manager, userService UserService
 		userService:   userService,
 		scriptService: scriptService,
 		logger:        log.WithFields(zap.String("component", "terminal_handler")),
+		keepalive:     wskeepalive.DefaultTiming(),
 	}
 }
 
@@ -122,22 +137,20 @@ func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID str
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
 		return
 	}
-	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
-	if interactiveRunner == nil {
-		h.logger.Error("interactive runner not available")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
-		return
-	}
 	h.logger.Info("terminal WebSocket connection request",
 		zap.String("session_id", sessionID),
 		zap.String("mode", "agent"),
 		zap.String("remote_addr", c.Request.RemoteAddr))
-	h.handleAgentPassthroughWS(c, sessionID, interactiveRunner)
+	h.handleAgentPassthroughWS(c, sessionID, h.lifecycleMgr.GetInteractiveRunner())
 }
 
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+			h.closeMissingEnvironmentTerminal(c)
+			return
+		}
 		h.logger.Warn("environment terminal execution not ready",
 			zap.String("task_environment_id", environmentID),
 			zap.String("terminal_id", terminalID),
@@ -172,6 +185,23 @@ func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environme
 	h.handleUserShellWS(c, execution, environmentID, terminalID, interactiveRunner)
 }
 
+func (h *TerminalHandler) closeMissingEnvironmentTerminal(c *gin.Context) {
+	if !gorillaws.IsWebSocketUpgrade(c.Request) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "task environment not found"})
+		return
+	}
+	// Browsers hide failed handshake status codes. Complete the upgrade so a
+	// retained terminal can distinguish a removed target from a temporary outage.
+	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.WriteControl(gorillaws.CloseMessage,
+		gorillaws.FormatCloseMessage(gorillaws.CloseNormalClosure, "environment_not_found"),
+		time.Now().Add(time.Second))
+}
+
 func (h *TerminalHandler) handleRemoteUserShellWS(
 	c *gin.Context,
 	execution *lifecycle.AgentExecution,
@@ -186,15 +216,22 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 		return
 	}
 
-	_, initialCommand, httpErr := h.resolveShellLabel(c)
+	label, initialCommand, httpErr := h.resolveShellLabel(c)
 	if httpErr != "" {
 		releaseClient()
 		c.JSON(http.StatusBadRequest, gin.H{"error": httpErr})
 		return
 	}
+	var initialCommandOnce bool
+	_, initialCommand, initialCommandOnce, _, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	if httpErr != "" {
+		releaseClient()
+		c.JSON(http.StatusNotFound, gin.H{"error": httpErr})
+		return
+	}
 	// The per-terminal WS URL carries only env + terminalId, so recover the
 	// command pre-registered by wsUserShellCreate for script/dev terminals.
-	if initialCommand == "" {
+	if initialCommand == "" && !initialCommandOnce {
 		if runner := h.lifecycleMgr.GetInteractiveRunner(); runner != nil {
 			initialCommand = runner.LookupShellInitialCommand(scopeID, terminalID)
 		}
@@ -250,6 +287,8 @@ func (h *TerminalHandler) handleRemoteUserShellWS(
 			h.logger.Debug("failed to send initial command to remote terminal shell",
 				zap.String("terminal_id", terminalID),
 				zap.Error(err))
+		} else if h.terminalSvc != nil {
+			h.terminalSvc.MarkCursorMCPAuthenticationAttemptStarted(terminalID)
 		}
 	}
 
@@ -278,6 +317,14 @@ func (h *TerminalHandler) handleAgentPassthroughWS(
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if execution.RuntimeName == agentruntime.RuntimeSSH {
+		h.handleRemoteAgentTerminal(c, execution)
+		return
+	}
+	if interactiveRunner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
 		return
 	}
 
@@ -357,7 +404,7 @@ func (h *TerminalHandler) resolvePreferredShell(ctx context.Context) string {
 }
 
 // resolveWorkingDir returns the workspace path from the environment execution.
-func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution) (string, error) {
+func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution, requested string) (string, error) {
 	if execution == nil {
 		return "", fmt.Errorf("environment execution is not ready")
 	}
@@ -365,9 +412,52 @@ func (h *TerminalHandler) resolveWorkingDir(execution *lifecycle.AgentExecution)
 		return "", fmt.Errorf("%w: task environment %s has no workspace path configured",
 			lifecycle.ErrSessionWorkspaceNotReady, execution.TaskEnvironmentID)
 	}
+	if requested != "" && (workingDirWithinWorkspace(requested, execution.WorkspacePath) ||
+		workingDirWithinRoots(requested, execution.WorkspaceSourceRoots)) {
+		return requested, nil
+	}
 	h.logger.Info("handleUserShellWS: got working directory from environment execution",
 		zap.String("working_dir", execution.WorkspacePath))
 	return execution.WorkspacePath, nil
+}
+
+// workingDirWithinWorkspace keeps a user-requested terminal directory inside
+// the live agent workspace. Adopted worktrees are nested inside that root.
+func workingDirWithinRoots(requested string, roots []string) bool {
+	for _, root := range roots {
+		if workingDirWithinWorkspace(requested, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func workingDirWithinWorkspace(requested, workspace string) bool {
+	requested = resolvePathForContainment(requested)
+	workspace = resolvePathForContainment(workspace)
+	if !filepath.IsAbs(requested) || !filepath.IsAbs(workspace) {
+		return false
+	}
+	rel, err := filepath.Rel(workspace, requested)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// resolvePathForContainment canonicalizes both sides of a containment check.
+// Missing leaves are resolved through their parent so a symlinked ancestor
+// cannot make an in-workspace path look external.
+func resolvePathForContainment(path string) string {
+	cleaned := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	parent := filepath.Dir(cleaned)
+	if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(cleaned))
+	}
+	return cleaned
 }
 
 // resolveShellLabel returns the label and initial command for a user shell, derived
@@ -404,15 +494,37 @@ func (h *TerminalHandler) startUserShellProcess(
 	if httpErr != "" {
 		return "", http.StatusBadRequest, httpErr
 	}
-
+	var initialCommandOnce bool
+	var requestedWorkingDir string
+	label, initialCommand, initialCommandOnce, requestedWorkingDir, httpErr = h.resolveOrdinaryTerminalLaunch(c, execution, scopeID, terminalID, label, initialCommand)
+	if httpErr != "" {
+		return "", http.StatusNotFound, httpErr
+	}
+	if initialCommandOnce && initialCommand == "" && !interactiveRunner.IsUserShellAlive(scopeID, terminalID) {
+		if h.terminalSvc != nil && h.terminalSvc.CursorMCPAuthenticationAttemptPending(terminalID) {
+			return "", http.StatusConflict, "terminal_command_starting"
+		}
+		if h.terminalSvc != nil {
+			h.terminalSvc.MarkCursorMCPAuthenticationAttemptFailed(terminalID)
+		}
+		return "", http.StatusGone, "terminal_command_completed"
+	}
+	launchFailed := initialCommandOnce
+	if launchFailed {
+		defer func() {
+			if launchFailed && h.terminalSvc != nil {
+				h.terminalSvc.MarkCursorMCPAuthenticationAttemptFailed(terminalID)
+			}
+		}()
+	}
 	h.logger.Info("handleUserShellWS: starting user shell handling",
 		zap.String("session_id", sessionID),
 		zap.String("terminal_id", terminalID),
 		zap.String("label", label),
-		zap.String("initial_command", initialCommand))
+		zap.Bool("has_initial_command", initialCommand != ""))
 
 	preferredShell := h.resolvePreferredShell(c.Request.Context())
-	workingDir, err := h.resolveWorkingDir(execution)
+	workingDir, err := h.resolveWorkingDir(execution, requestedWorkingDir)
 	if err != nil {
 		h.logger.Warn("handleUserShellWS: workspace path not ready",
 			zap.String("session_id", sessionID),
@@ -444,7 +556,9 @@ func (h *TerminalHandler) startUserShellProcess(
 		}
 	}
 
-	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand, Env: shellEnv}
+	opts := &process.UserShellOptions{
+		Label: label, InitialCommand: initialCommand, InitialCommandOnce: initialCommandOnce, Env: shellEnv,
+	}
 
 	h.logger.Info("handleUserShellWS: calling StartUserShell",
 		zap.String("session_id", sessionID),
@@ -452,7 +566,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("working_dir", workingDir),
 		zap.String("preferred_shell", preferredShell),
 		zap.String("label", opts.Label),
-		zap.String("initial_command", opts.InitialCommand),
+		zap.Bool("has_initial_command", opts.InitialCommand != ""),
 		zap.Int("profile_env_count", len(profileEnv)),
 		zap.Int("shell_env_count", len(shellEnv)))
 
@@ -466,6 +580,10 @@ func (h *TerminalHandler) startUserShellProcess(
 			zap.Error(err))
 		return "", http.StatusServiceUnavailable, err.Error()
 	}
+	if h.terminalSvc != nil {
+		h.terminalSvc.MarkCursorMCPAuthenticationAttemptStarted(terminalID)
+	}
+	launchFailed = false
 
 	h.logger.Info("handleUserShellWS: user shell started successfully",
 		zap.String("session_id", sessionID),
@@ -474,6 +592,48 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.Int("os_pid", info.OSPID))
 
 	return info.ID, 0, ""
+}
+
+// errTerminalNotFound is the non-disclosing launch error. Missing metadata,
+// a foreign environment, and an unauthorized owner share it so a caller
+// cannot distinguish them.
+const errTerminalNotFound = "terminal not found"
+
+func (h *TerminalHandler) resolveOrdinaryTerminalLaunch(
+	c *gin.Context,
+	execution *lifecycle.AgentExecution,
+	scopeID, terminalID, label, initialCommand string,
+) (string, string, bool, string, string) {
+	if h.terminalSvc == nil || !terminalservice.IsManaged(terminalID) {
+		return label, initialCommand, false, "", ""
+	}
+	// Ownership comes from persisted terminal metadata, never from the
+	// execution that happens to serve this environment. Tasks can share one
+	// environment, so execution.TaskID may name a sibling task.
+	owner, err := h.terminalSvc.OwnerForTerminal(c.Request.Context(), scopeID, terminalID)
+	if err != nil {
+		h.logger.Warn("failed to resolve persisted terminal owner",
+			zap.String("session_id", execution.SessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return "", "", false, "", errTerminalNotFound
+	}
+	if err := h.lifecycleMgr.CheckTaskEnvironmentAccess(c.Request.Context(), owner, scopeID); err != nil {
+		h.logger.Warn("terminal owner is not authorized for this environment",
+			zap.String("session_id", execution.SessionID),
+			zap.String("terminal_id", terminalID),
+			zap.Error(err))
+		return "", "", false, "", errTerminalNotFound
+	}
+	// The one-shot command is consumed only after the task/environment pair
+	// above is authorized.
+	info, err := h.terminalSvc.ClaimShellLaunchInfo(c.Request.Context(), owner, scopeID, terminalID)
+	if err != nil {
+		h.logger.Warn("failed to resolve persisted terminal launch info",
+			zap.String("session_id", execution.SessionID), zap.Error(err))
+		return "", "", false, "", errTerminalNotFound
+	}
+	return info.Label, info.InitialCommand, info.InitialCommandOnce, info.WorkingDir, ""
 }
 
 // handleUserShellWS handles WebSocket connections for user shell terminals.
@@ -490,6 +650,17 @@ func (h *TerminalHandler) handleUserShellWS(
 		c, execution, scopeID, terminalID, interactiveRunner,
 	)
 	if errMsg != "" {
+		if httpStatus == http.StatusGone && errMsg == "terminal_command_completed" {
+			conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+			if err != nil {
+				h.logger.Debug("failed to upgrade completed terminal websocket", zap.Error(err))
+				return
+			}
+			closeFrame := gorillaws.FormatCloseMessage(gorillaws.CloseNormalClosure, "initial_command_completed")
+			_ = conn.WriteControl(gorillaws.CloseMessage, closeFrame, time.Now().Add(time.Second))
+			_ = conn.Close()
+			return
+		}
 		c.JSON(httpStatus, gin.H{"error": errMsg})
 		return
 	}

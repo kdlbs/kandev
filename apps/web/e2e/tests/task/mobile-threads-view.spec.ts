@@ -3,14 +3,15 @@ import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
-import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
+import { openTaskSession } from "../../helpers/git-helper";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
 import { requireBox } from "../../helpers/layout-assertions";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
-import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
+import { swipeDeckLeft, swipeDeckRight } from "./mobile-threads-swipe-helpers";
 import {
   captureThreadSettings,
   capturePresentation,
@@ -78,7 +79,7 @@ test.describe("Mobile Threads view", () => {
     try {
       const tasks = [];
       for (const title of ["A responsive grid", "B responsive grid", "C responsive grid"]) {
-        tasks.push(await startPresentationThread(testPage, apiClient, seedData, title));
+        tasks.push(await startPresentationThread(apiClient, seedData, title));
       }
       await seedThreadPresentation(apiClient, { layout: "grid" });
       await testPage.goto("/threads");
@@ -119,11 +120,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       AGENT_TITLE,
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -180,7 +180,6 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-picker");
     const titles = [
       "Review checkout accessibility across keyboard and touch",
       "Investigate a very long payment reconciliation identifier",
@@ -188,12 +187,17 @@ test.describe("Mobile Threads view", () => {
     ];
     const tasks = [];
     for (const title of titles) {
-      const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        title,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
       await openTaskSession(testPage, title);
       await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
       const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -287,8 +291,42 @@ test.describe("Mobile Threads view", () => {
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByRole("dialog", { name: "Menu", exact: true })).toBeHidden();
 
-    await swipeDeckLeft(testPage);
+    const columnIds = await board
+      .locator("[data-thread-column-id]")
+      .evaluateAll((columns) =>
+        columns.map((column) => column.getAttribute("data-thread-column-id")),
+      );
+    const selectedIndex = columnIds.indexOf(tasks[2].id);
+    expect(selectedIndex).toBeGreaterThanOrEqual(0);
+    const hasNextThread = selectedIndex < columnIds.length - 1;
+    const scrollEnd = await board.evaluateHandle((element) => {
+      const state = { complete: false };
+      element.addEventListener(
+        "scrollend",
+        () => {
+          state.complete = true;
+        },
+        { once: true },
+      );
+      return state;
+    });
+    try {
+      if (hasNextThread) await swipeDeckLeft(testPage);
+      else await swipeDeckRight(testPage);
+      await expect.poll(() => scrollEnd.evaluate((state) => state.complete)).toBe(true);
+    } finally {
+      await scrollEnd.dispose();
+    }
+    const settledIndex = await board.evaluate((element) =>
+      Math.round(element.scrollLeft / element.clientWidth),
+    );
+    if (hasNextThread) expect(settledIndex).toBeGreaterThan(selectedIndex);
+    else expect(settledIndex).toBeLessThan(selectedIndex);
+    const settledTaskId = columnIds[settledIndex];
+    expect(settledTaskId).toBeTruthy();
+    const activeColumn = board.getByTestId(`thread-column-${settledTaskId}`);
     await expect(selected.getByTestId("session-chat")).toHaveCount(0);
+    await expect(activeColumn.getByTestId("session-chat")).toHaveCount(1);
     await expect(board.getByTestId("session-chat")).toHaveCount(1);
     await expect
       .poll(() =>
@@ -298,14 +336,12 @@ test.describe("Mobile Threads view", () => {
         }),
       )
       .toBeLessThanOrEqual(0.01);
-    const activeColumn = board.getByTestId(/^thread-column-/).filter({
-      has: testPage.getByTestId("session-chat"),
-    });
     await expectSwipeCue(testPage, activeColumn, 3);
     await testPage.setViewportSize({ width: 820, height: 1180 });
     await expect(testPage.getByTestId("thread-swipe-cue")).toHaveCount(0);
     await testPage.setViewportSize({ width: 360, height: 740 });
-    await expect(activeColumn).toHaveCount(1);
+    await expect(activeColumn.getByTestId("session-chat")).toHaveCount(1);
+    await expect(board.getByTestId("session-chat")).toHaveCount(1);
     await expectSwipeCue(testPage, activeColumn, 3);
   });
 
@@ -422,11 +458,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-saved-view");
     const firstTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view first work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -437,7 +472,7 @@ test.describe("Mobile Threads view", () => {
     const secondTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view second work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -470,7 +505,10 @@ test.describe("Mobile Threads view", () => {
     await drawer.getByTestId("threads-task-picker-search").fill("Mobile saved");
     await expect(drawer.getByTestId("threads-task-picker-row")).toHaveCount(2);
     await expect(
-      drawer.getByTestId("threads-task-picker-row").first().getByRole("img", { name: "Review" }),
+      drawer
+        .getByTestId("threads-task-picker-row")
+        .first()
+        .getByRole("img", { name: "Turn finished, awaiting instruction" }),
     ).toBeVisible();
     await expect(
       drawer.getByTestId("threads-task-picker-row").first().getByTestId("threads-task-picker-step"),
@@ -550,8 +588,7 @@ test.describe("Mobile Threads view", () => {
     const buttons = geometryDrawer.locator("button:visible");
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
-      const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(buttons.nth(index));
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
     await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(
@@ -561,6 +598,67 @@ test.describe("Mobile Threads view", () => {
     await geometryDrawer.getByTestId("threads-mobile-view-option-view-all-threads").tap();
     await expect(geometryDrawer).toBeHidden();
     await expect(reloadedTrigger).toBeFocused();
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.18
+  test("offers Selection order and numbers picked tasks in the native drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const { settings } = await apiClient.getUserSettings();
+    previousViewSettings = {
+      thread_views: settings.thread_views ?? [],
+      thread_active_view_id: settings.thread_active_view_id ?? "view-all-threads",
+      thread_view_draft: settings.thread_view_draft ?? null,
+    };
+    const titles = ["Mobile selection first work", "Mobile selection second work"];
+    for (const title of titles) {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        title,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await openTaskSession(testPage, title);
+      await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
+    }
+
+    await testPage.goto("/threads");
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const drawer = testPage.getByTestId("threads-mobile-view-drawer");
+    await drawer.getByTestId("threads-mobile-new-view").tap();
+    const editor = drawer.getByTestId("threads-view-editor");
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId("threads-sort-select").tap();
+    await expect(testPage.getByRole("option", { name: "Selection order" })).toHaveCount(0);
+    await testPage.getByRole("option", { name: "Attention" }).tap();
+
+    await editor.getByTestId("threads-scope-select").tap();
+    await testPage.getByRole("option", { name: "Selected tasks", exact: true }).tap();
+    await editor.getByTestId("threads-sort-select").tap();
+    await testPage.getByRole("option", { name: "Selection order" }).tap();
+    await expect(editor.getByTestId("threads-sort-select")).toContainText("Selection order");
+
+    await editor.getByTestId("threads-open-task-picker").tap();
+    const picker = drawer.getByTestId("threads-task-picker");
+    await expect(picker).toBeVisible();
+    const pickerRow = (title: string) =>
+      picker.getByTestId("threads-task-picker-row").filter({ hasText: title });
+    await pickerRow(titles[1]).getByTestId("threads-task-picker-checkbox").tap();
+    await pickerRow(titles[0]).getByTestId("threads-task-picker-checkbox").tap();
+    await expect(pickerRow(titles[1]).getByTestId("threads-task-picker-position")).toHaveText("1");
+    await expect(pickerRow(titles[0]).getByTestId("threads-task-picker-position")).toHaveText("2");
+    const rowBox = await pickerRow(titles[0]).boundingBox();
+    expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await assertNoHorizontalOverflow(testPage, "mobile Threads selection order picker");
   });
 
   test("confirms deletion of a saved view inside the native drawer", async ({

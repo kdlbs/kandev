@@ -1,41 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
+import { fetchAccessibleRepos, fetchGitHubScopeEditorRepos } from "@/lib/api/domains/github-api";
 import { listUserProjects } from "@/lib/api/domains/gitlab-api";
-import {
-  listAzureDevOpsProjects,
-  listAzureDevOpsRepositories,
-} from "@/lib/api/domains/azure-devops-api";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
 import type {
   BuiltInRepositoryEligibility,
+  GitHubRepositorySource,
   RemoteRepository,
   RemoteRepositoryProvider,
   RemoteRepositorySourceError,
 } from "./use-remote-repositories";
-
-async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
-  if (!workspaceId) return [];
-  const { projects = [] } = await listAzureDevOpsProjects(workspaceId);
-  const batches = await Promise.all(
-    projects.map((project) =>
-      listAzureDevOpsRepositories(workspaceId, project.id).then(({ repositories = [] }) =>
-        repositories.map((repo) => ({
-          provider: "azure_devops" as const,
-          id: repo.id,
-          owner: repo.projectId,
-          name: repo.name,
-          fullName: `${repo.projectName}/${repo.name}`,
-          url: repo.webUrl,
-          defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
-          private: true,
-        })),
-      ),
-    ),
-  );
-  return batches.flat();
-}
 
 type RemoteRepositoryLoad = {
   repos: RemoteRepository[];
@@ -51,20 +26,32 @@ type RepositoryRequest = {
 async function loadBuiltInRepositories(
   workspaceId: string,
   eligibleProviders: ReadonlySet<RemoteRepositoryProvider>,
+  bypassCache: boolean,
+  githubRepositorySource: GitHubRepositorySource,
 ): Promise<RemoteRepositoryLoad> {
   if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
   const requests: RepositoryRequest[] = [];
   if (eligibleProviders.has("github")) {
+    const request = bypassCache
+      ? { workspaceId, limit: 100, refresh: true }
+      : { workspaceId, limit: 100 };
+    const fetchRepos =
+      githubRepositorySource === "scope-editor"
+        ? fetchGitHubScopeEditorRepos
+        : fetchAccessibleRepos;
     requests.push({
       provider: "github",
-      load: fetchAccessibleRepos({ workspaceId, limit: 100 }).then((repos) =>
+      load: fetchRepos(request).then((repos) =>
         repos.map((repo) => ({
           provider: "github" as const,
-          id: repo.full_name,
+          id: `${repo.github_host ?? "github.com"}/${repo.full_name}`,
+          providerHost: `https://${repo.github_host ?? "github.com"}`,
           owner: repo.owner,
           name: repo.name,
           fullName: repo.full_name,
-          url: `https://github.com/${repo.owner}/${repo.name}`,
+          url:
+            repo.html_url ||
+            `https://${repo.github_host ?? "github.com"}/${repo.owner}/${repo.name}`,
           defaultBranch: repo.default_branch,
           private: repo.private,
         })),
@@ -87,9 +74,6 @@ async function loadBuiltInRepositories(
         })),
       ),
     });
-  }
-  if (eligibleProviders.has("azure_devops")) {
-    requests.push({ provider: "azure_devops", load: loadAzureRepositories(workspaceId) });
   }
   return settleRepositoryRequests(requests);
 }
@@ -202,12 +186,15 @@ export function useBuiltInRepositorySource(
   workspaceId: string,
   refreshVersion: number,
   eligibility: BuiltInRepositoryEligibility,
+  githubRepositorySource: GitHubRepositorySource,
 ): RepositorySourceState {
   const [repos, setRepos] = useState<RemoteRepository[]>([]);
   const [loading, setLoading] = useState(true);
   const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
   const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
   const workspaceRef = useRef(workspaceId);
+  // The refresh version whose load has completed; a newer version bypasses server caches.
+  const loadedRefreshRef = useRef(refreshVersion);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,9 +211,11 @@ export function useBuiltInRepositorySource(
         cancelled = true;
       };
     }
-    loadBuiltInRepositories(workspaceId, eligibility.providers)
+    const bypassCache = loadedRefreshRef.current !== refreshVersion;
+    loadBuiltInRepositories(workspaceId, eligibility.providers, bypassCache, githubRepositorySource)
       .then((result) => {
         if (cancelled) return;
+        loadedRefreshRef.current = refreshVersion;
         setRepos(result.repos);
         setAvailableProviders(result.availableProviders);
         setSourceErrors(result.sourceErrors);
@@ -240,7 +229,13 @@ export function useBuiltInRepositorySource(
     return () => {
       cancelled = true;
     };
-  }, [eligibility.loading, eligibility.providers, refreshVersion, workspaceId]);
+  }, [
+    eligibility.loading,
+    eligibility.providers,
+    githubRepositorySource,
+    refreshVersion,
+    workspaceId,
+  ]);
 
   return { repos, availableProviders, sourceErrors, loading };
 }

@@ -23,6 +23,14 @@ scoped `AGENTS.md`/`CLAUDE.md` files and read the referenced instructions.
 If an imported file is unavailable, note the missing guidance and continue with
 the best available local instructions.
 
+When asked to run or inspect a service in the user's environment, search the
+known local infrastructure repositories and runbooks before concluding the
+host is unreachable or that deployment is unsupported. Use the exact hostname
+the user gave, then confirm aliases and deployment paths from those sources.
+Check whether the requested change is actually present in the target runtime
+before claiming it can exercise the current checkout. Keep this read-only until
+the user explicitly authorizes a deployment or other state change.
+
 Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.
 - Use `rg` to find existing patterns before inventing one.
@@ -63,6 +71,11 @@ LOG: only the relevant error lines or a small range from the saved log
 SOURCE: file at failing line plus the code under test
 NEXT: reproduce locally before changing code
 ```
+
+When batching reads, keep their combined output within the outer tool's output
+budget. If files require full reads, split the batch or read bounded ranges.
+If a result is truncated, retrieve only the missing file or range.
+Do not repeat a completed batch to recover one missing result.
 
 ## Trust Levels
 

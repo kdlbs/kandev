@@ -21,6 +21,7 @@ import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -45,13 +46,18 @@ export function createDefaultUserSettings(): UserSettingsState {
     shellOptions: [],
     defaultEditorId: null,
     enablePreviewOnClick: false,
+    escapeCancelsAgent: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
+    unreadTaskDot: false,
+    unreadTaskDotHideDelaySeconds: 2,
     agentGeneratedTaskTitles: true,
+    promptSuggestions: false,
     autoFocusNewTasks: true,
+    agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -59,11 +65,13 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
+    showTurnChangedFiles: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    markdownPreviewByDefault: true,
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
@@ -91,7 +99,6 @@ export function createDefaultUserSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
-    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
@@ -100,8 +107,11 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
@@ -128,6 +138,17 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
 /** Parses the last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
+}
+
+/** Parses the transcript message-time display, defaulting to relative. */
+export function parseMessageTimeDisplay(value: string | undefined): MessageTimeDisplay {
+  return value === "absolute_short" || value === "absolute_long" ? value : "relative";
+}
+
+export function parseAgentTabCloseBehavior(
+  value: string | undefined,
+): "delete_session" | "hide_panel" {
+  return value === "hide_panel" ? "hide_panel" : "delete_session";
 }
 
 /** Parses the MCP task agent profile default, defaulting to "current_task". */
@@ -273,14 +294,24 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
 function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     enablePreviewOnClick: s.enable_preview_on_click ?? current.enablePreviewOnClick,
+    escapeCancelsAgent: s.escape_cancels_agent ?? current.escapeCancelsAgent,
     chatSubmitKey: s.chat_submit_key ?? current.chatSubmitKey,
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,
     preventAutoStartAgentOnOpen:
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
+    unreadTaskDot: s.unread_task_dot ?? current.unreadTaskDot,
+    unreadTaskDotHideDelaySeconds:
+      s.unread_task_dot_hide_delay_seconds ?? current.unreadTaskDotHideDelaySeconds,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    promptSuggestions: s.prompt_suggestions ?? current.promptSuggestions,
     autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
+    agentTabCloseBehavior: mapDefined(
+      s.agent_tab_close_behavior,
+      current.agentTabCloseBehavior,
+      parseAgentTabCloseBehavior,
+    ),
     mcpTaskAgentProfileDefault: mapDefined(
       s.mcp_task_agent_profile_default,
       current.mcpTaskAgentProfileDefault,
@@ -302,12 +333,18 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
     showTodoListPanelOnlyWhenNotEmpty:
       s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
+    showTurnChangedFiles: s.show_turn_changed_files ?? current.showTurnChangedFiles,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,
       current.releaseNotesLastSeenVersion,
     ),
     lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
+    messageTimeDisplay: mapDefined(
+      s.message_time_display,
+      current.messageTimeDisplay,
+      parseMessageTimeDisplay,
+    ),
   };
 }
 
@@ -375,17 +412,14 @@ export function buildCoreFields(
       current.gitlabSavedPresets,
       (value) => value,
     ),
-    azureDevOpsBrowsePreferences: mapDefined(
-      s.azure_devops_browse_preferences,
-      current.azureDevOpsBrowsePreferences,
-      (value) => value,
-    ),
     appStatusBarOrder: mapDefined(
       s.app_status_bar_order,
       current.appStatusBarOrder,
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarFastActionsEnabled: s.sidebar_fast_actions_enabled ?? current.sidebarFastActionsEnabled,
+    sidebarNewTaskStyle: s.sidebar_new_task_style ?? current.sidebarNewTaskStyle,
     sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
     sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
@@ -414,6 +448,8 @@ export function buildLspFields(
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
+    markdownPreviewByDefault:
+      s?.markdown_preview_by_default ?? current.markdownPreviewByDefault ?? true,
     lspStatusLocation:
       s?.lsp_status_location === undefined
         ? current.lspStatusLocation
@@ -452,4 +488,13 @@ export function mapUserSettingsResponse(
     revision: s.revision ?? null,
     shellOptions,
   };
+}
+
+/** An older HTTP response must not replace a newer settings event. */
+export function mapLatestUserSettingsResponse(
+  response: UserSettingsResponse,
+  current: UserSettingsState,
+): UserSettingsState {
+  if ((response.settings.revision ?? 0) < (current.revision ?? 0)) return current;
+  return mapUserSettingsResponse(response, current);
 }

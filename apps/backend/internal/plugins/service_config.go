@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -23,6 +24,9 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	captureLock := s.formatterLifecycleLock(id)
+	captureLock.Lock()
+	defer captureLock.Unlock()
 	dispatchLock := s.dispatchLocks.lockFor(id)
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
@@ -39,6 +43,28 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
 		return err
 	}
+	// An admitted configuration save invalidates every earlier automation tool
+	// approval before any configuration effect. Secret-only saves and masked
+	// round trips deliberately rotate too, avoiding secret hashing or config
+	// comparison rules. A later write failure leaves the new version in place;
+	// an old approval is never restored while changed configuration may be
+	// effective.
+	rec, err = s.rotateAgentToolPolicyVersion(rec.ID)
+	if err != nil {
+		return err
+	}
+	defer s.notifySidebarGroupingCatalog(id)
+	catalogNotified := false
+	notifyCatalog := func() {
+		if catalogNotified {
+			return
+		}
+		catalogNotified = true
+		s.notifyAgentToolCatalogChanged()
+	}
+	// The policy version is already durable, so every later failure path must
+	// still invalidate consumers even when configuration was not written.
+	defer notifyCatalog()
 	stored, removedSecrets, rollbackVault, err := s.storeConfigSecrets(ctx, rec, merged)
 	if err != nil {
 		return err
@@ -61,7 +87,33 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// path), so a client disconnect right after the commit cannot cancel it
 	// and orphan the now-unreferenced vault entries.
 	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
+	// The committed config can change whether the plugin's required config
+	// is set, and so whether its agent tools are listed. Signal before the
+	// restart so the catalog is recomputed even when the plugin is not
+	// running or fails to restart.
+	notifyCatalog()
 	return s.restartForConfigChange(rec)
+}
+
+// rotateAgentToolPolicyVersion persists a fresh approval boundary before a
+// configuration write. It re-reads the current record under the service and
+// policy write locks so a concurrent status or restart-count write is not
+// reverted, and it aborts before changing configuration if persistence fails.
+func (s *Service) rotateAgentToolPolicyVersion(id string) (*store.Record, error) {
+	s.agentToolPolicyMu.Lock()
+	defer s.agentToolPolicyMu.Unlock()
+	s.recordPersistMu.Lock()
+	defer s.recordPersistMu.Unlock()
+	updated, ok := s.registry.Get(id)
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	updated.AgentToolPolicyVersion = uuid.NewString()
+	if err := s.store.Save(updated); err != nil {
+		return nil, fmt.Errorf("plugins: persist agent tool policy version: %w", err)
+	}
+	s.registry.Add(updated)
+	return updated, nil
 }
 
 // errSecretVaultRequired is returned by storeConfigSecrets when a plugin
@@ -237,13 +289,16 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-			// The restart error stays the returned error (it is the primary
-			// signal), but a failed status write means the registry may show
-			// StatusActive with no process running — don't lose that.
+		setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true)
+		if setErr != nil {
+			// The status write failed; the registry keeps its previous state,
+			// which is usually StatusActive with no running process.
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
 		}
+		// Refresh consumers even when the status transition or its cleanup
+		// failed. Each consumer re-reads the authoritative registry state.
+		s.notifyAgentToolCatalogChanged()
 		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}

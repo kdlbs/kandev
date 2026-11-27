@@ -339,7 +339,7 @@ test.describe("Sidebar layout — context menu", () => {
 
     await row.click({ button: "right" });
     const priorityMenu = testPage.getByTestId("task-context-priority");
-    await expect(priorityMenu.locator(".tabler-icon-flag")).toBeVisible();
+    await expect(priorityMenu.locator(".tabler-icon-list-numbers")).toBeVisible();
     await priorityMenu.hover();
     await expect(testPage.getByTestId("task-context-priority-current-high")).toBeVisible();
     await testPage.getByTestId("task-context-priority-low").click();

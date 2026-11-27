@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-06
-updated: 2026-09-05
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -42,6 +42,15 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.18:** On a coarse pointer, the task row shall remain the primary touch target. After task navigation, the existing PR-status drawer shall show the same author login.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.19:** TaskPR API and WebSocket payloads shall carry the owning workspace ID. The backend shall route typed PR events by that ID, and the frontend shall ignore missing or mismatched updates before changing the active workspace cache.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.20:** When an open GitHub pull request is a draft and has no active merge-queue entry, the task pull-request icon shall use the muted color even when its review or CI fields report a failure. Terminal and active-queue precedence shall remain unchanged.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.21:** When a GitHub task summary exceeds the available viewport height, its disclosure shall stay inside the viewport. One internal vertical scroll region shall make every PR entry and the final automation detail reachable.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.22:** The desktop disclosure shall remain open while the pointer moves from its trigger into its content and scrolls. Keyboard users shall reach and scroll the same content. Escape shall dismiss the disclosure.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.23:** The existing phone PR drawer shall make the same long summary reachable through internal scrolling. Its fixed header and final entry shall remain inside the viewport without document horizontal overflow.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.24:** The desktop tooltip description shall retain the rendered PR identities and status details. Its keyboard-focusable scroll region shall have a localized accessible name.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.25:** Keyboard focus on the desktop scroll region shall have a visible focus indicator.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.26:** A mouse shall remain over a GitHub task PR indicator for 500 ms before its summary opens. Leaving before that interval shall cancel disclosure. Each subsequent entry, including entry onto another indicator, shall require the full interval.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.27:** Visible keyboard focus shall open the summary immediately. Touch activation shall open the existing drawer without a hover delay. An open summary shall retain pointer transfer, keyboard scrolling, and Escape dismissal.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.28:** Passing over an indicator without opening its summary shall not load its stored PR details. Deliberate disclosure shall retain loading, retry, and cache behavior.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.29:** The Automation section shall list only open PRs with auto-fix or auto-merge enabled. It shall be omitted when no open PR has either option enabled.
 
 ## Migrated source detail
 
@@ -147,3 +156,9 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 [Sidebar task row presentation refinement](../../../plans/sidebar-task-row-presentation/plan.md)
 
 [PR task status hover hydration](../../../plans/pr-task-status-hover-hydration/plan.md)
+
+[PR task summary scrolling](../../../plans/pr-task-summary-scrolling/plan.md)
+
+- [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).
+
+- [PR task hover delay](../../../plans/pr-task-hover-delay/plan.md) implements criteria 001.26 through 001.28.

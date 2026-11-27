@@ -311,7 +311,33 @@ const issueFragment = `
 	team { id key }
 	assignee { name email avatarUrl }
 	creator { name avatarUrl }
+	project { id name url description }
 `
+
+// issueRelationsPageSize bounds how many inverse relations a search fetches
+// per issue. A search returns up to 100 issues, and Linear multiplies nested
+// connection sizes into the query complexity, so this stays small; an issue
+// with more relations is reported as truncated.
+const issueRelationsPageSize = 25
+
+// issueBlockersFragment adds the relations that point at an issue. A relation
+// of type "blocks" in this list names an issue that blocks it.
+var issueBlockersFragment = fmt.Sprintf(`
+	inverseRelations(first: %d) {
+		nodes { type issue { identifier state { type } } }
+		pageInfo { hasNextPage }
+	}
+`, issueRelationsPageSize)
+
+type issueRelationNode struct {
+	Type  string `json:"type"`
+	Issue struct {
+		Identifier string `json:"identifier"`
+		State      struct {
+			Type string `json:"type"`
+		} `json:"state"`
+	} `json:"issue"`
+}
 
 type issueNode struct {
 	ID          string `json:"id"`
@@ -342,6 +368,18 @@ type issueNode struct {
 		Name      string `json:"name"`
 		AvatarURL string `json:"avatarUrl"`
 	} `json:"creator"`
+	Project *struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		URL         string `json:"url"`
+		Description string `json:"description"`
+	} `json:"project"`
+	InverseRelations *struct {
+		Nodes    []issueRelationNode `json:"nodes"`
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
+	} `json:"inverseRelations"`
 }
 
 func issueNodeToIssue(n *issueNode) LinearIssue {
@@ -371,6 +409,32 @@ func issueNodeToIssue(n *issueNode) LinearIssue {
 		out.CreatorName = n.Creator.Name
 		out.CreatorIcon = n.Creator.AvatarURL
 	}
+	if n.Project != nil {
+		out.ProjectID = n.Project.ID
+		out.ProjectName = n.Project.Name
+		out.ProjectURL = n.Project.URL
+		out.ProjectSummary = n.Project.Description
+	}
+	if n.InverseRelations != nil {
+		out.Blockers = blockersFromRelations(n.InverseRelations.Nodes)
+		out.BlockersTruncated = n.InverseRelations.PageInfo.HasNextPage
+	}
+	return out
+}
+
+// blockersFromRelations keeps the inverse relations of type "blocks", which
+// name the issues that block the issue they were read from.
+func blockersFromRelations(nodes []issueRelationNode) []LinearIssueBlocker {
+	var out []LinearIssueBlocker
+	for _, rel := range nodes {
+		if rel.Type != "blocks" {
+			continue
+		}
+		out = append(out, LinearIssueBlocker{
+			Identifier: rel.Issue.Identifier,
+			StateType:  rel.Issue.State.Type,
+		})
+	}
 	return out
 }
 
@@ -382,7 +446,7 @@ func stateCategory(stateType string) string {
 		return "new"
 	case "started":
 		return "indeterminate"
-	case "completed", "canceled":
+	case stateTypeCompleted, "canceled":
 		return "done"
 	default:
 		return "new"
@@ -437,6 +501,14 @@ mutation SetIssueState($id: String!, $stateId: String!) {
 	}
 }`
 
+const addCommentMutation = `
+mutation CommentCreate($input: CommentCreateInput!) {
+	commentCreate(input: $input) {
+		success
+		comment { id }
+	}
+}`
+
 type setStateData struct {
 	IssueUpdate struct {
 		Success bool `json:"success"`
@@ -458,12 +530,43 @@ func (c *GraphQLClient) SetIssueState(ctx context.Context, issueID, stateID stri
 	return nil
 }
 
+// AddComment adds a Markdown comment to a Linear issue and returns its ID.
+func (c *GraphQLClient) AddComment(ctx context.Context, issueID, body string) (string, error) {
+	var data struct {
+		CommentCreate struct {
+			Success bool `json:"success"`
+			Comment struct {
+				ID string `json:"id"`
+			} `json:"comment"`
+		} `json:"commentCreate"`
+	}
+	vars := map[string]interface{}{"input": map[string]interface{}{"issueId": issueID, "body": body}}
+	if err := c.do(ctx, addCommentMutation, vars, &data); err != nil {
+		return "", err
+	}
+	if !data.CommentCreate.Success {
+		return "", &APIError{StatusCode: http.StatusInternalServerError, Message: "commentCreate returned success=false"}
+	}
+	return data.CommentCreate.Comment.ID, nil
+}
+
 // --- search ---
 
 const searchIssuesQuery = `
 query SearchIssues($filter: IssueFilter, $first: Int!, $after: String) {
 	issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
 		nodes {` + issueFragment + `}
+		pageInfo { hasNextPage endCursor }
+	}
+}`
+
+// searchIssuesWithBlockersQuery is searchIssuesQuery plus each issue's
+// blockers. It is used only when the filter sets RequireBlockersDone, so other
+// searches keep their query cost.
+var searchIssuesWithBlockersQuery = `
+query SearchIssues($filter: IssueFilter, $first: Int!, $after: String) {
+	issues(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
+		nodes {` + issueFragment + issueBlockersFragment + `}
 		pageInfo { hasNextPage endCursor }
 	}
 }`
@@ -493,8 +596,12 @@ func (c *GraphQLClient) SearchIssues(ctx context.Context, filter SearchFilter, p
 	if pageToken != "" {
 		vars["after"] = pageToken
 	}
+	query := searchIssuesQuery
+	if filter.RequireBlockersDone {
+		query = searchIssuesWithBlockersQuery
+	}
 	var data searchIssuesData
-	if err := c.do(ctx, searchIssuesQuery, vars, &data); err != nil {
+	if err := c.do(ctx, query, vars, &data); err != nil {
 		return nil, err
 	}
 	out := &SearchResult{
@@ -627,6 +734,12 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 			},
 		}
 	}
+	if len(f.ProjectIDs) > 0 {
+		out["project"] = map[string]interface{}{"id": map[string]interface{}{"in": f.ProjectIDs}}
+	}
+	if len(f.IssueIDs) > 0 {
+		out["id"] = map[string]interface{}{"in": f.IssueIDs}
+	}
 	if f.CreatorID != "" {
 		out["creator"] = map[string]interface{}{"id": map[string]interface{}{"eq": f.CreatorID}}
 	}
@@ -648,11 +761,7 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 
 // --- labels ---
 
-// Linear's GraphQL API caps `first` at 250. We don't paginate labels/users
-// because the watcher dialog renders them as a single dropdown — a workspace
-// with >250 labels or members would have UX problems regardless of how the
-// data is fetched. If this limit is hit in practice, switch to cursor-based
-// pagination here and lazy-load in the UI.
+// linearMaxPageSize is Linear's maximum number of results per page.
 const linearMaxPageSize = 250
 
 const teamLabelsQuery = `
@@ -692,60 +801,6 @@ func (c *GraphQLClient) ListLabels(ctx context.Context, teamKey string) ([]Linea
 	out := make([]LinearLabel, 0, len(data.IssueLabels.Nodes))
 	for _, l := range data.IssueLabels.Nodes {
 		out = append(out, LinearLabel{ID: l.ID, Name: l.Name, Color: l.Color})
-	}
-	return out, nil
-}
-
-// --- users ---
-
-const teamMembersQuery = `
-query TeamMembers($filter: UserFilter!, $first: Int!) {
-	users(first: $first, filter: $filter, orderBy: updatedAt) {
-		nodes { id name displayName email avatarUrl }
-	}
-}`
-
-type usersData struct {
-	Users struct {
-		Nodes []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			DisplayName string `json:"displayName"`
-			Email       string `json:"email"`
-			AvatarURL   string `json:"avatarUrl"`
-		} `json:"nodes"`
-	} `json:"users"`
-}
-
-// ListUsers returns members of the team identified by teamKey. The filter
-// uses Linear's `teamMemberships.some` to scope to that team.
-func (c *GraphQLClient) ListUsers(ctx context.Context, teamKey string) ([]LinearUser, error) {
-	if teamKey == "" {
-		return nil, fmt.Errorf("teamKey required")
-	}
-	vars := map[string]interface{}{
-		"filter": map[string]interface{}{
-			"teamMemberships": map[string]interface{}{
-				"some": map[string]interface{}{
-					"team": map[string]interface{}{"key": map[string]interface{}{"eq": teamKey}},
-				},
-			},
-		},
-		"first": linearMaxPageSize,
-	}
-	var data usersData
-	if err := c.do(ctx, teamMembersQuery, vars, &data); err != nil {
-		return nil, err
-	}
-	out := make([]LinearUser, 0, len(data.Users.Nodes))
-	for _, u := range data.Users.Nodes {
-		out = append(out, LinearUser{
-			ID:          u.ID,
-			Name:        u.Name,
-			DisplayName: u.DisplayName,
-			Email:       u.Email,
-			AvatarURL:   u.AvatarURL,
-		})
 	}
 	return out, nil
 }

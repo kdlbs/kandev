@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 import { KanbanPage } from "../../pages/kanban-page";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { seedWorkflowListView, WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workspace settings", () => {
   test("creates a Kanban workflow with template steps through workspace settings", async ({
@@ -12,6 +12,7 @@ test.describe("Workspace settings", () => {
     const workspaceName = `Settings Kanban ${Date.now().toString(36)}`;
     const taskTitle = `Kanban Bootstrap Task ${Date.now().toString(36)}`;
 
+    await seedWorkflowListView(testPage, "detailed");
     await testPage.goto("/settings/workspaces");
     await testPage.getByRole("button", { name: "Add Workspace" }).click();
     await testPage.getByLabel("Workspace Name").fill(workspaceName);

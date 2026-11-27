@@ -60,6 +60,16 @@ without breaking agents that support only the current legacy protocol.
 - **AC-AGENTS-MCP-PROTOCOL-001.8:** When a request declares an unsupported or
   malformed modern protocol version, Kandev shall return a protocol error and
   shall not silently reinterpret that request as legacy MCP.
+- **AC-AGENTS-MCP-PROTOCOL-001.9:** When a valid JSON-RPC notification has no
+  `id` member, declares a supported modern version in its HTTP header, and omits
+  `params._meta`, Kandev shall supply that version for SDK notification handling.
+  An accepted notification shall return HTTP 202 with no body. This includes
+  `notifications/roots/list_changed` sent when an agent restores a conversation;
+  the agent shall be able to use Kandev tools after that notification. Messages
+  with an `id` member or explicitly supplied metadata retain their existing
+  validation, including errors for malformed or conflicting modern metadata.
+  Ambiguous duplicate members and noncanonical field spellings retain SDK
+  validation without supplementation.
 
 ## Out of scope
 

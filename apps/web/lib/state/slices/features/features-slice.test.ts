@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { createAppStore } from "@/lib/state/store";
 import { createFeaturesSlice, defaultFeaturesState } from "./features-slice";
 import { defaultFeatureFlags } from "./types";
 import type { FeatureFlags, FeaturesSlice } from "./types";
 
 function makeStore() {
-  return create<FeaturesSlice>()(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createFeaturesSlice as any)(...a) })),
-  );
+  return create<FeaturesSlice>()(immer((set) => createFeaturesSlice(set)));
 }
 
 function flagsWith(value: boolean): FeatureFlags {
@@ -36,5 +34,18 @@ describe("features slice", () => {
     expect(store.getState().features).toEqual(flagsWith(true));
     store.getState().setFeatures(flagsWith(false));
     expect(store.getState().features).toEqual(flagsWith(false));
+  });
+
+  it("composes with hydrated flags in the app store", () => {
+    const bootFlags = flagsWith(true);
+    const store = createAppStore({ features: bootFlags });
+    const unrelatedAuthState = store.getState().auth;
+    const unrelatedWorkspaceState = store.getState().workspaces;
+
+    expect(store.getState().features).toEqual(bootFlags);
+    store.getState().setFeatures(flagsWith(false));
+    expect(store.getState().features).toEqual(flagsWith(false));
+    expect(store.getState().auth).toBe(unrelatedAuthState);
+    expect(store.getState().workspaces).toBe(unrelatedWorkspaceState);
   });
 });

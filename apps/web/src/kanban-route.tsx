@@ -1,17 +1,22 @@
 "use client";
 
+import {
+  readJourneyRepositories,
+  readJourneyWorkspaces,
+  readJourneyWorkflows,
+  readJourneyUserSettings,
+} from "@/hooks/journey-metadata-resources";
+
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { PageClient } from "@/app/page-client";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { fetchUserSettings } from "@/lib/api/domains/settings-api";
-import { listWorkflows } from "@/lib/api/domains/kanban-api";
-import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import {
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -25,7 +30,6 @@ import {
 } from "@/lib/state/workspace-context";
 import { isOfficeWorkspace } from "@/lib/state/slices/workspace/selectors";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { Workflow } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 
 export type KanbanRouteSelection = {
@@ -124,6 +128,7 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const requestIds = new Map<
       "workflows" | "repositories",
       { workspaceId: string; generation: number; requestId: string }
@@ -132,8 +137,8 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     // eslint-disable-next-line max-lines-per-function, complexity -- each branch preserves a distinct workspace read outcome
     async function bootstrap() {
       const [workspacesResponse, settingsResponse] = await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => null),
-        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+        readJourneyWorkspaces(store, { signal: controller.signal }).catch(() => null),
+        readJourneyUserSettings(store, { signal: controller.signal }).catch(() => null),
       ]);
       if (cancelled) return;
 
@@ -192,9 +197,17 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
       }
       const [workflowsResult, repositoriesResult] = await Promise.all([
         settleKanbanRead(
-          listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
+          readJourneyWorkflows(store, activeWorkspaceId, {
+            includeHidden: true,
+            signal: controller.signal,
+          }),
         ),
-        settleKanbanRead(listRepositories(activeWorkspaceId, undefined, { cache: "no-store" })),
+        settleKanbanRead(
+          readJourneyRepositories(store, activeWorkspaceId, {
+            signal: controller.signal,
+            retryTransient: false,
+          }),
+        ),
       ]);
       if (
         cancelled ||
@@ -266,6 +279,7 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     });
     return () => {
       cancelled = true;
+      controller.abort();
       const state = store.getState();
       for (const [collection, request] of requestIds) {
         state.setWorkspaceContextRead(
@@ -292,19 +306,6 @@ async function settleKanbanRead<T>(promise: Promise<T>): Promise<KanbanReadResul
   } catch (error) {
     return { ok: false, error };
   }
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 export function KanbanRoute({

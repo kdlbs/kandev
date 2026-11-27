@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/events"
@@ -327,7 +328,7 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 	if req.WorkflowID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_id is required", nil)
 	}
-	if len(req.StepIDs) == 0 {
+	if req.StepIDs == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "step_ids is required", nil)
 	}
 
@@ -343,12 +344,14 @@ func (h *Handlers) handleReorderWorkflowSteps(ctx context.Context, msg *ws.Messa
 
 // workflowScopeError answers a workflow-surface failure. A resource the
 // caller may not see, and one that does not exist, share the single not-found
-// reply the workflow package produces for both; anything else is a genuine
-// server failure. Without this, an agent that named a workflow, step or task
-// it cannot reach was told the backend broke.
+// reply the workflow package produces for both. Invalid step orders use the
+// validation reply; other failures remain internal errors.
 func (h *Handlers) workflowScopeError(msg *ws.Message, err error, clientErrMsg string) (*ws.Message, error) {
 	if workflowsvc.IsNotFound(err) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, clientErrMsg, nil)
+	}
+	if errors.Is(err, wfmodels.ErrInvalidWorkflowStepOrder) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, clientErrMsg, nil)
 	}
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 }

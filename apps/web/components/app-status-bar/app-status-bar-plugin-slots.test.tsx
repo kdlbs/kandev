@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { usePluginActionSurface } from "@/components/plugins/plugin-action-surface";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 import { AppStatusBarPluginContribution } from "./app-status-bar-plugin-slots";
@@ -53,4 +54,40 @@ describe("AppStatusBarPluginContribution", () => {
 
     expect(screen.getByTestId("left-status-slot")).not.toBeNull();
   });
+
+  it.each([
+    ["bar", "full", "status-bar", "desktop"],
+    ["mobile-drawer", "compact", "status-drawer", "mobile"],
+  ] as const)(
+    "provides the %s action surface",
+    (presentation, density, surfaceName, actionPresentation) => {
+      pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => {
+        const surface = usePluginActionSurface();
+        return (
+          <div
+            data-testid="status-action-surface"
+            data-surface={surface?.surface}
+            data-presentation={surface?.presentation}
+          />
+        );
+      });
+
+      const registration = pluginRegistry.getSlotRegistrations(SLOT)[0];
+      render(
+        <AppStatusBarPluginContribution
+          {...slotProps}
+          presentation={presentation}
+          density={density}
+          registration={registration}
+        />,
+      );
+
+      expect(screen.getByTestId("status-action-surface").getAttribute("data-surface")).toBe(
+        surfaceName,
+      );
+      expect(screen.getByTestId("status-action-surface").getAttribute("data-presentation")).toBe(
+        actionPresentation,
+      );
+    },
+  );
 });

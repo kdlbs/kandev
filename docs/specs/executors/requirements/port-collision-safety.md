@@ -98,6 +98,12 @@ This restores the dual connect-and-bind, dual-stack behavior the TypeScript laun
 `make dev` moved to the native Go launcher (PR #2411), where the Go probe was bind-only on the
 IPv4 loopback. The contract is not English error-text matching on socket errors.
 
+The Windows regression coverage for that probe holds the port with a loopback occupant rather
+than a wildcard occupant. A wildcard test listener binds a non-loopback interface, and Windows
+Firewall then prompts for every ephemeral `%TEMP%/go-build...` test binary. Unix keeps the
+wildcard-occupant assertion because a specific-address bind can still succeed against an active
+wildcard listener there. Production probing and listener binds are unchanged.
+
 ### Backend readiness ownership
 
 The process that owns user-visible readiness must create one fresh opaque health token for the

@@ -9,11 +9,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -24,6 +28,28 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+// @covers AC-EXECUTORS-OPENCODE-AUTH-001.9
+func TestConfigureAgentRuntimeMetadata(t *testing.T) {
+	want := managedruntime.OpenCodeRuntime{Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, Version: "2.1.2"}
+	var got struct {
+		Runtime managedruntime.OpenCodeRuntime `json:"opencode_runtime"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+	client := &Client{baseURL: server.URL, httpClient: server.Client()}
+	if err := client.ConfigureAgentRuntime(context.Background(), "unrelated display command", []string{"runner"}, nil, "", nil, want, launchwrapper.Spec{}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Runtime != want {
+		t.Fatalf("runtime = %+v, want %+v", got.Runtime, want)
+	}
 }
 
 func TestConfigureAgent_SerializesStructuredArgsAndOmitsAbsentFallback(t *testing.T) {
@@ -41,10 +67,10 @@ func TestConfigureAgent_SerializesStructuredArgsAndOmitsAbsentFallback(t *testin
 	client := &Client{baseURL: server.URL, httpClient: server.Client()}
 	args := []string{"runner", "two words", "", `C:\tools\agent.exe`}
 	continueArgs := []string{"runner", "continue", "thread id"}
-	if err := client.ConfigureAgent(context.Background(), "runner two words  C:\\tools\\agent.exe", args, nil, "", "runner continue thread id", continueArgs); err != nil {
+	if err := client.ConfigureAgent(context.Background(), "runner two words  C:\\tools\\agent.exe", args, nil, "runner continue thread id", continueArgs); err != nil {
 		t.Fatalf("configure structured args: %v", err)
 	}
-	if err := client.ConfigureAgent(context.Background(), "legacy --flag", nil, nil, "", "", nil); err != nil {
+	if err := client.ConfigureAgent(context.Background(), "legacy --flag", nil, nil, "", nil); err != nil {
 		t.Fatalf("configure legacy fallback: %v", err)
 	}
 
@@ -355,6 +381,29 @@ func TestCleanupPendingRequests_ScopesToRetiredStream(t *testing.T) {
 	}
 }
 
+func TestRegisterPendingRequestRejectsDisconnectedStream(t *testing.T) {
+	retiredConn := &websocket.Conn{}
+	c := &Client{
+		agentStreamConn:     retiredConn,
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
+	}
+
+	c.mu.Lock()
+	c.agentStreamConn = nil
+	c.mu.Unlock()
+	c.cleanupPendingRequests(retiredConn)
+
+	if c.registerPendingRequest("late", make(chan *ws.Message, 1), retiredConn) {
+		t.Fatal("request was registered after its stream disconnected")
+	}
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if len(c.pendingRequests) != 0 || len(c.pendingRequestConns) != 0 {
+		t.Fatalf("late request was retained: %d requests, %d connections", len(c.pendingRequests), len(c.pendingRequestConns))
+	}
+}
+
 // --- Tests for the 7 migrated methods ---
 
 func TestInitialize_Success(t *testing.T) {
@@ -367,6 +416,10 @@ func TestInitialize_Success(t *testing.T) {
 			"agent_info": map[string]string{
 				"name":    "test-agent",
 				"version": "1.0.0",
+			},
+			"durable_delivery": map[string]interface{}{
+				"version": 1,
+				"durable": true,
 			},
 		})
 		return resp
@@ -391,6 +444,32 @@ func TestInitialize_Success(t *testing.T) {
 			t.Errorf("expected version '1.0.0', got %q", info.Version)
 		}
 	}
+	capability, advertised := c.DurableDeliveryCapability()
+	if !advertised || !capability.Durable || capability.Version != 1 {
+		t.Fatalf("durable delivery capability = %#v, advertised=%v", capability, advertised)
+	}
+}
+
+func TestInitializeStoresSessionCapabilities(t *testing.T) {
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true,
+			"agent_info": map[string]any{
+				"name": "test-agent", "version": "1.0.0",
+				"supports_session_resume": true, "supports_session_load": true,
+			},
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if _, err := c.Initialize(context.Background(), "kandev", "1.0.0"); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if !c.SupportsSessionResume() || !c.SupportsSessionLoad() {
+		t.Fatalf("capabilities = resume:%v load:%v", c.SupportsSessionResume(), c.SupportsSessionLoad())
+	}
 }
 
 func TestInitialize_ServerError(t *testing.T) {
@@ -410,6 +489,176 @@ func TestInitialize_ServerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "agent not running") {
 		t.Fatalf("expected 'agent not running' error, got: %v", err)
+	}
+	var initializeErr *InitializeError
+	if !errors.As(err, &initializeErr) {
+		t.Fatalf("error type = %T, want *InitializeError", err)
+	}
+	if initializeErr.StartupEvidence != nil {
+		t.Fatalf("legacy response evidence = %#v, want nil", initializeErr.StartupEvidence)
+	}
+}
+
+func TestInitializeStartupEvidence(t *testing.T) {
+	const generation = 43
+	var gotGeneration atomic.Uint64
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.initialize" {
+			t.Errorf("action = %q, want agent.initialize", msg.Action)
+		}
+		var request struct {
+			ProcessGeneration uint64 `json:"process_generation"`
+		}
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Errorf("parse initialize request: %v", err)
+		}
+		gotGeneration.Store(request.ProcessGeneration)
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "process exited", map[string]any{
+			"startup_evidence": map[string]any{
+				"process_generation":      generation,
+				"exit_disposition":        "ordinary_exit",
+				"exit_code":               1,
+				"npm_code":                "ECONNRESET",
+				"collection_complete":     true,
+				"npm_diagnostic_present":  true,
+				"npm_diagnostic_complete": true,
+			},
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+	c.processGeneration = generation
+
+	_, err := c.Initialize(context.Background(), "kandev", "1.0.0")
+	if err == nil {
+		t.Fatal("expected initialize failure")
+	}
+	var initializeErr *InitializeError
+	if !errors.As(err, &initializeErr) {
+		t.Fatalf("error type = %T, want *InitializeError", err)
+	}
+	if got := gotGeneration.Load(); got != generation {
+		t.Fatalf("initialize process_generation = %d, want %d", got, generation)
+	}
+	if initializeErr.StartupEvidence == nil ||
+		initializeErr.StartupEvidence.ProcessGeneration != generation ||
+		initializeErr.StartupEvidence.NPMCode != "ECONNRESET" ||
+		!initializeErr.StartupEvidence.NPMDiagnosticPresent ||
+		!initializeErr.StartupEvidence.NPMDiagnosticComplete ||
+		initializeErr.StartupEvidence.ExitDisposition != types.ManagedStartupExitOrdinary {
+		t.Fatalf("startup evidence = %#v, want generation %d and ECONNRESET", initializeErr.StartupEvidence, generation)
+	}
+}
+
+func TestInitializeStartupEvidenceDropsMalformedOptionalFields(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":      9,
+			"exit_disposition":        "private_disposition",
+			"exit_code":               1.5,
+			"diagnostic_reason":       "mise_config_untrusted",
+			"diagnostic_complete":     false,
+			"collection_complete":     true,
+			"npm_diagnostic_complete": true,
+		},
+	})
+	if evidence == nil {
+		t.Fatal("required generation evidence was dropped")
+	}
+	if evidence.ProcessGeneration != 9 || evidence.ExitDisposition != types.ManagedStartupExitUnknown {
+		t.Fatalf("evidence = %#v, want generation 9 and unknown disposition", evidence)
+	}
+	if evidence.ExitCode != nil {
+		t.Fatalf("fractional exit code = %#v, want nil", evidence.ExitCode)
+	}
+	if evidence.DiagnosticReason != "" {
+		t.Fatalf("incomplete diagnostic reason = %q, want empty", evidence.DiagnosticReason)
+	}
+}
+
+func TestInitializeStartupEvidenceAcceptsCompleteMiseReason(t *testing.T) {
+	evidence := managedStartupEvidenceFromDetails(map[string]any{
+		"startup_evidence": map[string]any{
+			"process_generation":  uint64(9),
+			"exit_disposition":    "ordinary_exit",
+			"exit_code":           1,
+			"diagnostic_reason":   "mise_config_untrusted",
+			"diagnostic_complete": true,
+		},
+	})
+	if evidence == nil || evidence.ExitCode == nil || *evidence.ExitCode != 1 ||
+		evidence.DiagnosticReason != "mise_config_untrusted" || !evidence.DiagnosticComplete {
+		t.Fatalf("evidence = %#v, want a complete recognized mise refusal", evidence)
+	}
+}
+
+func TestInitializeStartupEvidenceExitCodeNullMissingAndZero(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		evidence   map[string]any
+		wantNil    bool
+		wantStatus int
+	}{
+		{
+			name: "missing",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit",
+			},
+			wantNil: true,
+		},
+		{
+			name: "explicit null",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": nil,
+			},
+			wantNil: true,
+		},
+		{
+			name: "zero",
+			evidence: map[string]any{
+				"process_generation": uint64(9), "exit_disposition": "ordinary_exit", "exit_code": 0,
+			},
+			wantStatus: 0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			evidence := managedStartupEvidenceFromDetails(map[string]any{"startup_evidence": tt.evidence})
+			if evidence == nil {
+				t.Fatal("required generation evidence was dropped")
+			}
+			if tt.wantNil {
+				if evidence.ExitCode != nil {
+					t.Fatalf("exit code = %#v, want missing status", evidence.ExitCode)
+				}
+				return
+			}
+			if evidence.ExitCode == nil || *evidence.ExitCode != tt.wantStatus {
+				t.Fatalf("exit code = %#v, want %d", evidence.ExitCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestStartStoresProcessGenerationWithoutChangingReturnValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/start" {
+			t.Errorf("path = %q, want /api/v1/start", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"command":"claude acp","process_generation":17}`))
+	}))
+	defer server.Close()
+	c := &Client{baseURL: server.URL, httpClient: server.Client(), logger: newTestLogger()}
+
+	command, err := c.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if command != "claude acp" {
+		t.Fatalf("Start() command = %q, want %q", command, "claude acp")
+	}
+	if c.processGeneration != 17 {
+		t.Fatalf("stored process generation = %d, want 17", c.processGeneration)
 	}
 }
 
@@ -462,6 +711,34 @@ func TestNewSession_Success(t *testing.T) {
 	}
 }
 
+func TestResumeSession_SuccessStoresAttachmentAttempt(t *testing.T) {
+	var received map[string]any
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.resume" {
+			t.Fatalf("action = %q, want agent.session.resume", msg.Action)
+		}
+		if err := json.Unmarshal(msg.Payload, &received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true, "attachment_attempt_id": "attempt-7",
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	if err := c.ResumeSession(context.Background(), "acp-session", "/workspace", nil); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if received["session_id"] != "acp-session" || received["cwd"] != "/workspace" {
+		t.Fatalf("resume request = %#v", received)
+	}
+	if got := c.GetLastAttachmentAttemptID(); got != "attempt-7" {
+		t.Fatalf("attachment attempt = %q, want attempt-7", got)
+	}
+}
+
 func TestNewSession_Error(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
@@ -487,6 +764,15 @@ func TestLoadSession_Success(t *testing.T) {
 		if msg.Action != "agent.session.load" {
 			t.Errorf("expected action 'agent.session.load', got %q", msg.Action)
 		}
+		var payload struct {
+			SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			t.Errorf("parse load request: %v", err)
+		}
+		if payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+			t.Errorf("session settings policy = %q, want provider_restored", payload.SessionSettingsPolicy)
+		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success":    true,
 			"session_id": "sess-456",
@@ -499,7 +785,7 @@ func TestLoadSession_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456", nil)
+	err := c.LoadSessionWithPolicy(ctx, "sess-456", nil, streams.SessionSettingsPolicyProviderRestored)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -525,6 +811,44 @@ func TestLoadSession_Error(t *testing.T) {
 	}
 }
 
+func TestSetConfigOptionWithPolicyCarriesHostPolicy(t *testing.T) {
+	var policies []streams.SessionSettingsPolicy
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.set_config_option" {
+			t.Errorf("action = %q, want agent.session.set_config_option", msg.Action)
+		}
+		var payload struct {
+			SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			t.Errorf("parse set_config_option request: %v", err)
+		}
+		policies = append(policies, payload.SessionSettingsPolicy)
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.SetConfigOptionWithPolicy(ctx, "reasoning_effort", "high", streams.SessionSettingsPolicyProviderRestored); err != nil {
+		t.Fatalf("SetConfigOptionWithPolicy: %v", err)
+	}
+	if err := c.SetConfigOption(ctx, "reasoning_effort", "medium"); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	want := []streams.SessionSettingsPolicy{streams.SessionSettingsPolicyProviderRestored, ""}
+	if len(policies) != len(want) {
+		t.Fatalf("settings policies = %v, want %v", policies, want)
+	}
+	for index := range want {
+		if policies[index] != want[index] {
+			t.Errorf("request %d settings policy = %q, want %q", index, policies[index], want[index])
+		}
+	}
+}
+
 func TestPrompt_Success(t *testing.T) {
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		if msg.Action != "agent.prompt" {
@@ -545,7 +869,8 @@ func TestPrompt_Success(t *testing.T) {
 			t.Errorf("expected prompt generation 42, got %d", payload.PromptGeneration)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-			"success": true,
+			"success":       true,
+			"submission_id": "prompt:req-1",
 		})
 		return resp
 	})
@@ -558,6 +883,9 @@ func TestPrompt_Success(t *testing.T) {
 	err := c.Prompt(ctx, "hello agent", nil, 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := c.LastDeliverySubmissionID(); got != "prompt:req-1" {
+		t.Fatalf("last delivery submission ID = %q", got)
 	}
 }
 
@@ -937,10 +1265,13 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 
 	// Add a pending request
 	ch := make(chan *ws.Message, 1)
+	c.mu.Lock()
+	streamConn := c.agentStreamConn
+	c.mu.Unlock()
 	c.pendingMu.Lock()
 	c.pendingRequests["pending-test"] = ch
 	c.pendingRequestConns = make(map[string]*websocket.Conn)
-	c.pendingRequestConns["pending-test"] = c.agentStreamConn
+	c.pendingRequestConns["pending-test"] = streamConn
 	c.pendingMu.Unlock()
 
 	// Wait for disconnect
@@ -962,6 +1293,64 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("expected 0 pending requests after disconnect, got %d", count)
 	}
+}
+
+func TestHasAgentStreamBecomesFalseBeforeDisconnectCallbacksDrain(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	closePeer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		payload, _ := json.Marshal(AgentEvent{Type: streams.EventTypeMessageChunk, Text: "queued"})
+		_ = conn.WriteMessage(websocket.TextMessage, payload)
+		<-closePeer
+	}))
+	defer server.Close()
+
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	disconnected := make(chan struct{})
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          newTestLogger(),
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+	if err := c.StreamUpdates(context.Background(), func(AgentEvent) {
+		close(handlerStarted)
+		<-releaseHandler
+	}, nil, func(error) { close(disconnected) }); err != nil {
+		t.Fatalf("StreamUpdates: %v", err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("event handler did not start")
+	}
+	close(closePeer)
+
+	deadline := time.Now().Add(time.Second)
+	for c.HasAgentStream() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.HasAgentStream() {
+		t.Fatal("HasAgentStream remained true after the websocket read loop observed disconnect")
+	}
+	select {
+	case <-disconnected:
+		t.Fatal("disconnect callback ran before the ordered event worker drained")
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect callback did not run after the event worker drained")
+	}
+	c.Close()
 }
 
 // TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse is the regression
@@ -1147,6 +1536,136 @@ func TestReadUpdatesStream_EventBurstDoesNotStarveResponse(t *testing.T) {
 	}
 	if resp.Type != ws.MessageTypeResponse {
 		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+}
+
+func TestStreamUpdatesFromWithOwnerReportsAcceptedConnectionBeforeEvents(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	stageQueries := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		stageQueries <- r.URL.Query().Get("stage")
+		data, _ := json.Marshal(AgentEvent{Type: "message_chunk", Text: "ready"})
+		_ = conn.WriteMessage(websocket.TextMessage, data)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	var previousOwner uint64
+	for i := 0; i < 2; i++ {
+		client := &Client{
+			baseURL:         server.URL,
+			httpClient:      server.Client(),
+			logger:          newTestLogger(),
+			pendingRequests: make(map[string]chan *ws.Message),
+		}
+		eventsHandled := atomic.Int32{}
+		var observedAtConnect atomic.Int32
+		var ownerID uint64
+		err := client.StreamUpdatesFromWithOwner(context.Background(), func(AgentEvent) {
+			eventsHandled.Add(1)
+		}, nil, nil, 0, func(acceptedOwner uint64) {
+			ownerID = acceptedOwner
+			observedAtConnect.Store(eventsHandled.Load())
+		})
+		if err != nil {
+			t.Fatalf("StreamUpdatesFromWithOwner: %v", err)
+		}
+		stage, ok := client.UpdateStreamStage()
+		if !ok || stage.OwnerID != ownerID {
+			t.Fatalf("stage owner = %d (available %t), callback owner = %d", stage.OwnerID, ok, ownerID)
+		}
+		if ownerID <= previousOwner {
+			t.Fatalf("accepted owner = %d, want greater than %d", ownerID, previousOwner)
+		}
+		if got := observedAtConnect.Load(); got != 0 {
+			t.Fatalf("events handled before connection owner callback = %d, want 0", got)
+		}
+		if got := <-stageQueries; got != "1" {
+			t.Fatalf("stage query = %q, want opt-in value 1", got)
+		}
+		previousOwner = ownerID
+		client.Close()
+	}
+}
+
+func TestStreamUpdatesConsumesStageHeartbeatAsMetadata(t *testing.T) {
+	for _, sendHeartbeat := range []bool{true, false} {
+		name := "older peer without heartbeat"
+		if sendHeartbeat {
+			name = "heartbeat peer"
+		}
+		t.Run(name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			stageQueries := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				stageQueries <- r.URL.Query().Get("stage")
+				if sendHeartbeat {
+					heartbeat, _ := ws.NewNotification(streams.UpdateStreamStageAction, streams.UpdateStreamStageHeartbeat{
+						AdapterSeen: 4, AdapterAgeMillis: 9, WriterSent: 3, WriterAgeMillis: 12,
+					})
+					data, _ := json.Marshal(heartbeat)
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+						return
+					}
+				}
+				data, _ := json.Marshal(AgentEvent{Type: "message_chunk", Text: "ordinary event"})
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+				for {
+					if _, _, err := conn.ReadMessage(); err != nil {
+						return
+					}
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			client := &Client{
+				baseURL:         server.URL,
+				httpClient:      server.Client(),
+				logger:          newTestLogger(),
+				pendingRequests: make(map[string]chan *ws.Message),
+			}
+			t.Cleanup(client.Close)
+			events := make(chan AgentEvent, 2)
+			if err := client.StreamUpdates(context.Background(), func(event AgentEvent) { events <- event }, nil, nil); err != nil {
+				t.Fatalf("StreamUpdates: %v", err)
+			}
+			if got := <-stageQueries; got != "1" {
+				t.Fatalf("stage query = %q, want opt-in value 1", got)
+			}
+			select {
+			case event := <-events:
+				if event.Type != "message_chunk" || event.Text != "ordinary event" {
+					t.Fatalf("event handler received %+v; heartbeat metadata must not reach it", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("ordinary agent event was not dispatched")
+			}
+			stage, ok := client.UpdateStreamStage()
+			if !ok {
+				t.Fatal("update stream stage snapshot is unavailable")
+			}
+			if sendHeartbeat {
+				if stage.AgentctlStage.AdapterSeen != 4 || stage.AgentctlStage.WriterSent != 3 || stage.ReadCount != 1 {
+					t.Fatalf("heartbeat snapshot = %+v, want heartbeat plus one event read", stage)
+				}
+			} else if stage.HeartbeatAgeMillis != -1 || stage.AgentctlStage.AdapterSeen != 0 {
+				t.Fatalf("older peer snapshot = %+v, want unavailable heartbeat and zero observed heartbeat count", stage)
+			}
+		})
 	}
 }
 

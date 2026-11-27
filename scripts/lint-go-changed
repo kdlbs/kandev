@@ -26,5 +26,14 @@ done
 [ "${#packages[@]}" -gt 0 ] || exit 0
 
 base=$(scripts/resolve-go-lint-base --comparison-base)
+
+# Go's memory target is per process and soft; bound analysis and build workers too.
+export GOMEMLIMIT="${GOMEMLIMIT:-3GiB}"
+export GOMAXPROCS="${GOMAXPROCS:-2}"
+case " ${GOFLAGS:-} " in
+	*" -p="*) ;;
+	*) export GOFLAGS="${GOFLAGS:+$GOFLAGS }-p=$GOMAXPROCS" ;;
+esac
+
 cd apps/backend
-exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m
+exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m --concurrency="$GOMAXPROCS"

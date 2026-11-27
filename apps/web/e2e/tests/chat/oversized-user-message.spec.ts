@@ -5,10 +5,10 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { watchWs } from "../../helpers/causal-waits";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { pasteOversizedMessage } from "./oversized-message-helpers";
 import {
   MESSAGE_PREVIEW_MAX_LINES,
   MESSAGE_PREVIEW_MAX_CODE_UNITS,
@@ -70,6 +70,25 @@ async function createTask(
   });
 }
 
+async function waitForStoredUserMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+  timeout = 90_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => message.author_type === "user" && message.content === content,
+        );
+      },
+      { timeout, message: "the complete user prompt should be stored" },
+    )
+    .toBe(true);
+}
+
 async function seedPinnedFiller(apiClient: ApiClient, sessionId: string): Promise<void> {
   const filler = Array.from({ length: 40 }, (_, index) => `pinned filler line ${index + 1}`).join(
     "\n",
@@ -99,7 +118,6 @@ test.describe("Oversized user-message previews", () => {
     backend,
   }) => {
     test.setTimeout(180_000);
-    const gateway = watchWs(testPage);
     const { source, tail, firstLine } = oversizedMessage("DESKTOP-OVERSIZED");
     await apiClient.saveUserSettings({
       show_anchored_prompt_bar: true,
@@ -126,26 +144,10 @@ test.describe("Oversized user-message previews", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const messageAdded = gateway.waitForResponse("message.add", { timeout: 60_000 });
-    await session.sendMessage(source);
-    await messageAdded;
-    await session.waitForChatIdle({ timeout: 60_000 });
-
-    const chat = session.activeChat();
-    const userBubble = chat
-      .getByTestId("user-message-bubble")
-      .filter({ hasText: firstLine })
-      .first();
-    await expect(userBubble).toBeVisible();
-    await expectBounded(userBubble, tail);
-    await expectTextDownload(
-      testPage,
-      userBubble.getByRole("button", { name: "Download full text" }),
-      source,
-      "kandev-message.txt",
-      path.join(backend.tmpDir, `desktop-message-${Date.now()}.txt`),
-    );
-
+    const editor = await pasteOversizedMessage(testPage, session, source, tail);
+    await session.submitMessageWithKeyboard(editor);
+    // The durable transcript confirms acceptance even if the large WS reply is
+    // delayed after the user message has already rendered.
     await expect
       .poll(
         async () => {
@@ -157,6 +159,22 @@ test.describe("Oversized user-message previews", () => {
         { timeout: 30_000, message: "the complete oversized prompt should be stored" },
       )
       .toBe(true);
+    await session.waitForChatIdle({ timeout: 60_000 });
+
+    const chat = session.activeChat();
+    const userBubble = chat
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: firstLine })
+      .first();
+    await expect(userBubble).toBeVisible({ timeout: 30_000 });
+    await expectBounded(userBubble, tail);
+    await expectTextDownload(
+      testPage,
+      userBubble.getByRole("button", { name: "Download full text" }),
+      source,
+      "kandev-message.txt",
+      path.join(backend.tmpDir, `desktop-message-${Date.now()}.txt`),
+    );
 
     await testPage.reload();
     await session.waitForLoad();
@@ -209,11 +227,10 @@ test.describe("Oversized user-message previews", () => {
     ).toHaveCount(1);
 
     const followUp = "/e2e:multi-turn";
-    const followUpAdded = gateway.waitForResponse("message.add");
     await session.sendMessage(followUp);
-    await followUpAdded;
+    await waitForStoredUserMessage(apiClient, task.session_id, followUp);
     await expect(chat.getByText(followUp, { exact: false }).last()).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
     await session.waitForChatIdle({ timeout: 60_000 });
     await session.expectChatResponseVisible("Multi-turn response ready", 0, { timeout: 30_000 });
@@ -225,17 +242,6 @@ test.describe("Oversized user-message previews", () => {
       message: "the desktop follow-up session should finish",
       timeout: 30_000,
     });
-    await expect
-      .poll(
-        async () => {
-          const { messages } = await apiClient.listSessionMessages(task.session_id!);
-          return messages.some(
-            (message) => message.author_type === "user" && message.content === followUp,
-          );
-        },
-        { timeout: 30_000, message: "the follow-up prompt should be stored" },
-      )
-      .toBe(true);
     await assertNoDocumentHorizontalOverflow(testPage, "desktop oversized message flow");
   });
 

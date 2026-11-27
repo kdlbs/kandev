@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/office/models"
 )
 
 // commitClaimTestSchema declares only the two tables commitClaim
@@ -118,7 +119,7 @@ func TestCommitClaim_RowChangedAwayFromQueuedIsNotSilentlyClaimed(t *testing.T) 
 	repo := newCommitClaimTestRepo(t)
 	ctx := context.Background()
 
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:             "run-race-1",
 		AgentProfileID: "agent-race-1",
 		Reason:         "task_assigned",

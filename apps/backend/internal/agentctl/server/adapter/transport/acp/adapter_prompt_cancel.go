@@ -84,6 +84,11 @@ func (a *Adapter) tryTransferPromptTurn(
 		return current.handoffCh, false
 	}
 	current.gateOwned = false
+	// ACP permissions and late tool frames do not carry their originating turn.
+	// A handed-off successor cannot establish exclusive foreground ownership.
+	turn.evidenceMu.Lock()
+	turn.continuationUnsafe = true
+	turn.evidenceMu.Unlock()
 	turn.gateOwned = true
 	a.promptTurn = turn
 	return nil, true
@@ -102,10 +107,17 @@ func (a *Adapter) claimPromptTurnCompletion(turn *promptTurnState) bool {
 	return true
 }
 
+func (a *Adapter) promptTurnWasHandedOff(turn *promptTurnState) bool {
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	return turn != nil && turn.handedOff
+}
+
 // finishPromptTurn releases whichever turn still owns the physical gate token.
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
 	a.promptTurnMu.Lock()
+	a.recordPromptFinishedForSuggestionLocked(turn)
 	if a.promptTurn == turn {
 		a.promptTurn = nil
 	}

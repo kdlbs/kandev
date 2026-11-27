@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -27,6 +30,18 @@ func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 	m.executorProfileReader = reader
 }
 
+// SetPluginExecutorProfileLoader wires the host-owned profile and transient
+// secret reader used by the plugin remote runtime.
+func (m *Manager) SetPluginExecutorProfileLoader(loader PluginExecutorProfileLoader) {
+	m.pluginExecutorProfileLoader = loader
+}
+
+// SetPluginRuntimeAPIURL sets the externally reachable Kandev API URL that plugin
+// executor environments call back to. Empty leaves plugin launches without one.
+func (m *Manager) SetPluginRuntimeAPIURL(url string) {
+	m.pluginRuntimeAPIURL = url
+}
+
 // ExecutorProfileEnvForSession resolves the executor profile's env vars for a
 // terminal, revealing secret-backed entries. It mirrors what the agent
 // subprocess receives (the orchestrator merges the same profile env into the
@@ -43,6 +58,13 @@ func (m *Manager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, t
 	profileID := m.terminalExecutorProfileID(ctx, sessionID, taskEnvironmentID)
 	if profileID == "" {
 		return nil, nil
+	}
+	if m.executorAdmission != nil {
+		var err error
+		ctx, err = m.executorAdmission(ctx, sessionID, "", profileID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
 	if err != nil {
@@ -102,4 +124,26 @@ func (m *Manager) terminalExecutorProfileID(ctx context.Context, sessionID, task
 		return ""
 	}
 	return env.ExecutorProfileID
+}
+
+// preparePluginExecutorLaunch attaches the provider profile and points the remote
+// environment at the externally reachable Kandev API.
+func (m *Manager) preparePluginExecutorLaunch(ctx context.Context, execReq *ExecutorCreateRequest, metadata map[string]interface{}, taskEnvironmentID string) error {
+	if m.pluginExecutorProfileLoader == nil {
+		return errors.New("plugin executor profile loader is unavailable")
+	}
+	profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
+	profile, err := m.pluginExecutorProfileLoader.ExecutorProviderProfileForLaunch(ctx, profileID, taskEnvironmentID)
+	if err != nil {
+		return fmt.Errorf("resolve plugin executor profile: %w", err)
+	}
+	if profile == nil {
+		return errors.New("plugin executor profile is unavailable")
+	}
+	execReq.PluginExecutor = &PluginExecutorLaunch{Profile: *profile}
+	if m.pluginRuntimeAPIURL != "" {
+		execReq.Env = cloneStringMap(execReq.Env)
+		execReq.Env[envKeyKandevAPIURL] = m.pluginRuntimeAPIURL
+	}
+	return nil
 }

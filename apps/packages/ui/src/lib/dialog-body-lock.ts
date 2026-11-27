@@ -1,3 +1,5 @@
+import * as React from "react";
+
 /**
  * Recovery for a stuck modal body lock.
  *
@@ -24,6 +26,8 @@ export const DIALOG_CLOSE_RECOVERY_MS = 400;
 const CLOSING_DIALOG_PARTS = [
   '[data-state="closed"][data-slot="dialog-content"]',
   '[data-state="closed"][data-slot="dialog-overlay"]',
+  '[data-state="closed"][data-slot="alert-dialog-content"]',
+  '[data-state="closed"][data-slot="alert-dialog-overlay"]',
 ].join(",");
 
 type VisibilitySubscription = {
@@ -70,4 +74,42 @@ export function subscribeDialogCloseRecovery(doc: Document): () => void {
     doc.removeEventListener("visibilitychange", subscription.onVisibilityChange);
     visibilitySubscriptions.delete(doc);
   };
+}
+
+/** Recover shared Radix body locks after Dialog and AlertDialog roots close. */
+export function useDialogBodyLockRecovery(
+  open: boolean | undefined,
+  onOpenChange?: (open: boolean) => void,
+) {
+  const finishClosingAnimations = React.useCallback(
+    () => finishClosingDialogAnimations(document),
+    [],
+  );
+  const scheduleCloseRecovery = React.useCallback(
+    () => window.setTimeout(finishClosingAnimations, DIALOG_CLOSE_RECOVERY_MS),
+    [finishClosingAnimations],
+  );
+
+  React.useEffect(
+    () => () => {
+      finishClosingAnimations();
+    },
+    [finishClosingAnimations],
+  );
+  React.useEffect(() => subscribeDialogCloseRecovery(document), []);
+
+  const previousOpen = React.useRef(open);
+  React.useEffect(() => {
+    const closedByOwner = previousOpen.current === true && open === false;
+    previousOpen.current = open;
+    if (closedByOwner) scheduleCloseRecovery();
+  }, [open, scheduleCloseRecovery]);
+
+  return React.useCallback(
+    (nextOpen: boolean) => {
+      onOpenChange?.(nextOpen);
+      if (!nextOpen && open === undefined) scheduleCloseRecovery();
+    },
+    [onOpenChange, open, scheduleCloseRecovery],
+  );
 }

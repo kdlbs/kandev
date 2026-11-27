@@ -21,7 +21,7 @@ type managerEnvironmentDestroyer struct {
 	mgr *worktree.Manager
 }
 
-func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (d *managerEnvironmentDestroyer) PushEnvironmentBranch(context.Context, *mo
 	return nil
 }
 
-func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 
@@ -295,6 +295,11 @@ func TestArchiveCleanupFindsWorktreeAfterLastSessionDeleted(t *testing.T) {
 // task_environment_repos rows.
 func newCleanupTestWorktreeManager(t *testing.T, repo *sqliterepo.Repository) *worktree.Manager {
 	t.Helper()
+	return newCleanupTestWorktreeManagerAt(t, repo, t.TempDir())
+}
+
+func newCleanupTestWorktreeManagerAt(t *testing.T, repo *sqliterepo.Repository, tasksBase string) *worktree.Manager {
+	t.Helper()
 	store, err := worktree.NewSQLiteStore(sqlx.NewDb(repo.DB(), "sqlite3"), sqlx.NewDb(repo.DB(), "sqlite3"))
 	if err != nil {
 		t.Fatalf("worktree store: %v", err)
@@ -302,7 +307,7 @@ func newCleanupTestWorktreeManager(t *testing.T, repo *sqliterepo.Repository) *w
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	mgr, err := worktree.NewManager(worktree.Config{
 		Enabled:       true,
-		TasksBasePath: t.TempDir(),
+		TasksBasePath: tasksBase,
 	}, store, log)
 	if err != nil {
 		t.Fatalf("worktree manager: %v", err)

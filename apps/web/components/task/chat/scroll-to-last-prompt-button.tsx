@@ -28,7 +28,7 @@ function TranscriptScrollButton({
   Icon,
   className,
 }: TranscriptScrollButtonProps) {
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -39,7 +39,11 @@ function TranscriptScrollButton({
           onClick={onClick}
           aria-label={label}
           data-testid={testId}
-          className={cn(DEFAULT_CLASS, isFinePointer ? "h-6 w-6" : "h-11 w-11", className)}
+          className={cn(
+            DEFAULT_CLASS,
+            isFinePointer && !isMobile ? "h-6 w-6" : "h-11 w-11",
+            className,
+          )}
         >
           <Icon className="h-3.5 w-3.5" />
         </Button>

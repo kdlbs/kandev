@@ -81,6 +81,13 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  it("hydrates a saved flag note from the workflow snapshot", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].flag_note = "Investigate before merging";
+
+    expect(snapshotToState(snapshot).kanban?.tasks[0]?.flagNote).toBe("Investigate before merging");
+  });
+
   // The server-rendered boot payload is the first thing a board paints from,
   // so a dropped assignee here shows every card as unassigned until the first
   // WS update happens to arrive.
@@ -91,6 +98,18 @@ describe("snapshotToState", () => {
     const state = snapshotToState(snapshot);
 
     expect(state.kanban?.tasks[0]?.assigneeUserId).toBe("user-7");
+  });
+
+  // The task page chip reads its label from kanban.tasks[].identifier, so a
+  // page load must carry it.
+  it("hydrates the task identifier into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].identifier = "KAN-42";
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.identifier).toBe("KAN-42");
+    expect(state.kanban?.tasks[0]?.workspaceId).toBe(workspaceID);
   });
 
   it("hydrates task metadata into the initial kanban state", () => {
@@ -339,4 +358,20 @@ describe("snapshotToState feeding hydrateState", () => {
 
     expect(result.kanban.tasks[0]?.primaryExecutorType).toBe(EXECUTOR_TYPE);
   });
+});
+
+// @covers AC-UI-PROVIDER-WATCHER-TYPES-001.5
+it.each([
+  ["issue_watch_id", true, false],
+  ["review_watch_id", false, true],
+  ["gitlab_issue_watch_id", true, false],
+  ["gitlab_review_watch_id", false, true],
+  ["jira_issue_watch_id", true, false],
+  ["linear_issue_watch_id", true, false],
+  ["sentry_issue_watch_id", true, false],
+] as const)("preserves watcher %s in initial task mapping", (key, issue, review) => {
+  const snapshot = snapshotWithPendingAction(undefined);
+  snapshot.tasks[0].metadata = { [key]: "watch" };
+  const mapped = snapshotToState(snapshot).kanban!.tasks[0];
+  expect([mapped.isIssueWatch, mapped.isPRReview]).toEqual([issue, review]);
 });

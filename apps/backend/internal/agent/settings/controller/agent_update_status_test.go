@@ -13,12 +13,30 @@ import (
 )
 
 type statusSelectionStore struct {
+	mu        sync.RWMutex
 	selection map[string]managedruntime.Selection
 }
 
+type statusOpenCodeSelectionStore struct {
+	statusSelectionStore
+	openCode managedruntime.OpenCodeSelection
+}
+
+func (s *statusOpenCodeSelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.openCode, true, nil
+}
+
 func (s *statusSelectionStore) Get(_ context.Context, agentName, packageName string) (managedruntime.Selection, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	selection, ok := s.selection[agentName+"\x00"+packageName]
 	return selection, ok, nil
+}
+
+func (s *statusSelectionStore) set(key string, selection managedruntime.Selection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selection[key] = selection
 }
 
 func (s *statusSelectionStore) Save(context.Context, string, string, string) error {
@@ -137,6 +155,66 @@ func TestListAgentUpdateStatusesComparesLatestAndCachesFailures(t *testing.T) {
 	}
 }
 
+func TestListAgentUpdateStatusesUsesLatestWithinSelectedOpenCodeFamily(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(&statusOpenCodeSelectionStore{
+		openCode: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV2,
+			Source:                managedruntime.OpenCodeSourceManaged,
+			Package:               managedruntime.OpenCodeV2Package,
+			SelectedVersion:       "2.0.18",
+			AppliedDefaultVersion: "2.0.18",
+			Revision:              7,
+		},
+	})
+	controller.SetRuntimeUpdater(&sequencedVersionUpdater{
+		fakeRuntimeUpdater: fakeRuntimeUpdater{target: "3.0.0"},
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"2.0.18", "2.0.20", "3.0.0"},
+			Latest:   "3.0.0",
+		},
+	})
+
+	statuses, err := controller.ListAgentUpdateStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("ListAgentUpdateStatuses: %v", err)
+	}
+	if len(statuses.Statuses) != 1 {
+		t.Fatalf("status count = %d, want one OpenCode status", len(statuses.Statuses))
+	}
+	status := statuses.Statuses[0]
+	if status.Package != managedruntime.OpenCodeV2Package || status.LatestVersion != "2.0.20" || status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+		t.Fatalf("v2 status = %+v, want package @opencode/cli latest 2.0.20", status)
+	}
+}
+
+func TestManagedRuntimeStateKeepsNativeSelectionWhenUpdaterIsUnavailable(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(&statusOpenCodeSelectionStore{
+		openCode: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV1,
+			Source:                managedruntime.OpenCodeSourceNative,
+			Package:               managedruntime.OpenCodeV1Package,
+			AppliedDefaultVersion: "1.18.32",
+			Revision:              1,
+		},
+	})
+
+	_, family, source, revision, active, _, err := controller.managedRuntimeState(
+		context.Background(), openCode.ID(), openCode,
+	)
+	if err != nil {
+		t.Fatalf("managedRuntimeState: %v", err)
+	}
+	if family != managedruntime.OpenCodeFamilyV1 || source != managedruntime.OpenCodeSourceNative || revision != 1 || active != "" {
+		t.Fatalf("native runtime state = family %q source %q revision %d active %q", family, source, revision, active)
+	}
+}
+
 func TestListAgentUpdateStatusesInvalidatesOnePackage(t *testing.T) {
 	controller := newTestController(map[string]agents.Agent{
 		"claude-acp": agents.NewClaudeACP(),
@@ -222,5 +300,65 @@ func TestListAgentUpdateStatusesBoundsConcurrentLookups(t *testing.T) {
 	}
 	if maximum > 5 {
 		t.Fatalf("maximum concurrent lookups = %d, want at most 5", maximum)
+	}
+}
+
+func TestListAgentUpdateStatusesCallerCancellationKeepsSharedLookup(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"claude-acp": agents.NewClaudeACP(),
+	})
+	firstLookupStarted := make(chan struct{})
+	releaseFirstLookup := make(chan struct{})
+	var calls int
+	controller.SetRuntimeUpdateStatusResolver(func(ctx context.Context, _ string) (string, error) {
+		calls++
+		if calls == 1 {
+			close(firstLookupStarted)
+			<-releaseFirstLookup
+		}
+		return "0.71.0", nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type response struct {
+		statuses *dto.ListAgentUpdateStatusResponse
+		err      error
+	}
+	firstDone := make(chan response, 1)
+	go func() {
+		statuses, err := controller.ListAgentUpdateStatuses(ctx)
+		firstDone <- response{statuses: statuses, err: err}
+	}()
+	select {
+	case <-firstLookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first registry lookup did not start")
+	}
+	cancel()
+
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("canceled ListAgentUpdateStatuses: %v", first.err)
+	}
+	if got := first.statuses.Statuses[0].CheckState; got != dto.AgentUpdateCheckStateUnknown {
+		t.Fatalf("canceled status state = %q, want unknown", got)
+	}
+
+	retryDone := make(chan response, 1)
+	go func() {
+		statuses, err := controller.ListAgentUpdateStatuses(context.Background())
+		retryDone <- response{statuses: statuses, err: err}
+	}()
+	close(releaseFirstLookup)
+	retry := <-retryDone
+	if retry.err != nil {
+		t.Fatalf("retry ListAgentUpdateStatuses: %v", retry.err)
+	}
+	if got := retry.statuses.Statuses[0].LatestVersion; got != "0.71.0" {
+		t.Fatalf("retry latest version = %q, want 0.71.0", got)
+	}
+	if calls != 1 {
+		t.Fatalf("resolver calls = %d, want one shared lookup", calls)
 	}
 }

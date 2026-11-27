@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/prompts/controller"
@@ -20,6 +21,18 @@ import (
 )
 
 func newTestRouter(t *testing.T) (*gin.Engine, func()) {
+	return newTestRouterForIdentity(t, authn.Identity{
+		UserID: "test-admin", Role: authn.RoleAdmin, Synthetic: true,
+	})
+}
+
+func newTestRouterForIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, func()) {
+	t.Helper()
+	router, _, cleanup := newTestRouterWithService(t, identity)
+	return router, cleanup
+}
+
+func newTestRouterWithService(t *testing.T, identity authn.Identity) (*gin.Engine, *service.Service, func()) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -38,6 +51,10 @@ func newTestRouter(t *testing.T) (*gin.Engine, func()) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, identity)
+		c.Next()
+	})
 	RegisterRoutes(router, ctrl, log)
 
 	cleanup := func() {
@@ -48,7 +65,7 @@ func newTestRouter(t *testing.T) (*gin.Engine, func()) {
 			t.Errorf("close repo: %v", err)
 		}
 	}
-	return router, cleanup
+	return router, svc, cleanup
 }
 
 func postJSON(t *testing.T, router *gin.Engine, path string, body any) *httptest.ResponseRecorder {

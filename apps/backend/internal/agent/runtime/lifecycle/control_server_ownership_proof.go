@@ -54,22 +54,21 @@ func controlServerHoldsCredential(
 	return ownershipproof.Matches(credential, challenge, binding, proofs)
 }
 
-// recordedDiagnosticLogPath reads the adopted server's diagnostic log
-// location, which AC-EXECUTORS-CONTROL-OWNERSHIP-001.1 requires the record
-// to name. It is retrieved after authentication because the endpoint that
-// decides whether to authenticate discloses no filesystem path.
-func recordedDiagnosticLogPath(
+// recordedServerDetails reads the adopted server's diagnostic location and
+// optional process identity after authentication. Missing identity remains
+// unknown and cannot authorize cleanup.
+func recordedServerDetails(
 	ctx context.Context,
 	client AdoptionControlClient,
 	recoveryReadTimeout time.Duration,
 	recoveryReadRetries int,
-) string {
+) *agentctl.ServerDetails {
 	details, err := withAdoptionRetry(ctx, recoveryReadTimeout, recoveryReadRetries,
 		func(ctx context.Context) (*agentctl.ServerDetails, error) {
 			return client.GetServerDetails(ctx)
 		})
 	if err != nil || details == nil {
-		return ""
+		return nil
 	}
-	return details.DiagnosticLogPath
+	return details
 }

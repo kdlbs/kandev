@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { KubernetesCluster } from "./kubernetes-tools";
+import { runFixtureCommand } from "./fixture-command";
 
 const REPOSITORY_ROOT = path.resolve(__dirname, "../../../..");
 const IMAGE_DIR = path.join(REPOSITORY_ROOT, "k8s", "worker-images");
@@ -72,10 +73,10 @@ export async function buildKubernetesWorkerImages(
         { tag: harnessTag, target, kind: "harness" },
       );
       buildImage(target, recipeTag, pins.baseImage, pins.pnpmVersion);
-      loadImage(cluster, recipeTag);
       buildHarnessImage(recipeTag, harnessTag);
-      loadImage(cluster, harnessTag);
     }
+    const harnessTags = built.filter((image) => image.kind === "harness").map((image) => image.tag);
+    loadImages(cluster, harnessTags);
   } catch (error) {
     await disposeImages(built);
     throw error;
@@ -172,10 +173,9 @@ USER 1000
   }
 }
 
-function loadImage(cluster: KubernetesCluster, tag: string): void {
-  execFileSync(cluster.kindBin, ["load", "docker-image", tag, "--name", cluster.name], {
+function loadImages(cluster: KubernetesCluster, tags: string[]): void {
+  runFixtureCommand(cluster.kindBin, ["load", "docker-image", ...tags, "--name", cluster.name], {
     timeout: 300_000,
-    stdio: process.env.E2E_DEBUG ? "inherit" : ["ignore", "ignore", "inherit"],
   });
 }
 

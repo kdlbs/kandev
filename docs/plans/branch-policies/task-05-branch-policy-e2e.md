@@ -29,7 +29,8 @@ acceptance_criteria:
   - AC-WORKSPACES-BRANCH-POLICIES-005.1
   - AC-WORKSPACES-BRANCH-POLICIES-005.2
   - AC-WORKSPACES-BRANCH-POLICIES-005.3
-system_design: "../../specs/workspaces/system-design/branch-policies.md"
+system_design:
+  - ../../specs/workspaces/system-design/branch-policies.md
 ---
 
 # Task 05: Cover branch policies in desktop and mobile E2E
@@ -120,3 +121,33 @@ Review remediation verification:
 - Desktop keyboard-focus help and mobile tap-to-open help scenarios passed.
 - The targeted desktop and mobile settings and subtask Playwright runs passed
   after the backend fresh-branch persistence fix.
+
+### PR #3598 CI remediation (2026-10-07)
+
+Hosted shard 11 failed because the collapsed sidebar divider intercepted the
+New Task click. A controlled collapsed-navigation reproduction failed without
+retries. The test now expands navigation through its visible control before
+opening the dialog. All policy, fresh-branch, Git branch, and persisted snapshot
+assertions remain.
+
+The repaired scenario passed three repetitions with retries disabled in the
+combined focused command below. No production or mobile behavior changed.
+
+Validation from `apps/web`:
+
+```sh
+E2E_PORT_OFFSET=0 pnpm e2e:run --project chromium tests/task/create-task-branch-policy.spec.ts tests/chat/slash-command-composer.spec.ts -- --grep 'selects a policy, enables fresh branch mode|keeps an open plan menu current' --retries=0 --repeat-each=3
+```
+
+Result: six passed after rebuilding the merged-main artifacts. Focused ESLint
+and `pnpm run typecheck` also passed.
+
+The complete desktop spec command also passed without retries:
+
+```sh
+E2E_PORT_OFFSET=0 pnpm e2e:run --no-build --project chromium tests/task/create-task-branch-policy.spec.ts tests/chat/slash-command-composer.spec.ts -- --retries=0
+```
+
+Result: ten passed. Repository catalog validation, full specification lint, and
+PR documentation coverage passed (71 work orders). Hosted CI for the next head
+remains pending; these are local receipts.

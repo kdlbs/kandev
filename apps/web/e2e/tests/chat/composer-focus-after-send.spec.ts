@@ -8,12 +8,7 @@ import { assertComposerFocusAfterSend } from "./composer-focus-after-send-helper
 // every send does for its duration) without restoring focus when it flips
 // back -- jsdom cannot reproduce this, so Playwright is the only witness.
 test.describe("Composer focus after send", () => {
-  // Retries here absorb a pre-existing, unrelated dockview panel-portal race
-  // (the chat panel's React subtree occasionally remounts a moment after
-  // task load, independent of this composer's own send flow -- see the task
-  // plan for reproduction). A real regression in the focus-restore wiring
-  // fails on every retry, so this does not mask this spec's own assertion.
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("keeps the composer focused across consecutive sends with no intervening click", async ({
     testPage,

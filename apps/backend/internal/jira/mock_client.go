@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,12 +21,18 @@ type MockClient struct {
 	statuses    map[string][]JiraStatus // projectKey → statuses
 	searchHits  []JiraTicket            // returned by SearchTickets regardless of JQL
 	doneCalls   []doneTransitionCall
+	comments    []commentCall
 	getError    *APIError
 }
 
 type doneTransitionCall struct {
 	TicketKey    string
 	TransitionID string
+}
+
+type commentCall struct {
+	TicketKey string
+	Body      string
 }
 
 // NewMockClient returns a MockClient with TestAuth set to a successful result
@@ -85,6 +92,13 @@ func (m *MockClient) DoTransition(_ context.Context, ticketKey, transitionID str
 	defer m.mu.Unlock()
 	m.doneCalls = append(m.doneCalls, doneTransitionCall{TicketKey: ticketKey, TransitionID: transitionID})
 	return nil
+}
+
+func (m *MockClient) AddComment(_ context.Context, ticketKey, body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments = append(m.comments, commentCall{TicketKey: ticketKey, Body: body})
+	return fmt.Sprintf("mock-comment-%d", len(m.comments)), nil
 }
 
 func (m *MockClient) ListProjects(context.Context) ([]JiraProject, error) {
@@ -317,6 +331,15 @@ func (m *MockClient) TransitionCalls() []doneTransitionCall {
 	return out
 }
 
+// CommentCalls returns comments recorded through AddComment.
+func (m *MockClient) CommentCalls() []commentCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]commentCall, len(m.comments))
+	copy(out, m.comments)
+	return out
+}
+
 // Reset clears every seeded value back to defaults. Called between tests.
 func (m *MockClient) Reset() {
 	m.mu.Lock()
@@ -333,6 +356,7 @@ func (m *MockClient) Reset() {
 	m.projects = nil
 	m.searchHits = nil
 	m.doneCalls = nil
+	m.comments = nil
 	m.getError = nil
 }
 

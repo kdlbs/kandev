@@ -3,7 +3,39 @@ package backendapp
 import (
 	"errors"
 	"fmt"
+	"sync"
 )
+
+func restoreWorkerCleanupRegistrar(
+	addRuntimeCleanup func(func() error),
+	restoreCleanups *[]func() error,
+) func(func() error) {
+	return func(cleanup func() error) {
+		registerRestoreWorkerCleanup(addRuntimeCleanup, restoreCleanups, cleanup)
+	}
+}
+
+func registerRestoreWorkerCleanup(
+	addRuntimeCleanup func(func() error),
+	restoreCleanups *[]func() error,
+	cleanup func() error,
+) {
+	if cleanup == nil {
+		return
+	}
+	var once sync.Once
+	var stopErr error
+	stop := func() error {
+		once.Do(func() { stopErr = cleanup() })
+		return stopErr
+	}
+	if addRuntimeCleanup != nil {
+		addRuntimeCleanup(stop)
+	}
+	if restoreCleanups != nil {
+		*restoreCleanups = append(*restoreCleanups, stop)
+	}
+}
 
 // quiesceForRestore stops every runtime that can write to the shared database
 // before the restore path checkpoints and closes its pool. cancelWorkers is

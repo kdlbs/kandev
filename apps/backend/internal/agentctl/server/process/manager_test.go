@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStartWithGenerationReturnsNoGenerationWhenJournalIsUnavailable(t *testing.T) {
+	journalErr := errors.New("journal unavailable")
+	manager := &Manager{
+		cfg:                &config.InstanceConfig{DurableJournalPath: "unavailable"},
+		deliveryJournalErr: journalErr,
+	}
+	manager.status.Store(StatusStopped)
+
+	generation, err := manager.StartWithGeneration(context.Background())
+
+	assert.Zero(t, generation)
+	require.ErrorIs(t, err, journalErr)
+}
 
 func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
 	log := newTestLogger(t)
@@ -125,7 +140,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr(make(chan struct{}))
+	m.readStderr(make(chan stderrReadResult, 1))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -161,11 +176,12 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	}
 	cmd.Stderr = stderrWriter
 	m := &Manager{
-		cmd:       cmd,
-		stderr:    stderr,
-		logger:    log,
-		doneCh:    make(chan struct{}),
-		updatesCh: make(chan adapter.AgentEvent, 1),
+		processManagerID: "manager-lifetime-1",
+		cmd:              cmd,
+		stderr:           stderr,
+		logger:           log,
+		doneCh:           make(chan struct{}),
+		updatesCh:        make(chan adapter.AgentEvent, 1),
 		stderrSanitizer: stderrLineSanitizerFunc(func(string) (string, bool) {
 			return "OpenCode provider failure", true
 		}),
@@ -183,10 +199,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	generation := m.beginManagedStartupGeneration()
 	if err := stderrWriter.Close(); err != nil {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 	m.waitForExit(stderrDone)
@@ -199,6 +216,13 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	if got, _ := data["process_manager_id"].(string); got != "manager-lifetime-1" {
+		t.Fatalf("process manager ID = %q, want manager-lifetime-1", got)
+	}
+	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
+	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
+		t.Fatalf("startup evidence = %#v, want complete ordinary exit evidence for generation %d", data["startup_evidence"], generation)
 	}
 	recent, ok := data["recent_stderr"].([]string)
 	if !ok || !slices.Equal(recent, []string{"OpenCode provider failure"}) {
@@ -237,6 +261,48 @@ func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {
 	}
 }
 
+type orderedMCPAttachmentPublisher struct {
+	adapter.AgentAdapter
+	events []adapter.AgentEvent
+}
+
+func (p *orderedMCPAttachmentPublisher) TryPublishMCPAttachmentEvent(
+	event adapter.AgentEvent,
+	persist func(adapter.AgentEvent) (adapter.AgentEvent, error),
+) (bool, error) {
+	if persist != nil {
+		persisted, err := persist(event)
+		if err != nil {
+			return false, err
+		}
+		event = persisted
+	}
+	p.events = append(p.events, event)
+	return true, nil
+}
+
+func TestPublishMCPAttachmentUsesAdapterQueueWhenAvailable(t *testing.T) {
+	publisher := &orderedMCPAttachmentPublisher{}
+	m := &Manager{
+		adapter:   publisher,
+		updatesCh: make(chan adapter.AgentEvent, 2),
+		logger:    newTestLogger(t),
+	}
+	attempt := streams.MCPAttachmentAttempt{AttemptID: "attempt-1"}
+	evidence := streams.MCPAttachmentEvidence{
+		AttemptID:  "attempt-1",
+		ServerName: "kandev",
+		Kind:       streams.MCPAttachmentEvidenceToolsListObserved,
+	}
+	m.PublishMCPAttachmentAttempt(attempt)
+	m.PublishMCPAttachment(evidence)
+
+	require.Len(t, publisher.events, 2)
+	require.Equal(t, attempt.AttemptID, publisher.events[0].MCPAttachmentAttempt.AttemptID)
+	require.Equal(t, evidence.Kind, publisher.events[1].MCPAttachment.Kind)
+	require.Empty(t, m.updatesCh, "adapter-owned events must keep their ordered queue")
+}
+
 func TestForwardUpdatesUsesItsGenerationStopChannel(t *testing.T) {
 	stopCh := make(chan struct{})
 	m := &Manager{
@@ -271,6 +337,7 @@ type stubAdapter struct {
 	connectCalled       bool
 	requiresProcessKill bool
 	updatesCh           chan adapter.AgentEvent
+	closeOnce           sync.Once
 }
 
 func newStubAdapter() *stubAdapter {
@@ -308,7 +375,7 @@ func (s *stubAdapter) GetSessionID() string                           { return "
 func (s *stubAdapter) GetOperationID() string                         { return "" }
 func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler) {}
 func (s *stubAdapter) Close() error {
-	close(s.updatesCh)
+	s.closeOnce.Do(func() { close(s.updatesCh) })
 	return nil
 }
 func (s *stubAdapter) RequiresProcessKill() bool { return s.requiresProcessKill }
@@ -554,4 +621,32 @@ func TestStartOneShotPreservesConfiguredTempEnvironment(t *testing.T) {
 		}
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
+}
+
+func TestBuildAdapterConfigPreservesPromptSuggestionsAndBackgroundWork(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		suggestions bool
+		background  bool
+	}{
+		{name: "suggestions only", suggestions: true},
+		{name: "background only", background: true},
+		{name: "both enabled", suggestions: true, background: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Manager{
+				cfg: &config.InstanceConfig{
+					AgentArgs: []string{"cat"}, WorkDir: t.TempDir(), AgentEnv: []string{"PATH=/usr/bin"},
+					Protocol: agent.ProtocolACP, PromptSuggestions: tc.suggestions,
+					AgentBackgroundWorkEnabled: tc.background,
+				},
+				logger: newTestLogger(t),
+			}
+			require.NoError(t, m.buildAdapterConfig())
+			t.Cleanup(func() { _ = m.adapter.Close() })
+			shared := m.adapterCfg.ToSharedConfig()
+			require.Equal(t, tc.suggestions, shared.PromptSuggestions)
+			require.Equal(t, tc.background, shared.AgentBackgroundWorkEnabled)
+		})
+	}
 }

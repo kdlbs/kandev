@@ -2,6 +2,7 @@ package portutil
 
 import (
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,14 +14,19 @@ func TestAllocatePort(t *testing.T) {
 	}
 
 	if port <= 0 || port > 65535 {
-		t.Errorf("AllocatePort() returned invalid port: %d", port)
+		t.Fatalf("AllocatePort() returned invalid port: %d", port)
 	}
 
-	t.Logf("Allocated port: %d", port)
+	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatalf("AllocatePort() did not release usable loopback port %d: %v", port, err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
 }
 
-func TestAllocatePortUniqueness(t *testing.T) {
-	// Hold all listeners open to prevent the OS from reassigning freed ports.
+func TestAllocatePortAvoidsHeldPorts(t *testing.T) {
+	// AllocatePort releases its probe. Reserve each returned port before asking
+	// for another so the test checks occupied ports rather than ephemeral reuse.
 	ports := make(map[int]bool)
 	listeners := make([]net.Listener, 0, 10)
 	defer func() {
@@ -29,15 +35,18 @@ func TestAllocatePortUniqueness(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 10; i++ {
-		l, err := net.Listen("tcp", ":0")
+		port, err := AllocatePort()
 		if err != nil {
-			t.Fatalf("Listen failed on iteration %d: %v", i, err)
+			t.Fatalf("AllocatePort failed on iteration %d: %v", i, err)
+		}
+		if ports[port] {
+			t.Fatalf("AllocatePort returned held port: %d", port)
+		}
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			t.Fatalf("hold allocated port %d on iteration %d: %v", port, i, err)
 		}
 		listeners = append(listeners, l)
-		port := l.Addr().(*net.TCPAddr).Port
-		if ports[port] {
-			t.Errorf("duplicate port: %d", port)
-		}
 		ports[port] = true
 	}
 }

@@ -101,7 +101,8 @@ Run the focused checks appropriate to the change:
 - In a fresh worktree, run `pnpm install --frozen-lockfile` from `apps/` before
   any pnpm-based checks, tests, lint, or commits.
 - from `apps/backend`: `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`;
-- from the repository root: `make -C apps/backend lint`;
+- from the repository root: `bash scripts/lint-go-changed <changed-go-files>`,
+  following `apps/backend/AGENTS.md` for comparison-base and resource defaults;
 - from `apps`: `pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts`;
 - from `apps/web`: `pnpm run typecheck` and `pnpm run lint`;
 - run affected E2E coverage when the gated surface is user-visible;

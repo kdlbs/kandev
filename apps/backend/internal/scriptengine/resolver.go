@@ -37,6 +37,7 @@ func (r *Resolver) WithProvider(p PlaceholderProvider) *Resolver {
 
 // Resolve replaces all {{key}} placeholders in the script.
 // Unknown placeholders are left as-is so the user can see what wasn't resolved.
+// Inserted values remain literal and are not scanned for more placeholders.
 func (r *Resolver) Resolve(script string) string {
 	if script == "" {
 		return script
@@ -45,11 +46,11 @@ func (r *Resolver) Resolve(script string) string {
 	if len(vars) == 0 {
 		return script
 	}
-	result := script
+	replacements := make([]string, 0, len(vars)*2)
 	for key, value := range vars {
-		result = strings.ReplaceAll(result, "{{"+key+"}}", value)
+		replacements = append(replacements, "{{"+key+"}}", value)
 	}
-	return result
+	return strings.NewReplacer(replacements...).Replace(script)
 }
 
 // mergedVars collects all static vars and dynamic provider vars into a single map.

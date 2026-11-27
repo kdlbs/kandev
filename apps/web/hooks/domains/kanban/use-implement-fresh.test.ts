@@ -99,7 +99,8 @@ function makeChatRef(opts: { value?: string; attachments?: MessageAttachment[] }
       getValue: () => opts.value ?? "",
       getSelectionStart: () => 0,
       insertText: vi.fn(),
-      clear,
+      clear: vi.fn(),
+      clearAcceptedPayload: clear,
       getAttachments: () => opts.attachments ?? [],
     },
   };
@@ -213,7 +214,7 @@ describe("useImplementFresh", () => {
 
     expect(mockSetActiveSession).toHaveBeenCalledWith(TASK_ID, SESS_FRESH);
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESS_PLAN, null);
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
     expect(mockToast).not.toHaveBeenCalled();
   });
 });
@@ -241,7 +242,7 @@ describe("useImplementFresh post-launch side effects", () => {
     });
 
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESS_PLAN, null);
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
   });
 
   it("preserves composer + draft when launch fails so user can retry", async () => {

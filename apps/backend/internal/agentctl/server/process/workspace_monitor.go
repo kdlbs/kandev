@@ -49,10 +49,10 @@ const maxConsecutiveGitFailures = 5
 func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer wt.wg.Done()
 
-	// If no valid git index was found at startup, there's nothing to poll.
-	// Exit immediately to avoid spamming "git diff-files: exit status 128" warnings
-	// every poll cycle until the consecutive failure threshold is reached.
-	if wt.gitIndexPath == "" {
+	// If no valid git index was found at startup, ordinary trackers have
+	// nothing to poll. A manager-built task root still polls its filesystem
+	// listing, but never starts a Git command.
+	if wt.gitIndexPath == "" && !wt.suppressGitPublication {
 		wt.logger.Warn("no valid git repository found, file monitor not polling",
 			zap.String("workDir", wt.workDir))
 		// Close the initialScanDone channel even on early exit so callers
@@ -76,15 +76,19 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	defer timer.Stop()
 
 	// Initial update — done unconditionally so the first focus-grab isn't
-	// stuck waiting for the first tick. Skipped only in fully-paused initial
-	// state? No: even paused workspaces benefit from a one-time scan so
-	// transitioning to slow/fast later finds a populated cache.
+	// stuck waiting for the first tick. Bare roots seed only their own file
+	// snapshot; repository status and file lists belong to child trackers.
 	initialScanStarted := time.Now()
-	wt.updateGitStatusClass(ctx, subproc.GitBackground)
-	wt.updateFiles(ctx)
+	var lastState workspaceState
+	if wt.suppressGitPublication {
+		wt.observeWorkspaceRootFiles(ctx)
+	} else {
+		wt.updateGitStatusClass(ctx, subproc.GitBackground)
+		wt.updateFiles(ctx)
 
-	// Cache the last known state (ignore error on initial fetch)
-	lastState, _ := wt.getWorkspaceState(ctx)
+		// Cache the last known state (ignore error on initial fetch)
+		lastState, _ = wt.getWorkspaceState(ctx)
+	}
 	wt.recordMonitorTick(time.Since(initialScanStarted))
 
 	// Signal that the initial scan is done — tests wait on this instead of
@@ -105,6 +109,9 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(filePoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("monitor", filePoll)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -173,6 +180,10 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		default:
 		}
 	}()
+	if wt.suppressGitPublication {
+		wt.observeWorkspaceRootFiles(ctx)
+		return false
+	}
 
 	currentState, err := wt.getWorkspaceState(ctx)
 	if err != nil {
@@ -200,7 +211,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		return false
 	}
 	*consecutiveFailures = 0
-	if currentState.changed(*lastState) {
+	changed := currentState.changed(*lastState)
+	noteSlowPollIdle(&wt.slowIdleMonitorTicks, changed)
+	if changed {
 		*lastState = currentState
 		wt.logger.Debug("workspace state changed, updating")
 
@@ -241,7 +254,7 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 	// again because the index blob hash stays constant and the worktree hash
 	// is always shown as 0000000 (not computed). To detect subsequent changes
 	// to dirty files, we also include the mtime of each dirty file.
-	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only")
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only", "-z")
 	if err != nil {
 		wrapped := fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
 			wt.workDir, err, stderr)
@@ -269,22 +282,22 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 		return ""
 	}
 
-	lines := strings.Split(strings.TrimSpace(diffFilesOutput), "\n")
+	paths := strings.Split(diffFilesOutput, "\x00")
 	var hashInput strings.Builder
-	for _, file := range lines {
+	for _, file := range paths {
 		if file == "" {
 			continue
 		}
 		hashInput.WriteString(file)
+		hashInput.WriteByte(0)
 		// Include mtime so we detect content changes to already-dirty files
 		safePath, err := wt.sanitizePath(file)
-		if err != nil {
-			continue // Skip files with invalid paths
+		if err == nil {
+			if info, statErr := os.Stat(safePath); statErr == nil {
+				hashInput.WriteString(fmt.Sprintf("%d", info.ModTime().UnixNano()))
+			}
 		}
-		if info, err := os.Stat(safePath); err == nil {
-			hashInput.WriteString(fmt.Sprintf(":%d", info.ModTime().UnixNano()))
-		}
-		hashInput.WriteString(";")
+		hashInput.WriteByte(0)
 	}
 	return hashInput.String()
 }

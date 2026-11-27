@@ -1,10 +1,14 @@
 "use client";
 
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
+import {
+  commentAttachmentsForDelivery,
+  formatReviewCommentsAsMarkdown,
+} from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
 import {
   ChatInputContainer,
@@ -24,7 +28,7 @@ import {
 } from "@/hooks/use-message-handler";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
-import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { useTranslation } from "react-i18next";
 import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import type { TaskPlanCommentRef } from "@/lib/types/http";
@@ -62,17 +66,7 @@ export function PassthroughComposerPanel({
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
-  const workspaceId = useAppStore((state) =>
-    resolveComposerWorkspaceId({
-      sessionId: panelState.resolvedSessionId,
-      taskId,
-      quickChatSessions: state.quickChat.sessions,
-      activeWorkflowId: state.kanban.workflowId,
-      activeTasks: state.kanban.tasks,
-      snapshots: Object.values(state.kanbanMulti.snapshots),
-      workflows: state.workflows.items,
-    }),
-  );
+  const composerWorkspace = useComposerWorkspace(panelState.resolvedSessionId, taskId);
   return (
     <div
       data-testid="passthrough-composer"
@@ -98,7 +92,9 @@ export function PassthroughComposerPanel({
         onSubmit={onSubmit}
         sessionId={panelState.resolvedSessionId}
         taskId={taskId}
-        workspaceId={workspaceId}
+        workspaceId={composerWorkspace.workspaceId}
+        workspaceResolutionFailed={composerWorkspace.status === "failed"}
+        onRetryWorkspaceResolution={composerWorkspace.retry}
         entityReferencesEnabled={false}
         taskTitle={panelState.task?.title}
         taskDescription={panelState.taskDescription ?? ""}
@@ -137,6 +133,7 @@ export function PassthroughComposerPanel({
 type PassthroughFinalMessage = {
   content: string;
   commentsToSend: Array<ReviewComment | AgentMessageComment>;
+  commentAttachments: MessageAttachment[];
   contextFilesMeta?: Array<{ path: string; name: string }>;
   planCommentRefs: TaskPlanCommentRef[];
 };
@@ -252,6 +249,10 @@ export async function buildPassthroughFinalMessage({
   return {
     content: visibleContent + contextFilesContext + planContext + taskMentionsContext,
     commentsToSend,
+    commentAttachments: commentAttachmentsForDelivery([
+      ...commentsToSend,
+      ...panelState.walkthroughComments,
+    ]),
     contextFilesMeta: buildContextFilesMeta(allContextFiles),
     planCommentRefs: toTaskPlanCommentRefs(panelState.planComments),
   };
@@ -282,7 +283,9 @@ async function requestPassthroughMessage({
     finalMessage: message.content,
     modelToSend: undefined,
     planMode: false,
-    attachments,
+    attachments: message.commentAttachments.length
+      ? [...(attachments ?? []), ...message.commentAttachments]
+      : attachments,
     contextFilesMeta: message.contextFilesMeta,
     planCommentRefs: message.planCommentRefs,
   });
@@ -293,7 +296,7 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
     panelState.handleClearPRFeedback();
   }
   if (panelState.walkthroughComments.length > 0) {
-    panelState.handleClearWalkthroughComments();
+    panelState.markCommentsSent(panelState.walkthroughComments.map((comment) => comment.id));
   }
   if (panelState.messageComments.length > 0) {
     panelState.handleClearMessageComments();
@@ -369,7 +372,7 @@ export function useSendPassthroughMessage({
         if (conflict?.snapshot) {
           storeApi.getState().setTaskPlanComments(taskId, conflict.snapshot);
         }
-        console.error("Failed to send passthrough message:", error);
+        console.error("Failed to send passthrough message:", sanitizeSessionErrorDetails(error));
         let title = t("task:failedToSendMessage");
         if (isMessageSendError(error)) title = t("task:messageNotSent");
         else if (conflict?.code === "plan_comments_changed") {
@@ -377,7 +380,9 @@ export function useSendPassthroughMessage({
         }
         toast({
           title,
-          ...(isMessageSendError(error) ? { description: error.message } : {}),
+          ...(isMessageSendError(error)
+            ? { description: sanitizeSessionErrorDetails(error, 240) }
+            : {}),
           variant: "error",
         });
         throw error;

@@ -1,0 +1,619 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/client";
+import { createAppStore } from "@/lib/state/store";
+import { toKanbanTask } from "@/lib/kanban/map-task";
+import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
+import type { BackendMessageMap } from "@/lib/types/backend";
+import type { AppState } from "@/lib/state/store";
+import { registerUsersHandlers } from "@/lib/ws/handlers/users";
+import { toApiSidebarDraft, toApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import {
+  SidebarTaskPageCache,
+  sidebarTaskPageRankingKey,
+  sidebarTaskPageScope,
+} from "./sidebar-task-page-cache";
+import { pluginRegistry } from "@/lib/plugins/registry";
+
+vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
+vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/domains/settings-api")>();
+  return { ...actual, updateUserSettings: vi.fn() };
+});
+const query: SidebarTaskQuery = {
+  filters: [],
+  collapsed_group_keys: [],
+  collapsed_task_ids: [],
+  sort: { key: "state", direction: "asc" },
+  group: "none",
+  page: 1,
+  page_size: 100,
+  locale: "en",
+};
+const savedViewId = "saved-view";
+const recoveredQueryKey = "recovered";
+const busy = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
+const page = (key = "a"): SidebarTaskPageResponse => ({
+  query_key: key,
+  page: 1,
+  page_size: 100,
+  total_entries: 0,
+  total_tasks: 0,
+  total_visible_tasks: 0,
+  has_previous: false,
+  has_next: false,
+  entries: [],
+});
+function setup() {
+  const store = createAppStore();
+  store.setState({ workspaces: { items: [], activeId: "ws" }, workspaceContextGeneration: 1 });
+  return { store, cache: new SidebarTaskPageCache(store) };
+}
+async function load(cache: SidebarTaskPageCache, key: string, result = page(key)) {
+  vi.mocked(querySidebarTasks).mockResolvedValueOnce(result);
+  const request = cache.request("ws", query, key);
+  await request.promise;
+  request.release();
+}
+function settingsMessage(
+  payload: Partial<BackendMessageMap["user.settings.updated"]["payload"]>,
+): BackendMessageMap["user.settings.updated"] {
+  return {
+    type: "notification",
+    action: "user.settings.updated",
+    payload: { user_id: "user", workspace_id: "ws", repository_ids: [], ...payload },
+  };
+}
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(updateUserSettings).mockResolvedValue({ settings: { revision: 1 } } as Awaited<
+    ReturnType<typeof updateUserSettings>
+  >);
+  vi.useFakeTimers();
+});
+afterEach(() => vi.useRealTimers());
+
+// @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.2
+it("evicts the least recently used first page without retaining later pages", async () => {
+  const { cache } = setup();
+  for (let n = 0; n < 5; n++) await load(cache, String(n));
+  await load(cache, "0");
+  await load(cache, "5");
+  expect(cache.get("0")).not.toBeNull();
+  expect(cache.get("1")).toBeNull();
+  for (const key of ["2", "3", "4", "5"]) expect(cache.get(key)).not.toBeNull();
+});
+
+it("expires from fetch time and bounds response bytes", async () => {
+  const { cache } = setup();
+  await load(cache, "a");
+  vi.advanceTimersByTime(299999);
+  expect(cache.get("a")).not.toBeNull();
+  vi.advanceTimersByTime(1);
+  expect(cache.get("a")).toBeNull();
+  await load(cache, "large", page("x".repeat(2 * 1024 * 1024)));
+  expect(cache.get("large")).toBeNull();
+  await load(cache, "second", { ...page(), page: 2 });
+  expect(cache.get("second")).toBeNull();
+});
+
+it("fences invalidation during a read and clears across workspace generations", async () => {
+  const { store, cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  store.setState((s) => ({
+    sidebarArchivedTasks: { ...s.sidebarArchivedTasks, revisionByWorkspaceId: { ws: 1 } },
+  }));
+  expect(cache.get("a")).toBeNull();
+  resolve(page("b"));
+  await request.promise;
+  expect(cache.get("b")).toBeNull();
+  request.release();
+  await load(cache, "c");
+  store.setState({ workspaceContextGeneration: 2 });
+  expect(cache.get("c")).toBeNull();
+});
+
+it("shares pending reads until the final consumer releases, and ignores late aborted completions", async () => {
+  const { cache } = setup();
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const a = cache.request("ws", query, "a"),
+    b = cache.request("ws", query, "a");
+  const signal = vi.mocked(querySidebarTasks).mock.calls[0][2]?.init?.signal;
+  expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+  a.release();
+  expect(signal?.aborted).toBe(false);
+  b.release();
+  expect(signal?.aborted).toBe(true);
+  resolve(page());
+  await b.promise.catch(() => undefined);
+  expect(cache.get("a")).toBeNull();
+});
+
+it("isolates app stores and does not keep results after clear", async () => {
+  const a = setup(),
+    b = setup();
+  await load(a.cache, "a");
+  expect(b.cache.get("a")).toBeNull();
+  a.cache.clear();
+  expect(a.cache.get("a")).toBeNull();
+});
+
+it("clears retained rows on logout even when the workspace generation stays the same", async () => {
+  const { store, cache } = setup();
+  await load(cache, "a");
+  store.getState().clearAuthenticated();
+  expect(cache.get("a")).toBeNull();
+});
+
+it("keeps view identity stable while invalidating a page after a color change", async () => {
+  const { store, cache } = setup();
+  await load(cache, "before-color-change");
+  const before = sidebarTaskPageScope(store.getState());
+  store.setState((state) => {
+    state.userSettings.sidebarTaskColors = { "task-red": "red" };
+  });
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("before-color-change")).toBeNull();
+});
+
+it("reuses the ranking key when unrelated state updates keep ranking inputs stable", () => {
+  const { store } = setup();
+  const state = store.getState();
+  let snapshotEnumerations = 0;
+  const snapshots = new Proxy(state.kanbanMulti.snapshots, {
+    ownKeys(target) {
+      snapshotEnumerations++;
+      return Reflect.ownKeys(target);
+    },
+  });
+  const rankingState = {
+    ...state,
+    kanbanMulti: { ...state.kanbanMulti, snapshots },
+  } as AppState;
+
+  const firstKey = sidebarTaskPageRankingKey(rankingState);
+  const countAfterFirstCalculation = snapshotEnumerations;
+  const secondKey = sidebarTaskPageRankingKey({
+    ...rankingState,
+    workspaceContextGeneration: rankingState.workspaceContextGeneration + 1,
+  });
+
+  expect(secondKey).toBe(firstKey);
+  expect(snapshotEnumerations).toBe(countAfterFirstCalculation);
+});
+
+it("keeps cached pages after a semantically equal full settings event", async () => {
+  const { store, cache } = setup();
+  await load(cache, "equal-settings");
+  const before = sidebarTaskPageScope(store.getState());
+  const settings = store.getState().userSettings;
+  registerUsersHandlers(store)["user.settings.updated"]?.(
+    settingsMessage({
+      revision: 1,
+      sidebar_task_colors: structuredClone(settings.sidebarTaskColors),
+      sidebar_task_color_automation: structuredClone(settings.sidebarTaskColorAutomation),
+    }),
+  );
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("equal-settings")).not.toBeNull();
+});
+
+it("keeps the current page after a group-indent write and its full settings acknowledgement", async () => {
+  const { store, cache } = setup();
+  await load(cache, "group-indent");
+  const before = sidebarTaskPageScope(store.getState());
+  store.getState().updateSidebarDraft({ groupIndent: false });
+  const local = store.getState().sidebarViewsByWorkspace.ws;
+  expect(local.draft?.groupIndent).toBe(false);
+
+  const userSettings = store.getState().userSettings;
+  registerUsersHandlers(store)["user.settings.updated"]?.(
+    settingsMessage({
+      revision: 2,
+      sidebar_views_by_workspace: {
+        ws: {
+          views: local.views.map(toApiSidebarView),
+          active_view_id: local.activeViewId,
+          draft: local.draft ? toApiSidebarDraft(local.draft) : null,
+        },
+      },
+      sidebar_task_colors: structuredClone(userSettings.sidebarTaskColors),
+      sidebar_task_color_automation: structuredClone(userSettings.sidebarTaskColorAutomation),
+    }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.getState().sidebarViewsByWorkspace.ws.draft?.groupIndent).toBe(false);
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("group-indent")).not.toBeNull();
+});
+
+it("evicts by aggregate serialized bytes before the entry-count limit", async () => {
+  const { cache } = setup();
+  const medium = page("x".repeat(750000));
+  await load(cache, "a", medium);
+  await load(cache, "b", medium);
+  await load(cache, "c", medium);
+  expect(cache.get("a")).toBeNull();
+  expect(cache.get("b")).not.toBeNull();
+  expect(cache.get("c")).not.toBeNull();
+});
+
+it("does not extend expiry when a cached view is activated with a pending refresh", async () => {
+  const { cache } = setup();
+  await load(cache, "a");
+  vi.advanceTimersByTime(299999);
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const refresh = cache.request("ws", query, "a");
+  expect(cache.get("a")).not.toBeNull();
+  vi.advanceTimersByTime(1);
+  expect(cache.get("a")).toBeNull();
+  resolve(page());
+  await refresh.promise;
+  refresh.release();
+  expect(cache.get("a")).not.toBeNull();
+});
+
+it("invalidates only snapshots containing a changed task summary", async () => {
+  const { store, cache } = setup();
+  const { taskId, workflowId, workspaceId } = await import("@/lib/types/ids");
+  const task = {
+    id: taskId("task-a"),
+    workspace_id: workspaceId("ws"),
+    workflow_id: workflowId("flow"),
+    workflow_step_id: "step",
+    position: 0,
+    title: "A",
+    description: "",
+    state: "TODO" as const,
+    priority: "medium" as const,
+    created_at: "2026-09-28T00:00:00Z",
+    updated_at: "2026-09-28T00:00:00Z",
+  };
+  await load(cache, "a", { ...page(), entries: [{ kind: "task", task }] });
+  await load(cache, "unaffected");
+  store.setState({
+    sidebarStatusSummaryByWorkspaceId: {
+      ws: {
+        "task-a": { revision: 2, updated_at: "2026-09-28T00:00:01Z", queued_prompt_count: 1 },
+      },
+    },
+  });
+  expect(cache.get("a")).toBeNull();
+  expect(cache.get("unaffected")).not.toBeNull();
+});
+
+it("keeps lookups read-only and treats committed workspace changes as hard barriers", async () => {
+  const { store, cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  const before = store.getState();
+  expect(cache.get("a")).not.toBeNull();
+  expect(store.getState()).toBe(before);
+  expect(signal?.aborted).toBe(false);
+  store.setState({ workspaceContextGeneration: 2 });
+  expect(cache.get("a")).toBeNull();
+  expect(signal?.aborted).toBe(true);
+  store.setState({ workspaceContextGeneration: 1 });
+  expect(cache.get("a")).toBeNull();
+  resolve(page("b"));
+  await request.promise.catch(() => undefined);
+  request.release();
+  expect(cache.get("b")).toBeNull();
+});
+
+it("invalidates cached pages without restarting reads on deletion and unsubscribes consumers", async () => {
+  const { cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  const live = vi.fn(),
+    disposed = vi.fn();
+  cache.subscribeDeletedTasks(live);
+  const unsubscribe = cache.subscribeDeletedTasks(disposed);
+  unsubscribe();
+  cache.removeTasks(new Set(["deleted"]));
+  expect(signal?.aborted).toBe(false);
+  expect(cache.get("a")).toBeNull();
+  expect(live).toHaveBeenCalledWith(new Set(["deleted"]));
+  expect(disposed).not.toHaveBeenCalled();
+  resolve(page("b"));
+  expect((await request.promise).provisional).toBe(true);
+  expect(cache.get("b")).toBeNull();
+  request.release();
+});
+
+// @covers AC-TASKS-KANBAN-TASK-REORDERING-001.13
+it("journals admitted sidebar stages without granting authority to cache reuse or stale rows", async () => {
+  const { store, cache } = setup();
+  const { taskId, workflowId, workspaceId } = await import("@/lib/types/ids");
+  const task = {
+    id: taskId("task-stage"),
+    workspace_id: workspaceId("ws"),
+    workflow_id: workflowId("flow"),
+    workflow_step_id: "optimistic",
+    position: 7,
+    title: "Current",
+    description: "",
+    state: "TODO" as const,
+    priority: "medium" as const,
+    created_at: "2026-10-22T10:00:00Z",
+    updated_at: "2026-10-22T10:00:00Z",
+  };
+  store.getState().retainTaskOverviews("sidebar:display", [toKanbanTask(task)]);
+  const canonical = store.getState().taskOverview.byId[task.id];
+  const pendingMove = store.getState().beginTaskOverviewRead();
+  await load(cache, "equal-stage", { ...page(), entries: [{ kind: "task", task }] });
+  expect(store.getState().taskOverview.byId[task.id]).toBe(canonical);
+  expect(store.getState().taskOverview.reads[pendingMove].changes[task.id]).toEqual({
+    id: task.id,
+    workflowStepId: "optimistic",
+  });
+  store.getState().finishTaskOverviewRead(pendingMove);
+
+  const laterMove = store.getState().beginTaskOverviewRead();
+  expect(cache.get("equal-stage")).not.toBeNull();
+  expect(store.getState().taskOverview.reads[laterMove].changes).toEqual({});
+  await load(cache, "stale-stage", {
+    ...page(),
+    entries: [
+      {
+        kind: "task",
+        task: { ...task, workflow_step_id: "stale", updated_at: "2026-10-22T09:00:00Z" },
+      },
+    ],
+  });
+  expect(store.getState().taskOverview.byId[task.id].workflowStepId).toBe("optimistic");
+  expect(store.getState().taskOverview.reads[laterMove].changes).toEqual({});
+  store.getState().finishTaskOverviewRead(laterMove);
+  expect(store.getState().taskOverview.reads).toEqual({});
+});
+
+describe("sidebar page recovery", () => {
+  it("shares one bounded cycle and latches exhaustion for background triggers", async () => {
+    const { cache } = setup();
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const first = cache.request("ws", query, "view");
+    const second = cache.request("ws", query, "view");
+    const firstError = first.promise.catch((error: unknown) => error);
+    const secondError = second.promise.catch((error: unknown) => error);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(firstError).resolves.toMatchObject({ status: 503 });
+    await expect(secondError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const latched = cache.request("ws", query, "view");
+    const latchedError = latched.promise.catch((error: unknown) => error);
+    await expect(latchedError).resolves.toMatchObject({ status: 503 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const manual = cache.request("ws", query, "view", { manualRetry: true });
+    const manualError = manual.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(manualError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+    first.release();
+    second.release();
+    latched.release();
+    manual.release();
+  });
+
+  it("starts one new cycle per foreground episode after exhaustion", async () => {
+    const { cache } = setup();
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const initial = cache.request("ws", query, "view");
+    const initialError = initial.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(initialError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+    const episode = {};
+    const foreground = cache.request("ws", query, "view", { foregroundRecoveryEpisode: episode });
+    const foregroundError = foreground.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+    const repeated = cache.request("ws", query, "view", {
+      foregroundRecoveryEpisode: episode,
+    });
+    const repeatedError = repeated.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(foregroundError).resolves.toMatchObject({ status: 503 });
+    await expect(repeatedError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+    initial.release();
+    foreground.release();
+    repeated.release();
+  });
+});
+
+describe("sidebar page recovery cooldown", () => {
+  it("re-admits retained-row background recovery after the exhaustion cooldown", async () => {
+    const { cache } = setup();
+    const retainedRows = { hasRetainedRows: true };
+    vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+    const initial = cache.request("ws", query, "view", retainedRows);
+    const initialError = initial.promise.catch((error: unknown) => error);
+    const joining = cache.request("ws", query, "view");
+    const joiningError = joining.promise.catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(137_000);
+    await expect(initialError).resolves.toMatchObject({ status: 503 });
+    await expect(joiningError).resolves.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+    const exhaustedAt = Date.now();
+
+    const tooSoon = cache.request("ws", query, "view", retainedRows);
+    await expect(tooSoon.promise).rejects.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+
+    vi.setSystemTime(exhaustedAt + 59_999);
+    const stillCooling = cache.request("ws", query, "view", retainedRows);
+    await expect(stillCooling.promise).rejects.toMatchObject({ status: 503 });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(9);
+
+    vi.setSystemTime(exhaustedAt + 60_000);
+    vi.mocked(querySidebarTasks).mockResolvedValueOnce(page(recoveredQueryKey));
+    const resumed = cache.request("ws", query, "view", retainedRows);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(resumed.promise).resolves.toMatchObject({ query_key: recoveredQueryKey });
+    expect(querySidebarTasks).toHaveBeenCalledTimes(10);
+
+    initial.release();
+    joining.release();
+    tooSoon.release();
+    stillCooling.release();
+    resumed.release();
+  });
+
+  it("keeps disclosure-sync exhaustion behind explicit Retry", async () => {
+    const { store, cache } = setup();
+    const reconcile = vi
+      .spyOn(store.getState(), "reconcileSidebarGroupDisclosure")
+      .mockResolvedValue(false);
+    const disclosureQuery: SidebarTaskQuery = {
+      ...query,
+      disclosure_view_id: savedViewId,
+      collapsed_group_keys: Array.from({ length: 1_002 }, (_, index) => `group-${index}`),
+    };
+    const retainedRows = { hasRetainedRows: true };
+    vi.mocked(querySidebarTasks).mockResolvedValue({
+      ...page("disclosure"),
+      grouping_keys: ["group"],
+    });
+
+    const initial = cache.request("ws", disclosureQuery, savedViewId, retainedRows);
+    const initialError = await initial.promise.catch((error: unknown) => error);
+    expect(initialError).toBeInstanceOf(Error);
+    const exhaustedAt = Date.now();
+
+    vi.setSystemTime(exhaustedAt + 60_000);
+    const background = cache.request("ws", disclosureQuery, savedViewId, retainedRows);
+    await expect(background.promise).rejects.toBe(initialError);
+    const foreground = cache.request("ws", disclosureQuery, savedViewId, {
+      ...retainedRows,
+      foregroundRecoveryEpisode: {},
+    });
+    await expect(foreground.promise).rejects.toBe(initialError);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(1);
+
+    const manual = cache.request("ws", disclosureQuery, savedViewId, {
+      ...retainedRows,
+      manualRetry: true,
+    });
+    await expect(manual.promise).rejects.toBeInstanceOf(Error);
+    expect(querySidebarTasks).toHaveBeenCalledTimes(2);
+    initial.release();
+    background.release();
+    foreground.release();
+    manual.release();
+    reconcile.mockRestore();
+  });
+});
+
+it("keeps the terminal record until the final consumer releases", async () => {
+  const { cache } = setup();
+  vi.mocked(querySidebarTasks).mockRejectedValue(busy());
+  const first = cache.request("ws", query, "view");
+  const firstError = first.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(firstError).resolves.toMatchObject({ status: 503 });
+
+  const latched = cache.request("ws", query, "view");
+  const latchedError = latched.promise.catch((error: unknown) => error);
+  await expect(latchedError).resolves.toMatchObject({ status: 503 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  first.release();
+  latched.release();
+  vi.mocked(querySidebarTasks).mockResolvedValueOnce(page());
+  const fresh = cache.request("ws", query, "view");
+  await vi.advanceTimersByTimeAsync(0);
+  await expect(fresh.promise).resolves.toMatchObject({ page: 1 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+  fresh.release();
+});
+
+// @covers AC-PLATFORM-INTERACTIVE-READS-007.3, AC-PLATFORM-INTERACTIVE-READS-007.4
+it("does not re-admit a foreground episode claimed by the active cycle", async () => {
+  const { cache } = setup();
+  vi.mocked(querySidebarTasks).mockRejectedValue(
+    new ApiError("busy", 503, { code: "persistence_unavailable" }),
+  );
+  const episode = {};
+  const lease = cache.request("ws", query, "view");
+  lease.claimForegroundEpisode(episode);
+  const firstError = lease.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(firstError).resolves.toMatchObject({ status: 503 });
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  const replay = cache.request("ws", query, "view", { foregroundRecoveryEpisode: episode });
+  const replayError = replay.promise.catch((error: unknown) => error);
+  await expect(replayError).resolves.toMatchObject({ status: 503 });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(querySidebarTasks).toHaveBeenCalledTimes(5);
+
+  const later = cache.request("ws", query, "view", { foregroundRecoveryEpisode: {} });
+  const laterError = later.promise.catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(querySidebarTasks).toHaveBeenCalledTimes(6);
+  await vi.advanceTimersByTimeAsync(30_000);
+  await expect(laterError).resolves.toMatchObject({ status: 503 });
+  lease.release();
+  replay.release();
+  later.release();
+});
+
+it("rejects a late grouping snapshot and never retains it after a scoped source update", async () => {
+  const { cache } = setup();
+  const reference = "plugin:acme:labels";
+  pluginRegistry.setSidebarGroupings([{ reference, label: "Labels", generation: "generation-1" }]);
+  const pending = Promise.withResolvers<SidebarTaskPageResponse>();
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(pending.promise);
+  const request = cache.request("ws", { ...query, group: reference }, "plugin-page");
+  pluginRegistry.invalidateSidebarGroupings("acme", "ws");
+  pending.resolve({ ...page(), grouping_generation: "generation-1", grouping_revision: "old" });
+  await expect(request.promise).rejects.toMatchObject({ name: "AbortError" });
+  expect(cache.get("plugin-page")).toBeNull();
+  request.release();
+  pluginRegistry.setSidebarGroupings([]);
+});

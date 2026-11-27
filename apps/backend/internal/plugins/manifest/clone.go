@@ -7,7 +7,14 @@ func (m Manifest) Clone() Manifest {
 	clone.Categories = cloneStrings(m.Categories)
 	clone.Webhooks = cloneWebhooks(m.Webhooks)
 	clone.Actions = cloneActions(m.Actions)
+	clone.NotificationFormatters = append([]NotificationFormatter(nil), m.NotificationFormatters...)
+	for index := range clone.NotificationFormatters {
+		clone.NotificationFormatters[index].ProviderTypes = cloneStrings(m.NotificationFormatters[index].ProviderTypes)
+		clone.NotificationFormatters[index].ManagementActions = cloneStrings(m.NotificationFormatters[index].ManagementActions)
+	}
+	clone.SidebarGroupings = append([]SidebarGrouping(nil), m.SidebarGroupings...)
 	clone.RepositoryProviders = cloneStrings(m.RepositoryProviders)
+	clone.ExecutorProviders = cloneExecutorProviders(m.ExecutorProviders)
 	clone.ReferenceSources = cloneReferenceSources(m.ReferenceSources)
 	clone.AuthProviders = cloneAuthProviders(m.AuthProviders)
 	clone.ConfigSchema = cloneMap(m.ConfigSchema)
@@ -17,9 +24,33 @@ func (m Manifest) Clone() Manifest {
 	clone.Capabilities.APIWrite = cloneStrings(m.Capabilities.APIWrite)
 	clone.UI.Pages = append([]UIPage(nil), m.UI.Pages...)
 	clone.UI.Styles = cloneStrings(m.UI.Styles)
+	clone.UI.FileViewers = append([]FileViewer(nil), m.UI.FileViewers...)
+	for i := range clone.UI.FileViewers {
+		clone.UI.FileViewers[i].Extensions = append([]string(nil), m.UI.FileViewers[i].Extensions...)
+	}
 	clone.UI.Keybindings = append([]UIKeybinding(nil), m.UI.Keybindings...)
 	clone.UI.WebApps = cloneWebApps(m.UI.WebApps)
 	clone.Runtime.Executables = cloneStringMap(m.Runtime.Executables)
+	return clone
+}
+
+func cloneExecutorProviders(values []ExecutorProvider) []ExecutorProvider {
+	if values == nil {
+		return nil
+	}
+	clone := make([]ExecutorProvider, len(values))
+	for index, value := range values {
+		clone[index] = value
+		clone[index].SupportedStateVersions = append([]int(nil), value.SupportedStateVersions...)
+		clone[index].ProfileSchema = cloneMap(value.ProfileSchema)
+		clone[index].ResourceStateSchema = cloneMap(value.ResourceStateSchema)
+		if value.LocalizedMessages != nil {
+			clone[index].LocalizedMessages = make(map[string]string, len(value.LocalizedMessages))
+			for key, message := range value.LocalizedMessages {
+				clone[index].LocalizedMessages[key] = message
+			}
+		}
+	}
 	return clone
 }
 

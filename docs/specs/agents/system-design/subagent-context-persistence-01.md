@@ -14,6 +14,11 @@ owners:
 
 This design preserves the technical source detail for `REQ-AGENTS-SUBAGENT-CONTEXT-PERSISTENCE-001` during migration.
 
+The planned [background-work inspection projection](background-work.md) links to
+these invocation rows without changing their execution/call keys or settled-at
+semantics. A completed launch-tool invocation does not by itself prove that a
+detached child run has finished; live work/run state belongs to that projection.
+
 ## Requirement mapping
 
 | Requirement | Design section |

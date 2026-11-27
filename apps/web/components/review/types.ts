@@ -1,20 +1,24 @@
 import { djb2Hash } from "@/lib/utils/hash";
 import { t } from "@/lib/i18n";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 import type { FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
 export type ReviewChangeFacet = {
   diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
   status: FileChangeStatus;
   additions: number;
   deletions: number;
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  display_stale?: boolean;
 };
 
 export type ReviewFile = {
   path: string;
   diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
   status: FileChangeStatus;
   additions: number;
   deletions: number;
@@ -22,6 +26,10 @@ export type ReviewFile = {
   source: "uncommitted" | "committed" | "pr";
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /** The rendered patch or counts come from the previous accepted snapshot. */
+  display_stale?: boolean;
+  /** Source target identity used to retire renderer state across replacement. */
+  display_scope_key?: string;
   staged_change?: ReviewChangeFacet;
   unstaged_change?: ReviewChangeFacet;
   /** Frontend-only layer selected from a mixed uncommitted file. */
@@ -39,6 +47,21 @@ export type ReviewFile = {
   /** True when this file belongs to an initialized Git submodule scope. */
   is_submodule?: boolean;
 };
+
+export function isReviewFileDetailReady(
+  file: Pick<ReviewFile, "diff_state" | "display_stale">,
+): boolean {
+  return !file.display_stale && file.diff_state !== "pending" && file.diff_state !== "unavailable";
+}
+
+/** A diff row exposes the native HTML preview only for the current readable file. */
+export function isReviewHtmlPreviewEligible(
+  file: Pick<ReviewFile, "path" | "status" | "diff_skip_reason">,
+): boolean {
+  if (file.status === "deleted") return false;
+  if (file.diff_skip_reason === "binary") return false;
+  return getFilePreviewKind(file.path) === "html";
+}
 
 /**
  * Composite per-file key used by the review dialog's in-memory state

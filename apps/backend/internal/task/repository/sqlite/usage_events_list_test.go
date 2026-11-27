@@ -124,3 +124,43 @@ func TestListTaskUsageEvents_TaskWithNoRows_ReturnsEmptyNonNilSlice(t *testing.T
 		t.Errorf("len(events) = %d, want 0", len(events))
 	}
 }
+
+func TestListSessionUsageTurnsAndEventsByTurn(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	createUsageEventsTestTask(t, repo, "task-turn-list")
+	createUsageEventsTestSession(t, repo, "session-turn-list", "task-turn-list")
+
+	cacheWrite := int64(5)
+	for _, event := range []*models.TaskUsageEvent{
+		{UsageEventID: "evt-turn-direct", TaskID: "task-turn-list", SessionID: "session-turn-list", TurnID: "turn-1", NativeScope: "direct", MeasurementSource: "response", UsageCompleteness: "exact", UsageSchemaVersion: 1, ProviderThreadID: "thread-root", ProviderTurnID: "native-1", ProviderResponseID: "response-1", ReportedCacheWriteTokens: &cacheWrite, CostSource: "unpriced", ContractVersion: 1, OccurredAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
+		{UsageEventID: "evt-turn-child", TaskID: "task-turn-list", SessionID: "session-turn-list", TurnID: "turn-1", NativeScope: "child", MeasurementSource: "response", UsageCompleteness: "exact", UsageSchemaVersion: 1, ProviderThreadID: "thread-child", ProviderTurnID: "native-child-1", ProviderResponseID: "response-child-1", CostSource: "models_dev_list", ContractVersion: 1, OccurredAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
+		{UsageEventID: "evt-turn-next", TaskID: "task-turn-list", SessionID: "session-turn-list", TurnID: "turn-2", ContractVersion: 1, CostSource: "unpriced", OccurredAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
+	} {
+		if err := repo.CreateTaskUsageEvent(context.Background(), event); err != nil {
+			t.Fatalf("CreateTaskUsageEvent(%s): %v", event.UsageEventID, err)
+		}
+	}
+
+	turns, err := repo.ListSessionUsageTurnCursors(context.Background(), "session-turn-list", 0, 1)
+	if err != nil {
+		t.Fatalf("ListSessionUsageTurnCursors first page: %v", err)
+	}
+	if len(turns) != 1 || turns[0].TurnID != "turn-2" || turns[0].Cursor <= 0 {
+		t.Fatalf("first page = %#v, want newest turn-2 with a positive cursor", turns)
+	}
+	next, err := repo.ListSessionUsageTurnCursors(context.Background(), "session-turn-list", turns[0].Cursor, 1)
+	if err != nil {
+		t.Fatalf("ListSessionUsageTurnCursors next page: %v", err)
+	}
+	if len(next) != 1 || next[0].TurnID != "turn-1" {
+		t.Fatalf("next page = %#v, want older turn-1", next)
+	}
+
+	rows, err := repo.ListSessionUsageEventsByTurn(context.Background(), "session-turn-list", "turn-1")
+	if err != nil {
+		t.Fatalf("ListSessionUsageEventsByTurn: %v", err)
+	}
+	if len(rows) != 2 || rows[0].ProviderResponseID != "response-1" || rows[0].ReportedCacheWriteTokens == nil || *rows[0].ReportedCacheWriteTokens != 5 || rows[1].NativeScope != "child" {
+		t.Fatalf("turn rows = %#v, want direct and child metadata round-tripped", rows)
+	}
+}

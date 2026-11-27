@@ -1,0 +1,150 @@
+import { expectRuntimeVersions } from "./agent-runtime-settings-helpers";
+import { expect, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
+
+export async function managedFallbackAwareness(
+  page: Page,
+  mobile: boolean,
+  capture?: PrAssetCapture,
+) {
+  await installRuntimeUpdateFixture(page);
+  const agent = {
+    name: "opencode-acp",
+    display_name: "OpenCode",
+    description: "OpenCode ACP",
+    supports_mcp: true,
+    installation_paths: ["opencode"],
+    available: true,
+    matched_path: "/usr/local/bin/opencode",
+    capabilities: {
+      supports_session_resume: true,
+      supports_shell: true,
+      supports_workspace_only: false,
+    },
+    model_config: {
+      default_model: "opencode/test",
+      available_models: [],
+      supports_dynamic_models: false,
+      status: "ok",
+    },
+    runtime_update: {
+      supported: true,
+      managed_fallback: true,
+      package: "opencode-ai",
+      current_version: "",
+      default_version: "8.0.0",
+      active_version: "8.0.0",
+      effective_version: "8.0.0",
+    },
+  };
+  await page.route("**/api/v1/agents/available", (route) =>
+    route.fulfill({ json: { agents: [agent], tools: [], total: 1 } }),
+  );
+  await page.route("**/api/v1/agents/discovery", (route) =>
+    route.fulfill({ json: { agents: [agent], total: 1 } }),
+  );
+  await page.route("**/api/v1/agent-update/status", (route) =>
+    route.fulfill({
+      json: {
+        statuses: [
+          {
+            agent_name: "opencode-acp",
+            display_name: "OpenCode",
+            runtime_id: "native:opencode",
+            owner: "external",
+            mechanism: "native",
+            management: "manual",
+            managed_fallback: true,
+            source: "opencode-ai",
+            guidance_url: "https://opencode.ai/docs/cli/",
+            current_version: "1.0.0",
+            available: true,
+            enabled: true,
+            auto_update_supported: false,
+            auto_update: false,
+            package: "opencode-ai",
+            default_version: "",
+            effective_version: "1.0.0",
+            latest_version: "9.0.0",
+            check_state: "update_available",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/v1/agent-update/opencode-acp/preview**", (route) =>
+    route.fulfill({
+      json: {
+        agent_name: "opencode-acp",
+        managed_fallback: true,
+        package: "opencode-ai",
+        current_version: "",
+        default_version: "8.0.0",
+        active_version: "8.0.0",
+        effective_version: "8.0.0",
+        target_version: "9.0.0",
+        operation: "update",
+        available_versions: [
+          { version: "9.0.0", latest: true },
+          { version: "8.0.0", latest: false },
+        ],
+        command: ["npm", "exec", "--package=opencode-ai@9.0.0", "--", "node", "-e", ""],
+        command_string: 'npm exec --package=opencode-ai@9.0.0 -- node -e ""',
+      },
+    }),
+  );
+  await page.goto("/settings/agents#runtime-update-opencode-acp");
+  const surface = page.getByTestId(`agent-update-${mobile ? "drawer" : "dialog"}-opencode-acp`);
+  await expect(surface).toContainText("Observed: 1.0.0");
+  await expect(surface.getByRole("switch")).toHaveCount(0);
+  const runtimeDetails = surface.getByTestId("agent-update-runtime-details-opencode-acp");
+  const runtimeDetailsSummary = runtimeDetails.locator(":scope > summary");
+  if (mobile) await runtimeDetailsSummary.tap();
+  else await runtimeDetailsSummary.click();
+  await expect(runtimeDetails.getByText("Package", { exact: true })).toBeVisible();
+  await expect(runtimeDetails.getByText("Source", { exact: true })).toBeVisible();
+  await expect(runtimeDetails.getByText("opencode-ai", { exact: true })).toHaveCount(2);
+  const guidance = surface.getByRole("link", { name: "Manual update guidance" });
+  await expect(guidance).toHaveAttribute("href", "https://opencode.ai/docs/cli/");
+  if (mobile) expect((await guidance.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(
+    await guidance.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+  await expectRuntimeVersions(surface, "Unknown", "9.0.0");
+  await expect(surface).toContainText("Active version: 8.0.0");
+  await expect(surface).toContainText("Effective version: 8.0.0");
+  const info = surface.getByTestId("agent-update-info-opencode-acp");
+  if (mobile) {
+    await info.tap();
+    const information = page.getByRole("dialog", { name: "Update runtime", exact: true });
+    await expect(information).toContainText("The native host installation stays unchanged");
+    await information.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(information).toBeHidden();
+    await expect(surface).toBeVisible();
+  } else {
+    await info.hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "The native host installation stays unchanged",
+    );
+    await page.keyboard.press("Escape");
+    await expect(surface).toBeVisible();
+  }
+  const commandDetails = surface.getByTestId("agent-update-command-opencode-acp");
+  if (mobile) await commandDetails.locator("summary").tap();
+  else await commandDetails.locator("summary").click();
+  const command = commandDetails.locator("pre");
+  await expect(command).toBeVisible();
+  await expect(command).toContainText("--package=opencode-ai@9.0.0");
+  await waitForFiniteAnimations(surface);
+  await capture?.screenshot("runtime-native-fallback", {
+    caption: "Native host guidance stays separate from managed fallback version selection.",
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+}

@@ -99,3 +99,27 @@ func TestDeleteExecutorRunningPrunesNonResumableRow(t *testing.T) {
 		t.Fatal("a row with no resume_token should be deleted")
 	}
 }
+
+// TestDeleteExecutorRunningPrunesTokenlessNotRunningRow pins the row rule the
+// orchestrator's idle reclaim relies on: a tokenless row whose status is not
+// running, such as a prepared session whose agent never started, is deleted
+// by the stale-execution cleanup for its current execution, not repaired.
+func TestDeleteExecutorRunningPrunesTokenlessNotRunningRow(t *testing.T) {
+	for _, status := range []string{models.ExecutorRunningStatusPrepared, models.ExecutorRunningStatusReady} {
+		t.Run(status, func(t *testing.T) {
+			writer := &invariantWriter{prior: &models.ExecutorRunning{
+				SessionID:        "session-3",
+				AgentExecutionID: "exec-3",
+				Runtime:          agentruntime.RuntimeStandalone,
+				Status:           status,
+			}}
+			m := &Manager{logger: newNopLogger(t), runningWriter: writer}
+
+			m.deleteExecutorRunning(context.Background(), "session-3", "exec-3")
+
+			if writer.repaired || !writer.deleted {
+				t.Fatalf("tokenless %s row: repaired=%v deleted=%v, want deleted only", status, writer.repaired, writer.deleted)
+			}
+		})
+	}
+}

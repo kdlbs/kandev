@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetSessionMetadataKeyIfStampIsAtomicAndPreservesOtherKeys(t *testing.T) {
@@ -189,4 +190,50 @@ func TestCommitBootstrapFailureIfCurrentExecutionGuardsStateExecutionAndStamp(t 
 			}
 		})
 	}
+}
+
+func TestCommitBootstrapFailureIfCurrentAttemptRejectsSameExecutionRetry(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-bootstrap-attempt", "session-bootstrap-attempt", "turn-bootstrap-attempt")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-bootstrap-attempt", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "runtime-bootstrap-attempt", SessionID: "session-bootstrap-attempt", TaskID: "task-bootstrap-attempt",
+		AgentExecutionID: "execution-shared",
+	}))
+	oldAttempt, err := repo.GetTaskSession(ctx, "session-bootstrap-attempt")
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, oldAttempt.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-old",
+	}))
+
+	// A retry can keep the same executor identity and STARTING state while it
+	// replaces the persisted start-attempt identity.
+	newAttempt, err := repo.GetTaskSession(ctx, oldAttempt.ID)
+	require.NoError(t, err)
+	newAttempt.ErrorMessage = "new start attempt owns this session"
+	require.NoError(t, repo.UpdateTaskSession(ctx, newAttempt))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, newAttempt.ID, map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-new",
+	}))
+
+	changed, _, err := repo.CommitBootstrapFailureIfCurrentAttempt(
+		ctx,
+		"task-bootstrap-attempt",
+		"session-bootstrap-attempt",
+		"execution-shared",
+		models.TaskSessionStateStarting,
+		"",
+		"attempt-old",
+		models.LastAgentError{Message: "stale attempt failed", StampValue: "stale-attempt"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "execution equality must not admit a stale same-execution failure")
+
+	stored, err := repo.GetTaskSession(ctx, oldAttempt.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, stored.State)
+	require.Equal(t, "new start attempt owns this session", stored.ErrorMessage)
+	_, found := models.LoadLastAgentError(stored.Metadata)
+	require.False(t, found, "stale attempt must not persist its failure projection")
 }

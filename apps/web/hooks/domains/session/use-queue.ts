@@ -9,10 +9,7 @@ import {
   reorderQueuedEntries,
   QueueEntryNotFoundError,
   QueueEditConflictError,
-  sendQueuedNow,
-  setQueueAutoRun,
   type QueueEditLease,
-  setQueueAutoMerge,
 } from "@/lib/api/domains/queue-api";
 import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type {
@@ -24,6 +21,7 @@ import type { MessageAttachment } from "./use-queue-types";
 export type { MessageAttachment, QueueMessageInput } from "./use-queue-types";
 import { useQueueAdmissionAction } from "./use-queue-admission";
 import { useQueueRefetch, type QueueRefetch } from "./use-queue-refetch";
+import { useQueueAutomationActions, useSendNowAction } from "./use-queue-mutations";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 import { generateUUID } from "@/lib/utils";
@@ -66,6 +64,7 @@ function useQueueState(sessionId: string | null) {
 
 type QueueActionsArgs = {
   identity: QueueSessionIdentity | null;
+  detailActive: boolean;
   entries: QueuedMessage[];
   setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
@@ -79,72 +78,10 @@ type QueueActionsArgs = {
 type BeginQueueOperation = ReturnType<typeof useQueueState>["beginQueueOperation"];
 type FinishQueueOperation = ReturnType<typeof useQueueState>["finishQueueOperation"];
 
-async function runQueueMutation(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-  mutate: (identity: QueueSessionIdentity) => Promise<unknown>,
-): Promise<void> {
-  if (!identity) return;
-  const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
-  const token = beginQueueOperation(sessionId, incarnationId);
-  if (!token) return;
-  let mutationError: unknown;
-  try {
-    try {
-      await mutate(identity);
-    } catch (error) {
-      mutationError = error;
-    }
-    try {
-      await refetch(sessionId, token);
-    } catch (reconcileError) {
-      if (mutationError) throw mutationError;
-      throw reconcileError;
-    }
-    if (mutationError) throw mutationError;
-  } finally {
-    finishQueueOperation(sessionId, token);
-  }
-}
-
-function useSendNowAction(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-) {
-  return useCallback(
-    (entryId: string) =>
-      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
-        sendQueuedNow({ ...current, scope: "entry", entry_id: entryId }),
-      ),
-    [beginQueueOperation, finishQueueOperation, identity, refetch],
-  );
-}
-
-type BooleanQueueMutation = (identity: QueueSessionIdentity, enabled: boolean) => Promise<unknown>;
-
-function useBooleanQueueAction(
-  identity: QueueSessionIdentity | null,
-  beginQueueOperation: BeginQueueOperation,
-  finishQueueOperation: FinishQueueOperation,
-  refetch: QueueRefetch,
-  mutate: BooleanQueueMutation,
-) {
-  return useCallback(
-    (enabled: boolean) =>
-      runQueueMutation(identity, beginQueueOperation, finishQueueOperation, refetch, (current) =>
-        mutate(current, enabled),
-      ),
-    [beginQueueOperation, finishQueueOperation, identity, mutate, refetch],
-  );
-}
-
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
   identity,
+  detailActive,
   entries,
   setQueueEntries,
   removeQueueEntry,
@@ -159,6 +96,7 @@ function useQueueActions({
     setQueueEntries,
     beginQueueOperation,
     finishQueueOperation,
+    detailActive,
   );
 
   const queue = useQueueAdmissionAction(
@@ -186,20 +124,12 @@ function useQueueActions({
     finishQueueOperation,
     refetch,
   );
-  const setAutoRun = useBooleanQueueAction(
+  const { setAutoRun, setAutoMerge } = useQueueAutomationActions({
     identity,
     beginQueueOperation,
     finishQueueOperation,
     refetch,
-    setQueueAutoRun,
-  );
-  const setAutoMerge = useBooleanQueueAction(
-    identity,
-    beginQueueOperation,
-    finishQueueOperation,
-    refetch,
-    setQueueAutoMerge,
-  );
+  });
 
   const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
     identity,
@@ -536,38 +466,50 @@ function useQueueRefresh(
   sessionId: string | null,
   connectionStatus: string,
   refetch: QueueRefetch,
+  detailActive: boolean,
 ) {
   useEffect(() => {
-    if (!sessionId || connectionStatus !== "connected") return;
+    if (!detailActive || !sessionId || connectionStatus !== "connected") return;
     void refetch(sessionId).catch((error) => {
       console.error("Failed to fetch queue status:", error);
     });
-  }, [sessionId, connectionStatus, refetch]);
+  }, [sessionId, connectionStatus, refetch, detailActive]);
   useForegroundRefresh(
     () => {
-      if (!sessionId || connectionStatus !== "connected") return;
+      if (!detailActive || !sessionId || connectionStatus !== "connected") return;
       return refetch(sessionId).catch((error) => {
         console.error("Failed to fetch queue status after foreground refresh:", error);
       });
     },
-    Boolean(sessionId),
+    detailActive && Boolean(sessionId),
     sessionId,
   );
   return useCallback(
-    () => (sessionId ? refetch(sessionId) : Promise.resolve()),
-    [sessionId, refetch],
+    () => (detailActive && sessionId ? refetch(sessionId) : Promise.resolve()),
+    [detailActive, sessionId, refetch],
   );
 }
 
 function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
+  if (!meta) {
+    return {
+      count: entries.length,
+      max: 0,
+      isFull: false,
+      mergeEnabled: true,
+      autoRun: true,
+      autoMerge: false,
+      autoMergeAvailable: false,
+    };
+  }
   return {
-    count: meta?.count ?? entries.length,
-    max: meta?.max ?? 0,
-    isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
-    mergeEnabled: meta?.mergeEnabled ?? true,
-    autoRun: meta?.autoRun ?? true,
-    autoMerge: meta?.autoMergeEnabled ?? false,
-    autoMergeAvailable: meta?.autoMergeAvailable ?? false,
+    count: meta.count ?? entries.length,
+    max: meta.max ?? 0,
+    isFull: meta.count >= meta.max && meta.max > 0,
+    mergeEnabled: meta.mergeEnabled ?? true,
+    autoRun: meta.autoRun ?? true,
+    autoMerge: meta.autoMergeEnabled ?? false,
+    autoMergeAvailable: meta.autoMergeAvailable ?? false,
   };
 }
 
@@ -579,7 +521,8 @@ function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
  * - Edit and remove rely on entry-level UUIDs: when a drain wins the race, the
  *   server returns `entry_not_found` and we refetch to resync the local list.
  */
-export function useQueue(sessionId: string | null) {
+export function useQueue(sessionId: string | null, options: { detailActive?: boolean } = {}) {
+  const detailActive = options.detailActive ?? true;
   const state = useQueueState(sessionId);
   const { entries, meta, isLoading, cancellationPending, taskSession } = state;
   const identity = useCurrentQueueIdentity(sessionId, taskSession);
@@ -597,6 +540,7 @@ export function useQueue(sessionId: string | null) {
     reorderEntries,
   } = useQueueActions({
     identity,
+    detailActive,
     entries,
     setQueueEntries: state.setQueueEntries,
     removeQueueEntry: state.removeQueueEntry,
@@ -606,7 +550,7 @@ export function useQueue(sessionId: string | null) {
     metaMergeEnabled: meta?.mergeEnabled,
     metaAutoRun: meta?.autoRun,
   });
-  const refetchBound = useQueueRefresh(sessionId, connectionStatus, refetch);
+  const refetchBound = useQueueRefresh(sessionId, connectionStatus, refetch, detailActive);
 
   return {
     entries,

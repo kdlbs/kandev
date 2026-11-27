@@ -79,3 +79,77 @@ describe("groupJobsByStage", () => {
     expect(group.stage).toBe("unstaged");
   });
 });
+
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.16
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.18
+describe("manual acceptance policy", () => {
+  it("accepts only optional manual jobs", () => {
+    expect(bucketJob(makeJob({ status: "manual", allow_failure: true }))).toBe("passed");
+    expect(bucketJob(makeJob({ status: "manual", allow_failure: false }))).toBe("in_progress");
+  });
+  it.each(["running", "pending", "created", "scheduled", "unknown"])(
+    "keeps %s in progress with either allowance",
+    (status) => {
+      for (const allow_failure of [false, true]) {
+        expect(bucketJob(makeJob({ status, allow_failure }))).toBe("in_progress");
+      }
+    },
+  );
+});
+
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.17
+// @covers AC-INTEGRATIONS-GITLAB-INTEGRATION-001.19
+describe("optional manual stage summaries", () => {
+  it("accepts a successful test and optional deploy without changing raw jobs", () => {
+    const jobs = [
+      makeJob(),
+      makeJob({
+        id: 2,
+        stage: "deploy",
+        status: "manual",
+        allow_failure: true,
+        web_url: "https://ci/deploy",
+      }),
+    ];
+    const original = structuredClone(jobs);
+    expect(bucketJobCounts(jobs)).toEqual({ passed: 2, inProgress: 0, failed: 0 });
+    expect(groupJobsByStage(jobs)[1]).toMatchObject({
+      bucket: "passed",
+      passed: 1,
+      total: 1,
+      webUrl: "https://ci/deploy",
+    });
+    expect(jobs).toEqual(original);
+  });
+  it.each([
+    ["manual", false, "in_progress"],
+    ["running", true, "in_progress"],
+    ["pending", true, "in_progress"],
+    ["failed", false, "failed"],
+    ["canceled", false, "failed"],
+    ["skipped", false, "passed"],
+    ["failed", true, "passed"],
+    ["canceled", true, "passed"],
+  ] as const)(
+    "preserves %s allowance %s beside optional manual",
+    (status, allow_failure, bucket) => {
+      const jobs = [
+        makeJob({ status: "manual", allow_failure: true, web_url: "https://ci/optional" }),
+        makeJob({ id: 2, status, allow_failure, web_url: "https://ci/dominant" }),
+      ];
+      const accepted = bucket === "passed";
+      const counts = {
+        passed: accepted ? 2 : 1,
+        inProgress: bucket === "in_progress" ? 1 : 0,
+        failed: bucket === "failed" ? 1 : 0,
+      };
+      expect(bucketJobCounts(jobs)).toEqual(counts);
+      expect(groupJobsByStage(jobs)[0]).toMatchObject({
+        ...counts,
+        bucket,
+        total: 2,
+        webUrl: accepted ? "https://ci/optional" : "https://ci/dominant",
+      });
+    },
+  );
+});

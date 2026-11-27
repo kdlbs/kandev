@@ -53,6 +53,7 @@ function seedOpenFile(state: Partial<FileEditorState> = {}) {
       key,
       {
         path: PATH,
+        instanceId: Symbol(),
         name: "foo.ts",
         content: "v1",
         originalContent: "v1",
@@ -120,6 +121,7 @@ it("clears symlink identity when unchanged content becomes a regular file", asyn
   });
   mockRequestFileContent.mockResolvedValueOnce({ content: "v1", is_binary: false });
   await syncOpenFileFromWorkspace({
+    isCurrent: () => true,
     client: FAKE_CLIENT,
     sessionId: SESSION_ID,
     fileKey: PATH,
@@ -154,6 +156,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -191,6 +194,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -222,6 +226,7 @@ describe("syncOpenFileFromWorkspace", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: PATH,
@@ -261,6 +266,7 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: key,
@@ -301,6 +307,7 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     });
 
     await syncOpenFileFromWorkspace({
+      isCurrent: () => true,
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
       fileKey: key,
@@ -356,11 +363,13 @@ function renderSyncHook(initial: SyncProps) {
     (props: SyncProps) => {
       const activeSessionIdRef = useRef<string | null>(SESSION_ID);
       const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
+      const activeEditorVisitRef = useRef<symbol | null>(Symbol());
       useOpenFileWorkspaceSync({
         gitStatus: props.gitStatus,
         openFiles: props.openFiles,
         updateFileState: props.updateFileState,
         activeSessionIdRef,
+        activeEditorVisitRef,
         gitFileSignaturesRef,
       });
     },

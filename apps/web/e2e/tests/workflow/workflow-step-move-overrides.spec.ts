@@ -1,16 +1,121 @@
 import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { movePreviewRequestPredicate } from "./workflow-move-preview-stability-helpers";
+import {
+  COMPOSER_HISTORY_PROMPT,
+  expectComposerActionKeyboardOrder,
+  expectComposerActionLayout,
+  prepareComposerCapture,
+  revealTranscriptControls,
+} from "./composer-action-layout-helpers";
 import {
   expectMoveInstructionsDelivered,
+  expectMoveSavedPromptDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
   seedMoveOverrideFixture,
+  selectMoveSavedPrompt,
   TARGET_STEP_MESSAGE,
   waitForMoveRequest,
 } from "./workflow-step-move-overrides-helpers";
 
 type SpecApiClient = Parameters<typeof seedMoveOverrideFixture>[1];
+
+/**
+ * Verifies phone target size and mouse activation while preserving compact desktop placement.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .3, .4, .5
+ */
+test("keeps the workflow action right-aligned on a phone with a mouse and on desktop", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  try {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    const fixture = await seedMoveOverrideFixture(
+      testPage,
+      apiClient,
+      seedData,
+      "Wrapped Mouse Move",
+      {
+        targetStepName: "Open pull request for review",
+        sourcePrompt: COMPOSER_HISTORY_PROMPT,
+      },
+    );
+    for (const { width, wrapped } of [
+      { width: 360, wrapped: true },
+      { width: 393, wrapped: true },
+      { width: 767 },
+      { width: 768 },
+      { width: 1440, wrapped: false },
+    ]) {
+      const label = width < 767 ? "Open pull request for review" : "Open PR";
+      await apiClient.updateWorkflowStep(fixture.targetStepId, { name: label });
+      await testPage.setViewportSize({ width, height: 900 });
+      const chat = fixture.session.activeChat();
+      await expect(chat.getByTestId("proceed-next-step")).toHaveText(label);
+      await revealTranscriptControls(chat);
+      await expectComposerActionLayout(chat, {
+        wrapped,
+        touch: width < 768,
+      });
+      await expectComposerActionKeyboardOrder(chat);
+      if (width === 360 || width === 1440) {
+        if (prCapture.capturing) await prepareComposerCapture(chat);
+        await prCapture.screenshot(
+          width === 360 ? "workflow-action-mouse-phone" : "workflow-action-desktop",
+          {
+            caption:
+              width === 360
+                ? "Phone workflow action above utilities with a fine pointer"
+                : "Desktop retains compact inline composer actions",
+          },
+        );
+      }
+    }
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: false,
+      show_scroll_to_start: false,
+      show_scroll_to_last_prompt: false,
+    });
+    await apiClient.updateWorkflowStep(fixture.targetStepId, { name: "Open PR" });
+    await testPage.setViewportSize({ width: 393, height: 900 });
+    const sparseChat = fixture.session.activeChat();
+    await expect(sparseChat.getByTestId("proceed-next-step")).toHaveText("Open PR");
+    await expect(sparseChat.getByTestId("auto-scroll-toggle-button")).toBeHidden();
+    await expectComposerActionLayout(sparseChat, { touch: true });
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    await apiClient.updateWorkflowStep(fixture.targetStepId, {
+      name: "Open pull request for review",
+    });
+    await testPage.setViewportSize({ width: 360, height: 900 });
+    const chat = fixture.session.activeChat();
+    await expect(chat.getByTestId("proceed-next-step")).toHaveText("Open pull request for review");
+    await revealTranscriptControls(chat);
+    await expectComposerActionLayout(chat, { wrapped: true, touch: true });
+    const request = waitForMoveRequest(testPage, fixture.taskId);
+    await chat.getByTestId("proceed-next-step").click();
+    expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+    await waitForStepCommitted(apiClient, fixture.taskId, fixture.targetStepId);
+  } finally {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: settings.show_transcript_auto_scroll_control ?? false,
+      show_scroll_to_start: settings.show_scroll_to_start === true,
+      show_scroll_to_last_prompt: settings.show_scroll_to_last_prompt === true,
+    });
+  }
+});
 
 /**
  * Count messages the session received as input (author_type "user") whose
@@ -130,34 +235,74 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
   const nextStepButton = testPage.getByTestId("proceed-next-step");
   await expect(nextStepButton).toBeVisible();
   await nextStepButton.hover();
-  await expect(testPage.getByTestId("proceed-next-step-options")).toBeVisible();
-  await expectPreviewFooter(
-    testPage.getByTestId("proceed-next-step-options"),
-    "workflow-move-submit",
-  );
-  await fillMoveOverrides(testPage);
-  const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").click();
+  const options = testPage.getByTestId("proceed-next-step-options");
+  await expect(options).toBeVisible();
+  const isMovePreview = movePreviewRequestPredicate(fixture.taskId, fixture.targetStepId);
+  // The first non-empty instructions refresh the preview and change the form height.
+  await Promise.all([
+    testPage.waitForEvent("requestfinished", {
+      predicate: async (request) =>
+        isMovePreview(request) &&
+        request.postDataJSON()?.entry_options?.instructions === MOVE_INSTRUCTIONS &&
+        (await request.response())?.ok() === true,
+    }),
+    fillMoveOverrides(testPage),
+  ]);
+  await expectPreviewFooter(options, "workflow-move-submit");
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "keyboard");
+  try {
+    const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").click();
 
-  expect((await moveRequest).postDataJSON()).toMatchObject({
-    workflow_step_id: fixture.targetStepId,
-    entry_options: {
-      reset_context: true,
-      instructions: MOVE_INSTRUCTIONS,
-    },
-  });
-  await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
-    timeout: 15_000,
-  });
-  expect((await apiClient.getTask(fixture.taskId)).primary_session_id).toBe(
-    fixture.primarySessionId,
-  );
-  await expect
-    .poll(() => countSessionMessages(apiClient, fixture.primarySessionId, MOVE_INSTRUCTIONS), {
-      timeout: 30_000,
-      message: "instructions were not delivered exactly once to the primary session",
-    })
-    .toBe(1);
+    expect((await moveRequest).postDataJSON()).toMatchObject({
+      workflow_step_id: fixture.targetStepId,
+      entry_options: {
+        reset_context: true,
+        instructions: savedPrompt.instructions,
+      },
+    });
+    await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {
+      timeout: 15_000,
+    });
+    expect((await apiClient.getTask(fixture.taskId)).primary_session_id).toBe(
+      fixture.primarySessionId,
+    );
+    await expect
+      .poll(() => countSessionMessages(apiClient, fixture.primarySessionId, MOVE_INSTRUCTIONS), {
+        timeout: 30_000,
+        message: "instructions were not delivered exactly once to the primary session",
+      })
+      .toBe(1);
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
+});
+
+// @covers AC-TASKS-SAVED-PROMPT-DELIVERY-001.15, AC-TASKS-SAVED-PROMPT-DELIVERY-001.16
+test("selects a saved prompt from the sidebar task Move menu", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const name = "Context Menu Saved Prompt";
+  const fixture = await seedMoveOverrideFixture(testPage, apiClient, seedData, name);
+  await fixture.session.openSidebarTaskContextMenu(`${name} Task`);
+  await testPage.getByTestId("task-context-move-to").hover();
+  await testPage.getByTestId(`task-context-step-${fixture.targetStepId}`).hover();
+
+  const savedPrompt = await selectMoveSavedPrompt(testPage, apiClient, "mouse");
+  try {
+    const move = waitForMoveRequest(testPage, fixture.taskId);
+    await testPage.getByTestId("workflow-move-submit").click();
+    expect((await move).postDataJSON()).toMatchObject({
+      workflow_step_id: fixture.targetStepId,
+      entry_options: { instructions: savedPrompt.instructions },
+    });
+    await expectMoveSavedPromptDelivered(apiClient, fixture.primarySessionId);
+  } finally {
+    await apiClient.deletePrompt(savedPrompt.id);
+  }
 });
 
 test("keeps the desktop next-step form open when clicking a checkbox label", async ({

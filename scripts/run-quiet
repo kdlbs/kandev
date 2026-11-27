@@ -7,7 +7,8 @@
 #
 # Usage:
 #   scripts/run-quiet <tag> -- <command...>
-#   scripts/run-quiet <tag> [--tail N] -- <command...>
+#   scripts/run-quiet <tag> [--tail N] [--summary] -- <command...>
+#   --summary prints bounded E2E counts on success (e2e/playwright tags only).
 #
 # Tags drive the error-extraction pattern (see grep_for_tag below). Unknown
 # tags fall back to a generic error/FAIL grep, then to the last 40 lines if
@@ -25,10 +26,11 @@ set -u
 
 # How many lines of failure context to surface inline.
 TAIL_LINES=40
+SUMMARY=0
 
 # Tag is required, must come first.
 if [[ $# -lt 1 ]]; then
-  echo "usage: run-quiet <tag> [--tail N] -- <command...>" >&2
+  echo "usage: run-quiet <tag> [--tail N] [--summary] -- <command...>" >&2
   exit 2
 fi
 TAG="$1"
@@ -41,6 +43,10 @@ while [[ $# -gt 0 ]]; do
       TAIL_LINES="$2"
       shift 2
       ;;
+    --summary)
+      SUMMARY=1
+      shift
+      ;;
     --)
       shift
       break
@@ -51,6 +57,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$SUMMARY" == 1 && "$TAG" != e2e && "$TAG" != playwright ]]; then
+  echo "run-quiet: --summary requires the e2e or playwright tag" >&2
+  exit 2
+fi
 
 if [[ $# -eq 0 ]]; then
   echo "run-quiet: no command supplied after --" >&2
@@ -85,7 +96,7 @@ case "$TAG" in
     ;;
 esac
 
-if [[ $RC -eq 0 && "$EXTRACT_LOG_ON_SUCCESS" != true ]]; then
+if [[ $RC -eq 0 && "$EXTRACT_LOG_ON_SUCCESS" != true && "$SUMMARY" == 0 ]]; then
   echo "exit=0 log=$LOG"
   exit 0
 fi
@@ -99,6 +110,17 @@ mv "$PLAIN" "${PLAIN}.log"
 PLAIN="${PLAIN}.log"
 # shellcheck disable=SC2016  # we want $0 inside awk, not shell expansion
 sed $'s/\033\\[[0-9;]*[a-zA-Z]//g' "$LOG" > "$PLAIN" 2>/dev/null || cp "$LOG" "$PLAIN"
+
+if [[ $RC -eq 0 && "$SUMMARY" == 1 ]]; then
+  COUNTS="$(tail -n 100 "$PLAIN" | grep -E '^[[:space:]]*[0-9]+ (passed|failed|skipped|flaky|did not run|interrupted)([[:space:]]|$)' | tail -n 6)"
+  if [[ -n "$COUNTS" ]]; then
+    printf '%s\n' "$COUNTS"
+  else
+    echo "summary=unavailable"
+  fi
+  rm -f "$PLAIN"
+  exit "$RC"
+fi
 
 grep_for_tag() {
   case "$TAG" in

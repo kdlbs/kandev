@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -45,6 +46,14 @@ type sshExecResult struct {
 // sshExecHandler answers a single remote command.
 type sshExecHandler func(command, stdin string) sshExecResult
 
+// sshStreamHandler serves a remote command that streams in both directions
+// instead of returning a canned result. It owns the channel until it returns,
+// and its return value is the command's exit status. `docker system
+// dial-stdio` is the motivating case: the Engine API is a full HTTP
+// conversation over stdin/stdout, so a handler that must read stdin to EOF
+// before writing anything cannot serve it.
+type sshStreamHandler func(command string, stream ssh.Channel) int
+
 type fakeSSHServer struct {
 	t        *testing.T
 	listener net.Listener
@@ -53,9 +62,10 @@ type fakeSSHServer struct {
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 
-	mu      sync.Mutex
-	calls   []sshExecCall
-	handler sshExecHandler
+	mu            sync.Mutex
+	calls         []sshExecCall
+	handler       sshExecHandler
+	streamHandler sshStreamHandler
 
 	reverseMu       sync.Mutex
 	reverseForwards map[string]net.Listener
@@ -309,11 +319,72 @@ func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
 	_ = req.Reply(true, nil)
 }
 
+type acceptSignalListener struct {
+	net.Listener
+	acceptReturned chan struct{}
+}
+
+func (l *acceptSignalListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	close(l.acceptReturned)
+	return conn, err
+}
+
+func TestFakeSSHServerStaleReverseForwardCleanupPreservesReplacement(t *testing.T) {
+	oldBase, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen old reverse forward: %v", err)
+	}
+	oldListener := &acceptSignalListener{Listener: oldBase, acceptReturned: make(chan struct{})}
+	replacement, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = oldListener.Close()
+		t.Fatalf("listen replacement reverse forward: %v", err)
+	}
+	key := "127.0.0.1:38429"
+	server := &fakeSSHServer{reverseForwards: map[string]net.Listener{key: oldListener}}
+	locked := false
+	t.Cleanup(func() {
+		if locked {
+			server.reverseMu.Unlock()
+		}
+		_ = oldListener.Close()
+		_ = replacement.Close()
+		server.wg.Wait()
+	})
+
+	server.reverseMu.Lock()
+	locked = true
+	server.wg.Add(1)
+	go server.serveReverseForward(nil, key, oldListener)
+	if err := oldListener.Close(); err != nil {
+		t.Fatalf("close old reverse forward: %v", err)
+	}
+	select {
+	case <-oldListener.acceptReturned:
+	case <-time.After(time.Second):
+		t.Fatal("old reverse forward did not leave Accept after close")
+	}
+	server.reverseForwards[key] = replacement
+	server.reverseMu.Unlock()
+	locked = false
+	server.wg.Wait()
+
+	server.reverseMu.Lock()
+	got, ok := server.reverseForwards[key]
+	server.reverseMu.Unlock()
+	if !ok || got != replacement {
+		t.Fatalf("reverse forward after stale cleanup = (%v, %v), want replacement listener", got, ok)
+	}
+}
+
 func (s *fakeSSHServer) serveReverseForward(conn *ssh.ServerConn, key string, listener net.Listener) {
 	defer s.wg.Done()
 	defer func() {
 		s.reverseMu.Lock()
-		delete(s.reverseForwards, key)
+		if s.reverseForwards[key] == listener {
+			delete(s.reverseForwards, key)
+		}
 		s.reverseMu.Unlock()
 	}()
 	for {
@@ -407,7 +478,27 @@ func (s *fakeSSHServer) serveSession(newChan ssh.NewChannel) {
 	}
 }
 
+// setStreamHandler installs a bidirectional handler, which takes precedence
+// over the canned exec handler for every command.
+func (s *fakeSSHServer) setStreamHandler(h sshStreamHandler) {
+	s.mu.Lock()
+	s.streamHandler = h
+	s.mu.Unlock()
+}
+
 func (s *fakeSSHServer) runExec(channel ssh.Channel, command string) {
+	s.mu.Lock()
+	stream := s.streamHandler
+	s.mu.Unlock()
+	if stream != nil {
+		s.mu.Lock()
+		s.calls = append(s.calls, sshExecCall{Command: command})
+		s.mu.Unlock()
+		status := stream(command, channel)
+		_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{uint32(status)}))
+		return
+	}
+
 	stdin, _ := io.ReadAll(channel)
 
 	s.mu.Lock()

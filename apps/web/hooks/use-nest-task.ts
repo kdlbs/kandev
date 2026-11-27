@@ -80,16 +80,20 @@ function rollbackParent(op: NestOp): void {
  * same composite nest operation the context menu uses. No-ops when the task
  * is not in any snapshot (the WS event reconciles state either way).
  */
-export function useNestTaskByDrag() {
+export function useNestTaskByDrag(
+  pageTasks: readonly { id: string; workflowId?: string | null }[] = [],
+) {
   const store = useAppStoreApi();
   const nestTask = useNestTask();
   return useCallback(
     (taskId: string, parentTaskId: string) => {
-      const workflowId = taskWorkflowIdFromSnapshots(store, taskId);
+      const workflowId =
+        pageTasks.find((task) => task.id === taskId)?.workflowId ??
+        taskWorkflowIdFromSnapshots(store, taskId);
       if (!workflowId) return;
       void nestTask(taskId, workflowId, parentTaskId);
     },
-    [store, nestTask],
+    [pageTasks, store, nestTask],
   );
 }
 

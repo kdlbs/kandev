@@ -209,10 +209,11 @@ const DefaultIssueWatchPollInterval = 300
 // Empty = unbound, in which case the target workflow step's defaults determine
 // where the resulting task runs (the historical repo-less behaviour).
 type IssueWatch struct {
-	ID             string `json:"id" db:"id"`
-	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
-	WorkflowID     string `json:"workflowId" db:"workflow_id"`
-	WorkflowStepID string `json:"workflowStepId" db:"workflow_step_id"`
+	CreatedByUserID string `json:"-" db:"created_by_user_id"`
+	ID              string `json:"id" db:"id"`
+	WorkspaceID     string `json:"workspaceId" db:"workspace_id"`
+	WorkflowID      string `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID  string `json:"workflowStepId" db:"workflow_step_id"`
 	// RepositoryID optionally binds watcher-created tasks to a repository so the
 	// agent launches in an isolated worktree instead of a blank scratch checkout.
 	// Empty = unbound. When set, the resulting task carries a single
@@ -258,10 +259,11 @@ type IssueWatchTask struct {
 // ticket matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewJiraIssueEvent struct {
-	IssueWatchID   string `json:"issueWatchId"`
-	WorkspaceID    string `json:"workspaceId"`
-	WorkflowID     string `json:"workflowId"`
-	WorkflowStepID string `json:"workflowStepId"`
+	CreatedByUserID string `json:"created_by_user_id,omitempty"`
+	IssueWatchID    string `json:"issueWatchId"`
+	WorkspaceID     string `json:"workspaceId"`
+	WorkflowID      string `json:"workflowId"`
+	WorkflowStepID  string `json:"workflowStepId"`
 	// RepositoryID / BaseBranch carry the watch's optional repository binding so
 	// the orchestrator source can populate IssueTaskRequest.Repositories without
 	// reloading the watch row. Empty RepositoryID = unbound (repo-less task).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -129,7 +130,7 @@ func TestHandleSpawnSessionReportsEffectiveAgentProfile(t *testing.T) {
 	assert.Equal(t, "requested-profile", orch.launchCalls[0].AgentProfileID)
 }
 
-func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
+func TestHandleSpawnSessionPreservesExplicitProfileOnPinnedStep(t *testing.T) {
 	svc, repo, _, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()
 	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
@@ -178,7 +179,7 @@ func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
 	require.NoError(t, repo.CreateTaskSession(ctx, session))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
-	orch.launchResponseProfileID = step.AgentProfileID
+	orch.launchResponseProfileID = "explicit-profile"
 	payload := spawnPayload(target.ID, "use the pinned profile", sender.ID, session.ID)
 	payload["agent_profile_id"] = "explicit-profile"
 	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
@@ -188,7 +189,8 @@ func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
 
 	var out map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &out))
-	assert.Equal(t, "step-pinned-profile", out["agent_profile_id"])
+	assert.Equal(t, "explicit-profile", out["agent_profile_id"])
+	assert.True(t, orch.launchCalls[0].ProfileExplicit)
 	assert.Equal(t, "explicit-profile", orch.launchCalls[0].AgentProfileID)
 }
 
@@ -255,6 +257,44 @@ func TestHandleSpawnSession_WorkspaceUnsafeReturnsRecoverableConflict(t *testing
 	var payload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, "workspace_reuse_unsafe", payload.Details["reason"])
+	assert.Empty(t, orch.renameCalls)
+}
+
+func TestHandleSpawnSession_KubernetesInheritedWorkspaceUnsupportedConflict(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = models.ErrWorkspaceReuseUnsupported
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Equal(t, "workspace_reuse_unsupported", payload.Details["reason"])
+	require.Equal(t, true, payload.Details["recoverable"])
+	require.Equal(t, "create a task with workspace_mode=\"new_workspace\"", payload.Details["retry"])
+	require.Contains(t, payload.Message, "new_workspace")
+	require.Empty(t, orch.renameCalls)
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.10
+func TestHandleSpawnSession_FailedEnvironmentWithResourcesPointsToReset(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = fmt.Errorf("start task: %w", models.ErrTaskEnvironmentResetRequired)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "workspace_reuse_unsafe", payload.Details["reason"])
+	assert.Equal(t, true, payload.Details["recoverable"])
+	assert.Equal(t, "reset the task environment, then retry", payload.Details["retry"])
+	assert.Contains(t, payload.Message, "reset the task environment")
 	assert.Empty(t, orch.renameCalls)
 }
 

@@ -10,7 +10,10 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+} from "@/lib/state/diff-target-types";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { ChangedFile } from "./changes-panel-helpers";
 import { useTranslation } from "react-i18next";
@@ -55,7 +58,7 @@ export function RepoGroupItem({
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
         <button
           type="button"
-          className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80 min-w-0"
+          className="flex min-h-6 items-center gap-1.5 text-[11px] font-medium text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground/80 min-w-0 [@media(pointer:coarse)]:min-h-11"
           data-testid="changes-repo-header"
           aria-expanded={!collapsed}
           onClick={onToggle}
@@ -76,7 +79,7 @@ export function RepoGroupItem({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 text-[10px] px-1.5 cursor-pointer"
+                className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
                 disabled={disabled}
                 onClick={() => onRepoAction(group.repositoryName)}
@@ -88,7 +91,7 @@ export function RepoGroupItem({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
+                className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
                 disabled={disabled}
                 onClick={() => onRepoSecondaryAction(group.repositoryName)}
@@ -128,7 +131,7 @@ export function FileSectionActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer"
           data-testid="repo-group-action"
           disabled={disabled}
           onClick={() => onAction("")}
@@ -140,7 +143,7 @@ export function FileSectionActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
           data-testid="repo-group-secondary-action"
           disabled={disabled}
           onClick={() => onSecondaryAction("")}
@@ -176,7 +179,7 @@ export function CommitsGroupActions({
         <Button
           size="sm"
           variant="ghost"
-          className="h-5 text-[10px] px-1.5 cursor-pointer gap-1"
+          className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer gap-1"
           data-testid="commits-repo-push"
           onClick={() => onRepoPush(repositoryName)}
         >
@@ -191,7 +194,7 @@ export function CommitsGroupActions({
             <Button
               size="sm"
               variant="ghost"
-              className="h-5 text-[10px] px-1.5 cursor-pointer gap-1"
+              className="h-6 min-h-6 [@media(pointer:coarse)]:min-h-11 text-[10px] px-1.5 cursor-pointer gap-1"
               data-testid="commits-repo-create-pr"
               onClick={() => onRepoCreatePR(repositoryName)}
               disabled={!canCreatePR}
@@ -234,7 +237,10 @@ export function CommitsRepoGroup({
    *  workspaces use this — the action buttons (Push / PR) move up to the
    *  section header so we don't render a redundant repo sub-header. */
   showHeader?: boolean;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
@@ -264,7 +270,7 @@ export function CommitsRepoGroup({
   const canCreatePR = !!onRepoCreatePR && !prExists;
   const rows = groupCommits.map((commit, index) => (
     <CommitRow
-      key={commit.commit_sha}
+      key={commitRowIdentity(commit)}
       commit={commit}
       isLatest={index === firstUnpushedInGroup}
       onOpenCommitDetail={onOpenCommitDetail}
@@ -309,4 +315,13 @@ export function CommitsRepoGroup({
       {!collapsed && <ul className="space-y-0.5">{rows}</ul>}
     </li>
   );
+}
+
+function commitRowIdentity(commit: CommitItem): string {
+  const target = commit.detailTarget;
+  const targetScope =
+    target.source === "local"
+      ? (target.repo ?? "")
+      : `${target.workspaceId}:${target.owner}/${target.repo}`;
+  return `${target.source}:${targetScope}:${target.sha}`;
 }

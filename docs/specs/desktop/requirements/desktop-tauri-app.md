@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-08-27
+updated: 2026-11-24
 owners:
   - tbd
 ---
@@ -31,6 +31,52 @@ Kandev's installed desktop app should behave like a native application without d
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.9:** an origin-checked native directory
   picker for explicit repository discovery and task-folder selection, without
   exposing general filesystem access to the SPA.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.10:** On macOS, the desktop window shall
+  show Kandev content up to the top edge without a separate full-width title
+  strip or centered window title. Native close, minimize, and full-screen
+  controls shall stay visible and operable at the upper left during startup,
+  conflict recovery, and normal app use. The app shall keep a usable window
+  drag region without covering interactive content, including when the
+  sidebar is collapsed or the window is at its minimum size. Windows and
+  Linux shall retain their native window decorations.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.11:** The expanded macOS sidebar header
+  shall keep the Kandev link, workspace switcher, and collapse button in the
+  same row to the right of the native controls. Long workspace names shall
+  truncate without hiding the switcher chevron or collapse button. In the
+  collapsed 56px rail, the brand and expand button shall remain reachable
+  below the native controls; the workspace switcher shall reappear when the
+  sidebar expands, including after hover reveal. Neither sidebar state shall
+  place an interactive target under the traffic lights.
+
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.12:** After a macOS external-link helper exits, the desktop app shall reap it within one second under normal scheduling. Repeated link opens shall not accumulate zombie children.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.13:** An external-link launch shall not wait for the browser to close or block application interaction. Validation and origin checks shall still reject unauthorized destinations. A process-spawn failure shall return an error to the caller.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.14:** External-link cleanup shall reap only the helper for that launch. It shall not consume another child process's exit status or stop the owned backend.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.15:** When the user activates Send test
+  notification in the desktop app, Kandev shall attempt native notification
+  delivery independently of browser notification availability or permission.
+  Browser-only clients, including mobile browsers, shall retain their existing
+  browser notification test behavior through the same control.
+  The test message on both targets shall describe notification delivery on the
+  current device without claiming that browser notifications work when only
+  native delivery was exercised.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.16:** The desktop test shall respect OS
+  notification permission. Only the explicit test gesture may request an
+  undecided permission; denied permission shall retain the OS settings guidance.
+  Permission-query or request failures shall use the existing permission error
+  feedback. Delivery failure shall not falsely report permission failure or
+  successful display, and shall not escape as an unhandled action rejection.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.17:** Each explicit desktop test activation
+  shall be a distinct app-scoped test occurrence, so a previous successful test
+  does not suppress a later activation. Testing shall not represent an agent
+  session or release event, change provider configuration, or require a task.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.18:** With a sparse PATH and only nvm-managed
+  Node.js, the macOS app shall find `node`, `npm`, and `npx` for local agent
+  discovery and execution. This applies to a usable `node` or numeric default
+  under `~/.nvm`.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.19:** Executables in the inherited and
+  common desktop PATH entries shall take precedence over the nvm fallback.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.20:** When the nvm selection is absent,
+  invalid, or incomplete, Kandev shall start with its ordinary desktop PATH.
 
 ## System design
 

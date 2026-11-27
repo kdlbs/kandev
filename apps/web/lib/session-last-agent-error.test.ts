@@ -18,6 +18,9 @@ const OTHER_TAB_STAMP = "stamp-other";
 const THIS_TAB_STAMP = "stamp-this";
 const MANAGED_RUNTIME_NPM_FAILURE = "managed_runtime_npm_resolution";
 const NPM_ERROR_CODE_ETARGET = "npm error code ETARGET";
+const BOOTSTRAP_ERROR_MESSAGE = "The agent could not start.";
+const PROCESS_EXIT_MESSAGE = "The agent exited before startup completed.";
+const PROCESS_EXIT_CODE = "process_exited";
 
 describe("readLastAgentError", () => {
   it("reads structured failure fields in snake_case", () => {
@@ -35,6 +38,23 @@ describe("readLastAgentError", () => {
     });
   });
 
+  it("reads typed managed runtime startup metadata", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "Agent stopped during startup",
+          failure_code: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+        },
+      }),
+    ).toMatchObject({
+      code: "managed_runtime_startup",
+      startupReason: "early_exit",
+      startupAttempts: 2,
+    });
+  });
+
   it("reads structured failure fields in camelCase", () => {
     expect(
       readLastAgentError({
@@ -42,11 +62,30 @@ describe("readLastAgentError", () => {
           message: AGENT_ERROR_MESSAGE,
           code: MANAGED_RUNTIME_NPM_FAILURE,
           details: NPM_ERROR_CODE_ETARGET,
+          startupAttempts: 2,
         },
       }),
     ).toMatchObject({
       code: MANAGED_RUNTIME_NPM_FAILURE,
       details: NPM_ERROR_CODE_ETARGET,
+      startupAttempts: 2,
+    });
+  });
+
+  it("reads the structured durable-delivery submission identity when details are sanitized", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "Prompt delivery outcome is uncertain",
+          code: "DURABLE_DELIVERY_UNCERTAIN",
+          details: "prompt:initial:<redacted>",
+          delivery_submission_id: "submission-1",
+        },
+      }),
+    ).toMatchObject({
+      code: "DURABLE_DELIVERY_UNCERTAIN",
+      details: "prompt:initial:<redacted>",
+      deliverySubmissionId: "submission-1",
     });
   });
 });
@@ -57,7 +96,7 @@ describe("readLastAgentError optional metadata", () => {
     expect(
       readLastAgentError({
         last_agent_error: {
-          message: "The agent could not start.",
+          message: BOOTSTRAP_ERROR_MESSAGE,
           execution_id: "execution-1",
           phase: "bootstrap",
           attempt_id: "attempt-1",
@@ -82,6 +121,141 @@ describe("readLastAgentError optional metadata", () => {
         },
       ],
     });
+  });
+
+  it("reads safe typed selection evidence and drops malformed optional fields", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            requested_model: "vendor/opus-5",
+            effective_model: "gpt-5.2",
+            prompt_not_sent: true,
+          },
+          {
+            operation: "resume",
+            code: "permission_mode_mismatch",
+            reason: "effective_mismatch",
+            requested_mode: "default",
+            effective_mode: "plan",
+            prompt_not_sent: false,
+          },
+        ],
+      },
+    });
+
+    expect(error?.causes).toEqual([
+      {
+        operation: "start",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+        requested_model: "vendor/opus-5",
+        effective_model: "gpt-5.2",
+        prompt_not_sent: true,
+      },
+      {
+        operation: "resume",
+        code: "permission_mode_mismatch",
+        reason: "effective_mismatch",
+        requested_mode: "default",
+        effective_mode: "plan",
+        prompt_not_sent: false,
+      },
+    ]);
+
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: BOOTSTRAP_ERROR_MESSAGE,
+          causes: [
+            {
+              operation: "resume",
+              code: "model_selection_failed",
+              reason: "not_a_reason",
+              requested_model: "/home/user/private-model",
+              prompt_not_sent: "false",
+            },
+          ],
+        },
+      })?.causes,
+    ).toEqual([{ operation: "resume", code: "model_selection_failed" }]);
+  });
+
+  it("reads typed Copilot plugin evidence and validates the exact runtime identity", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private plugin path=/Users/alice/.config/copilot/plugins",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3+build.4",
+            plugin_id: "private-plugin",
+          },
+          {
+            operation: "resume",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            runtime_version: "/private/runtime",
+          },
+        ],
+      },
+    });
+
+    expect(error?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+        runtime_version: "1.2.3+build.4",
+      },
+      {
+        operation: "resume",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+      },
+    ]);
+
+    const invalid = readLastAgentError({
+      last_agent_error: {
+        message: BOOTSTRAP_ERROR_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            detail: "private output",
+            reason: "invalid_inventory",
+            runtime_version: "1.2.3-beta.1",
+          },
+          {
+            operation: "start",
+            code: "plugin_preparation_failed",
+            reason: "private_reason",
+            runtime_version: "1.2.3",
+          },
+        ],
+      },
+    });
+    expect(invalid?.causes).toEqual([
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+        reason: "invalid_inventory",
+      },
+      {
+        operation: "start",
+        code: "plugin_preparation_failed",
+        detail: "The selected Copilot plugins could not be prepared.",
+      },
+    ]);
   });
 
   it("reads typed launch recovery fields and keeps action order bounded", () => {
@@ -191,6 +365,85 @@ describe("readLastAgentError optional metadata", () => {
   });
 });
 
+describe("process exit agent error causes", () => {
+  it("keeps the recognized reason and numeric exit status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        phase: "bootstrap",
+        causes: [
+          {
+            operation: "resume",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 1,
+            detail: "raw /private/workspace/mise.toml",
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toEqual([
+      {
+        operation: "resume",
+        code: PROCESS_EXIT_CODE,
+        reason: "mise_config_untrusted",
+        exit_code: 1,
+        detail: PROCESS_EXIT_MESSAGE,
+      },
+    ]);
+  });
+
+  it("degrades unknown reasons, malformed statuses, and hostile detail", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "private_reason",
+            exit_code: 1.5,
+            detail: "/Users/alice/.config/mise.toml",
+          },
+          {
+            operation: "start",
+            code: PROCESS_EXIT_CODE,
+            reason: "mise_config_untrusted",
+            exit_code: 4294967296,
+          },
+        ],
+      },
+    });
+    expect(error?.causes).toHaveLength(2);
+    expect(error?.causes?.[0]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "unclassified",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[0]?.exit_code).toBeUndefined();
+    expect(error?.causes?.[1]).toMatchObject({
+      code: PROCESS_EXIT_CODE,
+      reason: "mise_config_untrusted",
+      detail: PROCESS_EXIT_MESSAGE,
+    });
+    expect(error?.causes?.[1]?.exit_code).toBeUndefined();
+    expect(JSON.stringify(error)).not.toContain("/Users/alice");
+    expect(JSON.stringify(error)).not.toContain("private_reason");
+  });
+
+  it("keeps exit status zero distinct from a missing status", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: PROCESS_EXIT_MESSAGE,
+        causes: [
+          { operation: "start", code: PROCESS_EXIT_CODE, reason: "unclassified", exit_code: 0 },
+        ],
+      },
+    });
+    expect(error?.causes?.[0]?.exit_code).toBe(0);
+  });
+});
+
 describe("lastAgentErrorStamp", () => {
   it("combines occurredAt and message so a fresh error invalidates a prior dismissal", () => {
     expect(lastAgentErrorStamp({ message: AGENT_ERROR_MESSAGE, occurredAt: OCCURRED_AT })).toBe(
@@ -249,4 +502,34 @@ describe("setStoredAcknowledgedAgentErrors", () => {
     setStoredAcknowledgedAgentErrors({ "session-a": "stamp-v2" });
     expect(getStoredAcknowledgedAgentErrors()).toEqual({ "session-a": "stamp-v2" });
   });
+});
+
+it("preserves bounded Pi thinking evidence when reading a stored startup failure", () => {
+  const error = readLastAgentError({
+    last_agent_error: {
+      message: "startup failed",
+      occurred_at: OCCURRED_AT,
+      causes: [
+        {
+          operation: "start",
+          code: "thinking_level_mismatch",
+          reason: "effective_mismatch",
+          requested_setting: "medium",
+          effective_setting: "off",
+          setting_config_id: "thought_level",
+          setting_source: "agent_profile",
+          prompt_not_sent: true,
+          requested_mode: "unsafe-alias",
+        },
+      ],
+    },
+  });
+  expect(error?.causes?.[0]).toMatchObject({
+    requested_setting: "medium",
+    effective_setting: "off",
+    setting_config_id: "thought_level",
+    setting_source: "agent_profile",
+    prompt_not_sent: true,
+  });
+  expect(error?.causes?.[0].requested_mode).toBeUndefined();
 });

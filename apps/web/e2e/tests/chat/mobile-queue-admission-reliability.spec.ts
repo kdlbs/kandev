@@ -6,7 +6,13 @@ import { registerSeparateQueueRows } from "../../helpers/message-queue-settings"
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { routeMainWebSocketWithQueueAdmissionDrops } from "../../helpers/ws-drop";
-import { openQuickChatWithAgent, sendQuickChatMessage } from "./quick-chat-helpers";
+import {
+  openQuickChatSetup,
+  sendQuickChatMessage,
+  startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
+} from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
 registerSeparateQueueRows(test);
@@ -76,31 +82,40 @@ test.describe("mobile queue admission reliability", () => {
     await expect.poll(() => drops.droppedRequestCount()).toBe(1);
   });
 
-  test("reconciles a lost accepted Quick Chat response through a touch submit", async ({
-    testPage,
-  }) => {
-    test.setTimeout(120_000);
-    const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
-    const dialog = await openQuickChatWithAgent(testPage);
-    await sendQuickChatMessage(dialog, testPage, "/sleep 30");
-    await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
-      {
-        timeout: 15_000,
-      },
-    );
-    await waitForComposerQueueMode(dialog);
+  test.describe("lost accepted Quick Chat response", () => {
+    test.describe.configure({ retries: 0 });
 
-    const prompt = "recover the mobile Quick Chat admission";
-    drops.dropNextQueueAddResponse();
-    const editor = dialog.locator(".tiptap.ProseMirror:visible");
-    await typeWhileBusy(testPage, editor, prompt);
-    const submit = dialog.getByTestId("submit-message-button");
-    await expectTouchTarget(submit);
-    await submit.tap();
+    test("reconciles through a touch submit", async ({ testPage, apiClient }) => {
+      test.setTimeout(120_000);
+      const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
+      const dialog = await openQuickChatSetup(testPage);
+      const started = await startQuickChatFromSetup(dialog, testPage);
+      await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+      await waitForQuickChatDirectInput(dialog);
+      await sendQuickChatMessage(dialog, testPage, "/sleep 30");
+      await expect(
+        testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
+      ).toBeVisible({ timeout: 15_000 });
+      await waitForComposerQueueMode(dialog);
 
-    await expect(editor).toHaveText("", { timeout: 30_000 });
-    await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
-    await expect.poll(() => drops.queueAddRequestCount()).toBe(1);
-    await expect.poll(() => drops.droppedResponseCount()).toBe(1);
+      const prompt = "recover the mobile Quick Chat admission";
+      drops.dropNextQueueAddResponse();
+      const editor = dialog.locator(".tiptap.ProseMirror:visible");
+      await typeWhileBusy(testPage, editor, prompt);
+      const submit = dialog.getByTestId("submit-message-button");
+      await expectTouchTarget(submit);
+      await submit.tap();
+
+      await expect(editor).toHaveText("", { timeout: 30_000 });
+      await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
+      await expect.poll(() => drops.droppedResponseCount()).toBe(1);
+      expect(
+        drops.queueAddRequestCount(),
+        JSON.stringify({
+          queueAddRequests: drops.queueAddRequests(),
+          browserQueueSnapshots: drops.queueSnapshots(),
+        }),
+      ).toBe(1);
+    });
   });
 });

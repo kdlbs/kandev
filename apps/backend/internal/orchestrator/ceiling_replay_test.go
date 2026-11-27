@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 
@@ -53,10 +54,14 @@ func TestStripCeilingRecordKeys_NonObjectValueYieldsEmptyMap(t *testing.T) {
 	require.Empty(t, stripped)
 }
 
-func TestCeilingReplayOutcomeFromExecution(t *testing.T) {
-	require.Equal(t, ceilingReplaySucceeded, ceilingReplayOutcomeFromExecution(&executor.TaskExecution{}, nil))
-	require.Equal(t, ceilingReplayStillDeferred, ceilingReplayOutcomeFromExecution(nil, nil))
-	require.Equal(t, ceilingReplayFailed, ceilingReplayOutcomeFromExecution(nil, context.Canceled))
+func TestCeilingReplayResultFromExecution(t *testing.T) {
+	require.Equal(t, ceilingReplaySucceeded, ceilingReplayResultFromExecution(&executor.TaskExecution{}, nil).outcome)
+	require.Equal(t, ceilingReplayStillDeferred, ceilingReplayResultFromExecution(nil, nil).outcome)
+	failed := ceilingReplayResultFromExecution(nil, context.Canceled)
+	require.Equal(t, ceilingReplayFailed, failed.outcome)
+	require.ErrorIs(t, failed.err, context.Canceled)
+	invalid := ceilingReplayResultFromExecution(nil, &routingerr.BuiltCommandValidationError{Command: "continue", Cause: errors.New("flag is not allowed")})
+	require.Equal(t, ceilingReplayPermanentlyFailed, invalid.outcome)
 }
 
 func TestSessionIDFromCeilingPayload(t *testing.T) {
@@ -307,7 +312,7 @@ func TestReplayCeilingDeferralRejectsStaleWorkflowEntryBeforeDispatch(t *testing
 	// The replay caller may hold an old task snapshot. The method must reload
 	// and reject before any start/LaunchAgent side effect can use that snapshot.
 	outcome := svc.replayCeilingDeferral(ctx, &models.Task{ID: task.ID}, old)
-	require.Equal(t, ceilingReplaySuperseded, outcome)
+	require.Equal(t, ceilingReplaySuperseded, outcome.outcome)
 	reloaded, err := repo.GetTask(ctx, task.ID)
 	require.NoError(t, err)
 	route, ok := models.LoadWorkflowSessionRoute(reloaded.Metadata)
@@ -378,7 +383,7 @@ func TestReplayCeilingDeferralRejectsRouteChangedAfterInitialValidation(t *testi
 	// commits a successor before the concrete start-created seam is admitted;
 	// that seam must re-read the route and reject before LaunchAgent.
 	outcome := svc.replayCeilingDeferral(ctx, &models.Task{ID: task.ID}, deferral)
-	require.Equal(t, ceilingReplaySuperseded, outcome)
+	require.Equal(t, ceilingReplaySuperseded, outcome.outcome)
 	agentMgr.mu.Lock()
 	launchCalls := len(agentMgr.setExecutionDescriptionCalls)
 	agentMgr.mu.Unlock()

@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskSession,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
@@ -15,8 +16,20 @@ import type {
   TaskPriority,
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
+  Repository,
 } from "../../lib/types/http";
+import type {
+  SidebarWorkspaceStateApi,
+  UserSettingsResponse,
+} from "../../lib/types/http-user-settings";
+import type { RetryPolicy } from "../../lib/types/automation";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
+import type {
+  Coordinator,
+  CoordinatorListResponse,
+  CreateCoordinatorRequest,
+  Proposal,
+} from "../../lib/api/domains/coordinator-api";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
@@ -27,6 +40,15 @@ import type {
 } from "../../lib/types/github";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
+import type {
+  MCPDefinitionInput,
+  MCPDefinitionPatch,
+  MCPMarketplaceInstallInput,
+  MCPMarketplaceSearchResponse,
+  MCPServerDefinition,
+  MCPSelectionResponse,
+  MCPSelectionScope,
+} from "../../lib/types/http-mcp";
 import type {
   GitLabMRApproval,
   GitLabMRCommit,
@@ -137,6 +159,10 @@ export type MockReview = {
 };
 
 export type MockCheckRun = {
+  id?: number;
+  app_id?: number;
+  app_slug?: string;
+  check_suite_id?: number;
   name: string;
   source?: string;
   status: string;
@@ -149,6 +175,7 @@ export type MockCheckRun = {
 export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
 
 export type MockGitHubWorkspaceConnection = {
+  github_host?: string;
   source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
   status: MockGitHubConnectionStatus;
   login?: string;
@@ -183,6 +210,7 @@ export type MockGitHubCLIAccount = {
 };
 
 export type MockGitHubAppRegistration = {
+  github_host?: string;
   id: string;
   display_name: string;
   app_id: number;
@@ -208,6 +236,7 @@ type WorkflowStepCreateOpts = {
   is_start_step?: boolean;
   agent_profile_id?: string;
   session_target?: WorkflowSessionTarget | null;
+  disable_unclassified_fallback?: boolean;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   auto_advance_requires_signal?: boolean;
@@ -226,23 +255,42 @@ function buildWorkflowStepCreateBody(
   opts?: WorkflowStepCreateOpts,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = { workflow_id: workflowId, name, position };
+  setWorkflowStepCreateFields(body, opts);
+  return body;
+}
+
+function setWorkflowStepCreateFields(body: Record<string, unknown>, opts?: WorkflowStepCreateOpts) {
+  if (!opts) return;
   if (opts?.is_start_step !== undefined) body.is_start_step = opts.is_start_step;
   setIf(body, "agent_profile_id", opts?.agent_profile_id);
   if (opts?.session_target !== undefined) body.session_target = opts.session_target;
+  if (opts?.disable_unclassified_fallback !== undefined) {
+    body.disable_unclassified_fallback = opts.disable_unclassified_fallback;
+  }
+  setWorkflowStepCreatePolicies(body, opts);
+  setWorkflowStepCreateSignals(body, opts);
+  setIf(body, "events", opts.events);
+}
+
+function setWorkflowStepCreatePolicies(
+  body: Record<string, unknown>,
+  opts: WorkflowStepCreateOpts,
+) {
   if (opts?.profile_session_start_policy) {
     body.profile_session_start_policy = opts.profile_session_start_policy;
   }
   if (opts?.profile_session_end_policy) {
     body.profile_session_end_policy = opts.profile_session_end_policy;
   }
+}
+
+function setWorkflowStepCreateSignals(body: Record<string, unknown>, opts: WorkflowStepCreateOpts) {
   if (opts?.auto_advance_requires_signal !== undefined) {
     body.auto_advance_requires_signal = opts.auto_advance_requires_signal;
   }
   if (opts?.complete_task_on_enter !== undefined) {
     body.complete_task_on_enter = opts.complete_task_on_enter;
   }
-  setIf(body, "events", opts?.events);
-  return body;
 }
 
 type CreateRepositoryOpts = {
@@ -299,6 +347,7 @@ type CreateTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  mcp_server_ids?: string[];
   /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
   priority?: TaskPriority;
 };
@@ -314,6 +363,8 @@ export type TaskDependencyRef = {
 export type TaskDependencyProjection = {
   blocked?: boolean;
   blocked_reason?: "pending" | "failed" | "unknown";
+  parent_id?: string | null;
+  related?: TaskDependencyRef[];
   depends_on?: TaskDependencyRef[];
   blocks?: TaskDependencyRef[];
 };
@@ -371,6 +422,7 @@ function buildCreateTaskBody(
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
   setIf(body, "blocked_by", options.blocked_by);
+  setIf(body, "mcp_server_ids", options.mcp_server_ids);
   if (options.start_when_unblocked !== undefined) {
     body.start_when_unblocked = options.start_when_unblocked;
   }
@@ -405,6 +457,9 @@ type OptionalAgentTaskOpts = {
   start_when_unblocked?: boolean;
   /** Prepare the task without launching its session so E2E fixtures can bind it first. */
   start_agent?: boolean;
+  /** Create a prepared session without starting its agent (requires start_agent false). */
+  prepare_session?: boolean;
+  mcp_server_ids?: string[];
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -431,38 +486,53 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   setIf(fields, "blocked_by", opts.blocked_by);
+  setIf(fields, "mcp_server_ids", opts.mcp_server_ids);
   if (opts.start_when_unblocked !== undefined) {
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
   if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
+  if (opts.prepare_session !== undefined) fields.prepare_session = opts.prepare_session;
   return fields;
 }
+
+const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
 
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
 export class ApiClient {
-  constructor(private baseUrl: string) {}
+  constructor(
+    private baseUrl: string,
+    private ensureBackendReady?: () => Promise<void>,
+  ) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
   async rawRequest(
     method: string,
     path: string,
     body?: unknown,
-    options?: Pick<RequestInit, "redirect">,
+    options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
+    const { extraHeaders, ...requestOptions } = options ?? {};
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
-      ...options,
+      ...requestOptions,
     });
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -476,7 +546,12 @@ export class ApiClient {
     method: string,
     body?: unknown,
   ): Promise<Record<string, string> | undefined> {
-    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    // This client is worker-scoped, but its backend can restart during a test.
+    // Do not let fetch reuse an idle keep-alive socket from the previous process.
+    const headers: Record<string, string> = {
+      Connection: "close",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    };
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
       headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
         this.baseUrl,
@@ -516,6 +591,121 @@ export class ApiClient {
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
     return this.request("GET", "/api/v1/workspaces");
+  }
+
+  async listMCPServers(workspaceId: string): Promise<MCPServerDefinition[]> {
+    const response = await this.request<{ servers?: MCPServerDefinition[] }>(
+      "GET",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+    );
+    return response.servers ?? [];
+  }
+
+  async createMCPServer(
+    workspaceId: string,
+    payload: MCPDefinitionInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+      payload,
+    );
+  }
+
+  async updateMCPServer(
+    workspaceId: string,
+    serverId: string,
+    payload: MCPDefinitionPatch,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "PATCH",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+      payload,
+    );
+  }
+
+  async deleteMCPServer(workspaceId: string, serverId: string, revision: number): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}?expected_revision=${revision}&confirm=true`,
+    );
+  }
+
+  async searchMCPMarketplace(query = ""): Promise<MCPMarketplaceSearchResponse> {
+    const search = query.trim() ? `?search=${encodeURIComponent(query.trim())}` : "";
+    return this.request("GET", `/api/v1/mcp-marketplace${search}`);
+  }
+
+  async installMCPMarketplaceEntry(
+    workspaceId: string,
+    payload: MCPMarketplaceInstallInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-marketplace/install`,
+      payload,
+    );
+  }
+
+  async getMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "GET",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async replaceMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+    definitionIds: string[],
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "PUT",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections`,
+      { workspace_id: workspaceId, definition_ids: definitionIds },
+    );
+  }
+
+  // --- Coordinator (docs/specs/coordinator/) ---
+
+  async createCoordinator(
+    workspaceId: string,
+    req: CreateCoordinatorRequest,
+  ): Promise<Coordinator> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/coordinators`, req);
+  }
+
+  async listCoordinators(workspaceId: string): Promise<CoordinatorListResponse> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/coordinators`);
+  }
+
+  /** GET .../coordinators/:cid/proposals/:pid, for polling proposal state (e.g. status, task_id) from the backend directly. */
+  async getProposal(
+    workspaceId: string,
+    coordinatorId: string,
+    proposalId: string,
+  ): Promise<Proposal> {
+    return this.request(
+      "GET",
+      `/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}/proposals/${proposalId}`,
+    );
   }
 
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
@@ -640,13 +830,34 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createCustomTUIAgent(options: {
+    display_name: string;
+    command: string;
+    command_args?: string[];
+    model?: string;
+    description?: string;
+    mcp_strategy?: string;
+    protocol?: "acp";
+  }): Promise<Agent> {
+    const created = await this.request<{ name: string }>("POST", "/api/v1/agents/tui", options);
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === created.name);
+    if (!agent)
+      throw new Error(`Custom TUI agent ${created.name} was not returned by the agent list`);
+    return agent;
+  }
+
   /** Removes a custom agent by slug, so a spec that creates one leaves the
    * worker's agent list as it found it. Missing is not an error. */
   async deleteCustomAgentByName(name: string): Promise<void> {
     const { agents } = await this.listAgents();
     const agent = agents.find((candidate) => candidate.name === name);
     if (!agent) return;
-    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+    await this.deleteAgentById(agent.id);
+  }
+
+  async deleteAgentById(agentId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/agents/${agentId}`);
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -661,18 +872,17 @@ export class ApiClient {
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
-   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * Office-scoped profiles (those with a non-empty `workspaceId`) are
    * always preserved — they belong to onboarded office workspaces and
    * are managed via the office agent endpoints, not by this helper.
    * Without this guard the per-test cleanup deletes the seeded CEO and
    * cascades into "No agents yet" failures across office tests.
    */
-  async cleanupTestProfiles(keepIds: string[]): Promise<void> {
-    const { agents } = await this.listAgents();
+  async cleanupTestProfiles(keepIds: string[], agentSnapshot?: Agent[]): Promise<void> {
+    const agents = agentSnapshot ?? (await this.listAgents()).agents;
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
-        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
-        if (wsId) continue;
+        if (profile.workspaceId) continue;
         if (!keepIds.includes(profile.id)) {
           await this.deleteTestProfile(profile.id);
         }
@@ -740,6 +950,7 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<AgentProfile> {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
@@ -755,6 +966,47 @@ export class ApiClient {
       cli_flags: opts.cli_flags,
       command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
+      copilot_selected_plugins: opts.copilot_selected_plugins,
+    });
+    return normalizeAgentProfile(response);
+  }
+
+  async createDynamicAgentProfile(
+    name: string,
+    candidates: Array<{
+      executionProfileId: string;
+      enabled: boolean;
+      unclassifiedEnabled: boolean;
+      consecutiveFailureThreshold: number;
+    }>,
+  ): Promise<AgentProfile> {
+    const errorPolicy = {
+      retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
+      wait_for_reset: { enabled: false, max_wait_seconds: 0 },
+      on_exhausted: "stop",
+    };
+    const response = await this.request<unknown>("POST", "/api/v1/agents/dynamic/profiles", {
+      name,
+      model: "",
+      dynamic: {
+        version: 1,
+        candidates: candidates.map((candidate, position) => ({
+          position,
+          execution_profile_id: candidate.executionProfileId,
+          enabled: candidate.enabled,
+          policies: {
+            version: 1,
+            transient: errorPolicy,
+            hard: errorPolicy,
+            unclassified: {
+              enabled: candidate.unclassifiedEnabled,
+              consecutive_failure_threshold: candidate.unclassifiedEnabled
+                ? candidate.consecutiveFailureThreshold
+                : 0,
+            },
+          },
+        })),
+      },
     });
     return normalizeAgentProfile(response);
   }
@@ -788,13 +1040,22 @@ export class ApiClient {
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
+      copilot_selected_plugins?: string[];
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
   }
 
   async listPrompts(): Promise<{
-    prompts: Array<{ id: string; name: string; content: string; builtin: boolean }>;
+    prompts: Array<{
+      id: string;
+      name: string;
+      content: string;
+      builtin: boolean;
+      source?: string;
+      source_path?: string;
+      alternate_content?: string;
+    }>;
   }> {
     return this.request("GET", "/api/v1/prompts");
   }
@@ -852,6 +1113,8 @@ export class ApiClient {
       start_when_unblocked?: boolean;
       /** Prepare the task without launching its session so E2E fixtures can bind it first. */
       start_agent?: boolean;
+      /** Create a prepared session without starting its agent (requires start_agent false). */
+      prepare_session?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -950,7 +1213,7 @@ export class ApiClient {
   }
 
   async listRepositories(workspaceId: string): Promise<{
-    repositories: Array<{ id: string; name: string }>;
+    repositories: Repository[];
     total: number;
   }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
@@ -1073,6 +1336,9 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      source_type?: string;
+      local_path?: string;
+      provider_scope?: string;
       default_branch?: string;
       pull_before_worktree?: boolean;
       provider?: string;
@@ -1080,6 +1346,7 @@ export class ApiClient {
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
+      remote_url?: string;
       dev_script?: string;
       setup_script?: string;
       cleanup_script?: string;
@@ -1088,6 +1355,19 @@ export class ApiClient {
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
+  }
+
+  async getRepository(repositoryId: string): Promise<Repository> {
+    return this.request("GET", `/api/v1/repositories/${repositoryId}`);
+  }
+
+  async deleteRepository(repositoryId: string): Promise<void> {
+    const response = await this.rawRequest("DELETE", `/api/v1/repositories/${repositoryId}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/repositories/${repositoryId} failed (${response.status}): ${await response.text()}`,
+      );
+    }
   }
 
   async createRepositoryScript(
@@ -1197,6 +1477,7 @@ export class ApiClient {
       name: string;
       type: string;
       profiles?: Array<{ id: string; name: string }>;
+      provider?: { plugin_id?: string; key?: string };
     }>;
   }> {
     return this.request("GET", "/api/v1/executors");
@@ -1232,17 +1513,22 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
-      sidebar_views_by_workspace: Record<
-        string,
-        { views: Array<Record<string, unknown>>; active_view_id: string; draft: unknown }
-      >;
+      sidebar_views_by_workspace: Record<string, SidebarWorkspaceStateApi>;
+      sidebar_task_prefs?: UserSettingsResponse["settings"]["sidebar_task_prefs"];
       workspace_id?: string;
       workflow_filter_id?: string;
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
-      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
+      sidebar_fast_actions_enabled?: boolean;
+      sidebar_new_task_style?: "simple" | "compact";
+      sidebar_hover_enabled?: boolean;
+      sidebar_hover_delay_ms?: number;
+      sidebar_layouts_by_workspace?: Record<
+        string,
+        import("../../lib/types/http-user-settings").SidebarLayoutApi
+      >;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1256,12 +1542,17 @@ export class ApiClient {
   }
 
   async saveUserSettings(settings: {
+    escape_cancels_agent?: boolean;
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     prevent_auto_start_agent_on_open?: boolean;
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
+    unread_task_dot?: boolean;
+    unread_task_dot_hide_delay_seconds?: number;
     agent_generated_task_titles?: boolean;
+    message_time_display?: "relative" | "absolute_short" | "absolute_long";
+    agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
@@ -1274,6 +1565,10 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_fast_actions_enabled?: boolean;
+    sidebar_new_task_style?: "simple" | "compact";
+    sidebar_hover_enabled?: boolean;
+    sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
@@ -1286,8 +1581,15 @@ export class ApiClient {
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
+      views_create?: unknown[];
+      views_upsert?: unknown[];
+      views_update?: unknown[];
+      view_ids_delete?: string[];
+      view_order?: string[];
       active_view_id?: string;
       draft?: unknown;
+      draft_update?: unknown;
+      select_plugin_grouping?: unknown;
     };
     sidebar_layout_state?: {
       workspace_id: string;
@@ -1366,16 +1668,19 @@ export class ApiClient {
         on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
       auto_advance_requires_signal?: boolean;
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       complete_task_on_enter?: boolean;
-      stage_type?: "work" | "review" | "approval" | "custom";
+      stage_type?: "work" | "review" | "approval" | "custom" | "hold";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       session_target?: WorkflowSessionTarget | null;
+      disable_unclassified_fallback?: boolean;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -1413,6 +1718,7 @@ export class ApiClient {
     workspaceId: string,
     yamlContent: string,
   ): Promise<{ created: string[]; skipped: string[] }> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`, {
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },
@@ -1422,12 +1728,53 @@ export class ApiClient {
     return res.json() as Promise<{ created: string[]; skipped: string[] }>;
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  async deleteTask(
+    taskId: string,
+    options?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ): Promise<void> {
+    const cascade = options?.cascade ?? false;
+    const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
+    const query = new URLSearchParams();
+    if (cascade) query.set("cascade", "true");
+    if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    const deletePath = `/api/v1/tasks/${taskId}${queryString}`;
+    for (let attempt = 0; attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS; attempt += 1) {
+      const preview = await this.request<{ confirmation_id: string }>(
+        "POST",
+        "/api/v1/tasks/delete-preflight",
+        { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+      );
+      const response = await this.rawRequest("DELETE", deletePath, undefined, {
+        extraHeaders: { "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id },
+      });
+      if (response.ok) {
+        await response.json();
+        return;
+      }
+
+      const text = await response.text();
+      let isStalePreview = false;
+      if (response.status === 409) {
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          isStalePreview = payload.error === "task deletion preview is no longer current";
+        } catch {
+          isStalePreview = false;
+        }
+      }
+      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
+        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
+      }
+    }
   }
 
   async archiveTask(taskId: string): Promise<void> {
     await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
+  }
+
+  async unarchiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/unarchive`);
   }
 
   async getAgentProfileMcpConfig(
@@ -1447,7 +1794,33 @@ export class ApiClient {
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
     const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
-    await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
+    const path = `/api/v1/e2e/reset/${workspaceId}${params}`;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await this.rawRequest("DELETE", path);
+      if (response.ok) return;
+
+      const body = await response.text();
+      const transientWorktreeInspection =
+        response.status === 500 &&
+        body.includes("exit status 128") &&
+        (body.includes("inspect worktrees before delete") ||
+          body.includes("capture worktree cleanup identities") ||
+          body.includes("capture cleanup identity"));
+      const sessionTransferInProgress =
+        response.status === 500 && body.trim() === '{"error":"session transfer in progress"}';
+      if ((!transientWorktreeInspection && !sessionTransferInProgress) || attempt === 3) {
+        throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
+      }
+
+      // A task cleanup worker can remove a checkout between the reset's
+      // inventory read and its dirty-worktree inspection. Retry the complete
+      // reset after cleanup or a workflow session transfer releases its ownership.
+      await dwell(
+        250 * (attempt + 1),
+        "poll-interval",
+        "poll interval for E2E reset after transient cleanup or session transfer ownership",
+      );
+    }
   }
 
   /**
@@ -1467,8 +1840,26 @@ export class ApiClient {
 
   // --- E2E Mock Harness (KANDEV_E2E_MOCK=true) ---
   // These routes are mounted only when the backend was started with the
-  // env var set. They write directly to task_sessions / messages so the
-  // live-presence UI can be exercised without launching a real executor.
+  // environment selector set. They expose test-only state setup and controls.
+
+  async getBackendBootID(): Promise<string> {
+    const info = await this.request<{ boot_id: string }>("GET", "/api/v1/system/info");
+    return info.boot_id;
+  }
+
+  async killLocalAgentRuntimeChild(): Promise<{
+    killed: boolean;
+    process_id: number;
+    runtime_epoch: number;
+  }> {
+    return this.request("POST", "/api/v1/e2e/agent-runtime/kill-child", {});
+  }
+
+  async disconnectSessionAgentUpdatesStream(sessionId: string): Promise<{ disconnected: boolean }> {
+    return this.request("POST", "/api/v1/e2e/agent-runtime/disconnect-session-stream", {
+      session_id: sessionId,
+    });
+  }
 
   async seedTaskSession(
     taskId: string,
@@ -1529,6 +1920,32 @@ export class ApiClient {
       `/api/v1/_test/background-probe/${sessionId}/calls`,
     );
     return calls;
+  }
+
+  /**
+   * Seeds one shared background-workload projection row and publishes it on
+   * the live WebSocket subject. Lets browser suites cover provider states the
+   * deterministic ACP producer cannot reach, such as a terminal job whose
+   * history must outlive the active count. Only mounted when the backend was
+   * started with KANDEV_E2E_MOCK=true.
+   */
+  async recordBackgroundWorkload(
+    sessionId: string,
+    workload: {
+      work_id: string;
+      run_id?: string;
+      kind: string;
+      title: string;
+      state: string;
+      exit_code?: number;
+      output?: string;
+      revision?: number;
+    },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/_test/background-work", {
+      session_id: sessionId,
+      ...workload,
+    });
   }
 
   /**
@@ -1798,7 +2215,11 @@ export class ApiClient {
     return this.request<Record<string, unknown>>(
       "PUT",
       `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
-      { display_name: registration.display_name, app_id: registration.app_id },
+      {
+        display_name: registration.display_name,
+        app_id: registration.app_id,
+        ...(registration.github_host ? { github_host: registration.github_host } : {}),
+      },
     );
   }
 
@@ -1846,6 +2267,18 @@ export class ApiClient {
     merge_queue_last_removal_reason?: string;
     merge_queue_last_removal_before_sha?: string;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
+      workflow_id?: number;
+      workflow_name?: string;
+      workflow_run_id?: number;
+      workflow_event?: string;
+      head_repo_id?: number;
+      head_repo_owner?: string;
+      head_repo_name?: string;
+      head_branch?: string;
       name: string;
       source?: string;
       status?: string;
@@ -1889,6 +2322,20 @@ export class ApiClient {
 
   async mockGitHubAddRepos(org: string, repos: MockRepo[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
+  }
+
+  async mockGitHubSetRepositoryDetails(
+    owner: string,
+    repo: string,
+    pushAccess: boolean | null,
+    adminAccess = false,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repository-details", {
+      owner,
+      repo,
+      push_access: pushAccess,
+      admin_access: adminAccess,
+    });
   }
 
   private async seedMockGitHubRepositoryAccess(
@@ -2059,12 +2506,17 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    /** RFC 3339; GitHub reports it for merged PRs. */
+    merged_at?: string;
+    /** RFC 3339; GitHub reports it for merged and closed PRs. */
+    closed_at?: string;
     head_sha?: string;
     head_repo_owner?: string;
     head_repo_name?: string;
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
+    has_merge_conflicts?: boolean;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_entry_id?: string;
@@ -2122,6 +2574,7 @@ export class ApiClient {
     review_state: string;
     checks_state: string;
     mergeable_state: string;
+    has_merge_conflicts?: boolean | null;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
@@ -2150,6 +2603,10 @@ export class ApiClient {
     repo: string;
     pr_number: number;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
       name: string;
       source?: string;
       status?: string;
@@ -2184,6 +2641,7 @@ export class ApiClient {
     }>;
     workflow_runs?: Array<{
       id: number;
+      check_suite_id?: number;
       run_attempt?: number;
       workflow_id?: number;
       name: string;
@@ -2508,6 +2966,31 @@ export class ApiClient {
 
   // --- Session ---
 
+  /** Reads the authoritative background-work projection for a session. */
+  async listBackgroundWorkloads(sessionId: string): Promise<{
+    workloads: Array<{
+      work_id: string;
+      title: string;
+      kind?: string;
+      state: string;
+      exit_code?: number | null;
+      source_call_id?: string;
+      origin_turn_id?: string;
+      revision?: number;
+    }>;
+  }> {
+    const response = await this.rawRequest(
+      "GET",
+      `/api/v1/task-sessions/${encodeURIComponent(sessionId)}/background-work`,
+    );
+    if (!response.ok) {
+      throw new Error(
+        `listBackgroundWorkloads failed (${response.status}): ${await response.text()}`,
+      );
+    }
+    return response.json();
+  }
+
   async listSessionMessages(sessionId: string): Promise<{
     messages: Array<{
       id: string;
@@ -2517,6 +3000,8 @@ export class ApiClient {
       turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }>;
   }> {
     // The production endpoint intentionally caps explicit pages at 100. E2E
@@ -2527,8 +3012,11 @@ export class ApiClient {
       content: string;
       author_type: string;
       type?: string;
+      turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }> = [];
     let after = "";
     for (;;) {
@@ -2547,7 +3035,12 @@ export class ApiClient {
   }
 
   async listSessionTurns(sessionId: string): Promise<{
-    turns: Array<{ id: string; completed_at?: string | null }>;
+    turns: Array<{
+      id: string;
+      started_at?: string;
+      completed_at?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
@@ -2557,15 +3050,9 @@ export class ApiClient {
       from_step_id?: string | null;
       to_step_id: string;
       trigger: string;
-    }>;
+    }> | null;
   }> {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
-  }
-
-  async getTaskSession(sessionId: string): Promise<{
-    session: { id: string; last_read_message_id?: string };
-  }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
   /**
@@ -2605,6 +3092,10 @@ export class ApiClient {
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
+      execution_profile_id?: string;
+      route_generation?: number;
+      route_state?: string;
+      route_reason?: string;
       state: string;
       is_primary: boolean;
       started_at: string;
@@ -2626,6 +3117,21 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async listTaskSessionDetails(taskId: string) {
+    const summary = await this.listTaskSessions(taskId);
+    const sessions = await Promise.all(
+      summary.sessions.map(async (row) => {
+        const { session } = await this.getTaskSession(row.id);
+        return { ...row, ...session };
+      }),
+    );
+    return { ...summary, sessions };
+  }
+
+  async getTaskSession(sessionId: string): Promise<{ session: TaskSession }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
   async getQueueSessionIdentity(
@@ -2719,12 +3225,15 @@ export class ApiClient {
 
   async getTask(taskId: string): Promise<{
     id: string;
+    workspace_id?: string;
+    workflow_id?: string;
     title: string;
     description?: string;
     autopilot?: boolean;
     primary_session_id?: string | null;
     primary_executor_type?: string | null;
     state?: string;
+    interrupted?: boolean;
     workflow_step_id?: string;
     workflow_agent_overrides?: WorkflowAgentOverrides;
     wip_admitted?: boolean;
@@ -2739,6 +3248,7 @@ export class ApiClient {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       position: number;
     }>;
     workspace_folders?: Array<{
@@ -2882,6 +3392,7 @@ export class ApiClient {
     workflowStepId: string,
     agentProfileId: string,
     opts?: {
+      executor_profile_id?: string;
       repos?: Array<{ owner: string; name: string }>;
       prompt?: string;
       review_scope?: string;
@@ -2894,6 +3405,7 @@ export class ApiClient {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
       agent_profile_id: agentProfileId,
+      ...(opts?.executor_profile_id ? { executor_profile_id: opts.executor_profile_id } : {}),
       repos: opts?.repos ?? [],
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",
@@ -2977,6 +3489,10 @@ export class ApiClient {
     });
   }
 
+  async renameSession(sessionId: string, name: string): Promise<void> {
+    await this.wsRequest("session.rename", { session_id: sessionId, name });
+  }
+
   async setSessionMode(sessionId: string, modeId: string): Promise<void> {
     await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
       mode_id: modeId,
@@ -3013,9 +3529,18 @@ export class ApiClient {
     });
   }
 
-  async getQueueStatus(
-    identity: QueueSessionIdentityInput,
-  ): Promise<{ count: number; auto_run: boolean; auto_merge_enabled: boolean }> {
+  async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
+    count: number;
+    entries: Array<{
+      id: string;
+      position: number;
+      content: string;
+      queued_by: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    auto_run: boolean;
+    auto_merge_enabled: boolean;
+  }> {
     return this.wsRequest("message.queue.get", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
@@ -3081,21 +3606,6 @@ export class ApiClient {
     });
   }
 
-  async createSentryInstance(payload: {
-    name: string;
-    secret: string;
-    url?: string;
-    workspaceId?: string;
-  }): Promise<{ id: string }> {
-    const { workspaceId, ...config } = payload;
-    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
-    return this.request("POST", path, {
-      authMethod: "auth_token",
-      url: "https://sentry.io",
-      ...config,
-    });
-  }
-
   /**
    * Poll until the integration config reports `lastOk: true`. SetConfig kicks
    * off an async auth-health probe in a goroutine, so the row's `lastOk` flips
@@ -3149,40 +3659,6 @@ export class ApiClient {
       // the bounded poll can observe the recovered backend.
       return false;
     }
-  }
-
-  // --- Azure DevOps Mock Control ---
-
-  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
-    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
-  }
-
-  async mockAzureDevOpsReset(): Promise<void> {
-    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
-  }
-
-  async setAzureDevOpsConfig(
-    workspaceId: string,
-    payload: { organizationUrl: string; pat: string },
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { ...payload, authMethod: "pat" },
-    );
-  }
-
-  async associateAzureDevOpsTaskPR(
-    workspaceId: string,
-    taskId: string,
-    repositoryId: string,
-    pullRequestId: number,
-  ): Promise<void> {
-    await this.request(
-      "POST",
-      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { repositoryId, pullRequestId },
-    );
   }
 
   // --- Jira Mock Control ---
@@ -3279,6 +3755,10 @@ export class ApiClient {
 
   async mockLinearSetStates(teamKey: string, states: MockLinearState[]): Promise<void> {
     await this.request("POST", "/api/v1/linear/mock/states", { teamKey, states });
+  }
+
+  async mockLinearSetProjects(teamKey: string, projects: MockLinearProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/projects", { teamKey, projects });
   }
 
   async mockLinearAddIssues(issues: MockLinearIssue[]): Promise<void> {
@@ -3450,7 +3930,7 @@ export class ApiClient {
     workflowStepId: string;
     agentProfileId: string;
     executorProfileId?: string;
-    filter?: { teamKey?: string };
+    filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
     prompt?: string;
     enabled?: boolean;
     pollIntervalSeconds?: number;
@@ -3476,15 +3956,47 @@ export class ApiClient {
     enabled: boolean;
     lastError?: string;
     lastErrorAt?: string;
+    prompt?: string;
+    filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
   } | null> {
     // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
     // walk the workspace list and find by id. Scoped by workspace_id so the
     // result set stays small even if the install accumulates watchers. The
     // list endpoint wraps the rows in a { watches: [...] } envelope.
     const { watches } = await this.request<{
-      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+      watches: Array<{
+        id: string;
+        enabled: boolean;
+        lastError?: string;
+        lastErrorAt?: string;
+        prompt?: string;
+        filter?: { teamKey?: string; projectIds?: string[]; requireBlockersDone?: boolean };
+      }>;
     }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
     return watches.find((w) => w.id === watchId) ?? null;
+  }
+
+  async triggerLinearIssueWatch(
+    workspaceId: string,
+    watchId: string,
+  ): Promise<{ newIssues: number }> {
+    return this.request(
+      "POST",
+      `/api/v1/linear/watches/issue/${encodeURIComponent(watchId)}/trigger?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async deleteLinearIssueWatches(workspaceId: string): Promise<void> {
+    const { watches } = await this.request<{ watches: Array<{ id: string }> }>(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+    for (const w of watches) {
+      await this.request(
+        "DELETE",
+        `/api/v1/linear/watches/issue/${encodeURIComponent(w.id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      );
+    }
   }
 
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
@@ -3617,6 +4129,7 @@ export class ApiClient {
   }
 
   async runtimeUpdateTaskStatus(token: string, taskId: string, status: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${taskId}/status`, {
       method: "POST",
       headers: {
@@ -3628,6 +4141,7 @@ export class ApiClient {
   }
 
   async runtimePostComment(token: string, taskId: string, body: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/comments`, {
       method: "POST",
       headers: {
@@ -3643,6 +4157,7 @@ export class ApiClient {
     parentTaskId: string,
     data: { title: string; description?: string; assigneeAgentId?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${parentTaskId}/subtasks`, {
       method: "POST",
       headers: {
@@ -3662,6 +4177,7 @@ export class ApiClient {
     token: string,
     data: { name: string; role: string; reason?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/agents`, {
       method: "POST",
       headers: {
@@ -3673,6 +4189,7 @@ export class ApiClient {
   }
 
   async runtimePutMemory(token: string, path: string, content: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       method: "PUT",
       headers: {
@@ -3684,6 +4201,7 @@ export class ApiClient {
   }
 
   async runtimeGetMemory(token: string, path: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -3725,6 +4243,11 @@ export class ApiClient {
     return this.request("POST", "/api/v1/ssh/test", req);
   }
 
+  /** Remote Docker connection test: SSH reachability plus the daemon steps. */
+  async testRemoteDockerConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+    return this.request("POST", "/api/v1/remote-docker/test", req);
+  }
+
   async listSSHSessions(executorId: string): Promise<SSHSession[]> {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
@@ -3749,7 +4272,9 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
-    taskMode?: "automation_run" | "normal_task";
+    taskMode?: "automation_run" | "normal_task" | "managed_conversation";
+    managedDestination?: { plugin_id: string; instance_key: string; revision: number };
+    retryPolicy?: RetryPolicy;
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -3776,10 +4301,8 @@ export class ApiClient {
     /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
-     * disk. The API ignores `execution_mode` on input by design, so this is
-     * the only way to stand up the state the board-move migration notice
-     * exists to explain; the `legacy_board_card` flag the UI reads is then
-     * derived by the same production SQL a real upgraded install goes through.
+     * disk. The API ignores `execution_mode` on input by design, so this flag
+     * seeds the state a real upgraded install carries.
      */
     legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
@@ -3789,9 +4312,11 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       task_mode: opts.taskMode,
+      managed_destination: opts.managedDestination,
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
+      retry_policy: opts.retryPolicy,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",
@@ -3879,9 +4404,13 @@ export class ApiClient {
    * Returns { skipped, reason } when the automation is at its concurrency cap.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
-  async triggerAutomationManual(
-    automationId: string,
-  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+  async triggerAutomationManual(automationId: string): Promise<{
+    run_task_id?: string;
+    run_id?: string;
+    delivery_status?: string;
+    skipped?: boolean;
+    reason?: string;
+  }> {
     return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 
@@ -3897,11 +4426,13 @@ export class ApiClient {
     taskId: string,
     state: string,
     isPrimary = true,
+    options?: { isPassthrough?: boolean },
   ): Promise<{ id: string; task_id: string; status: string }> {
     return this.request("POST", "/api/v1/e2e/task-sessions", {
       task_id: taskId,
       state,
       is_primary: isPrimary,
+      is_passthrough: options?.isPassthrough,
     });
   }
 }
@@ -4043,6 +4574,8 @@ export type MockJiraTicket = {
 
 export type MockLinearTeam = { id: string; key: string; name: string };
 
+export type MockLinearProject = { id: string; name: string; content?: string };
+
 export type MockLinearState = {
   id: string;
   name: string;
@@ -4064,6 +4597,8 @@ export type MockLinearIssue = {
   teamKey?: string;
   priority?: number;
   url?: string;
+  /** Issues that block this one; only blocker-aware watch searches see them. */
+  blockers?: Array<{ identifier: string; stateType: string }>;
 };
 
 // --- Sentry mock payload types ---

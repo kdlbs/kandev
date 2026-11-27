@@ -14,6 +14,20 @@ func withCeilingDispatchClaim(ctx context.Context, claim *ceilingDeferredLaunchC
 	return context.WithValue(ctx, ceilingDispatchClaimContextKey{}, claim)
 }
 
+// admitClaimedIdleFocusResume validates the exact queued idle resume and
+// renews its durable lease before it can bypass passive queue admission.
+func (s *Service) admitClaimedIdleFocusResume(ctx context.Context, taskID, sessionID, reason string) error {
+	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
+	if reason != autoResumeBlockedLaunchQueued || claim == nil || claim.svc != s || !claim.held ||
+		claim.taskID != taskID || claim.deferral.Kind != models.CeilingLaunchResume ||
+		claim.deferral.Origin != string(launchOriginAutomatic) ||
+		stringField(claim.deferral.Payload, metaKeySessionID) != sessionID ||
+		!boolField(claim.deferral.Payload, resumePayloadIdleProvenanceKey) {
+		return ErrIdleSuspensionProvenanceRequired
+	}
+	return s.admitCeilingDispatch(ctx, taskID)
+}
+
 // admitCeilingDispatch orders final route validation and renewal of the exact
 // dispatch claim with route mutation. The renewal is the local admission
 // boundary; later route changes use lifecycle cancellation. No admission lock
@@ -64,7 +78,7 @@ func (s *Service) renewCeilingDispatchClaim(ctx context.Context, claim *ceilingD
 		}
 		details, exists := models.ReadCeilingLaunchClaimDetails(record)
 		now := time.Now().UTC()
-		if !equivalent || !exists || details.ID != claim.id || details.Expired(now) {
+		if !equivalent || !exists || details.ID != claim.id || details.Owner != claim.owner || details.Expired(now) {
 			return ErrCeilingLaunchClaimed
 		}
 		updated := cloneCeilingRecord(record)

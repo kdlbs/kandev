@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +49,41 @@ func TestKubernetesCreateInstanceAcceptsCompleteTypedConfiguration(t *testing.T)
 	if errors.Is(err, errKubernetesLifecycleRequestIncomplete) {
 		t.Fatalf("CreateInstance() error = %v, complete typed configuration was not consumed", err)
 	}
+}
+
+func TestApplyKubernetesDurableJournalPathUsesPersistentWorkspace(t *testing.T) {
+	for _, mode := range []kubeexecutor.WorkspaceMode{
+		kubeexecutor.WorkspaceModeManagedPVC,
+		kubeexecutor.WorkspaceModeExistingClaim,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+			executorRequest := &ExecutorCreateRequest{
+				DurableJournalOwnerID: "environment-1",
+				Metadata: map[string]interface{}{
+					MetadataKeyKubernetesRuntimeWorkspaceMode: string(mode),
+				},
+			}
+
+			applyKubernetesDurableJournalPath(request, executorRequest)
+
+			require.Equal(t, "/workspace/.kandev/agentctl-journals/environment-1/delivery.bbolt", request.DurableJournalPath)
+		})
+	}
+}
+
+func TestApplyKubernetesDurableJournalPathRejectsEphemeralWorkspace(t *testing.T) {
+	request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+	executorRequest := &ExecutorCreateRequest{
+		DurableJournalOwnerID: "environment-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesWorkspaceMode: string(kubeexecutor.WorkspaceModeEmptyDir),
+		},
+	}
+
+	applyKubernetesDurableJournalPath(request, executorRequest)
+
+	require.Empty(t, request.DurableJournalPath)
 }
 
 func TestKubernetesAgentctlCreateReconcilesAmbiguousResponse(t *testing.T) {
@@ -126,7 +163,7 @@ func TestKubernetesCreateInstanceProvisionsBootstrapsAndForwardsAgentctl(t *test
 			streams:   kubeexecutor.NewStreamOperations(execs, forwards),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) {
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
 		return []byte("agentctl-binary"), nil
 	}
 	req := validKubernetesCreateRequest()
@@ -168,7 +205,10 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 	require.NoError(t, err)
 
 	reconnectExecs := &recordingKubernetesExec{}
-	reconnectForwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{41001: instancePort}}
+	reconnectForwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	}}
 	restartedBackend := NewKubernetesExecutor(nil, newTestLogger())
 	restartedBackend.clientFactory = func(kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
 		return &kubernetesRuntimeClient{
@@ -176,7 +216,9 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 			streams:   kubeexecutor.NewStreamOperations(reconnectExecs, reconnectForwards),
 		}, nil
 	}
-	restartedBackend.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("unused"), nil }
+	restartedBackend.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("unused"), nil
+	}
 	reconnectRequest := validKubernetesCreateRequest()
 	reconnectRequest.InstanceID = "new-execution-id"
 	reconnectRequest.PreviousExecutionID = created.InstanceID
@@ -196,7 +238,7 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 	require.Empty(t, reconnectExecs.requests)
 	require.Len(t, resources.createdPods, 1)
 	require.Len(t, resources.createdPVCs, 0)
-	require.Equal(t, []uint16{41001}, reconnectForwards.remotePorts())
+	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41001}, reconnectForwards.remotePorts())
 }
 
 func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testing.T) {
@@ -210,9 +252,18 @@ func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testin
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
 	require.Equal(t, "initial-token", created.AuthToken)
+	resources.mu.Lock()
+	resources.pod.Status.ContainerStatuses[0].RestartCount = 1
+	resources.mu.Unlock()
 
 	staleInstancePort := startKubernetesUnhealthyServer(t)
-	restartedControlPort := startKubernetesAgentctlServerWithToken(t, true, 41002, "rotated-token")
+	restartedControl := &builtinMCPInstanceRecoveryControl{
+		expectedToken: "initial-token", replacementToken: "rotated-token",
+		createPort: 41002, getStatusCode: http.StatusUnauthorized,
+	}
+	restartedControlServer := httptest.NewServer(restartedControl)
+	t.Cleanup(restartedControlServer.Close)
+	restartedControlPort := testHTTPPort(t, restartedControlServer)
 	restartedInstancePort := startKubernetesAgentctlServer(t, false, 0)
 	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
 		41001:                                    staleInstancePort,
@@ -228,10 +279,12 @@ func TestKubernetesCreateInstanceRehandshakesAfterMainContainerRestart(t *testin
 	require.Equal(t, "rotated-token", reconnected.AuthToken)
 	require.Equal(t, "41002", reconnected.Metadata[MetadataKeyKubernetesAgentctlRemotePort])
 	require.Equal(t, created.InstanceID, reconnected.Metadata[MetadataKeyKubernetesAgentctlInstanceID])
-	require.Equal(t, []uint16{41001, uint16(kubeexecutor.DefaultAgentctlPort), 41002}, forwards.remotePorts())
-	require.True(t, forwards.sessions[0].isClosed(), "the stale instance forward must close")
-	require.True(t, forwards.sessions[1].isClosed(), "the temporary control forward must close")
-	require.False(t, forwards.sessions[2].isClosed(), "the rotated instance forward must remain live")
+	require.Equal(t, 0, restartedControl.getRequests, "a restarted main container should bypass stale InstanceInfo auth")
+	require.Equal(t, 1, restartedControl.handshakes)
+	require.Equal(t, 1, restartedControl.creates)
+	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41002}, forwards.remotePorts())
+	require.True(t, forwards.sessions[0].isClosed(), "the temporary control forward must close")
+	require.False(t, forwards.sessions[1].isClosed(), "the rotated instance forward must remain live")
 	require.Empty(t, execs.requests, "a container restart reuses Pod-scoped bootstrap files")
 }
 
@@ -246,7 +299,10 @@ func TestKubernetesCreateInstanceUsesCurrentConnectionConfigOnReconnect(t *testi
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
 
-	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{41001: instancePort}}
+	forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	}}
 	restarted := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesAuthMode] = "kubeconfig"
@@ -275,7 +331,10 @@ func TestKubernetesCreateInstanceUsesRecordedNamespaceAfterConnectionNamespaceCh
 	})
 	created, err := initial.CreateInstance(context.Background(), validKubernetesCreateRequest())
 	require.NoError(t, err)
-	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{41001: instancePort})
+	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	})
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesConfigNamespace] = "other-agents"
 
@@ -471,6 +530,26 @@ func TestKubernetesStopInstancePreservesOrdinaryStopAndForceCleansManagedResourc
 		require.Equal(t, []string{"pod-rv-1"}, resources.deletedPodResourceVersions)
 		require.Equal(t, []string{"pvc-rv-1"}, resources.deletedPVCResourceVersions)
 		require.Equal(t, []string{"pod", "pvc"}, resources.deletionOrder)
+	})
+
+	t.Run("idle suspension preserves task resources", func(t *testing.T) {
+		controlPort := startKubernetesAgentctlServer(t, true, 41001)
+		instancePort := startKubernetesAgentctlServer(t, false, 0)
+		resources := &fakeKubernetesResources{}
+		forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+			uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+			41001:                                    instancePort,
+		}}
+		executor := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
+		instance, err := executor.CreateInstance(context.Background(), validKubernetesCreateRequest())
+		require.NoError(t, err)
+		instance.StopReason = StopReasonIdleSuspension
+
+		require.NoError(t, executor.StopInstance(context.Background(), instance, false))
+
+		require.Empty(t, resources.deletedPods)
+		require.Empty(t, resources.deletedPVCs)
+		require.True(t, forwards.lastSession().isClosed(), "idle suspension must close the process-local forward")
 	})
 }
 

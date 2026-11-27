@@ -1,5 +1,5 @@
 import * as React from "react";
-import { firstAnimationListValue, parseCssTime } from "./animation-utils";
+import { firstAnimationListValue, parseCssTime, releaseAnimation } from "./animation-utils";
 import { createPersistentMotionVisibility } from "./persistent-motion-visibility";
 
 type CompositorPulseProps = React.ComponentProps<"span"> & {
@@ -40,7 +40,7 @@ function CompositorPulse({
     }
 
     const restoreAnimation = () => {
-      animation?.cancel();
+      if (animation) releaseAnimation(animation);
       animation = null;
       element.style.animation = inlineAnimation;
       registration.setAnimation(null);

@@ -3,28 +3,50 @@ package orchestrator
 import (
 	"encoding/json"
 	"strings"
-)
 
-// authErrorPatterns are substrings that indicate an authentication-related error.
-var authErrorPatterns = []string{
-	"authentication_error",
-	"authentication required",
-	"token has expired",
-	"Failed to authenticate",
-	"authorization_error",
-	"invalid_api_key",
-	"invalid api key",
-}
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // isAuthError returns true if the error message indicates an authentication failure.
 func isAuthError(errorMsg string) bool {
-	lower := strings.ToLower(errorMsg)
-	for _, pattern := range authErrorPatterns {
-		if strings.Contains(lower, strings.ToLower(pattern)) {
-			return true
-		}
+	return routingerr.IsAuthenticationFailureDiagnostic(errorMsg)
+}
+
+// isAuthenticationRecoveryFailure uses typed evidence whenever it exists.
+// Text classification remains for older records that have no structured
+// cause or routing code.
+func isAuthenticationRecoveryFailure(data watcher.AgentEventData) bool {
+	if data.FailureCode == string(routingerr.CodeAuthRequired) {
+		return true
 	}
-	return false
+	causes := models.NormalizeAgentErrorCauses(data.Causes)
+	if len(causes) > 0 {
+		for _, cause := range causes {
+			if cause.Code == models.AgentErrorCauseCodeAuthenticationRequired {
+				return true
+			}
+		}
+		return false
+	}
+	return isAuthError(data.ErrorMessage)
+}
+
+func normalizeRecoveryAuthMethods(methods []streams.AuthMethodInfo) []streams.AuthMethodInfo {
+	if len(methods) == 0 {
+		return nil
+	}
+	projected := agentctltypes.NormalizeSessionOperationFailure(&agentctltypes.SessionOperationFailure{
+		Code:        agentctltypes.SessionOperationFailureCodeAuthenticationRequired,
+		AuthMethods: methods,
+	})
+	if projected == nil {
+		return nil
+	}
+	return projected.AuthMethods
 }
 
 // extractReadableAuthError attempts to extract a human-readable authentication

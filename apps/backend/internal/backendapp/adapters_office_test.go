@@ -3,9 +3,12 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 
 	"github.com/jmoiron/sqlx"
 
@@ -14,10 +17,13 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	officeshared "github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/testutil"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -95,11 +101,11 @@ func (r *adapterStartStepResolver) ResolveFirstStep(ctx context.Context, workflo
 }
 
 func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	agentTaskID, err := adapter.CreateOfficeTaskAsAgent(
-		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime", nil,
+		ctx, "ws-1", "project-1", "agent-worker", "Agent task", "Created at runtime", nil, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -134,7 +140,7 @@ func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
 }
 
 func TestOfficeWorkspaceCreatorDoesNotBootstrapKanbanWorkflow(t *testing.T) {
-	_, taskSvc := newOfficeTaskAdapterHarness(t)
+	_, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	adapter := &taskWorkspaceCreatorAdapter{taskSvc: taskSvc}
 	ctx := context.Background()
 
@@ -199,7 +205,7 @@ func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
 // method is that opt-in's only production setter, so both cases here —
 // with and without an assignee — must always stamp it true.
 func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
@@ -245,6 +251,99 @@ func TestCreateOfficeTaskInWorkflowCarriesAssigneeIntoLaunchMetadata(t *testing.
 	assertRoutineFireCarrier(t, noAssigneeTask.Metadata, "routine-2")
 }
 
+func TestCreateOfficeRoutineTaskPersistsContextAndRequiredAssignmentsBeforeStart(t *testing.T) {
+	adapter, taskSvc, officeRepo := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+	wireOfficeProjectRepositorySources(taskSvc, officeRepo)
+	encodedRepositories, err := officemodels.EncodeRepositories([]string{"https://github.com/example/research-repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := officeRepo.CreateProject(ctx, &officemodels.Project{
+		ID: "project-routine", WorkspaceID: "ws-1", Name: "Research",
+		Status: officemodels.ProjectStatusActive, Repositories: encodedRepositories,
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	blocker, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: workflows[0].ID, Title: "Prerequisite",
+	})
+	if err != nil {
+		t.Fatalf("create blocker task: %v", err)
+	}
+	id, err := adapter.CreateOfficeTaskInWorkflowWithContext(ctx, "ws-1", "routine-assignee", workflows[0].ID, "Discovery", "Record evidence", "routine-research", officeroutines.RoutineTaskOptions{
+		ProjectID: "project-routine", BlockedBy: []string{blocker.Task.ID}, RequiredSubtaskCount: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := taskSvc.GetTask(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := task.Metadata[models.MetaKeyRequiredSubtaskCount].(float64); got != 3 {
+		t.Fatalf("required assignments = %v, want 3", task.Metadata[models.MetaKeyRequiredSubtaskCount])
+	}
+	if task.ProjectID != "project-routine" {
+		t.Fatalf("project_id = %q, want project-routine", task.ProjectID)
+	}
+	if len(task.Repositories) != 1 {
+		t.Fatalf("project repositories = %#v, want persisted project source", task.Repositories)
+	}
+	blockers, err := officeRepo.ListBlockersForTasks(ctx, []string{id})
+	if err != nil {
+		t.Fatalf("list blockers: %v", err)
+	}
+	if len(blockers[id]) != 1 || blockers[id][0] != blocker.Task.ID {
+		t.Fatalf("blockers = %#v, want %s", blockers[id], blocker.Task.ID)
+	}
+	if !models.HasAutoStartOnCreateIntent(task.Metadata) {
+		t.Fatal("routine start intent lost")
+	}
+}
+
+func TestCreateOfficeRoutineTaskRejectsCrossWorkspaceContext(t *testing.T) {
+	adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithTaskRepo(t)
+	ctx := context.Background()
+	wireOfficeProjectRepositorySources(taskSvc, officeRepo)
+	if err := taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-foreign", Name: "Foreign workspace"}); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	foreignWorkflow, err := taskRepo.EnsureOfficeWorkflow(ctx, "ws-foreign")
+	if err != nil {
+		t.Fatalf("ensure foreign workflow: %v", err)
+	}
+	if err := officeRepo.CreateProject(ctx, &officemodels.Project{
+		ID: "project-foreign", WorkspaceID: "ws-foreign", Name: "Foreign project",
+		Status: officemodels.ProjectStatusActive,
+	}); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+	foreignBlocker, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: "ws-foreign", WorkflowID: foreignWorkflow, Title: "Foreign task",
+	})
+	if err != nil {
+		t.Fatalf("create foreign blocker: %v", err)
+	}
+	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	for _, options := range []officeroutines.RoutineTaskOptions{
+		{ProjectID: "project-foreign"},
+		{BlockedBy: []string{foreignBlocker.Task.ID}},
+	} {
+		_, err := adapter.CreateOfficeTaskInWorkflowWithContext(ctx, "ws-1", "routine-assignee", workflows[0].ID, "Discovery", "Record evidence", "routine-research", options)
+		if err == nil {
+			t.Fatalf("CreateOfficeTaskInWorkflowWithContext accepted foreign context: %+v", options)
+		}
+	}
+}
+
 // assertRoutineFireCarrier pins AC-OFFICE-RUN-CAUSATION-001.14/.24: a
 // routine-fire task carries the full task-boundary causation carrier with
 // the AC.24 root values for the lineage triple (a routine fire has no
@@ -267,8 +366,8 @@ func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wan
 	if got, _ := metadata[models.MetaKeyOfficeCarrierRoutineID].(string); got != wantRoutineID {
 		t.Errorf("carrier routine_id = %q, want %q", got, wantRoutineID)
 	}
-	if got, _ := metadata[models.MetaKeyOfficeCarrierActorKind].(string); got != string(officemodels.ActorKindSystem) {
-		t.Errorf("carrier actor_kind = %q, want %q", got, officemodels.ActorKindSystem)
+	if got, _ := metadata[models.MetaKeyOfficeCarrierActorKind].(string); got != string(runsmodels.ActorKindSystem) {
+		t.Errorf("carrier actor_kind = %q, want %q", got, runsmodels.ActorKindSystem)
 	}
 	if got, _ := metadata[models.MetaKeyOfficeCarrierActorID].(string); got != "" {
 		t.Errorf("carrier actor_id = %q, want empty", got)
@@ -282,11 +381,11 @@ func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wan
 // created child task's persisted metadata, exactly as CreateOfficeTaskAsAgent
 // already does for a root task.
 func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T) {
-	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter, taskSvc, _ := newOfficeTaskAdapterHarness(t)
 	ctx := context.Background()
 
 	parentTaskID, err := adapter.CreateOfficeTaskAsAgent(
-		ctx, "ws-1", "project-1", "agent-worker", "Parent task", "Parent", nil,
+		ctx, "ws-1", "project-1", "agent-worker", "Parent task", "Parent", nil, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("create parent task: %v", err)
@@ -298,7 +397,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 		models.MetaKeyOfficeCarrierCreatingRunID:  "run-1",
 		models.MetaKeyOfficeCarrierHumanRooted:    false,
 		models.MetaKeyOfficeCarrierRoutineID:      "",
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindAgent),
+		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindAgent),
 		models.MetaKeyOfficeCarrierActorID:        "agent-worker",
 	}
 	// Metadata round-trips through a JSON column: numbers come back as
@@ -310,7 +409,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 	wantMetadata[models.MetaKeyOfficeCarrierCausationDepth] = float64(1)
 
 	childTaskID, err := adapter.CreateOfficeSubtask(
-		ctx, parentTaskID, "agent-assignee", "Child task", "A subtask", carrier,
+		ctx, parentTaskID, "agent-assignee", "Child task", "A subtask", carrier, officeshared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeSubtask: %v", err)
@@ -333,7 +432,12 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 	}
 }
 
-func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service) {
+func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository) {
+	adapter, taskSvc, officeRepo, _ := newOfficeTaskAdapterHarnessWithTaskRepo(t)
+	return adapter, taskSvc, officeRepo
+}
+
+func newOfficeTaskAdapterHarnessWithTaskRepo(t *testing.T) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository, *tasksqlite.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter.db"))
 	if err != nil {
@@ -341,6 +445,29 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 	}
 	database := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = database.Close() })
+	adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+	return adapter, taskSvc, officeRepo, taskRepo
+}
+
+func newOfficeTaskAdapterHarnessWithTestDB(t *testing.T) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository, *tasksqlite.Repository, *sqlx.DB) {
+	t.Helper()
+	if dsn := os.Getenv("KANDEV_TEST_POSTGRES_DSN"); dsn != "" {
+		database := testutil.OpenIsolatedPostgres(t, dsn)
+		adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+		return adapter, taskSvc, officeRepo, taskRepo, database
+	}
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter-project.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	database := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+	adapter, taskSvc, officeRepo, taskRepo := newOfficeTaskAdapterHarnessWithDB(t, database)
+	return adapter, taskSvc, officeRepo, taskRepo, database
+}
+
+func newOfficeTaskAdapterHarnessWithDB(t *testing.T, database *sqlx.DB) (*taskCreatorAdapter, *taskservice.Service, *officesqlite.Repository, *tasksqlite.Repository) {
+	t.Helper()
 	repo, cleanup, err := repository.Provide(database, database, nil)
 	if err != nil {
 		t.Fatalf("task repository: %v", err)
@@ -373,6 +500,8 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		Reviews:          repo,
 		ResourceCleanups: repo,
 	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
+	taskSvc.SetBlockerRepository(officeRepo)
+	taskSvc.SetProjectRepositorySourceReader(emptyOfficeProjectSourceReader{})
 	// Mirrors production wiring (registerRoutes in helpers.go): CreateChildTask
 	// requires a WorkspacePolicyAttacher to attach the child's workspace-group
 	// membership before returning.
@@ -386,5 +515,5 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		t.Fatalf("ensure office workflow: %v", err)
 	}
 	taskSvc.SetStartStepResolver(&adapterStartStepResolver{repo: repo})
-	return &taskCreatorAdapter{taskSvc: taskSvc}, taskSvc
+	return &taskCreatorAdapter{taskSvc: taskSvc}, taskSvc, officeRepo, repo
 }

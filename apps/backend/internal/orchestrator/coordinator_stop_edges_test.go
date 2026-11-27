@@ -212,10 +212,12 @@ func TestFallbackFreshLaunch_CoordinatorCancellationWinsBeforeResetWrite(t *test
 		false,
 		"",
 		false,
+		"",
 		false,
 		nil,
 		nil,
 		nil,
+		false,
 	)
 
 	require.ErrorIs(t, err, orchestratorexec.ErrSessionStateSuperseded)
@@ -268,10 +270,12 @@ func TestFallbackFreshLaunch_DoesNotResetCancellationObservedBeforeGuard(t *test
 		false,
 		"",
 		false,
+		"",
 		false,
 		nil,
 		nil,
 		nil,
+		false,
 	)
 
 	require.ErrorIs(t, err, orchestratorexec.ErrSessionStateSuperseded)

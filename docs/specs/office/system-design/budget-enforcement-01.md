@@ -70,8 +70,8 @@ const (
 func ClassifyRunProvenance(reason string) RunProvenance
 ```
 
-An unexported `map[string]struct{}` literal holds the 20-literal allowlist of
-`AC-OFFICE-BUDGET-007.2` verbatim (16 current + 4 legacy). `processRun` calls
+An unexported `map[string]struct{}` literal holds the 21-literal allowlist of
+`AC-OFFICE-BUDGET-007.2` verbatim (17 current + 4 legacy). `processRun` calls
 this exactly once, before gate 1, and threads the result through every gate
 via a small `admissionCtx` struct (see below) rather than recomputing it —
 satisfying `AC-OFFICE-BUDGET-001.1`'s "computed once, never revised".
@@ -124,7 +124,7 @@ the union. Names present in the fixed six-entry exclusion list of
 
 The test asserts, over the union of all seven blocks minus exclusions:
 every resolved string is a member of exactly one of two Go string sets
-declared directly in the test file — `attendedForTest` (the 20 literals of
+declared directly in the test file — `attendedForTest` (the 21 literals of
 `AC-OFFICE-BUDGET-007.2`, kept textually identical to
 `shared.attendedRunReasons`, not derived from it, so the assertion is not
 checking the production map against itself) and `unattendedForTest` (the 6

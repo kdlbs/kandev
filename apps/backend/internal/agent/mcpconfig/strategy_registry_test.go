@@ -66,3 +66,19 @@ func TestStrategyOptionsExcludeNone(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectDeliveryStrategyKeyIsExplicit(t *testing.T) {
+	for _, strategy := range []PassthroughMCPStrategy{PiStrategy{}, &PiStrategy{}} {
+		key, ok := ProjectDeliveryStrategyKey(strategy)
+		if !ok || key != StrategyKeyPi {
+			t.Fatalf("ProjectDeliveryStrategyKey(%T) = %q/%t, want %q/true", strategy, key, ok, StrategyKeyPi)
+		}
+	}
+	// Declaring a project strategy is not enough: Cursor keeps its existing
+	// native approval behavior and must not produce delivery evidence yet.
+	for _, strategy := range []PassthroughMCPStrategy{CursorStrategy{}, ClaudeStrategy{}, OpenCodeStrategy{}, nil} {
+		if key, ok := ProjectDeliveryStrategyKey(strategy); ok {
+			t.Fatalf("ProjectDeliveryStrategyKey(%T) = %q, want unsupported", strategy, key)
+		}
+	}
+}

@@ -3,6 +3,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -17,11 +19,15 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/httpmw"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/opencode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
@@ -30,15 +36,16 @@ import (
 
 // Server is the HTTP API server for a single agent instance.
 type Server struct {
-	cfg              *config.InstanceConfig
-	procMgr          *process.Manager
-	mcpServer        *mcp.Server
-	mcpBackendClient *mcp.ChannelBackendClient
-	logger           *logger.Logger
-	router           *gin.Engine
-	portProxies      *portProxyCache
-	metricsCollector *metrics.Collector
-	lspInstaller     lspInstallerRegistry
+	cfg                           *config.InstanceConfig
+	procMgr                       *process.Manager
+	mcpServer                     *mcp.Server
+	mcpBackendClient              *mcp.ChannelBackendClient
+	logger                        *logger.Logger
+	router                        *gin.Engine
+	portProxies                   *portProxyCache
+	metricsCollector              *metrics.Collector
+	lspInstaller                  lspInstallerRegistry
+	builtinMCPRejectionLogLimiter builtinMCPRejectionLogLimiter
 
 	// credentialSource, when set via SetCredentialSource, authenticates this
 	// instance's requests and streams against the control server's single
@@ -82,19 +89,28 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
+	if mcpServer != nil {
+		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
+	}
+	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
+		mcpBackendClient.SetSessionID(cfg.SessionID)
+		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
+	}
 
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
+	s.router.Use(s.rejectUnboundBuiltinMCPRoutes())
 	// Exempt paths from auth:
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, builtinMCPExemptPaths(cfg)...))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
 	// starting the new instance's agent. Missing header is allowed for
 	// backward compatibility with curl/tests; mismatch is rejected.
 	s.router.Use(instanceIDGuard(cfg.InstanceID))
+	s.router.Use(s.deliveryProtocolGuard())
 
 	s.setupRoutes()
 	return s
@@ -108,24 +124,44 @@ func (s *Server) Router() http.Handler {
 func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", s.handleHealth)
+	s.router.GET("/identity", s.handleInstanceIdentity)
 
 	// Agent control
 	api := s.router.Group("/api/v1")
+	s.registerPassthroughRoutes(api)
+	s.registerProjectMCPRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
+		api.GET("/runtime/storage", s.handleRuntimeStorage)
 		api.GET("/info", s.handleInfo)
 		api.GET("/system/metrics", s.handleSystemMetrics)
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.POST("/agent/opencode/credentials", s.handleOpenCodeCredentials)
+		api.GET("/agent/opencode/credentials", s.handleOpenCodeCredentialStatus)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
+		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/agent/session", s.handleAgentSessionAssociation)
+		api.GET("/agent/delivery", s.handleDeliveryStatus)
+		api.GET("/agent/delivery/successors", s.handleDeliverySuccessorStreams)
+		api.POST("/agent/delivery/stream/abandon", s.handleDeliverySuccessorAbandon)
+		api.POST("/agent/delivery/stream/abandon-bootstrap", s.handleFailedBootstrapDeliveryAbandon)
+		api.POST("/agent/submissions", s.handleDeliverySubmission)
+		api.GET("/agent/submissions", s.handleDeliverySubmissions)
+		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
+		api.POST("/agent/submissions/:id/cancel", s.handleDeliverySubmissionCancel)
+		api.POST("/agent/submissions/:id/retire", s.handleDeliverySubmissionRetire)
+		api.GET("/agent/delivery/stream", s.handleDeliveryReplay)
+		api.POST("/agent/delivery/stream/ack", s.handleDeliveryAcknowledgement)
 		api.GET("/lsp/stream", s.handleLSPStreamWS)
 
 		// Unified workspace stream (git status, files, shell)
@@ -141,6 +177,7 @@ func (s *Server) setupRoutes() {
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
 		api.POST("/workspace/reconcile", s.handleReconcileWorkspace)
+		api.POST("/workspace/recovery-exclusions", s.handleSetWorkspaceRecoveryExclusions)
 		api.POST("/workspace/rebind", s.handleRebindWorkspace)
 
 		// Per-task base-branch map update: kandev backend hits this when
@@ -155,6 +192,11 @@ func (s *Server) setupRoutes() {
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
+		api.GET("/workspace/root-files", s.handleWorkspaceRootFiles)
+		api.GET("/workspace/image-preview", s.handleQuestionImage)
+		api.POST("/workspace/file-preview/prepare", s.handlePrepareFilePreview)
+		api.POST("/workspace/file-preview/read", s.handleReadFilePreview)
+		api.POST("/workspace/file-preview/cancel", s.handleCancelFilePreview)
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
@@ -216,6 +258,12 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
 		api.POST("/git/contribution/use", s.handleGitUseContribution)
 		api.POST("/git/contribution/history-explanation", s.handleGitContributionHistoryExplanation)
+		api.POST("/git/turn-changes/checkpoint", s.handleGitTurnCheckpoint)
+		api.POST("/git/turn-changes/delete", s.handleGitTurnCheckpointDelete)
+		api.POST("/git/turn-changes/compare", s.handleGitTurnCheckpointCompare)
+		api.POST("/git/turn-changes/export", s.handleGitTurnCheckpointExport)
+		api.POST("/git/turn-changes/archive", s.handleGitTurnCheckpointArchive)
+		api.GET("/git/turn-changes/scopes", s.handleGitTurnCheckpointScopes)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -235,13 +283,27 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Utility agent routes
-	auxHandler := utility.NewHandler(s.cfg.WorkDir, s.logger.Zap())
+	auxHandler := utility.NewHandler(s.cfg.HomeDir, append([]string{s.cfg.WorkDir}, s.cfg.WorkspaceSourceRoots...), s.logger.Zap())
+	if err := s.procMgr.RegisterInstanceCleanupHook(auxHandler.Close); err != nil {
+		s.logger.Error("failed to register utility cleanup hook", zap.Error(err))
+		if closeErr := auxHandler.Close(); closeErr != nil {
+			s.logger.Error("failed to close utility resources", zap.Error(closeErr))
+		}
+	}
+	auxHandler.SetInstanceID(s.cfg.InstanceID)
+	auxHandler.SetControlAuthorization(func(c *gin.Context) bool { return c.GetBool(authenticatedControlContextKey) })
 	auxHandler.RegisterRoutes(api)
 
 	// MCP routes (if MCP server is configured)
 	if s.mcpServer != nil {
-		s.mcpServer.RegisterRoutes(s.router)
+		nativeRoutes := gin.IRouter(s.router)
+		if s.cfg.NativeMCPRoutePrefix != "" {
+			nativeRoutes = s.router.Group(s.cfg.NativeMCPRoutePrefix)
+		}
+		s.mcpServer.RegisterRoutes(nativeRoutes)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/builtin-binding", s.handlePrepareBuiltinMCP)
+		api.GET("/mcp/builtin-binding", func(c *gin.Context) { c.JSON(http.StatusOK, s.mcpServer.Profile()) })
 		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 		api.PUT("/mcp/plugin-tools", s.handleSetPluginTools)
 	}
@@ -356,7 +418,12 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	// ModeExternal stays rejected on purpose: it belongs to the backend's own
 	// MCP endpoint for external coding agents, and no launch path can emit it.
 	if !mcpmode.IsInstanceMode(req.Mode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
+		return
+	}
+	current := s.mcpServer.Profile()
+	if current.BuiltinPackages != nil && mcpprofile.Legacy(req.Mode, false, nil).Surface != current.Surface {
+		c.JSON(http.StatusForbidden, gin.H{"error": "built-in MCP surface is bound until the next process start"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
@@ -393,15 +460,20 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	AgentStatus string                 `json:"agent_status"`
-	ProcessInfo map[string]interface{} `json:"process_info"`
-	Uptime      string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth          `json:"delivery_health"`
+	RuntimeStorage *streams.RuntimeStorageSnapshot `json:"runtime_storage,omitempty"`
+	AgentStatus    string                          `json:"agent_status"`
+	ProcessInfo    map[string]interface{}          `json:"process_info"`
+	Uptime         string                          `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
+	runtimeStorage := s.procMgr.CachedRuntimeStorage()
 	c.JSON(http.StatusOK, StatusResponse{
-		AgentStatus: string(s.procMgr.Status()),
-		ProcessInfo: s.procMgr.GetProcessInfo(),
+		AgentStatus:    string(s.procMgr.Status()),
+		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		RuntimeStorage: runtimeStorage,
+		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }
 
@@ -424,18 +496,37 @@ func (s *Server) handleInfo(c *gin.Context) {
 
 // Start request/response
 type StartRequest struct {
-	// Future: could add options like custom command, env overrides
+	Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation,omitempty"`
 }
 
 type StartResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Command string `json:"command,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
+	Command           string `json:"command,omitempty"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
+	Error             string `json:"error,omitempty"`
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	if err := s.procMgr.Start(c.Request.Context()); err != nil {
+	var req StartRequest
+	if c.Request.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(c.Request.Body, 16<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, StartResponse{Success: false, Error: "invalid start request"})
+			return
+		}
+	}
+	var processGeneration uint64
+	var err error
+	if req.Preparation != nil {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.AbortWithStatusJSON(http.StatusForbidden, StartResponse{Success: false, Error: "authenticated control is required for managed runtime preparation"})
+			return
+		}
+		processGeneration, err = s.procMgr.StartWithManagedRuntimePreparation(c.Request.Context(), *req.Preparation)
+	} else {
+		processGeneration, err = s.procMgr.StartWithGeneration(c.Request.Context())
+	}
+	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
 			Success: false,
@@ -445,21 +536,36 @@ func (s *Server) handleStart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, StartResponse{
-		Success: true,
-		Message: "agent started",
-		Command: s.procMgr.GetFinalCommand(),
+		Success:           true,
+		Message:           "agent started",
+		Command:           s.procMgr.GetFinalCommand(),
+		ProcessGeneration: processGeneration,
 	})
 }
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	Command         string            `json:"command"`
-	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs      `json:"continue_args"`
-	Env             map[string]string `json:"env,omitempty"`
-	ReplaceEnv      bool              `json:"replace_env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
+	OpenCodeRuntime opencode.Runtime   `json:"opencode_runtime,omitzero"`
+	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Command         string             `json:"command"`
+	AgentArgs       optionalArgs       `json:"agent_args"`
+	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs       `json:"continue_args"`
+	Env             map[string]string  `json:"env,omitempty"`
+	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	PreferACPV2     bool               `json:"prefer_acp_v2,omitempty"`
+	// ProjectMCPDelivery carries execution-bound project-file delivery
+	// evidence. It is trusted only on an authenticated control request and is
+	// validated against this instance before accepted configuration changes.
+	ProjectMCPDelivery *agentctltypes.ProjectMCPDelivery `json:"project_mcp_delivery,omitempty"`
+	// InstallContext carries authenticated installer provenance for reusable
+	// managed npm repairs. Nil disables reuse for this configuration.
+	InstallContext *agentctltypes.ManagedRuntimeInstallContext `json:"install_context,omitempty"`
+	// ApprovalPolicy is accepted and ignored. It was never consulted by any
+	// code path; the field remains so an older backend configuring a newer
+	// agentctl still succeeds. Permission auto-approval travels on
+	// CreateInstanceRequest.AutoApprovePermissions.
+	ApprovalPolicy string `json:"approval_policy,omitempty"`
 }
 
 type optionalArgs struct {
@@ -483,8 +589,32 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
 			Success: false,
-			Error:   "invalid request: " + err.Error(),
+			Error:   "invalid agent configuration",
 		})
+		return
+	}
+
+	if !req.LaunchWrapper.IsZero() {
+		if !c.GetBool(authenticatedControlContextKey) {
+			c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for launch wrappers"})
+			return
+		}
+		if !req.AgentArgs.Present || req.LaunchWrapper.Validate() != nil {
+			c.JSON(http.StatusBadRequest, AgentConfigureResponse{Error: "invalid launch wrapper configuration"})
+			return
+		}
+	}
+
+	if req.ProjectMCPDelivery != nil && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for project MCP delivery"})
+		return
+	}
+	if req.PreferACPV2 && !c.GetBool(authenticatedControlContextKey) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated control is required for ACP v2 preview"})
+		return
+	}
+	if req.InstallContext != nil && (!c.GetBool(authenticatedControlContextKey) || !req.InstallContext.Valid()) {
+		c.JSON(http.StatusForbidden, AgentConfigureResponse{Error: "authenticated installer provenance is required for reusable repairs"})
 		return
 	}
 
@@ -496,14 +626,10 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	var configureErr error
-	if req.ReplaceEnv {
-		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
-	} else {
-		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
-	}
+	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.PreferACPV2, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
 	if configureErr != nil {
-		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))
+		s.logger.Error("failed to configure agent",
+			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
 			Error:   configureErr.Error(),
@@ -511,7 +637,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	s.logger.Info("agent configured", zap.String("command", req.Command), zap.String("approval_policy", req.ApprovalPolicy))
+	s.logger.Info("agent configured")
 	c.JSON(http.StatusOK, AgentConfigureResponse{
 		Success: true,
 		Message: "agent configured",

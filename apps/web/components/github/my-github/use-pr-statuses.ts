@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { githubResourceKey } from "@/lib/github/host";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getPRStatusesBatch, type PRStatusRef } from "@/lib/api/domains/github-api";
 import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
 
-export function prStatusKey(owner: string, repo: string, number: number): string {
-  return `${owner}/${repo}#${number}`;
+export function prStatusKey(
+  owner: string,
+  repo: string,
+  number: number,
+  host = "github.com",
+): string {
+  return githubResourceKey(owner, repo, number, host);
 }
 
 // usePRStatuses fetches PR review/checks/mergeable summaries in a single
@@ -17,17 +23,15 @@ export function usePRStatuses(
   workspaceId: string | null,
   prs: GitHubPR[],
 ): Map<string, GitHubPRStatus> {
-  const [statuses, setStatuses] = useState<Map<string, GitHubPRStatus>>(new Map());
-  // `completedKey` is set only after a fetch resolves (success or failure), so
-  // a transient error can be retried on the next render, and React Strict
-  // Mode's intentional unmount+remount doesn't cause the batch fetch to be
-  // skipped — the first mount's cleanup fires before the response lands, so
-  // completedKey stays empty and the second mount retries.
+  const emptyStatuses = useMemo(() => new Map<string, GitHubPRStatus>(), []);
+  const [result, setResult] = useState(() => ({ key: "", statuses: emptyStatuses }));
+  // Only successful, uncancelled reads record a completed key. StrictMode's
+  // cancelled first effect therefore cannot suppress the second effect's read.
   const completedKey = useRef<string>("");
 
   const key =
     workspaceId && prs.length > 0
-      ? `${workspaceId}:${prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",")}`
+      ? `${workspaceId}:${prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number, p.github_host)).join(",")}`
       : "";
 
   // We deliberately depend only on `key`: `prs` gets a new array identity on
@@ -38,7 +42,7 @@ export function usePRStatuses(
   useEffect(() => {
     if (key === "") {
       completedKey.current = "";
-      setStatuses(new Map());
+      setResult({ key: "", statuses: emptyStatuses });
       return;
     }
     if (completedKey.current === key) return;
@@ -46,20 +50,21 @@ export function usePRStatuses(
       owner: p.repo_owner,
       repo: p.repo_name,
       number: p.number,
+      ...(p.github_host ? { expected_host: p.github_host } : {}),
     }));
     let cancelled = false;
     getPRStatusesBatch(workspaceId!, refs)
       .then((resp) => {
         if (cancelled) return;
         completedKey.current = key;
-        setStatuses(new Map(Object.entries(resp.statuses ?? {})));
+        setResult({ key, statuses: new Map(Object.entries(resp.statuses ?? {})) });
       })
       .catch(() => {
         if (cancelled) return;
-        // Leave completedKey untouched so the next render retries; only
-        // clear the currently-rendered statuses if they belong to a now-stale
-        // key, so a transient error doesn't wipe otherwise-useful badges.
-        setStatuses((prev) => (prev.size === 0 ? prev : new Map()));
+        // Failure clears retained summaries without recording a completed key.
+        setResult((prev) =>
+          prev.statuses.size === 0 ? prev : { key: "", statuses: emptyStatuses },
+        );
       });
     return () => {
       cancelled = true;
@@ -67,5 +72,5 @@ export function usePRStatuses(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, workspaceId]);
 
-  return statuses;
+  return key !== "" && result.key === key ? result.statuses : emptyStatuses;
 }

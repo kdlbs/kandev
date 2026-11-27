@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -54,17 +53,19 @@ type docRepo interface {
 // DocumentService provides task document business logic including CRUD,
 // revision management, revert, and attachment handling.
 type DocumentService struct {
-	repo           docRepo
-	logger         *logger.Logger
-	coalesceWindow time.Duration
+	repo                 docRepo
+	logger               *logger.Logger
+	coalesceWindow       time.Duration
+	createAttachmentFile func(string) (documentAttachmentFile, error)
 }
 
 // NewDocumentService creates a new DocumentService.
 func NewDocumentService(repo docRepo, log *logger.Logger) *DocumentService {
 	return &DocumentService{
-		repo:           repo,
-		logger:         log.WithFields(zap.String("component", "document-service")),
-		coalesceWindow: defaultDocCoalesceWindow,
+		repo:                 repo,
+		logger:               log.WithFields(zap.String("component", "document-service")),
+		coalesceWindow:       defaultDocCoalesceWindow,
+		createAttachmentFile: createDocumentAttachmentFile,
 	}
 }
 
@@ -323,22 +324,12 @@ func (s *DocumentService) UploadAttachment(
 	if strings.ContainsAny(ext, "/\\\x00") {
 		return nil, ErrInvalidPathComponent
 	}
-	// filepath.Base strips any directory components from the user-supplied
-	// taskID / key before they enter filepath.Join — both as a defense in
-	// depth alongside safePathComponent and as the canonical pattern
-	// CodeQL recognises as a path-injection sanitiser.
-	safeTaskID := filepath.Base(taskID)
-	safeKey := filepath.Base(key)
-	dir := filepath.Join(basePath, "attachments", safeTaskID)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, fmt.Errorf("create attachment dir: %w", err)
-	}
-	diskPath := filepath.Join(dir, safeKey+ext)
-	if err := os.WriteFile(diskPath, data, 0o640); err != nil {
-		return nil, fmt.Errorf("write attachment file: %w", err)
-	}
-
 	existing, err := s.repo.GetDocument(ctx, taskID, key)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(basePath, "attachments", filepath.Base(taskID))
+	diskPath, err := s.prepareAttachmentFile(dir, data)
 	if err != nil {
 		return nil, err
 	}
@@ -361,15 +352,9 @@ func (s *DocumentService) UploadAttachment(
 		head.CreatedAt = existing.CreatedAt
 	}
 
-	// Attachments have no revision history — upsert only.
-	if existing == nil {
-		if err := s.repo.CreateDocument(ctx, head); err != nil {
-			return nil, fmt.Errorf("create attachment document: %w", err)
-		}
-	} else {
-		if err := s.repo.UpdateDocument(ctx, head); err != nil {
-			return nil, fmt.Errorf("update attachment document: %w", err)
-		}
+	if err := s.publishAttachment(ctx, head, existing == nil); err != nil {
+		s.logger.Warn("attachment publication failed; candidate retained", zap.Error(err))
+		return nil, err
 	}
 	return head, nil
 }

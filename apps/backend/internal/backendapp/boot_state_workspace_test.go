@@ -505,3 +505,30 @@ func TestOfficeWorkspacesLegacyCookiePrecedence(t *testing.T) {
 		})
 	}
 }
+
+// A route that boots one workspace list (task detail, settings) carries the
+// same access projection as the home boot: a copilot gate that reads scopes
+// off the active workspace sees them on first paint.
+func TestAddWorkspaceStateCarriesTheAccessProjection(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	if err := harness.taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-access", Name: "Access"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	builder := bootStateBuilder{p: routeParams{taskSvc: harness.taskSvc, userCtrl: harness.userCtrl}}
+	activeID := "ws-access"
+	state := map[string]any{}
+
+	builder.addWorkspaceState(ctx, state, &activeID)
+
+	block, _ := state["workspaces"].(map[string]any)
+	items, _ := block["items"].([]map[string]any)
+	if len(items) == 0 {
+		t.Fatalf("workspaces block items = %#v, want mapped items", block["items"])
+	}
+	for _, key := range []string{"scopes", "viewer_role"} {
+		if _, ok := items[0][key]; !ok {
+			t.Errorf("workspace item has no %q key: %v", key, items[0])
+		}
+	}
+}

@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { releaseAnimation } from "@kandev/ui/animation-utils";
 import { useChatMotion } from "@/hooks/use-chat-motion";
 import { getNewArrivalIds, type ArrivalSnapshot } from "./chat-motion-state";
 
@@ -77,7 +78,7 @@ export function ChatMotionItem({
       ],
       { duration: remaining, easing: "ease-out" },
     );
-    return () => animation.cancel();
+    return () => releaseAnimation(animation);
   }, [arrival, context.live]);
   return (
     <div ref={ref} data-chat-motion-item={messageId}>

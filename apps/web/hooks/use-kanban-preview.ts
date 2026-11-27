@@ -7,12 +7,16 @@ import { PREVIEW_PANEL } from "@/lib/settings/constants";
 interface UseKanbanPreviewOptions {
   onClose?: () => void;
   initialTaskId?: string;
+  /** Another panel holds the right-hand slot; the saved preview stays intact. */
+  displaced?: boolean;
 }
 
 export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   // Always start with default values to avoid hydration mismatch
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpenRaw, setIsOpen] = useState(false);
+  const [displaced, setDisplaced] = useState(options.displaced ?? false);
+  const isOpen = isOpenRaw && !displaced;
   const [previewWidthPx, setPreviewWidthPx] = useState<number>(PREVIEW_PANEL.DEFAULT_WIDTH_PX);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
@@ -46,14 +50,14 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
 
   // Persist state to localStorage
   useEffect(() => {
-    setKanbanPreviewState({ isOpen });
-  }, [isOpen]);
+    setKanbanPreviewState({ isOpen: isOpenRaw });
+  }, [isOpenRaw]);
 
   useEffect(() => {
-    if (isOpen && previewWidthPx > 0) {
+    if (isOpenRaw && previewWidthPx > 0) {
       setKanbanPreviewState({ previewWidthPx });
     }
-  }, [isOpen, previewWidthPx]);
+  }, [isOpenRaw, previewWidthPx]);
 
   useEffect(() => {
     setKanbanPreviewState({ selectedTaskId });
@@ -62,6 +66,7 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
   const open = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
     setIsOpen(true);
+    setDisplaced(false);
   }, []);
 
   const close = useCallback(() => {
@@ -85,6 +90,7 @@ export function useKanbanPreview(options: UseKanbanPreviewOptions = {}) {
     open,
     close,
     toggle,
+    displace: setDisplaced,
     setSelectedTaskId,
     updatePreviewWidth,
     containerRef,

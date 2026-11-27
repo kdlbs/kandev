@@ -72,6 +72,15 @@ Automatic port selection only applies when no port was requested, and `KANDEV_BA
 make dev PORT=38430 WEB_PORT=37430
 ```
 
+On macOS, run `make desktop-dev` to open the native Tauri shell with its bundled
+runtime. The backend uses the checkout's `.kandev-dev/` home, database at
+`.kandev-dev/data/kandev.db`, logs under `.kandev-dev/logs/`, and the dev
+runtime profile. This shares state with `make dev`, so run only one of these
+commands at a time. The existing home-owner error is shown if another process
+already uses that state. The desktop command builds its runtime before launch;
+restart it after changing the backend or web application because those parts do
+not live reload in the shell.
+
 `make dev-web` starts only Vite on its fixed development port; it has no live API by itself. `make dev-backend` starts only the backend with the normal production-profile home unless you override it. For an intentionally isolated backend-only run:
 
 ```bash
@@ -142,7 +151,12 @@ The complete source and Landing build contract is in the [public docs contributi
 - Persistence changes include fresh-schema and upgrade-path tests.
 - Credentials, external text, shell arguments, URLs, paths, and logs respect their trust boundary.
 - Exact automated and manual checks are recorded; skipped suites have a reason.
-- UI changes include Playwright coverage plus screenshots or a short recording.
+- UI candidate PRs must include a fresh screenshot as an HTTPS Markdown image
+  with descriptive alt text under `## Screenshots`. This rule also applies to
+  fork PRs. The check verifies presence. Reviewers assess freshness, visibility,
+  relevance, and viewport coverage. Ask a maintainer to apply
+  `no-screenshots-allow` only for a nonvisual path match or an explained capture
+  limitation. Keep the Playwright coverage required for UI changes.
 - Generated artifacts, local databases, recordings, and unrelated formatting are absent.
 - You understand and can explain all submitted code, including agent-generated code.
 

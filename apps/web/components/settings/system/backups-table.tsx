@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -205,13 +205,16 @@ async function waitForCreatedBackup(
   reload: () => Promise<SnapshotInfo[]>,
   previousNames: Set<string>,
   t: TFunction,
+  reloadAfterWrite: () => Promise<SnapshotInfo[]> = reload,
 ): Promise<void> {
   const deadline = Date.now() + BACKUP_CREATE_TIMEOUT_MS;
+  let read = reloadAfterWrite;
   while (Date.now() < deadline) {
-    const items = await reload();
+    const items = await read();
     if (items.some((item) => item.kind === "manual" && !previousNames.has(item.name))) {
       return;
     }
+    read = reload;
     await sleep(BACKUP_CREATE_POLL_MS);
   }
   // This message is caught and rendered into the card's error line, so it is
@@ -219,41 +222,69 @@ async function waitForCreatedBackup(
   throw new Error(t("system:backupsCreateTimeout", { seconds: BACKUP_CREATE_TIMEOUT_MS / 1_000 }));
 }
 
-export function BackupsTable() {
-  const { t } = useTranslation();
-  const { backups, loaded, isLoading, reload } = useBackups();
-  // Creating, downloading, restoring, and deleting a snapshot are admin-only
-  // on the backend: a snapshot is a copy of the whole multi-user database.
-  // Members keep the read-only listing.
-  const isAdmin = useIsAdmin();
+function useBackupMutationState(query: ReturnType<typeof useBackups>, t: TFunction) {
   const [creating, setCreating] = useState(false);
-  const [restoreName, setRestoreName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setCreating(false);
+    setError(null);
+  }, [query.scopeGeneration, query.scopeIdentityKey]);
+
   const onCreate = async () => {
+    const writerScope = query.captureScope();
     setCreating(true);
     setError(null);
-    const previousNames = new Set(backups.map((backup) => backup.name));
+    const previousNames = new Set(query.backups.map((backup) => backup.name));
     try {
       await createBackup();
-      await waitForCreatedBackup(reload, previousNames, t);
+      if (!query.isCurrentScope(writerScope)) return;
+      await waitForCreatedBackup(
+        () => query.reloadForScope(writerScope),
+        previousNames,
+        t,
+        () => query.reloadAfterWrite(writerScope),
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("system:backupsCreateFailed"));
+      if (query.isCurrentScope(writerScope) && !isObsoleteScopeError(err)) {
+        setError(err instanceof Error ? err.message : t("system:backupsCreateFailed"));
+      }
     } finally {
-      setCreating(false);
+      if (query.isCurrentScope(writerScope)) setCreating(false);
     }
   };
 
   const onDelete = async (name: string) => {
+    const writerScope = query.captureScope();
     setError(null);
     try {
       await deleteBackup(name);
-      await reload();
+      if (!query.isCurrentScope(writerScope)) return;
+      await query.reloadAfterWrite(writerScope);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("system:backupsDeleteFailed"));
+      if (query.isCurrentScope(writerScope) && !isObsoleteScopeError(err)) {
+        setError(err instanceof Error ? err.message : t("system:backupsDeleteFailed"));
+      }
     }
   };
 
+  return { creating, error, onCreate, onDelete };
+}
+
+function isObsoleteScopeError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+export function BackupsTable() {
+  const { t } = useTranslation();
+  const query = useBackups();
+  const { backups, loaded, isLoading } = query;
+  // Creating, downloading, restoring, and deleting a snapshot are admin-only
+  // on the backend: a snapshot is a copy of the whole multi-user database.
+  // Members keep the read-only listing.
+  const isAdmin = useIsAdmin();
+  const { creating, error, onCreate, onDelete } = useBackupMutationState(query, t);
+  const [restoreName, setRestoreName] = useState<string | null>(null);
   const items = backups;
 
   return (

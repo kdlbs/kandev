@@ -5,14 +5,19 @@ import {
   type TaskState,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { effectiveTaskPendingAction } from "../task-select-helpers";
 import { taskPRInfoFromSummary } from "../task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
-import { taskColorFacts } from "@/lib/sidebar/task-color-projection";
-import { resolveAutomaticTaskColor } from "@/lib/sidebar/task-color-rules";
+import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -25,7 +30,8 @@ export type SheetItemCtx = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
-  pendingArchiveTaskIds?: ReadonlySet<string>;
+  manualColors?: Record<string, TaskColor | null>;
+  pendingRemovalTaskIds?: ReadonlySet<string>;
 };
 
 const EMPTY_REPOSITORIES_BY_ID = new Map<string, Repository>();
@@ -58,6 +64,26 @@ function sheetLaunchQueue(task: KanbanState["tasks"][number]) {
   return task.statusSummary?.launch_queue;
 }
 
+function sheetLastActivity(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.last_activity_at ?? task.updatedAt ?? task.createdAt;
+}
+
+function sheetHasRunningSession(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.has_running_session;
+}
+
+function sheetWaitStatus(task: KanbanState["tasks"][number]) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -66,6 +92,7 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     sessionState: hasSummary
       ? summary?.primary_session?.state
       : (task.primarySessionState as TaskSessionState | undefined),
+    hasRunningSession: sheetHasRunningSession(task),
     foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     repositoryPath: sheetRepositoryPath(task, ctx),
     repositories: resolveTaskRepositorySlugs(task.repositories, ctx.repositoryPathsById),
@@ -78,12 +105,20 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
     prInfo: taskPRInfoFromSummary(summary),
-    agentErrorMessage: statusSummaryActiveErrorPreview(
+    agentErrorMessage: statusSummaryRowErrorPreview(
       summary,
       ctx.acknowledgedAgentErrors,
       ctx.dismissedAgentErrors,
     ),
+    turnError: sheetTurnError(summary),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
+}
+
+function sheetTurnError(summary: Parameters<typeof statusSummaryTurnError>[0]) {
+  const value = statusSummaryTurnError(summary);
+  if (!value) return null;
+  return { stamp: value.stamp, preview: value.preview, sessionId: value.session_id };
 }
 
 export function toSheetItem(
@@ -91,46 +126,50 @@ export function toSheetItem(
   ctx: SheetItemCtx,
 ) {
   const status = sheetStatus(task, ctx);
-  const facts = taskColorFacts(task, {
+  const color = sidebarTaskColorDisplay(task, {
     workspaceId: ctx.workspaceId,
     repositoriesById: ctx.repositoriesById ?? EMPTY_REPOSITORIES_BY_ID,
     stepColorById: ctx.stepColorById ?? EMPTY_STEP_COLORS,
+    settings: ctx.automaticColorSettings,
+    manualColor: ctx.manualColors?.[task.id],
   });
-  const automaticColor = ctx.automaticColorSettings
-    ? resolveAutomaticTaskColor(ctx.automaticColorSettings, facts)
-    : null;
   return {
     id: task.id,
     title: task.title,
     autopilot: task.autopilot,
     priority: task.priority,
+    createdAt: task.createdAt,
+    lastActivityAt: sheetLastActivity(task),
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     ...status,
     interrupted: task.interrupted,
     description: task.description,
+    flagNote: task.flagNote,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId,
     workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
-    workspaceId: facts.workspaceId,
+    workspaceId: color.facts.workspaceId,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
-    workflowStepColor: facts.workflowStepColor,
+    workflowStepColor: color.facts.workflowStepColor,
     isArchived: task.isArchived === true,
-    isPendingArchive: !task.isArchived && ctx.pendingArchiveTaskIds?.has(task.id) === true,
+    isPendingRemoval: ctx.pendingRemovalTaskIds?.has(task.id) === true,
     isFromOffice: task.isFromOffice,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     repositoryLinks: task.repositories,
-    repositoryRuleIdentities: facts.repositories,
-    automaticColor: automaticColor?.color,
-    automaticColorSource: automaticColor?.source,
+    repositoryRuleIdentities: color.facts.repositories,
+    automaticColor: color.automaticColor?.color,
+    automaticColorSource: color.automaticColor?.source,
+    effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
+    ...sheetWaitStatus(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -18,10 +19,15 @@ type sessionUpdater interface {
 // emitter wraps an ACP connection and session ID to provide
 // convenient methods for streaming agent updates.
 type emitter struct {
-	ctx        context.Context
-	conn       sessionUpdater
-	sid        acp.SessionId
-	mcpServers map[string]mcpServerDef
+	ctx                  context.Context
+	conn                 sessionUpdater
+	sid                  acp.SessionId
+	mcpServers           map[string]mcpServerDef
+	registerDetachedWork func(acp.SessionId, context.CancelFunc) func()
+	supportsCompaction   bool
+	// scenarioArgs carries the text after `/e2e:<name>` for scenarios that
+	// accept per-session arguments. Empty for ordinary predefined scenarios.
+	scenarioArgs string
 }
 
 // callMCPTool invokes an MCP tool through the server definitions attached to
@@ -110,12 +116,29 @@ func (e *emitter) startTool(id acp.ToolCallId, title string, kind acp.ToolKind, 
 
 // completeTool marks a tool call as completed with output.
 func (e *emitter) completeTool(id acp.ToolCallId, output any) {
+	e.completeToolWithMeta(id, acp.ToolCallStatusCompleted, output, nil)
+}
+
+// completeToolWithMeta marks a tool call terminal with output and _meta. The
+// acp-go-sdk has no WithUpdateMeta option, so the option closure sets it.
+func (e *emitter) completeToolWithMeta(
+	id acp.ToolCallId,
+	status acp.ToolCallStatus,
+	output any,
+	meta map[string]any,
+) {
+	opts := []acp.ToolCallUpdateOpt{
+		acp.WithUpdateStatus(status),
+		acp.WithUpdateRawOutput(output),
+	}
+	if meta != nil {
+		opts = append(opts, func(update *acp.SessionToolCallUpdate) {
+			update.Meta = meta
+		})
+	}
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
-		Update: acp.UpdateToolCall(id,
-			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
-			acp.WithUpdateRawOutput(output),
-		),
+		Update:    acp.UpdateToolCall(id, opts...),
 	})
 }
 
@@ -197,6 +220,64 @@ func (e *emitter) startMonitorTool(id acp.ToolCallId, taskID, command string) {
 	})
 }
 
+func (e *emitter) startClaudeControlTool(id acp.ToolCallId, title, toolName string, input any) {
+	withMeta := func(tc *acp.SessionUpdateToolCall) {
+		tc.Meta = map[string]any{"claudeCode": map[string]any{"toolName": toolName}}
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.StartToolCall(id, title,
+			acp.WithStartKind(acp.ToolKindOther),
+			acp.WithStartStatus(acp.ToolCallStatusPending),
+			acp.WithStartRawInput(input),
+			withMeta,
+		),
+	})
+}
+
+func (e *emitter) completeClaudeTaskStopTool(id acp.ToolCallId, taskID string) {
+	output := map[string]any{
+		"task_id":   taskID,
+		"task_type": "local_bash",
+		"message":   "Successfully stopped task: " + taskID,
+	}
+	encodedOutput, _ := json.Marshal(output)
+	stopMeta := func(toolResponse any) map[string]any {
+		claudeCode := map[string]any{"toolName": "TaskStop"}
+		if toolResponse != nil {
+			claudeCode["toolResponse"] = toolResponse
+		}
+		return map[string]any{"claudeCode": claudeCode}
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(nil)
+				update.RawInput = map[string]any{"task_id": taskID}
+			},
+		),
+	})
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(output)
+			},
+		),
+	})
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			func(update *acp.SessionToolCallUpdate) {
+				update.Meta = stopMeta(nil)
+				update.RawOutput = string(encodedOutput)
+			},
+		),
+	})
+}
+
 // toMetaMap is a small adapter so the local meta builders can return `any`
 // (matching the kandev-side recognizer signature) while the SDK's Meta field
 // requires `map[string]any` specifically.
@@ -248,6 +329,7 @@ const (
 	subagentKeyStatus       = "status"
 	subagentStatusCompleted = "completed"
 	subagentStatusAsync     = "async_launched"
+	subagentKeyName         = "name"
 	subagentKeyDescription  = "description"
 	subagentKeyPrompt       = "prompt"
 	subagentKeySubagentType = "subagent_type"
@@ -312,7 +394,7 @@ func subagentClaudeMetaWithResponse(r subagentResult) any {
 
 // startSubagentTool emits the initial subagent tool_call (status=pending) in
 // claude-agent-acp's wire shape: title "Task", kind Other, the Agent meta
-// marker, and rawInput carrying description/prompt/subagent_type.
+// marker, and rawInput carrying name/description/prompt/subagent_type.
 func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, subagentType string) {
 	withStartMeta := func(meta any) acp.ToolCallStartOpt {
 		return func(tc *acp.SessionUpdateToolCall) { tc.Meta = toMetaMap(meta) }
@@ -323,6 +405,7 @@ func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, suba
 			acp.WithStartKind(acp.ToolKindOther),
 			acp.WithStartStatus(acp.ToolCallStatusPending),
 			acp.WithStartRawInput(map[string]any{
+				subagentKeyName:         "repo-explorer",
 				subagentKeyDescription:  description,
 				subagentKeyPrompt:       prompt,
 				subagentKeySubagentType: subagentType,
@@ -457,4 +540,17 @@ func (e *emitter) requestPermission(toolCallID acp.ToolCallId, title string, kin
 		return false
 	}
 	return resp.Outcome.Selected != nil && string(resp.Outcome.Selected.OptionId) == "allow"
+}
+
+// completeToolWithContent completes a tool call with both raw output and an
+// explicit rich content carrier. Use it to reproduce providers whose typed
+// result and duplicate content carriers carry independent display data.
+func (e *emitter) completeToolWithContent(id acp.ToolCallId, output any, text string) {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
+			acp.WithUpdateRawOutput(output),
+			acp.WithUpdateContent([]acp.ToolCallContent{acp.ToolContent(acp.TextBlock(text))})),
+	})
 }

@@ -124,11 +124,9 @@ test.describe("ssh sessions-endpoint contract", () => {
     expect(row.remote_task_dir).toMatch(/\/tasks\/[^/]+$/);
   });
 
-  // G4 — unknown executor id returns an empty list, not 404.
-  test("unknown executor id returns empty array", async ({ apiClient }) => {
-    const sessions = await apiClient.listSSHSessions("does-not-exist");
-    expect(Array.isArray(sessions)).toBe(true);
-    expect(sessions.length).toBe(0);
+  // G4 — missing and inaccessible executors use the same not-found response.
+  test("unknown executor id returns not found", async ({ apiClient }) => {
+    await expect(apiClient.listSSHSessions("does-not-exist")).rejects.toThrow("failed (404)");
   });
 
   // G5 — uptime_seconds increases on subsequent polls of the same session.

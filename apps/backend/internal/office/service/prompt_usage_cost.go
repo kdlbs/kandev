@@ -35,6 +35,9 @@ type costResolution struct {
 // and cost_source=unpriced already carries the second one — see
 // models.CostContractVersion's contract history.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
+	if data.Usage.PriceSuppressed {
+		return costResolution{estimated: data.Usage.Estimated, source: models.CostSourceUnpriced}
+	}
 	if data.Usage.ProviderReportedCostPresent || data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
 			costSubcents: data.Usage.ProviderReportedCostSubcents,

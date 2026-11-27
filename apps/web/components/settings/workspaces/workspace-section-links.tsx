@@ -8,7 +8,6 @@ import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { listRepositories } from "@/lib/api/domains/workspace-api";
 import { listSecrets } from "@/lib/api/domains/secrets-api";
 import { listWorkspaceCanvases } from "@/lib/api/domains/canvas-api";
-import { getAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-auth-api";
 import { getGitLabConfig } from "@/lib/api/domains/gitlab-api";
 import { getJiraConfig } from "@/lib/api/domains/jira-api";
@@ -38,7 +37,6 @@ export type SectionCounts = {
 // config GETs and workspaces are few.
 async function countConfiguredIntegrations(workspaceId: string): Promise<number> {
   const probes: Array<Promise<boolean>> = [
-    getAzureDevOpsConfig(workspaceId).then((config) => config !== null),
     fetchGitHubStatus(workspaceId).then((status) => !!status.authenticated),
     getGitLabConfig({ workspaceId }).then((config) => config !== null),
     getJiraConfig({ workspaceId }).then((config) => config !== null),
@@ -122,8 +120,11 @@ type SectionStat = {
 
 // Name and mark come from the tab table, so a tile and the tab it opens cannot
 // end up labelled or marked differently.
-function workspaceSectionStats(canvasesEnabled: boolean): SectionStat[] {
-  return getWorkspaceSettingsTabs(canvasesEnabled)
+function workspaceSectionStats(
+  canvasesEnabled: boolean,
+  coordinatorEnabled: boolean,
+): SectionStat[] {
+  return getWorkspaceSettingsTabs(canvasesEnabled, coordinatorEnabled)
     .filter(({ tab }) => tab !== "overview")
     .map(({ tab }) => ({ key: tab as keyof SectionCounts, tab }));
 }
@@ -144,7 +145,8 @@ export function WorkspaceSectionStats({
 }) {
   const { t } = useTranslation();
   const canvasesEnabled = useFeature("canvases");
-  const stats = workspaceSectionStats(canvasesEnabled);
+  const coordinatorEnabled = useFeature("coordinator");
+  const stats = workspaceSectionStats(canvasesEnabled, coordinatorEnabled);
 
   return (
     <div

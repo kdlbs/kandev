@@ -11,8 +11,14 @@ import {
 } from "./changes-panel-helpers";
 import { useChangesPanelData, buildChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelBody } from "./changes-panel-body";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
+import { usePanelActive } from "@/hooks/use-panel-active";
 import {
   consumeContributionComparisonRequest,
   useContributionComparisonRequest,
@@ -22,9 +28,13 @@ import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-c
 export { filterUnpushedCommits, mergeCommits, separateCommitHistories };
 
 type ChangesPanelProps = {
+  panelId: string;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
 };
@@ -32,6 +42,8 @@ type ChangesPanelProps = {
 const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const data = useChangesPanelData();
+  const isVisible = usePanelActive(props.panelId);
+  useSessionGitRefresh(data.activeSessionId, isVisible);
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,
@@ -65,6 +77,9 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   return (
     <PanelRoot className="@container/changes-panel" data-testid="changes-panel">
       <ChangesPanelHeader
+        refreshStatus={data.refreshStatus}
+        hasPriorData={data.gitStatusPresentation.hasPriorData}
+        failedRepositories={data.gitStatusPresentation.failedRepositories}
         hasChanges={data.git.hasChanges}
         hasCommits={data.git.hasCommits}
         hasPRFiles={data.hasPRFiles}

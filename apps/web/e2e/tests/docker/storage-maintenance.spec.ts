@@ -60,6 +60,61 @@ async function refreshStorageOverview(page: Page): Promise<void> {
   });
 }
 
+async function runStorageCleanup(page: Page): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let force = false;
+
+  while (Date.now() < deadline) {
+    const action = force
+      ? page.getByTestId("storage-run-anyway")
+      : page.getByTestId("storage-run-now");
+    await expect(action).toBeVisible();
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/v1/system/storage/run",
+    );
+    await action.click();
+    const response = await responsePromise;
+    const body = await response.json();
+
+    if (response.status() === 202) {
+      await expect(page.getByTestId("storage-run-now")).toHaveAttribute(
+        "data-job-state",
+        "succeeded",
+        { timeout: 60_000 },
+      );
+      return;
+    }
+
+    expect(response.status(), JSON.stringify(body)).toBe(409);
+    expect(body.busy_resources).toEqual(expect.any(Array));
+    await expect(page.getByTestId("storage-busy")).toBeVisible();
+    force = body.force_available === true;
+    if (!force) {
+      await expect
+        .poll(
+          async () => {
+            const response = await page.request.get(
+              new URL("/api/v1/system/storage/runs?limit=50", page.url()).toString(),
+            );
+            const { runs } = (await response.json()) as {
+              runs: Array<{ state: string }>;
+            };
+            return runs.some((run) => run.state === "queued" || run.state === "running");
+          },
+          {
+            timeout: 60_000,
+            message: "Wait for the active storage cleanup before retrying",
+          },
+        )
+        .toBe(false);
+    }
+  }
+
+  throw new Error("Storage cleanup remained busy and was not accepted within 60 seconds");
+}
+
 test.describe.serial("process-scoped container cleanup", () => {
   let previousTestContainer = "";
 
@@ -132,11 +187,7 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
     await expect(testPage.getByTestId("storage-resource-managed-containers")).toContainText(
       "2 managed containers",
     );
-    await testPage.getByTestId("storage-run-now").click();
-    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
-      "data-job-state",
-      "succeeded",
-    );
+    await runStorageCleanup(testPage);
     await expect.poll(() => dockerInspectExists(managed)).toBe(false);
     expect(dockerInspectExists(active)).toBe(true);
     expect(dockerInspectExists(unrelated)).toBe(true);

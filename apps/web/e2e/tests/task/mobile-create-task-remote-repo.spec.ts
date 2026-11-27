@@ -4,11 +4,12 @@ import { waitForFiniteAnimations } from "../../helpers/animations";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { switchToTerminalPanel, waitForShellReady } from "../terminal/mobile-terminal-helpers";
+import { makeGitEnv } from "../../helpers/git-helper";
+import { taskWorktreeGit, waitForTaskWorktree } from "../../helpers/empty-remote-repository";
 import {
   cleanupPRLinkForkLaunchFixture,
   createPRLinkForkLaunchFixture,
-  expectForkPRLaunchState,
+  expectForkPRLaunchMetadata,
   waitForForkPRInfo,
 } from "./pr-link-fork-launch-helpers";
 import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
@@ -209,9 +210,24 @@ test.describe("Create task Remote repo picker on mobile", () => {
       await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
       await expect(session.idleInput()).toBeVisible();
 
-      await switchToTerminalPanel(testPage);
-      await waitForShellReady(testPage);
-      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(created.id))?.status ?? null, {
+          timeout: 60_000,
+          message: "the mobile fork PR task worktree did not become ready",
+        })
+        .toBe("ready");
+      if (!fixture.repositoryId) throw new Error("fork launch fixture has no repository");
+      const worktreePath = await waitForTaskWorktree(apiClient, taskId, fixture.repositoryId);
+      const worktreeGit = taskWorktreeGit(worktreePath, makeGitEnv(backend.tmpDir));
+      expect(worktreeGit.exec("git branch --show-current").trim()).toBe(fixture.headBranch);
+      expect(worktreeGit.exec("git rev-parse HEAD").trim()).toBe(fixture.headOID);
+      expect(worktreeGit.exec("git rev-parse refs/remotes/origin/main").trim()).toBe(
+        fixture.targetOID,
+      );
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expectForkPRLaunchMetadata(apiClient, fixture, taskId);
     } finally {
       await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
     }
@@ -329,24 +345,6 @@ test.describe("Create task Remote repo picker on mobile", () => {
       status: "active",
     });
     await apiClient.configureGitLab(seedData.workspaceId);
-    await apiClient.mockAzureDevOpsSeed({
-      authenticated: true,
-      projects: [{ id: "project-1", name: "Platform", url: "https://dev.azure.com/acme/Platform" }],
-      repositories: [
-        {
-          id: "azure-repo-1",
-          name: "api",
-          projectId: "project-1",
-          projectName: "Platform",
-          defaultBranch: "refs/heads/main",
-          webUrl: "https://dev.azure.com/acme/Platform/_git/api",
-        },
-      ],
-    });
-    await apiClient.setAzureDevOpsConfig(seedData.workspaceId, {
-      organizationUrl: "https://dev.azure.com/acme",
-      pat: "azure-test-pat",
-    });
 
     await openRemotePicker(testPage);
     const providerTabs = testPage.getByTestId("task-repository-source-tabs");
@@ -354,9 +352,10 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expect(providerTabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
     const gitLabTab = providerTabs.getByRole("tab", { name: "GitLab" });
     await expect(gitLabTab).toBeVisible();
-    const azureTab = providerTabs.getByRole("tab", { name: "Azure DevOps" });
-    await expect(azureTab).toBeVisible();
-    const tabBoxes = await Promise.all([gitLabTab.boundingBox(), azureTab.boundingBox()]);
+    const sheet = testPage.getByTestId("mobile-repository-sheet-content");
+    await waitForFiniteAnimations(sheet);
+    const githubTab = providerTabs.getByRole("tab", { name: "GitHub" });
+    const tabBoxes = await Promise.all([githubTab.boundingBox(), gitLabTab.boundingBox()]);
     for (const tabBox of tabBoxes) {
       expect(tabBox).not.toBeNull();
       expect(tabBox!.height).toBeGreaterThanOrEqual(44);
@@ -365,12 +364,13 @@ test.describe("Create task Remote repo picker on mobile", () => {
       (element) => getComputedStyle(element).overflowX,
     );
     expect(["auto", "scroll"]).toContain(tabOverflow);
-    await gitLabTab.click();
+    await gitLabTab.tap();
     const option = testPage
       .getByTestId("task-repository-remote-option")
       .filter({ hasText: "kandev/sample" });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    await option.click();
+    await option.tap();
+    await expect(sheet).toBeHidden();
     await openRepositoryManagement(testPage);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "kandev/sample",

@@ -1,0 +1,350 @@
+package orchestrator
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+type promptGenerationOwnerTestManager struct {
+	*mockAgentManager
+	sessionID   string
+	executionID string
+	generation  uint64
+}
+
+func (m *promptGenerationOwnerTestManager) OwnsPromptGeneration(
+	sessionID, executionID string,
+	generation uint64,
+) bool {
+	return sessionID == m.sessionID && executionID == m.executionID && generation == m.generation
+}
+
+func TestAgentCompletedTurnlessDeliveryIgnoresSupersededPrompt(t *testing.T) {
+	fixture := newDeliveryWorkflowOutcomeFixture(t, "stale-owner", "stale-owner-step")
+	ctx, repo, session := fixture.ctx, fixture.repo, fixture.session
+	terminalKey := "agent_delivery.terminal:" + fixture.effect.StreamID + ":1"
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE agent_delivery_effects SET turn_id = '' WHERE effect_key = ?`, terminalKey); err != nil {
+		t.Fatalf("make persisted terminal turn-less: %v", err)
+	}
+	stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{
+		ID: "stale-owner-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+	})
+	turn := &models.Turn{
+		ID: "turn-successor-b", TaskID: session.TaskID, TaskSessionID: session.ID,
+		StartedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("create successor turn: %v", err)
+	}
+
+	baseManager := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	manager := &promptGenerationOwnerTestManager{
+		mockAgentManager: baseManager,
+		sessionID:        session.ID,
+		executionID:      "execution-1",
+		generation:       2,
+	}
+	svc := createTestServiceWithScheduler(repo, fixture.step, newMockTaskRepo(), manager)
+	svc.SetWorkflowStepGetter(fixture.step)
+	svc.turnService = &repoTurnService{repo: repo}
+	setSessionExecID(t, repo, session.ID, manager.executionID)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:                    session.TaskID,
+		SessionID:                 session.ID,
+		AgentExecutionID:          manager.executionID,
+		PromptGeneration:          1,
+		DeliveryStreamID:          fixture.effect.StreamID,
+		DeliveryIncarnationID:     fixture.effect.IncarnationID,
+		DeliveryHarnessGeneration: uint64(fixture.effect.HarnessGeneration),
+		DeliverySequence:          uint64(fixture.effect.Sequence),
+		DeliverySubmissionID:      fixture.effect.SubmissionID,
+		DeliveryOutcome:           string(models.DeliverySubmissionCompleted),
+	})
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, session.ID)
+	if err != nil || active == nil || active.ID != turn.ID {
+		t.Fatalf("active successor turn = %+v, err=%v; want %q to remain active", active, err, turn.ID)
+	}
+	updatedSession, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil || updatedSession.State != models.TaskSessionStateRunning {
+		t.Fatalf("session after stale completion = %+v, err=%v", updatedSession, err)
+	}
+	terminal, err := repo.GetAgentDeliveryEffect(ctx, terminalKey)
+	if err != nil || terminal.TurnID != "" {
+		t.Fatalf("stale completion bound terminal to a turn: %+v, err=%v", terminal, err)
+	}
+	if _, err := repo.GetAgentDeliveryEffect(ctx, "workflow.on_turn_complete:"+turn.ID); !errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+		t.Fatalf("stale completion wrote successor workflow receipt: %v", err)
+	}
+}
+
+func TestDeliveryRetentionWorkflowOutcome(t *testing.T) {
+	t.Run("successful workflow transition records the applied receipt", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "applied", "applied-step")
+		stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+		fixture.installStep(t, &wfmodels.WorkflowStep{
+			ID: "applied-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+			Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type:   wfmodels.OnTurnCompleteMoveToStep,
+				Config: map[string]interface{}{"step_id": "applied-next"},
+			}}},
+		})
+		fixture.installStep(t, &wfmodels.WorkflowStep{
+			ID: "applied-next", WorkflowID: "wf1", Position: 1, UpdatedAt: stepTime,
+		})
+		transitioned := fixture.service.processOnTurnCompleteViaEngineWithCause(
+			withWorkflowEffect(fixture.ctx, fixture.effect), fixture.taskID, fixture.session, turnCompletionCauseAgentTurn,
+		)
+		if !transitioned {
+			t.Fatal("eligible bound workflow transition did not run")
+		}
+		task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+		if err != nil || task.WorkflowStepID != "applied-next" {
+			t.Fatalf("workflow transition step = %q, err %v", task.WorkflowStepID, err)
+		}
+		stored, err := fixture.repo.GetAgentDeliveryEffect(fixture.ctx, fixture.effect.EffectKey)
+		if err != nil || stored.Outcome != "applied" || stored.StreamID != fixture.effect.StreamID ||
+			stored.SubmissionID != fixture.effect.SubmissionID || stored.TurnID != fixture.effect.TurnID {
+			t.Fatalf("applied workflow receipt = %+v, err %v", stored, err)
+		}
+		if err := fixture.service.reconcileAgentDeliverySettlements(fixture.ctx, fixture.session.ID); err != nil {
+			t.Fatalf("reconcile applied workflow receipt: %v", err)
+		}
+		submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.effect.SubmissionID)
+		if err != nil || submission.FullySettledAt == nil {
+			t.Fatalf("applied workflow terminal settlement = %+v, err %v", submission, err)
+		}
+	})
+
+	t.Run("no workflow records not required", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "no-workflow", "")
+		fixture.run(t, "not_required", turnCompletionCauseAgentTurn)
+	})
+
+	t.Run("quick chat records not required", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "quick-chat", "quick-chat-step")
+		if _, err := fixture.repo.DB().ExecContext(fixture.ctx,
+			`UPDATE tasks SET is_ephemeral = 1 WHERE id = ?`, fixture.taskID); err != nil {
+			t.Fatalf("mark quick-chat task ephemeral: %v", err)
+		}
+		stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+		fixture.installStep(t, &wfmodels.WorkflowStep{ID: "quick-chat-step", WorkflowID: "wf1", UpdatedAt: stepTime})
+		fixture.run(t, "not_required", turnCompletionCauseAgentTurn)
+	})
+
+	t.Run("Office scheduler terminal without workflow records not required", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "office-scheduler", "office-step")
+		if _, err := fixture.repo.DB().ExecContext(fixture.ctx,
+			`UPDATE tasks SET project_id = ?, workflow_step_id = '' WHERE id = ?`, "project-office", fixture.taskID); err != nil {
+			t.Fatalf("mark scheduler-owned Office task: %v", err)
+		}
+		task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+		if err != nil || !task.IsFromOffice {
+			t.Fatalf("Office task classification = %+v, err %v", task, err)
+		}
+		fixture.run(t, "not_required", turnCompletionCauseAgentTurn)
+	})
+
+	t.Run("no automatic action records a guarded no-op", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "no-action", "no-action-step")
+		stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+		fixture.installStep(t, &wfmodels.WorkflowStep{
+			ID: "no-action-step", WorkflowID: "wf1", UpdatedAt: stepTime,
+		})
+		fixture.run(t, "no_automatic_transition", turnCompletionCauseAgentTurn)
+	})
+
+	t.Run("approval-skipped action records a guarded no-op without moving", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "approval-skipped", "approval-step")
+		stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+		fixture.installStep(t, &wfmodels.WorkflowStep{
+			ID: "approval-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+			Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type:   wfmodels.OnTurnCompleteMoveToNext,
+				Config: map[string]interface{}{"requires_approval": true},
+			}}},
+		})
+		fixture.setStep(t, &wfmodels.WorkflowStep{ID: "approval-next", WorkflowID: "wf1", Position: 1})
+		fixture.run(t, "no_automatic_transition", turnCompletionCauseAgentTurn)
+		task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+		if err != nil || task.WorkflowStepID != "approval-step" {
+			t.Fatalf("approval-skipped action moved task to %q, err %v", task.WorkflowStepID, err)
+		}
+	})
+
+	t.Run("missing completion signal stays protected", func(t *testing.T) {
+		fixture := newDeliveryWorkflowOutcomeFixture(t, "missing-signal", "signal-step")
+		stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+		fixture.installStep(t, &wfmodels.WorkflowStep{
+			ID: "signal-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+			AutoAdvanceRequiresSignal: true,
+			Events:                    wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}}},
+		})
+		fixture.setStep(t, &wfmodels.WorkflowStep{ID: "signal-next", WorkflowID: "wf1", Position: 1})
+		fixture.run(t, "", turnCompletionCauseAgentTurn)
+		submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.effect.SubmissionID)
+		if err != nil || submission.FullySettledAt != nil || submission.PayloadPrunedAt != nil {
+			t.Fatalf("deferred terminal became retention-eligible: %+v, err %v", submission, err)
+		}
+	})
+}
+
+type deliveryWorkflowOutcomeFixture struct {
+	ctx     context.Context
+	repo    *sqliterepo.Repository
+	service *Service
+	taskID  string
+	session *models.TaskSession
+	effect  *models.AgentDeliveryEffect
+	step    *mockStepGetter
+}
+
+func newDeliveryWorkflowOutcomeFixture(t *testing.T, suffix, stepID string) *deliveryWorkflowOutcomeFixture {
+	t.Helper()
+	ctx := context.Background()
+	taskID, sessionID := "retention-workflow-task-"+suffix, "retention-workflow-session-"+suffix
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, stepID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load retention workflow session: %v", err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	submissionID := "prompt:" + suffix
+	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
+		ID: submissionID, SessionID: sessionID, IncarnationID: incarnationID,
+		HarnessGeneration: 1, OwnerGeneration: 1, DispatchAttemptID: "dispatch-" + suffix,
+		PayloadHash: "payload-" + suffix, Payload: []byte("retained prompt"),
+		State: models.DeliverySubmissionDispatching,
+	}); err != nil {
+		t.Fatalf("prepare retained workflow submission: %v", err)
+	}
+	streamID := "retention-workflow-stream-" + suffix
+	event := persistedTerminalEvent(sessionID, incarnationID, 1, submissionID, streamID, "complete")
+	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
+	effect := &models.AgentDeliveryEffect{
+		EffectKey:  "workflow.on_turn_complete:" + eventTurnID(event),
+		EffectType: "workflow.on_turn_complete", State: models.DeliveryEffectCompleted,
+		TaskID: taskID, SessionID: sessionID, TurnID: eventTurnID(event),
+		StreamID: streamID, Sequence: 1, IncarnationID: incarnationID,
+		HarnessGeneration: 1, SubmissionID: submissionID,
+	}
+	stepGetter := newMockStepGetter()
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	service := createEngineServiceWithTaskRepo(t, repo, stepGetter, taskRepo, &mockAgentManager{})
+	return &deliveryWorkflowOutcomeFixture{
+		ctx: ctx, repo: repo, service: service, taskID: taskID, session: session,
+		effect: effect, step: stepGetter,
+	}
+}
+
+func (f *deliveryWorkflowOutcomeFixture) setStep(t *testing.T, step *wfmodels.WorkflowStep) {
+	t.Helper()
+	f.step.steps[step.ID] = step
+}
+
+func (f *deliveryWorkflowOutcomeFixture) installStep(t *testing.T, step *wfmodels.WorkflowStep) {
+	t.Helper()
+	if _, err := f.repo.DB().ExecContext(f.ctx, `
+		INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, step.ID, step.WorkflowID, step.ID, step.Position,
+		step.UpdatedAt, step.UpdatedAt); err != nil {
+		t.Fatalf("insert workflow policy step: %v", err)
+	}
+	f.setStep(t, step)
+}
+
+func (f *deliveryWorkflowOutcomeFixture) run(t *testing.T, expectedOutcome string, cause turnCompletionCause) {
+	t.Helper()
+	transitioned := f.service.processOnTurnCompleteViaEngineWithCause(
+		withWorkflowEffect(f.ctx, f.effect), f.taskID, f.session, cause,
+	)
+	if transitioned {
+		t.Fatal("workflow outcome evaluation unexpectedly transitioned")
+	}
+	stored, err := f.repo.GetAgentDeliveryEffect(f.ctx, f.effect.EffectKey)
+	if expectedOutcome == "" {
+		if !errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+			t.Fatalf("deferred workflow receipt lookup = %+v, err %v; want absent", stored, err)
+		}
+		return
+	}
+	if err != nil || stored.Outcome != expectedOutcome || stored.StreamID != f.effect.StreamID ||
+		stored.SubmissionID != f.effect.SubmissionID || stored.TurnID != f.effect.TurnID {
+		t.Fatalf("guarded workflow outcome = %+v, err %v; want %q for the exact terminal", stored, err, expectedOutcome)
+	}
+	if err := f.service.reconcileAgentDeliverySettlements(f.ctx, f.session.ID); err != nil {
+		t.Fatalf("reconcile receipt-backed terminal: %v", err)
+	}
+	submission, err := f.repo.GetAgentDeliverySubmissionMetadata(f.ctx, f.effect.SubmissionID)
+	if err != nil || submission.FullySettledAt == nil {
+		t.Fatalf("receipt-backed terminal settlement = %+v, err %v", submission, err)
+	}
+}
+
+func eventTurnID(event models.AgentDeliveryEvent) string {
+	var payload streams.AgentEvent
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return ""
+	}
+	return payload.TurnID
+}
+
+// TestOnTurnComplete_OfficeBlockedRecordsNoAutomaticTransition pins the
+// turn-end half of #4889: an Office task in BLOCKED records a guarded no-op
+// outcome, leaves its step and state untouched, and parks the session waiting
+// for input instead of completing the turn.
+func TestOnTurnComplete_OfficeBlockedRecordsNoAutomaticTransition(t *testing.T) {
+	fixture := newDeliveryWorkflowOutcomeFixture(t, "office-blocked", "blocked-step")
+	if _, err := fixture.repo.DB().ExecContext(fixture.ctx,
+		`UPDATE tasks SET project_id = ?, state = ? WHERE id = ?`,
+		"project-office", string(v1.TaskStateBlocked), fixture.taskID,
+	); err != nil {
+		t.Fatalf("mark task Office-blocked: %v", err)
+	}
+	stepTime := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{
+		ID: "blocked-step", WorkflowID: "wf1", Position: 0, UpdatedAt: stepTime,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToNext,
+		}}},
+	})
+	fixture.setStep(t, &wfmodels.WorkflowStep{ID: "blocked-next", WorkflowID: "wf1", Position: 1})
+
+	fixture.run(t, "no_automatic_transition", turnCompletionCauseAgentTurn)
+
+	task, err := fixture.repo.GetTask(fixture.ctx, fixture.taskID)
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.WorkflowStepID != "blocked-step" || task.State != v1.TaskStateBlocked {
+		t.Fatalf("task = step %q state %q, want blocked-step/BLOCKED", task.WorkflowStepID, task.State)
+	}
+	session, err := fixture.repo.GetTaskSession(fixture.ctx, fixture.session.ID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+}

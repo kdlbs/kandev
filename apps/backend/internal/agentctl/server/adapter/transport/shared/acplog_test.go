@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,50 @@ import (
 
 func testEvent(sessionID string) *streams.AgentEvent {
 	return &streams.AgentEvent{Type: streams.EventTypeMessageChunk, SessionID: sessionID, Text: "hello"}
+}
+
+func TestACPLogPruneWriterRegistrationIsAtomicWithRemoval(t *testing.T) {
+	dir := t.TempDir()
+	m := newACPLogManager(acpLogConfig{dir: dir, retention: time.Hour, ringSize: 8})
+	defer m.closeAll()
+
+	for i := range 100 {
+		name := "normalized-acp-agent-session-" + strconv.Itoa(i) + ".jsonl"
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-48 * time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			m.prune(time.Now())
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			m.getWriter(name).writeLine([]byte("record-" + strconv.Itoa(i)))
+		}()
+		close(start)
+		wg.Wait()
+		m.flushAll()
+
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("iteration %d: active writer path was removed: %v", i, err)
+		}
+		if !strings.Contains(string(contents), "record-"+strconv.Itoa(i)) {
+			t.Fatalf("iteration %d: active writer record is missing: %q", i, contents)
+		}
+		m.closeWriterForPath(path)
+	}
 }
 
 // TestResolveACPLogDir_Precedence pins the directory resolution order:

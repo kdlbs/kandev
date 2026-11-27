@@ -42,7 +42,7 @@ func TestInjectInspectorScript_UpperCaseBodyTag(t *testing.T) {
 
 func TestInspectorScript_CapturesVersionedTextEvidence(t *testing.T) {
 	wants := []string{
-		"var PROTOCOL_VERSION = 2;",
+		"var PROTOCOL_VERSION = 3;",
 		"function captureTextSelection()",
 		"selection.getRangeAt(0)",
 		"function captureTextEndpoint(",
@@ -122,6 +122,14 @@ func TestInspectorScript_OwnsDragGesturesOnlyInScreenshotMode(t *testing.T) {
 		if !strings.Contains(inspectorScript, want) {
 			t.Errorf("inspector should include %q", want)
 		}
+	}
+}
+
+func TestInspectorScript_AcknowledgesCaptureModeAfterInstallingListeners(t *testing.T) {
+	textListener := strings.Index(inspectorScript, "document.addEventListener('mouseup', onTextMouseUp, true);")
+	modeAcknowledgement := strings.Index(inspectorScript, "send('capture-mode-changed', { mode: mode });")
+	if textListener < 0 || modeAcknowledgement < textListener {
+		t.Fatal("inspector should acknowledge capture mode after installing its listeners")
 	}
 }
 

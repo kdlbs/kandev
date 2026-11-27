@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
@@ -466,6 +467,23 @@ func TestWsUserShellList_NoInteractiveRunner(t *testing.T) {
 	}
 	if len(shellList) != 0 {
 		t.Errorf("expected empty shells array, got %d items", len(shellList))
+	}
+}
+
+func TestTerminalListProjectionHidesOrdinaryLaunchCommandAndPreservesScripts(t *testing.T) {
+	runner := process.NewInteractiveRunner(nil, newTestLogger(), 1024)
+	runner.RegisterScriptShell("env-1", "shell-auth-1", "Sign in to MCP", "'cursor-agent' mcp login 'private-server-id'")
+	runner.RegisterScriptShell("env-1", "script-build-1", "Build", "npm run build")
+	items := appendUnmanagedShells(nil, runner, "env-1", false)
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private-server-id") || strings.Contains(string(encoded), "'cursor-agent' mcp login") {
+		t.Fatalf("ordinary terminal list leaked its launch command: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "npm run build") {
+		t.Fatalf("script terminal launch command was not preserved: %s", encoded)
 	}
 }
 

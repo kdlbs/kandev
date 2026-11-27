@@ -4,8 +4,10 @@ system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002
+  - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
+  - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-09-14
+updated: 2026-11-25
 owners:
   - cfl12
 ---
@@ -14,10 +16,9 @@ owners:
 
 ## Context and boundaries
 
-The task system owns launch gating, typed launch-error projection, and recovery
-actions for a task repository. GitHub remains the source of pull-request state;
-the workspace system resolves repository branches; the UI renders the
-task-owned projection.
+The task system owns launch gating, typed errors, and recovery for task
+repositories. GitHub owns PR state, workspaces resolve branches, and the UI
+renders task-owned projections.
 
 ## Requirement mapping
 
@@ -25,14 +26,15 @@ task-owned projection.
 | --- | --- |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001 | PR gate, initial prompt admission, error projection, recovery actions |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002 | Error scope, durable session history, shared task surface |
+| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003 | Quick Chat retention amendment, retained response contract, recovery and navigation |
+| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004 | Abandoned materialization recovery amendment |
 
 ## PR gate and launch paths
 
-The auto-start gate selects relevant PRs by explicit repository and PR identity,
-then exact repository/branch identity. It skips only when at least one relevant
-PR exists and every one is merged or closed. An open, empty, unknown, failed
-lookup, or absent PR leaves the normal auto-start path available. Manual launch
-always bypasses this gate.
+Auto-start matches PRs by explicit repository/PR identity, then exact
+repository/branch identity. It skips only when relevant PRs exist and all are
+merged or closed. Open, empty, unknown, failed, or absent results preserve
+normal auto-start. Manual launch bypasses this gate.
 
 The gate stores an informational task error when it suppresses an auto-start.
 The error is stamped from the sorted relevant PR identities and states so the
@@ -160,6 +162,9 @@ The `ready` and `stopped` states require a non-empty worktree path.
 
 After a materialization error, the materialization owner clears its claim and
 stores the `failed` state. This update remains valid when no worktree path exists.
+The [abandoned materialization recovery amendment](#abandoned-materialization-recovery-amendment-2026-10-12-draft)
+extends this rule to every early exit of the owner and defines when a later
+start can elect a new owner.
 
 ## Branch resolution and persistence
 
@@ -298,3 +303,261 @@ Shared view models, action guards, stamps, and request state serve both presenta
 - [ADR-2026-08-18-never-started-agent-stall-terminal](../../../decisions/2026-08-18-never-started-agent-stall-terminal.md)
 
 - [Error scope and history decision](../../../decisions/2026-09-14-error-scope-and-history.md)
+
+## Quick Chat retention amendment (2026-10-02, draft)
+
+REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003 maps to this section.
+
+`httpStartQuickChat` currently rolls back its ephemeral task on any synchronous
+`LaunchSession` error. Retain the task when a session has already been persisted.
+Resolve that session by the newly created task's authoritative primary/session
+records, never by another workspace's most recent session. Persist the safe
+launch error through the existing task/session error machinery before returning
+the failed response. Extend this endpoint's error envelope additively with
+`task_id` and `session_id` when a retained session exists; retain non-2xx status
+and a sanitized error. Extend the typed workspace API error handling so the
+caller can reconcile these identities without parsing English error text.
+No global HTTP-client success semantics change is needed.
+
+Before session allocation, keep the existing cleanup of an unstarted task and
+return an ordinary safe error. The local setup form retains its values and
+inline error, permitting a new request. This distinguishes pre-session form
+failure from an inspectable persisted conversation. Asynchronous failures already
+have an accepted identity and must use existing durable error projection.
+
+`useAgentSelection` must separate whether a response may activate a tab from
+whether the persisted conversation exists. A stale request result upserts its
+returned task/session without deleting it, selecting it, or reopening the
+modal. The current request replaces the setup tab and opens the retained session
+on either success or a typed retained-session error. WS-first and HTTP-first
+orders converge on one identity. Explicit user deletion wins over late responses
+through existing tombstones; a late upsert must not resurrect a deleted tab.
+Unrelated WS updates never supersede request ownership. Review configuration-chat
+start callers for shared reset behavior without extending ordinary-chat changes
+to unrelated runtime contracts.
+
+Render pre-session errors in `QuickChatSetup`, owned above the setup component so
+rerenders do not discard the error or form choices. Persisted failures use
+`QuickChatSessionView`, `TaskLaunchErrorProvider`, preparation progress, and the
+existing error history/recovery surface. Prevent automatic resumption while an
+active launch error exists, scoped to Quick Chat so ordinary stopped-session
+resumption retains its current policy. Retry invokes the existing guarded
+recovery action rather than POSTing a new quick chat. Boot/list/reconnect must
+include failed ephemeral sessions; retain normal authorization and expiration.
+
+Desktop retains the existing dialog and tab strip. Phone retains the shipped
+full-height Quick Chat surface with safe-area padding, fixed navigation and
+composer/footer, and the existing content scroll region. Place pre-session error
+copy above the setup footer; reuse session error cards in persisted conversations.
+This gives error inspection the space of the existing conversation rather than
+opening a nested overlay. All new copy goes through all seven locale catalogs.
+
+Test synchronous post-allocation failures, asynchronous failures, pre-allocation
+errors, tab navigation during a delayed response, explicit deletion racing a late
+response, reload/reconnect, and retry identity. Include mixed healthy/failed tabs.
+Public recovery guidance belongs in `docs/public/tasks-and-workflows.md` when
+implementation lands. See [delivery package](../../../plans/setup-recovery-ux/plan.md).
+
+The [startup amendment](quick-chat-opening-composer.md#startup-acceptance-amendment)
+moves ordinary creation acceptance before preparation. Its background path
+preserves this retention contract.
+
+### Quick Chat launch admission coverage
+
+For a newly allocated ephemeral session, the orchestrator retains the allocated
+identity through initial-prompt persistence and later launch admission failures.
+The prepared-launch failure helper invokes the executor's existing conditional typed
+failure transition, including sanitization, recovery actions and primary-aware
+task reconciliation. Already-settled sessions retain their original error history;
+intentional capacity deferral is not a launch failure. The HTTP handler returns
+the retained identity only after the launch path has attempted this bookkeeping.
+
+Automatic recovery considers task-owned errors and this session's active error.
+A sibling session's error does not block this conversation. Rejecting a late
+response for a tombstoned conversation preserves any pending selection request.
+
+## Abandoned materialization recovery amendment (2026-10-12, draft)
+
+REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004 maps to this section. Delivery:
+[environment failure recovery package](../../../plans/upstream-environment-failure-recovery/plan.md).
+
+### Problem
+
+An early launch error once left an abandoned `creating` claim or a bare
+`failed` environment. Starts returned `workspace_preparing` or
+`workspace_reuse_unsafe` until a reset.
+
+### Claim release by the owner
+
+The owner releases its own claim when it gives up. Release uses one conditional
+repository write, `FailTaskEnvironmentMaterialization(sessionID)`,
+that changes the row to `failed` and clears the claim only while the row is
+still `creating` and still owned by that session. The existing
+`markTaskEnvironmentMaterializationFailed` path and the inline `LaunchAgent`
+error branch use the same write, because a full-row update could otherwise
+overwrite a claim that another session re-elected meanwhile.
+
+Release points:
+
+- `LaunchPreparedSession` releases the session's claim on error only after the
+  session snapshot read under its launch lock proves membership in the supplied
+  task. A failed initial lookup or foreign-task request has no release authority.
+  Release remains inside that lock. `ErrExecutionAlreadyRunning` and a
+  superseded cancellable resume preserve the current claim. A committed
+  re-election followed by a failed environment reload still releases the claim
+  after session ownership has been established.
+- The `startTask` early-return helper releases the claim of a session that this
+  start created, for ordinary and ephemeral tasks alike, unless the error is
+  `ErrCeilingLaunchDeferred`. A session reused by the start keeps its claim.
+
+Release never changes session state. Kanban sessions keep their current
+`CREATED` behavior, and Quick Chat keeps its existing typed failure transition.
+
+### Abandoned claims
+
+The election treats a `creating` claim as abandoned when the owner session is
+missing or terminal, which is the current rule, or when the environment row was
+last updated before the launch budget and the owner is not live. Lifecycle
+preparation and each launch phase have separate bounds, so the budget is
+`constants.SetupScriptTimeout` plus `constants.AgentLaunchTimeout` plus the
+five-minute allowance that the orphaned-session reconciliation already uses
+(30 minutes with default settings). The sum saturates at the maximum duration
+for accepted extreme preparation settings; arithmetic overflow must never
+shorten the owner's budget. A live owner is a session in `STARTING` or
+`RUNNING` with an `executors_running` row. A launch that is still preparing after
+the budget is treated as abandoned; the race rules below keep it from
+publishing over the new owner.
+
+The predicate runs only inside a binding transaction. A process restart, a
+start path that never reached a release point, and any other cause that leaves
+the owner silent are all detected the next time a start needs the environment.
+No background sweep or configuration setting is added.
+
+### Re-election
+
+`reelectTaskEnvironmentMaterializationTx` hands an environment to a new owner in
+the caller's transaction. Its conditional update accepts exactly two rows:
+
+- a `failed` row with an empty claim and no physical evidence; or
+- a `creating` row whose claim is still the abandoned owner read by the same
+  transaction.
+
+Physical evidence is a workspace path, container ID, sandbox ID, a
+non-deleted `task_environment_repos` row, or retained Kubernetes metadata even
+when control credentials were never recorded. Only a bare Kubernetes row with
+empty metadata is eligible. The update sets `creating`, stores the
+new owner, clears container and sandbox handles and their secret references, and
+updates `updated_at`. It keeps the environment ID, so the shared group pointer,
+sessions that reference the row, and recovery claims keep their identity.
+
+Callers:
+
+- The task-local binding re-elects instead of returning `workspace_reuse_unsafe`
+  for an abandoned `creating` row and for an eligible `failed` row. An abandoned
+  row with physical evidence keeps the current behavior: it becomes `failed` and
+  the binding returns `workspace_reuse_unsafe`.
+- The shared-group binding applies the same rule to the group's environment.
+  The group pointer keeps naming the row, so other members observe
+  `workspace_preparing` while the new owner prepares it.
+- `LaunchPreparedSession` re-elects an eligible `failed` environment of the same
+  task for the session that it launches. It uses a standalone transaction that
+  takes the task cleanup barrier and recovery-claim admission. A failed foreign
+  environment (`inherit_parent` or `shared_group`) is never re-elected by the
+  child. A launch meeting
+  `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.5` claims its own environment
+  before allocation (see [additional-session workspace reuse](additional-session-workspace-reuse.md)).
+  Other starts stay fail-closed.
+
+Every caller runs after `taskCleanupBarrierLocked` and
+`recoveryclaim.EnsureAvailableTx`, so a deleting task or a held recovery claim
+still fails the binding.
+
+### Races
+
+PostgreSQL release, binding, launch re-election, and finalization share the
+transaction advisory namespace `task-environment-materialization:<environmentID>`.
+Identity-only queries discover the lock target; they do not authorize a mutable
+state transition. Acquire the owning task row before the environment lock, then
+read current status and materializer in a separate READ COMMITTED statement.
+Shared bindings acquire requester, group-owner, and environment-owner task rows
+in sorted order before any environment lock. Recheck identity after waiting and
+fail closed if it changed rather than extending the task lock set out of order.
+SQLite retains its existing single-writer serialization. Cleanup and recovery
+admission remain mandatory before a binding, re-election, or publication write.
+
+Exactly one conditional update wins. A binding that loses returns the current
+state error: `workspace_preparing` while the winner prepares. A launch that loses
+reloads the row: a `creating` row owned by another session is awaited with
+`waitForTaskEnvironmentReady`, a `ready` or `stopped` row is adopted, and any
+other state fails closed.
+
+A former owner that was re-elected away cannot change the row. Its failure write
+matches no row. Before publishing readiness, `persistTaskEnvironment` refuses a
+launch that started as the initial materializer when the fresh row is no longer
+claimed by that session. `FinalizeTaskEnvironmentMaterialization` already
+requires the current claim. The refused launch fails through the normal launch
+failure path, and its partial runtime is stopped by the existing cleanup.
+
+### Boundary with explicit retry
+
+Failures stay visible and the `session.ensure` latch is unchanged. Only Retry,
+a new session, `spawn_session_kandev`, or a workflow or automation start can
+re-elect. A task-local failed environment without consumers can be replaced.
+
+### Retain and replace an unusable environment
+
+Task-local worktree starts and terminal resumes can retire failed physical
+environments and reserve replacements. Election binds the requester before
+materialization and checks task/materialization locks, generation, session
+state/binding, cleanup, and recovery claims. Materializers, live consumers,
+inherited owners, and other executor types retain reset guidance.
+
+Retirement preserves IDs, inventory, files, and historical bindings. Preflight
+inspects only its selected successor. Canonical queries, uniqueness, and startup
+healing exclude retired rows; by-ID reads retain history. Allocation excludes
+recorded roots. Inventory and publication use saved roots and environment IDs.
+Cached and explicit-ID checkouts must match the selected environment.
+
+Retries settle abandoned claims. A fresh terminal owner's claim survives until
+a later completion or launch-budget expiry. Failed successors retain consumer
+guards. Every preflight exit, including errors and capacity deferral, releases
+its captured unused claim after workspace admission. Release fences environment,
+owner, generation, and timestamp, and locks the PostgreSQL owner row against
+startup. Started sessions, live executions, and renewed claims remain untouched.
+Post-commit reload errors use the same release. Cleanup never resets inventory,
+mutates inherited owners, or settles historical outcomes.
+
+### Interaction with workspace election waits
+
+A binding that loses election can wait for the winner. If the winner becomes
+failed, the wait ends with the existing refusal. The next start re-elects.
+
+### Workspace requests during initial launch
+
+For AC-004.12, `validateBoundWorkspaceEnvironment` marks a refusal for a
+`creating` environment and retains `ErrSessionWorkspaceNotReady` for callers.
+`coalesceSessionLaunch` re-enters the same session slot when it receives this
+result from a workspace-only operation. The caller's context bounds its wait.
+Creating-environment refusals do not consume the recovery-admission retry
+budget. The next launch owner runs normal admission. Concurrent launches share
+that result. A launch error follows the existing settlement rules.
+
+### Verification
+
+- Repository tests cover release by the owner only, abandonment by terminal,
+  missing, and stale owners, protection of live and young owners, re-election
+  of eligible `failed` rows, fail-closed rows with physical evidence, shared
+  groups, the cleanup barrier and recovery claims, and single-winner races.
+- Executor tests cover release on early launch errors, preservation on
+  `ErrExecutionAlreadyRunning`, launch-time re-election, the lost-race outcomes,
+  the `inherit_parent` refusal, and the refused publication by a former owner.
+- Orchestrator tests cover release by `startTask` for created sessions and
+  preservation on `ErrCeilingLaunchDeferred` and for reused sessions.
+- MCP handler tests cover the reset guidance for a `failed` environment with
+  physical evidence.
+- PostgreSQL 16 and 18 run actual multi-connection lock-wait tests for release,
+  local/shared binding, launch re-election, and finalization. State and owner
+  replacements while blocked must be observed after admission. A refused former
+  owner's finalization must roll back its inventory deletion and replacement.
+  Shared-group ownership round trips through the real INTEGER schema on both
+  versions. CI guards against skipped or unmatched PostgreSQL 18 tests.

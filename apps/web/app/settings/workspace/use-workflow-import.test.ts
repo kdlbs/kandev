@@ -275,3 +275,51 @@ it("does not submit twice while the final request is pending", async () => {
     await firstSubmit;
   });
 });
+
+it("pauses on exclusion warnings before importing, then imports on confirm", async () => {
+  const warnings = [
+    {
+      code: "routing_disabled" as const,
+      workflow_name: "Guarded",
+      step_name: "Review",
+      role: "reviewer",
+    },
+  ];
+  vi.mocked(previewWorkflowImportAction).mockResolvedValue({
+    skipped: [],
+    profiles: [],
+    steps: [],
+    warnings,
+  });
+  const { result } = renderImportHook();
+
+  act(() => result.current.setImportYaml(importYaml));
+  await act(async () => {
+    await result.current.handleImport();
+  });
+
+  expect(result.current.importPhase).toBe("resolving");
+  expect(result.current.preview?.warnings).toEqual(warnings);
+  expect(importWorkflowsAction).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await result.current.handleImport();
+  });
+  expect(importWorkflowsAction).toHaveBeenCalledWith(workspace.id, importYaml, []);
+});
+
+it("auto-submits an all-matched preview without exclusion warnings", async () => {
+  vi.mocked(previewWorkflowImportAction).mockResolvedValue({
+    skipped: [],
+    profiles: [],
+    steps: [],
+  });
+  const { result } = renderImportHook();
+
+  act(() => result.current.setImportYaml(importYaml));
+  await act(async () => {
+    await result.current.handleImport();
+  });
+
+  expect(importWorkflowsAction).toHaveBeenCalledOnce();
+});

@@ -75,6 +75,50 @@ func TestPeekTurnOutcomeIsRepeatableAndNonDiscarding(t *testing.T) {
 	}
 }
 
+func TestRetainedOutcomePreservesPromptFailureDisposition(t *testing.T) {
+	mgr := newTurnOutcomeTestManager(t)
+	addTestInstance(t, mgr, "inst-1")
+
+	_, ok := mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type:                     streams.EventTypeError,
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	})
+	if !ok {
+		t.Fatal("RetainTurnOutcome() ok = false, want true")
+	}
+	outcome, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1")
+	if !hasOutcome || outcome.Event.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("retained disposition = %q, present=%v, want retain_runtime", outcome.Event.PromptFailureDisposition, hasOutcome)
+	}
+}
+
+func TestRetainedOutcomeCopiesCapacityContinuationSnapshot(t *testing.T) {
+	mgr := newTurnOutcomeTestManager(t)
+	addTestInstance(t, mgr, "inst-1")
+	snapshot := &streams.CapacityContinuationSnapshot{
+		Support: streams.CapacityContinuationCodexLiveSessionV2, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2, KnownFailedShellTools: 1,
+	}
+	_, ok := mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type: streams.EventTypeError, PromptGeneration: 7, CapacityContinuation: snapshot,
+	})
+	if !ok {
+		t.Fatal("RetainTurnOutcome() ok = false, want true")
+	}
+	snapshot.CompletedTools = 99
+	snapshot.KnownFailedShellTools = 99
+	outcome, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1")
+	if !hasOutcome || outcome.Event.CapacityContinuation == nil {
+		t.Fatal("capacity continuation snapshot was not retained")
+	}
+	if got := outcome.Event.CapacityContinuation.CompletedTools; got != 2 {
+		t.Fatalf("retained completed tool count = %d, want immutable value 2", got)
+	}
+	if got := outcome.Event.CapacityContinuation.KnownFailedShellTools; got != 1 {
+		t.Fatalf("retained known failed shell count = %d, want immutable value 1", got)
+	}
+}
+
 // TestPeekTurnOutcomeDistinguishesUnknownInstanceFromNothingRetained pins
 // that a 404-worthy "no such instance" is distinguishable from the normal
 // "instance exists, nothing retained yet" answer.

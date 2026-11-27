@@ -4,6 +4,11 @@
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol, operations
 
+## Recovery policy revision
+
+The [runtime replacement decision](2026-09-27-agentctl-runtime-replacement.md) replaces this record's monotonic availability and mandatory backend restart policy.
+The remaining crash-containment decisions remain applicable. The new implementation package is pending.
+
 ## Context
 
 The standalone `agentctl` process crashed with Go's fatal `concurrent map

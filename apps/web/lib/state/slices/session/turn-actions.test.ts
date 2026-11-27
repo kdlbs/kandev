@@ -5,7 +5,7 @@ import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "@/lib/state/slices/session/session-slice";
 import type { SessionSlice } from "@/lib/state/slices/session/types";
 import { sessionId, taskId } from "@/lib/types/ids";
-import type { Turn } from "@/lib/types/http";
+import type { Message, Turn } from "@/lib/types/http";
 import { parseTurnTimestamp, shouldApplyTurnUpdate } from "./turn-actions";
 
 const SESSION_ID = sessionId("session-1");
@@ -13,6 +13,8 @@ const TASK_ID = taskId("task-1");
 const STARTED_AT = "2026-07-23T10:00:00.000Z";
 const COMPLETED_AT = "2026-07-23T10:01:00.000Z";
 const LATER_AT = "2026-07-23T10:02:00.000Z";
+const COVERED_MESSAGE_ID = "message-a";
+const WINDOW_TURN_ID = "turn-window";
 
 /** Creates a zustand store backed by the session slice. */
 function makeStore() {
@@ -307,6 +309,167 @@ describe("mergeTurnsSnapshot", () => {
 
     expect(store.getState().turns.bySession[SESSION_ID].map(({ id }) => id)).toEqual(["turn-kept"]);
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+});
+
+describe("mergeTurnsWindow", () => {
+  it("retires a missed completion when the window reports no active turn", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", STARTED_AT);
+    store.getState().addTurn(turn(WINDOW_TURN_ID));
+    store.getState().setActiveTurn(SESSION_ID, WINDOW_TURN_ID);
+    store
+      .getState()
+      .mergeTurnsWindow(
+        SESSION_ID,
+        [turn(WINDOW_TURN_ID, { completed_at: COMPLETED_AT })],
+        { message_ids: [], active_turn_id: null },
+        0,
+      );
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it("clears an unchanged request-start marker after an authoritative null observation", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", STARTED_AT);
+    store.getState().addTurn(turn(WINDOW_TURN_ID));
+    store.getState().setActiveTurn(SESSION_ID, WINDOW_TURN_ID);
+    store
+      .getState()
+      .mergeTurnsWindow(SESSION_ID, [], { message_ids: [], active_turn_id: null }, 0, {
+        activeTurnId: WINDOW_TURN_ID,
+        reconcileEpoch: 0,
+        updatedAt: STARTED_AT,
+      });
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it("accepts null authority when the same response refreshes the unchanged turn row", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", STARTED_AT);
+    store.getState().addTurn(turn(WINDOW_TURN_ID));
+    store.getState().setActiveTurn(SESSION_ID, WINDOW_TURN_ID);
+    store
+      .getState()
+      .mergeTurnsWindow(
+        SESSION_ID,
+        [turn(WINDOW_TURN_ID, { updated_at: LATER_AT })],
+        { message_ids: [], active_turn_id: null },
+        0,
+        { activeTurnId: WINDOW_TURN_ID, reconcileEpoch: 0, updatedAt: STARTED_AT },
+      );
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it.each(["new-marker", "newer-row", "new-epoch"])(
+    "preserves %s against a delayed null observation",
+    (change) => {
+      const store = makeStore();
+      seedSession(store, "RUNNING", STARTED_AT);
+      store.getState().addTurn(turn(WINDOW_TURN_ID));
+      store.getState().setActiveTurn(SESSION_ID, WINDOW_TURN_ID);
+      if (change === "new-marker") {
+        store.getState().addTurn(turn("new-live-turn", { started_at: LATER_AT }));
+        store.getState().setActiveTurn(SESSION_ID, "new-live-turn");
+      }
+      if (change === "newer-row")
+        store.getState().addTurn(turn(WINDOW_TURN_ID, { updated_at: LATER_AT }));
+      if (change === "new-epoch")
+        store.setState((draft) => {
+          draft.turns.reconcileEpochBySession[SESSION_ID] = 1;
+        });
+      store
+        .getState()
+        .mergeTurnsWindow(SESSION_ID, [], { message_ids: [], active_turn_id: null }, 0, {
+          activeTurnId: WINDOW_TURN_ID,
+          reconcileEpoch: 0,
+          updatedAt: STARTED_AT,
+        });
+      expect(store.getState().turns.activeBySession[SESSION_ID]).toBe(
+        change === "new-marker" ? "new-live-turn" : WINDOW_TURN_ID,
+      );
+    },
+  );
+});
+
+describe("mergeTurnsWindow coverage and active authority", () => {
+  it("records bounded message coverage without marking full history loaded", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", LATER_AT);
+    store.getState().mergeMessages(SESSION_ID, [
+      {
+        id: COVERED_MESSAGE_ID,
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        turn_id: WINDOW_TURN_ID,
+        author_type: "agent",
+        content: "response",
+        type: "message",
+        created_at: STARTED_AT,
+      } as Message,
+    ]);
+
+    store
+      .getState()
+      .mergeTurnsWindow(
+        SESSION_ID,
+        [turn(WINDOW_TURN_ID, { started_at: LATER_AT, updated_at: LATER_AT })],
+        { message_ids: [COVERED_MESSAGE_ID, "not-retained"], active_turn_id: WINDOW_TURN_ID },
+        0,
+      );
+
+    expect(store.getState().turns.loadedBySession[SESSION_ID]).toBeUndefined();
+    expect(store.getState().turns.windowCoverageBySession?.[SESSION_ID]).toEqual({
+      messageIds: [COVERED_MESSAGE_ID],
+      activeTurnObserved: true,
+    });
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBe(WINDOW_TURN_ID);
+  });
+
+  it("does not resurrect a turn completed while the window request was in flight", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", LATER_AT);
+    store.getState().setActiveTurn(SESSION_ID, null);
+    store.getState().addTurn(
+      turn("turn-live", {
+        completed_at: COMPLETED_AT,
+        updated_at: COMPLETED_AT,
+      }),
+    );
+    store.getState().completeTurn(SESSION_ID, "turn-live", COMPLETED_AT, undefined, COMPLETED_AT);
+
+    store
+      .getState()
+      .mergeTurnsWindow(
+        SESSION_ID,
+        [turn("turn-live", { completed_at: undefined, updated_at: STARTED_AT })],
+        { message_ids: [], active_turn_id: "turn-live" },
+        0,
+      );
+
+    expect(store.getState().turns.bySession[SESSION_ID]?.[0].completed_at).toBe(COMPLETED_AT);
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it("rejects the active marker from a window read predating an authoritative clear", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", LATER_AT);
+    store.getState().setActiveTurn(SESSION_ID, null);
+    store.setState((state) => {
+      state.turns.reconcileEpochBySession[SESSION_ID] = 1;
+    });
+
+    store
+      .getState()
+      .mergeTurnsWindow(
+        SESSION_ID,
+        [turn("turn-before-clear", { started_at: LATER_AT, updated_at: LATER_AT })],
+        { message_ids: [], active_turn_id: "turn-before-clear" },
+        0,
+      );
+
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+    expect(store.getState().turns.loadedBySession[SESSION_ID]).toBeUndefined();
   });
 });
 

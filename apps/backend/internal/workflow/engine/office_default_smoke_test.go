@@ -305,10 +305,11 @@ func compileWorkflow(tmpl *wfmodels.WorkflowTemplate) map[string]StepSpec {
 // smokeStore is an in-memory TransitionStore that exposes mutable current-step
 // pointers so tests can drive an end-to-end walk.
 type smokeStore struct {
-	steps         map[string]StepSpec
-	currentStepID string
-	applied       map[string]bool
-	transitions   []string
+	steps                    map[string]StepSpec
+	currentStepID            string
+	workflowStepTransitionID int64
+	applied                  map[string]bool
+	transitions              []string
 }
 
 func newSmokeStore(steps map[string]StepSpec) *smokeStore {
@@ -318,14 +319,20 @@ func newSmokeStore(steps map[string]StepSpec) *smokeStore {
 	}
 }
 
-func (s *smokeStore) setCurrentStep(id string) { s.currentStepID = id }
+func (s *smokeStore) setCurrentStep(id string) {
+	if s.currentStepID != id {
+		s.workflowStepTransitionID++
+	}
+	s.currentStepID = id
+}
 
 func (s *smokeStore) LoadState(_ context.Context, _, _ string) (MachineState, error) {
 	return MachineState{
-		TaskID:        "task-1",
-		SessionID:     "sess-1",
-		WorkflowID:    "wf",
-		CurrentStepID: s.currentStepID,
+		TaskID:                   "task-1",
+		SessionID:                "sess-1",
+		WorkflowID:               "wf",
+		CurrentStepID:            s.currentStepID,
+		WorkflowStepTransitionID: s.workflowStepTransitionID,
 	}, nil
 }
 
@@ -357,7 +364,7 @@ func (s *smokeStore) LoadPreviousStep(_ context.Context, _ string, currentPositi
 
 func (s *smokeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStepID string, _ Trigger) error {
 	s.transitions = append(s.transitions, fromStepID+"->"+toStepID)
-	s.currentStepID = toStepID
+	s.setCurrentStep(toStepID)
 	return nil
 }
 
@@ -368,7 +375,7 @@ func (s *smokeStore) ApplyTransitionIfAtStep(
 		return false, nil
 	}
 	s.transitions = append(s.transitions, expectedStepID+"->"+toStepID)
-	s.currentStepID = toStepID
+	s.setCurrentStep(toStepID)
 	return true, nil
 }
 

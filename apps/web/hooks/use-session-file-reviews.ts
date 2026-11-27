@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 export type FileReviewState = {
@@ -30,6 +30,8 @@ type UseSessionFileReviewsReturn = {
 // Shared module-level cache so all hook instances share the same review state
 const reviewsCache: Record<string, Map<string, FileReviewState>> = {};
 const fetchedSessions = new Set<string>();
+type PendingReviewRead = { changedFiles: Set<string>; reset: boolean };
+const pendingReviewReads = new Map<string, PendingReviewRead>();
 let cacheVersion = 0;
 
 function notifyChange() {
@@ -46,14 +48,32 @@ function updateCache(sessionId: string, map: Map<string, FileReviewState>) {
 /** Create an optimistic update: clone the cache, apply mutation, update cache + local state. */
 function optimisticUpdate(
   sessionId: string,
+  filePath: string,
   mutate: (next: Map<string, FileReviewState>) => void,
   setReviews: (m: Map<string, FileReviewState>) => void,
 ) {
+  pendingReviewReads.get(sessionId)?.changedFiles.add(filePath);
   const next = new Map(reviewsCache[sessionId] ?? new Map());
   mutate(next);
   reviewsCache[sessionId] = next;
   setReviews(next);
   notifyChange();
+}
+
+/** Preserve local intent while still accepting untouched initial snapshot rows. */
+function reconcileReviewSnapshot(
+  sessionId: string,
+  snapshot: Map<string, FileReviewState>,
+  pending: PendingReviewRead,
+) {
+  const current = reviewsCache[sessionId];
+  if (pending.reset) return new Map(current);
+  for (const path of pending.changedFiles) {
+    const review = current?.get(path);
+    if (review) snapshot.set(path, review);
+    else snapshot.delete(path);
+  }
+  return snapshot;
 }
 
 function fetchSessionReviews(
@@ -64,6 +84,8 @@ function fetchSessionReviews(
   const client = getWebSocketClient();
   if (!client) return;
 
+  const pending: PendingReviewRead = { changedFiles: new Set(), reset: false };
+  pendingReviewReads.set(sessionId, pending);
   fetchedSessions.add(sessionId);
   queueMicrotask(() => setLoading(true));
 
@@ -76,52 +98,120 @@ function fetchSessionReviews(
           map.set(review.file_path, { reviewed: review.reviewed, diffHash: review.diff_hash });
         }
       }
-      updateCache(sessionId, map);
-      setReviews(map);
+      const reconciled = reconcileReviewSnapshot(sessionId, map, pending);
+      updateCache(sessionId, reconciled);
+      setReviews(reconciled);
     })
     .catch(() => {
       /* Ignore errors - reviews are not critical */
     })
     .finally(() => {
+      pendingReviewReads.delete(sessionId);
       setLoading(false);
     });
 }
 
-export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
-  const [reviews, setReviews] = useState<Map<string, FileReviewState>>(() =>
-    sessionId ? (reviewsCache[sessionId] ?? new Map()) : new Map(),
-  );
-  const [loading, setLoading] = useState(false);
+type ReaderOwner = { sessionId: string | null; active: boolean };
+type ReaderSnapshot = {
+  owner: ReaderOwner | null;
+  reviews: Map<string, FileReviewState>;
+  loading: boolean;
+};
+const emptyReviews = new Map<string, FileReviewState>();
+
+function readerPublisher(
+  owner: ReaderOwner | null,
+  setSnapshot: React.Dispatch<React.SetStateAction<ReaderSnapshot>>,
+) {
+  const publish = (patch: Partial<Pick<ReaderSnapshot, "reviews" | "loading">>) => {
+    if (!owner?.active) return;
+    setSnapshot((previous) => {
+      if (!owner.active) return previous;
+      const current =
+        previous.owner === owner
+          ? previous
+          : {
+              owner,
+              reviews: owner.sessionId
+                ? (reviewsCache[owner.sessionId] ?? emptyReviews)
+                : emptyReviews,
+              loading: false,
+            };
+      return { ...current, ...patch };
+    });
+  };
+  return {
+    setReviews: (reviews: Map<string, FileReviewState>) => publish({ reviews }),
+    setLoading: (loading: boolean) => publish({ loading }),
+  };
+}
+
+function useReviewReader(sessionId: string | null) {
+  const [snapshot, setSnapshot] = useState<ReaderSnapshot>({
+    owner: null,
+    reviews: emptyReviews,
+    loading: false,
+  });
+  const ownerRef = useRef<ReaderOwner | null>(null);
   const versionRef = useRef(cacheVersion);
 
+  useLayoutEffect(() => {
+    const owner: ReaderOwner = { sessionId, active: true };
+    ownerRef.current = owner;
+    return () => {
+      owner.active = false;
+    };
+  }, [sessionId]);
+
   useEffect(() => {
+    const owner = ownerRef.current;
+    if (!owner?.active || owner.sessionId !== sessionId) return;
+    const publisher = readerPublisher(owner, setSnapshot);
+    versionRef.current = cacheVersion;
+    queueMicrotask(() => {
+      publisher.setReviews(sessionId ? (reviewsCache[sessionId] ?? emptyReviews) : emptyReviews);
+      publisher.setLoading(false);
+    });
     const handler = () => {
-      if (!sessionId) return;
+      if (!sessionId || !owner.active) return;
       const cached = reviewsCache[sessionId];
       if (cached && cacheVersion !== versionRef.current) {
         versionRef.current = cacheVersion;
-        setReviews(cached);
+        publisher.setReviews(cached);
       }
     };
     window.addEventListener("file-reviews-change", handler);
-    return () => window.removeEventListener("file-reviews-change", handler);
+    if (sessionId && !fetchedSessions.has(sessionId)) {
+      fetchSessionReviews(sessionId, publisher.setReviews, publisher.setLoading);
+    }
+    return () => {
+      window.removeEventListener("file-reviews-change", handler);
+    };
   }, [sessionId]);
 
-  useEffect(() => {
-    if (!sessionId || fetchedSessions.has(sessionId)) {
-      if (sessionId && reviewsCache[sessionId]) {
-        queueMicrotask(() => setReviews(reviewsCache[sessionId]));
-      }
-      return;
-    }
-    fetchSessionReviews(sessionId, setReviews, setLoading);
+  const capturePublisher = useCallback(() => {
+    const owner = ownerRef.current;
+    return readerPublisher(owner?.sessionId === sessionId ? owner : null, setSnapshot);
   }, [sessionId]);
+  const current = snapshot.owner?.active && snapshot.owner.sessionId === sessionId;
+  const fallbackReviews = sessionId ? (reviewsCache[sessionId] ?? emptyReviews) : emptyReviews;
+  return {
+    reviews: current ? snapshot.reviews : fallbackReviews,
+    loading: current ? snapshot.loading : false,
+    capturePublisher,
+  };
+}
+
+export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
+  const { reviews, loading, capturePublisher } = useReviewReader(sessionId);
 
   const markReviewed = useCallback(
     (filePath: string, diffHash: string) => {
       if (!sessionId) return;
+      const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
+        filePath,
         (next) => {
           next.set(filePath, { reviewed: true, diffHash });
         },
@@ -139,6 +229,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
         .catch(() => {
           optimisticUpdate(
             sessionId,
+            filePath,
             (reverted) => {
               reverted.delete(filePath);
             },
@@ -146,14 +237,16 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
           );
         });
     },
-    [sessionId],
+    [sessionId, capturePublisher],
   );
 
   const markUnreviewed = useCallback(
     (filePath: string) => {
       if (!sessionId) return;
+      const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
+        filePath,
         (next) => {
           next.set(filePath, { reviewed: false, diffHash: "" });
         },
@@ -172,11 +265,14 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
           /* Ignore failures for unmark */
         });
     },
-    [sessionId],
+    [sessionId, capturePublisher],
   );
 
   const resetReviews = useCallback(() => {
     if (!sessionId) return;
+    const { setReviews } = capturePublisher();
+    const pending = pendingReviewReads.get(sessionId);
+    if (pending) pending.reset = true;
     reviewsCache[sessionId] = new Map();
     setReviews(new Map());
     notifyChange();
@@ -185,7 +281,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
     client.request("session.file_review.reset", { session_id: sessionId }).catch(() => {
       /* Ignore */
     });
-  }, [sessionId]);
+  }, [sessionId, capturePublisher]);
 
   return { reviews, markReviewed, markUnreviewed, resetReviews, loading };
 }

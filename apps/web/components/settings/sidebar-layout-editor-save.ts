@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { ApiError } from "@/lib/api/client";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { mapLatestUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
   defaultSidebarLayout,
   fromApiSidebarLayout,
@@ -56,7 +56,8 @@ export async function submitSidebarLayout({
       layout: toApiSidebarLayout(submitted),
     },
   });
-  const latest = response.settings.sidebar_layouts_by_workspace?.[submittedWorkspaceId];
+  const accepted = mapLatestUserSettingsResponse(response, store.getState().userSettings);
+  const latest = accepted.sidebarLayoutsByWorkspace?.[submittedWorkspaceId];
   const next = latest
     ? fromApiSidebarLayout(latest)
     : { ...submitted, revision: submittedRevision + 1 };
@@ -76,7 +77,7 @@ export async function submitSidebarLayout({
   }
   if (workspaceRef.current === submittedWorkspaceId) {
     const current = store.getState().userSettings;
-    setUserSettings(mapUserSettingsResponse(response, current));
+    setUserSettings(mapLatestUserSettingsResponse(response, current));
     onOperationError(null);
   }
 }
@@ -117,7 +118,8 @@ function useLatestSidebarLayout({
     setLatestLoading(true);
     try {
       const response = await fetchUserSettings({ cache: "no-store" });
-      const latest = response.settings.sidebar_layouts_by_workspace?.[requestedWorkspaceId];
+      const accepted = mapLatestUserSettingsResponse(response, store.getState().userSettings);
+      const latest = accepted.sidebarLayoutsByWorkspace?.[requestedWorkspaceId];
       const next = latest ? fromApiSidebarLayout(latest) : defaultSidebarLayout();
       if (latestAttemptRef.current !== requestedAttempt) return;
       const recoverUnsupportedDraft =
@@ -134,7 +136,7 @@ function useLatestSidebarLayout({
         latestAttemptRef.current === requestedAttempt
       ) {
         const current = store.getState().userSettings;
-        setUserSettings(mapUserSettingsResponse(response, current));
+        setUserSettings(mapLatestUserSettingsResponse(response, current));
         setStatus(null);
       }
     } catch {

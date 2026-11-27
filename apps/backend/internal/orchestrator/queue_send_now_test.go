@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -192,7 +193,7 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messageCreator := &mockMessageCreator{}
 	svc.messageCreator = messageCreator
 	svc.activeTurns.Store("session-1", "turn-1")
@@ -222,6 +223,12 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 	// Production dispatch registers the handoff before starting the worker;
 	// preserve that ownership precondition for this direct worker test.
 	svc.markQueuedDispatchInFlight("session-1", claimed.Dispatch.ID)
+	// This test covers restore bookkeeping, not delivery. A claimed entry
+	// resumes Auto-run, so pause it again: the restore-drain then leaves the
+	// restored entries pending instead of dispatching their FIFO head.
+	if err := svc.messageQueue.SetAutoRun(ctx, "session-1", false); err != nil {
+		t.Fatalf("pause Auto-run before the worker: %v", err)
+	}
 	svc.executeSendNowClaim(claimed)
 	if len(messageCreator.userMessages) != 1 {
 		t.Fatalf("replacement retry created %d user messages, want 1", len(messageCreator.userMessages))
@@ -235,8 +242,8 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 			t.Fatalf("restored source %q lost user_message_recorded marker: %#v", entry.ID, entry.Metadata)
 		}
 	}
-	if !svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
-		t.Fatal("restoring accepted Send Now claim reverted Auto-run")
+	if svc.messageQueue.GetStatus(ctx, "session-1").AutoRun {
+		t.Fatal("restoring accepted Send Now claim changed the paused Auto-run setting")
 	}
 }
 
@@ -251,7 +258,7 @@ func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, session.ID)
 	if err != nil {
@@ -273,7 +280,7 @@ func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim old prompt: %v", err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, claim.Dispatch.ID, nil)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, claim.Dispatch.ID, nil)
 
 	if _, err := repo.DB().ExecContext(
 		ctx,
@@ -325,7 +332,7 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	claim := &messagequeue.SendNowClaim{
 		Dispatch: messagequeue.QueuedMessage{
@@ -373,6 +380,15 @@ func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-created", v1.TaskStateInProgress)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.startAgentProcessFunc = func(context.Context, string) error {
+		agentMgr.mu.Lock()
+		accepted := agentMgr.initialPromptDispatchCallback
+		agentMgr.mu.Unlock()
+		if accepted != nil {
+			accepted()
+		}
+		return nil
+	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
@@ -419,6 +435,8 @@ func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
 
 func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing.T) {
 	ctx := context.Background()
+	const promptReferenceContext = "EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. " +
+		"Use these expansions as hidden context while preserving the original @mentions.\n\n### @principles\nApply the repository principles."
 	repo := setupTestRepo(t)
 	seedTaskAndSessionWithStep(t, repo, "queued-created", "queued-session", "queued-step")
 	seedExecutorRunning(t, repo, "queued-session", "queued-created", "prepared-exec")
@@ -431,6 +449,15 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "queued-created", v1.TaskStateScheduling)
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.startAgentProcessFunc = func(context.Context, string) error {
+		agentMgr.mu.Lock()
+		accepted := agentMgr.initialPromptDispatchCallback
+		agentMgr.mu.Unlock()
+		if accepted != nil {
+			accepted()
+		}
+		return nil
+	}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(svc.stopSendNowWorkers)
@@ -439,10 +466,12 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 	deferral := models.CeilingDeferral{
 		Kind: models.CeilingLaunchStartCreated,
 		Payload: map[string]interface{}{
-			metaKeySessionID:      "queued-session",
-			metaKeyAgentProfileID: "profile-queued",
-			metaKeyPrompt:         "workflow prompt",
-			"skip_message_record": true,
+			metaKeySessionID:           "queued-session",
+			metaKeyAgentProfileID:      "profile-queued",
+			metaKeyPrompt:              "workflow prompt @principles\n\n" + sysprompt.Wrap(promptReferenceContext),
+			"prompt_already_composed":  true,
+			"prompt_reference_context": promptReferenceContext,
+			"skip_message_record":      true,
 		},
 		Origin:          string(launchOriginAutomatic),
 		ReasonCode:      ceilingReasonRefused,
@@ -480,8 +509,10 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 		}
 		agentMgr.mu.Unlock()
 		if descriptionCalls == 1 {
-			if !strings.Contains(descriptions[0], "workflow prompt") || !strings.Contains(descriptions[0], "pending Continue") {
-				t.Fatalf("created-session launch prompt = %q, want workflow prompt and Continue", descriptions[0])
+			if !strings.Contains(descriptions[0], "workflow prompt @principles") || !strings.Contains(descriptions[0], "pending Continue") ||
+				!strings.Contains(descriptions[0], "Apply the repository principles.") ||
+				strings.Count(descriptions[0], promptReferenceContext) != 1 {
+				t.Fatalf("created-session launch prompt = %q, want workflow prompt, trusted context once, and Continue", descriptions[0])
 			}
 			launched = true
 			break
@@ -553,7 +584,7 @@ func TestPromptSendNowClaimRejectsPlanCommentWhenTranscriptPersistenceFails(t *t
 	svc := createTestServiceWithAgent(
 		repo, newMockStepGetter(), newMockTaskRepo(), agentMgr,
 	)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{userMessageErr: errors.New("transcript unavailable")}
 	claim := &messagequeue.SendNowClaim{
 		Sources: []messagequeue.QueuedMessage{
@@ -703,7 +734,7 @@ func TestSendQueuedNowSupersedesPendingFIFOHandoff(t *testing.T) {
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	reservationMetadata := map[string]interface{}{
@@ -802,6 +833,24 @@ func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithDispatchCallback(
 	return result.result, result.err
 }
 
+func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.2
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.7
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9
@@ -879,7 +928,7 @@ func TestSendQueuedNowCancelsLiveFIFOTurn(t *testing.T) {
 			}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 			svc.messageQueue.SetAutoMergeEnabled(false)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 			t.Cleanup(func() {
 				releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
@@ -961,6 +1010,59 @@ func TestSendQueuedNowCancelsLiveFIFOTurn(t *testing.T) {
 	}
 }
 
+func TestSendQueuedNowCancelsActiveTurnWhenSessionProjectionIsPromptable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	turns := &repoTurnService{repo: repo}
+	if _, err := turns.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+
+	// The turn store can observe a live turn before the session projection moves
+	// out of WAITING_FOR_INPUT. Send Now must use the authoritative active turn
+	// identity instead of admitting a concurrent prompt from the stale projection.
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("persist stale promptable projection: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = turns
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
+	svc.messageCreator = &mockMessageCreator{}
+	svc.messageQueue.SetAutoMergeEnabled(false)
+	t.Cleanup(func() { svc.stopSendNowWorkers() })
+
+	for _, content := range []string{"queued A", "urgent B", "queued C"} {
+		if _, err := svc.messageQueue.QueueMessageWithMetadata(
+			ctx, "session-1", "task-1", content, "", messagequeue.QueuedByUser, false, nil, nil,
+		); err != nil {
+			t.Fatalf("queue %q: %v", content, err)
+		}
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if len(status.Entries) != 3 {
+		t.Fatalf("queued entries = %#v, want A, B, C", status.Entries)
+	}
+
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeEntry, status.Entries[1].ID); err != nil {
+		t.Fatalf("Send Now error = %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("cancel calls = %d, want one for the active turn despite the promptable session projection", got)
+	}
+}
+
 func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -994,7 +1096,7 @@ func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(func() {
 		releasePreClaimOnce.Do(func() { close(releasePreClaim) })
@@ -1166,7 +1268,7 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	stopSendNowWorkers = svc.stopSendNowWorkers
 
@@ -1238,7 +1340,7 @@ func TestSendQueuedNowConflictsBeforeReplacementClaimsPrompt(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	t.Cleanup(func() {
 		releasePreClaimOnce.Do(func() { close(releasePreClaim) })

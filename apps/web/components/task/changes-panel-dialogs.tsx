@@ -28,6 +28,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Trans, useTranslation } from "react-i18next";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import type { ChangedFileTarget } from "./changes-timeline-selection";
 
 // --- Discard Confirmation Dialog ---
 
@@ -35,7 +36,7 @@ type DiscardDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fileToDiscard: string | null;
-  filesToDiscard: string[] | null;
+  filesToDiscard: ChangedFileTarget[] | null;
   anchorRef: RefObject<HTMLElement | null>;
   onConfirm: () => void;
 };
@@ -61,7 +62,8 @@ export function DiscardDialog({
   const { t } = useTranslation();
   const bulkCount = filesToDiscard?.length ?? 0;
   const isBulk = bulkCount > 1;
-  const displayFile = fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0] : null);
+  const displayFile =
+    fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0].path : null);
   const description = isBulk ? t("task:discardAllChangesToFiles", { count: bulkCount }) : null;
   const title = t("task:discardChanges");
   const cancelLabel = t("common:cancel");

@@ -35,7 +35,8 @@ async function waitForState(apiClient: ApiClient, taskId: string, state: string)
     .toBe(state);
 }
 
-async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<void> {
+async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string): Promise<string> {
+  let questionID = "";
   await expect
     .poll(
       async () => {
@@ -46,11 +47,24 @@ async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string)
             message.metadata?.parent_question === true &&
             typeof message.metadata.parent_question_id === "string",
         );
-        return questions.length === 1 ? String(questions[0].metadata?.parent_question_id) : "";
+        questionID =
+          questions.length === 1 ? String(questions[0].metadata?.parent_question_id) : "";
+        return questionID;
       },
       { timeout: 60_000, message: "one durable parent question should be delivered" },
     )
     .not.toBe("");
+  return questionID;
+}
+
+async function waitForChildAnswerTurn(apiClient: ApiClient, sessionID: string): Promise<void> {
+  // Turn admission and message projection settle separately.
+  await expect
+    .poll(async () => (await apiClient.listSessionTurns(sessionID)).turns.length, {
+      timeout: 60_000,
+      message: "parent answer should create a child turn",
+    })
+    .toBeGreaterThanOrEqual(2);
 }
 
 test.describe("Mobile task autopilot", () => {
@@ -134,15 +148,30 @@ test.describe("Mobile task autopilot", () => {
     });
     await assertNoDocumentHorizontalOverflow(testPage, "mobile autopilot task switcher");
 
-    await waitForParentQuestion(apiClient, parent.id);
-    // The answer turn can finish before polling observes RUNNING. Its durable
-    // turn remains observable after the child returns to WAITING_FOR_INPUT.
+    const questionID = await waitForParentQuestion(apiClient, parent.id);
+    await waitForChildAnswerTurn(apiClient, childSessionId);
+
     await expect
-      .poll(async () => (await apiClient.listSessionTurns(childSessionId)).turns.length, {
-        timeout: 60_000,
-        message: "the parent answer should create a mobile child turn",
-      })
-      .toBeGreaterThanOrEqual(2);
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(childSessionId);
+          return {
+            answered: messages.some(
+              (message) =>
+                message.metadata?.status === "answered" &&
+                message.metadata.question_id === questionID,
+            ),
+            responses: messages.filter(
+              (message) =>
+                message.author_type === "user" &&
+                message.metadata?.parent_question_id === questionID &&
+                typeof message.metadata.parent_question_response === "string",
+            ).length,
+          };
+        },
+        { timeout: 60_000, message: "one parent answer should reach the child message history" },
+      )
+      .toEqual({ answered: true, responses: 1 });
 
     await testPage.goto(`/t/${child.id}`);
     const childSession = new SessionPage(testPage);

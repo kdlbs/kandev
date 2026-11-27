@@ -1,6 +1,13 @@
 ---
-spec: docs/specs/workspaces/requirements/branch-policies.md
-system_design: docs/specs/workspaces/system-design/branch-policies.md
+requirements:
+  - REQ-WORKSPACES-BRANCH-POLICIES-001
+  - REQ-WORKSPACES-BRANCH-POLICIES-002
+  - REQ-WORKSPACES-BRANCH-POLICIES-003
+  - REQ-WORKSPACES-BRANCH-POLICIES-004
+  - REQ-WORKSPACES-BRANCH-POLICIES-005
+system_design:
+  - ../../specs/workspaces/system-design/branch-policies.md
+legacy_specs: []
 created: 2026-08-24
 status: complete
 ---

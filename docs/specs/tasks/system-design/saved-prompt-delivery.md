@@ -30,7 +30,7 @@ surfaces continue to use the shared composer and message handler.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-TASKS-SAVED-PROMPT-DELIVERY-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow), [Security](#security) |
+| `REQ-TASKS-SAVED-PROMPT-DELIVERY-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow), [Security](#security), [One-time move instructions](#one-time-move-instructions) |
 
 ## Components and responsibilities
 
@@ -123,6 +123,94 @@ The MCP task-create handler continues to pass the task description and selected
 step into `LaunchSession`. It does not gain a separate expansion implementation.
 This repair does not infer a workflow step or change step-selection semantics.
 
+### Workflow entry and composed launches
+
+Workflow entry returns the composed prompt and its exact generated expansion
+context together. `buildWorkflowEntryPrompt` retains the context returned by
+`buildWorkflowPromptWithContext`. Its initial-description claim keeps its existing semantics.
+
+`launchAfterOnEnterDispatch` carries both values into `autoStartStepPrompt`.
+Created sessions and context resets pass the expansion context into both
+runtime-context injectors before message recording. Office and ordinary task
+injectors use the same exact-content trust rule.
+
+The private `startCreatedSessionWithComposedPrompt` entry point forwards the
+context to `startCreatedSession`. Skipping composition does not skip trusted-context
+propagation. The final `wrapCreatedSessionPrompt` receives the same value.
+
+`StartSessionForWorkflowStep`, missing-execution recovery, and replacement-session
+branches also carry the generated context to any downstream canonicalization.
+A replacement that rebuilds the step prompt uses the context from that rebuild.
+An immediate retry of an already prepared prompt retains its matching context.
+Do not infer provenance by extracting a block from prompt text.
+
+Keep queued-message storage and replay authority unchanged. If replay prepares
+references again, use the backend resolver before canonicalization. Never treat
+a serialized expansion-shaped block as a new trust source. This repair adds no
+queue schema or new acceptance-time snapshot contract for queued messages.
+
+Queued workflow auto-start prompts resolve saved references again at the drain
+boundary, before the user-message row is written. The same call returns the
+trusted expansion context for dispatch recovery. If the saved record changes
+after the row is written but before provider dispatch completes, a fresh-runtime
+fallback uses that drain-time context rather than re-resolving the mutable
+record. Other queued messages keep their existing preparation path.
+
+Preserve task/session identity, completion instructions, mode transforms, entity
+references, handoff ordering, cancellation guards, and title ownership. Passthrough
+sessions continue to omit hidden expansions.
+
+## One-time move instructions
+
+`WorkflowMoveOptionsFields` owns the shared instructions field. Use
+`TaskPromptReferenceEditor` for reference recognition, selection, highlighting,
+and plain-text serialization. Keep the visible field label and provide its
+accessible name to the editor. Retain the existing task-create defaults.
+`workflowMoveOptionsPayload` sends the draft through `entry_options.instructions`.
+It contains visible text and `@name` references.
+
+Reuse the composer suggestion popup on desktop. Anchor it above the editor
+and give the list its own scroll region. The next-step popover and sidebar
+Move submenu keep the same dimensions when suggestions open. The shared
+stepper inherits the same field.
+
+Keep the phone next-step drawer and the task-switcher **Task actions** path.
+Use the existing move drawer as the mobile exemplar. Its body owns vertical
+scrolling and contains the editor, inline results, and Move action in one column.
+Keep the header fixed. Bound the drawer to the dynamic viewport and keep
+the body above the bottom safe area. Contain overscroll in the drawer.
+Use 44 px minimum touch targets for
+suggestions and the Move action. Match the existing 28 px desktop actions,
+focus rings, and prompt-chip tokens. Keep the selected result visible and
+allow long names to truncate with their full accessible name.
+
+The editor owns plain Enter, Tab, and Escape while it handles a suggestion.
+The existing Ctrl/Cmd+Enter move shortcut takes precedence. Keep focus in
+the editor after selection and retain the draft after a failed move. Keep
+selection in the same React tree so focus and outside-click handlers preserve
+the move during selection. Use existing border and selected-row styles.
+Update suggestions immediately while the user types.
+
+For workflow auto-start, keep the move sentinel and pass the complete visible
+prompt to the existing resolver once. The transient step overlay already
+carries the instructions on reused-session paths. In `startTask`, move the
+fresh-launch append ahead of the resolver while keeping its position after
+the composed step body. Apply the same ordering to the direct fallback
+when step lookup fails. Keep the exact returned context through persistence
+and dispatch. The skip-step option continues to suppress the step body and
+its task-description fallback.
+
+For a queued handoff from `queueMoveInstructionsForSession`, reuse the
+existing drain-time preparation and exact-context propagation in
+`event_handlers_agent.go`. Classify these entries through server-owned move
+queue metadata. Preserve existing queue routing and consumption behavior.
+Do not derive provenance from the visible sentinel. Keep Office run
+composition in its existing run-owned path.
+
+No request field, database schema, or prompt-resolution policy changes.
+The server continues to strip supplied definitions before structured
+resolution. Passthrough keeps literal text as in other prompt surfaces.
+
 ## Failure and recovery
 
 A saved-prompt lookup error remains non-fatal. Kandev logs a warning without
@@ -146,6 +234,11 @@ The accepted message keeps the expansion that existed at acceptance time.
 
 The backend saved-prompt repository is authoritative. The browser can select or
 name a prompt, but it cannot define trusted prompt instructions.
+
+Create, update, and delete routes require `org.config.manage`. Reads and
+reference use remain available to org members because saved prompts are shared
+reusable configuration. Custom records can only be changed through this
+authority-gated API; built-in records remain backend-seeded.
 
 The prompt service removes forged expansion blocks and legacy browser prompt
 blocks. It sanitizes saved names and content before it writes a system tag.
@@ -172,6 +265,9 @@ expansion reached the session during diagnosis.
   Chat and observe a deterministic agent response from its definition.
 - Orchestrator tests cover missing workflow-step IDs, ephemeral launches,
   absent step getters, and lookup failures with the real saved-prompt service.
+- Prompt-handler tests deny member mutations without `org.config.manage` and
+  retain member reads. Queue-drain tests compare the recorded definition with a
+  replacement launch after a saved-prompt edit during failed dispatch.
 - Launch integration tests capture the agent-manager prompt and recorded user
   message for `LaunchSession` and `StartCreatedSession` without workflow steps.
   They verify matching definitions, preserved trust, and passthrough exclusion.
@@ -180,3 +276,10 @@ expansion reached the session during diagnosis.
 
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 - [Apply Agent-Generated Titles to Quick Chat](../../../decisions/2026-08-26-quick-chat-agent-titles.md)
+
+## Implementation plans
+
+- [Quick Chat delivery](../../../plans/quick-chat-saved-prompt-delivery/plan.md): completed direct-message repair.
+- [Launch fallback](../../../plans/saved-prompt-launch-fallback/plan.md): completed no-workflow repair.
+- [Workflow entry delivery](../../../plans/workflow-entry-saved-prompts/plan.md): completed composed-launch repair.
+- [One-time move instructions](../../../plans/move-instruction-prompt-selection/plan.md): reference selection and delivery.

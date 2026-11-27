@@ -25,12 +25,10 @@ type RecordAgentDecisionInput struct {
 	AgentProfileID string
 	Decision       string
 	Reason         string
-	// SessionID, when features.officeSessionIdentity is on, names the
-	// decider's own calling session so RecordDecision re-evaluates against
-	// it instead of the task's most-recently-started ("active") session.
-	// The runtime handler derives it from the signed RunContext and passes it
-	// unconditionally; gated here because the flag decision belongs with the
-	// rest of this service's behavior, not the transport layer.
+	// SessionID names the decider's own calling session so RecordDecision
+	// re-evaluates against it instead of the task's most-recently-started
+	// ("active") session. The runtime handler derives it from the signed
+	// RunContext.
 	SessionID string
 }
 
@@ -154,9 +152,7 @@ func (s *DashboardService) RecordAgentDecision(
 		Role:          role,
 		Comment:       in.Reason,
 	}
-	if s.officeSessionIdentity {
-		decisionInput.SessionID = in.SessionID
-	}
+	decisionInput.SessionID = in.SessionID
 	result, err := dispatcher.RecordDecision(ctx, decisionInput)
 	if err != nil {
 		return nil, fmt.Errorf("record decision: %w", err)

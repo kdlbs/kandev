@@ -1,3 +1,4 @@
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { generateUUID } from "@/lib/utils";
 
 export type WorkspaceRestorationStatus = "pending" | "ready" | "error";
@@ -155,12 +156,5 @@ export function clearWorkspaceRestoration(
 
 /** Keep backend diagnostics safe and bounded before they reach a disclosure. */
 export function sanitizeWorkspaceRestorationDetails(error: unknown): string {
-  let message = String(error ?? "");
-  if (error instanceof Error) message = error.message;
-  if (typeof error === "string") message = error;
-  return message
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
-    .slice(0, 512)
-    .replace(/[\uD800-\uDBFF]$/u, "")
-    .trim();
+  return sanitizeSessionErrorDetails(error);
 }

@@ -6,8 +6,10 @@ import {
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
+  isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
+import visibleMessageTypes from "@kandev/types/unread-message-visible-types.json";
 
 const ERROR_AT = "2026-05-30T00:00:00Z";
 const AFTER = "2026-05-30T00:01:00Z";
@@ -92,6 +94,22 @@ describe("hasSuccessfulAgentBootAfter", () => {
     const later = { ...bootMessage("2026-05-30T00:02:00Z"), type: "message" } as Message;
     expect(hasSuccessfulAgentBootAfter([bootMessage(AFTER), later], ERROR_AT)).toBe(true);
   });
+
+  it("uses only authoritative metadata for stamped recovery rows", () => {
+    const success = providerRestoredSuccess("failure-1");
+    const metadata = {
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true, metadata)).toBe(
+      true,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-2", true, metadata)).toBe(
+      false,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true)).toBe(false);
+  });
 });
 
 describe("recovery resolution metadata", () => {
@@ -111,7 +129,88 @@ describe("recovery resolution metadata", () => {
       false,
     );
   });
+
+  it("uses an authoritative stamp-specific resolution when the success row is absent", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", undefined, true),
+    ).toBe(true);
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", undefined, true),
+    ).toBe(false);
+  });
+
+  it("does not let a transcript notice or global timestamp settle a stamped failure", () => {
+    const notice = providerRestoredSuccess("failure-1");
+    const metadata = { recovery_resolved_at: AFTER };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", [notice], true)).toBe(
+      false,
+    );
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", [], true)).toBe(
+      false,
+    );
+  });
+
+  it("rejects malformed resolution records and oversized host attempt references", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-99999999999999999999" },
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-started" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(false);
+  });
+
+  it("keeps a successor failure unresolved when only its predecessor was settled", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(true);
+    expect(hasSessionRecoveryResolutionAfter(metadata, AFTER, "successor-failure")).toBe(false);
+  });
 });
+
+describe("selection failure correlation", () => {
+  it("requires an exact occurrence link only for typed model and mode failures", () => {
+    expect(isSelectionFailureRecoveryMetadata({ causes: [{ code: "model_unavailable" }] })).toBe(
+      true,
+    );
+    expect(isSelectionFailureRecoveryMetadata({ code: "permission_mode_mismatch" })).toBe(true);
+    for (const code of [
+      "thinking_level_unavailable",
+      "thinking_level_failed",
+      "thinking_level_mismatch",
+      "thinking_level_unconfirmed",
+    ]) {
+      expect(isSelectionFailureRecoveryMetadata({ causes: [{ code }] })).toBe(true);
+    }
+    expect(
+      isSelectionFailureRecoveryMetadata({ causes: [{ code: "transport_unavailable" }] }),
+    ).toBe(false);
+  });
+});
+
+function providerRestoredSuccess(resolvedErrorStamp: string): Message {
+  return baseMessage({
+    id: `resume-success-${resolvedErrorStamp}`,
+    type: "status",
+    created_at: AFTER,
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      attempt_id: "resume-2",
+      resolved_error_stamp: resolvedErrorStamp,
+    },
+  });
+}
 
 describe("isSuccessfulScriptExecutionMetadata", () => {
   it("uses the shared exited-zero success rule", () => {
@@ -388,6 +487,54 @@ describe("filterVisibleMessages recovery history", () => {
   });
 });
 
+describe("filterVisibleMessages dismissed Git push errors", () => {
+  it("hides only a persisted push failure row, preserving legacy errors and later failures", () => {
+    const dismissed = baseMessage({
+      id: "dismissed-push",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const legacyPush = baseMessage({
+      id: "legacy-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const laterPush = baseMessage({
+      id: "later-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const unrelated = baseMessage({
+      id: "unrelated-error",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "pull",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const malformedMarker = baseMessage({
+      id: "malformed-marker",
+      type: "error",
+      metadata: {
+        git_operation_error: "true",
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+
+    expect(
+      filterPlanMessages([dismissed, legacyPush, laterPush, unrelated, malformedMarker]).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["legacy-push", "later-push", "unrelated-error", "malformed-marker"]);
+  });
+});
+
 describe("hasFailedAgentBootAfter", () => {
   it("returns true when a boot after the failure reports status failed", () => {
     expect(hasFailedAgentBootAfter([bootMessage(AFTER, { status: "failed" })], ERROR_AT)).toBe(
@@ -418,5 +565,80 @@ describe("hasFailedAgentBootAfter", () => {
   it("ignores non-boot scripts that failed after the failure", () => {
     const setup = bootMessage(AFTER, { script_type: "setup", status: "failed" });
     expect(hasFailedAgentBootAfter([setup], ERROR_AT)).toBe(false);
+  });
+});
+
+describe("filterVisibleMessages permission presentation", () => {
+  it("hides an automatic standalone permission row", () => {
+    const permission = baseMessage({
+      id: "perm-auto",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "automatic" },
+    });
+
+    expect(filterPlanMessages([permission])).toEqual([]);
+  });
+
+  it("keeps an unavailable row so its feedback is visible", () => {
+    const permission = baseMessage({
+      id: "perm-unavailable",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "unavailable" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-unavailable",
+    ]);
+  });
+
+  it("keeps an interactive row actionable", () => {
+    const permission = baseMessage({
+      id: "perm-interactive",
+      type: "permission_request",
+      metadata: { status: "pending", permission_presentation: "interactive" },
+    });
+
+    expect(filterPlanMessages([permission]).map((message) => message.id)).toEqual([
+      "perm-interactive",
+    ]);
+  });
+
+  it("keeps the tool row when an attached unavailable permission is deduplicated", () => {
+    const toolCall = baseMessage({
+      id: "tool-1",
+      type: "tool_call",
+      metadata: { tool_call_id: "call-1", status: "complete" },
+    });
+    const permission = baseMessage({
+      id: "perm-attached",
+      type: "permission_request",
+      metadata: {
+        status: "pending",
+        tool_call_id: "call-1",
+        permission_presentation: "unavailable",
+      },
+    });
+
+    expect(
+      filterVisibleMessages([toolCall, permission], new Set(["call-1"]), new Set()).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["tool-1"]);
+  });
+});
+
+describe("filterVisibleMessages shared visible-type manifest", () => {
+  // @covers AC-TASKS-TASK-UNREAD-DOT-001.10
+  it.each(visibleMessageTypes)("renders a %s message as visible", (type) => {
+    const message = baseMessage({ id: `visible-${type}`, type: type as Message["type"] });
+    expect(
+      filterVisibleMessages([message], new Set<string>(), new Set<string>()).map((m) => m.id),
+    ).toEqual([`visible-${type}`]);
+  });
+
+  it("hides a log message, which the manifest does not list", () => {
+    // Literal type: permission-style types are exempt from the manifest by design.
+    const message = baseMessage({ id: "hidden-log", type: "log" as Message["type"] });
+    expect(filterVisibleMessages([message], new Set<string>(), new Set<string>())).toEqual([]);
   });
 });

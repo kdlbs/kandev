@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -34,23 +35,69 @@ import (
 // For the routing UI without real CLIs installed, set
 // `KANDEV_MOCK_PROVIDERS=claude-acp,codex-acp,opencode-acp` when
 // launching `make dev`.
-func Provide(log *logger.Logger) (*Registry, func() error, error) {
+func Provide(log *logger.Logger, codexAppServerEnabled ...bool) (*Registry, func() error, error) {
 	reg := NewRegistry(log)
+	nativeEnabled := len(codexAppServerEnabled) > 0 && codexAppServerEnabled[0]
 
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
 	mockProviders := os.Getenv("KANDEV_MOCK_PROVIDERS")
 	if mockMode == "only" {
 		// E2E mode keeps inference isolated to the mock provider, but virtual
-		// families are still part of the settings and routing contract. They do
-		// not launch a process or discover a host binary, so retaining them does
-		// not weaken the isolation boundary.
+		// families and disabled optional-agent descriptors remain available for
+		// settings and historical profile retention. They cannot dispatch work.
 		_ = reg.Register(agents.NewDynamicAgent())
 		_ = reg.Register(agents.NewMockAgent())
+		_ = reg.Register(agents.NewCodexAppServer(false))
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_COPILOT"), "true") {
+			// Browser coverage needs a disposable Copilot settings identity.
+			// Use the mock ACP peer so capability probes and accidental task
+			// launches never require a native Copilot install or authentication.
+			copilot := agents.NewMockAgentWithID(agents.CopilotACPAgentID, "Copilot", "Copilot")
+			// Keep the disposable identity out of the default-profile seed,
+			// which selects the first launchable profile by display order.
+			copilot.SetDisplayOrder(1000)
+			if err := reg.Register(copilot); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, agents.CopilotACPAgentID, log)
+		}
+		if err := registerAntigravityMockAgent(reg, log); err != nil {
+			return nil, nil, err
+		}
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_DEVIN"), "true") {
+			// Browser coverage needs a disposable Devin settings identity. The
+			// mock ACP peer supplies deterministic modes and capability
+			// snapshots without a native install or account.
+			devin := agents.NewMockAgentWithID(agents.DevinACPAgentID, "Devin", "Devin")
+			// Keep the disposable identity out of the default-profile seed.
+			devin.SetDisplayOrder(1001)
+			if err := reg.Register(devin); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, agents.DevinACPAgentID, log)
+		}
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") && strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_PI"), "true") {
+			pi := agents.NewMockAgentWithID("pi-acp", "Pi", "Pi")
+			pi.SetDisplayOrder(1002)
+			if err := reg.Register(pi); err != nil {
+				return nil, nil, err
+			}
+			configureMockAgent(reg, "pi-acp", log)
+		}
 		configureMockAgent(reg, "mock-agent", log)
+		if strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") &&
+			strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_AUGGIE"), "true") {
+			// Explicit recovery E2E needs Auggie's provider identity and native ACP
+			// resume capability, while still using the deterministic mock ACP peer.
+			_ = reg.Register(agents.NewMockAgentWithID("auggie", "Auggie", "Auggie"))
+			configureMockAgent(reg, "auggie", log)
+		}
 		registerExtraMockProviders(reg, log, mockProviders)
 		validateMockProviders(reg, mockProviders, log)
 	} else {
-		reg.LoadDefaults()
+		reg.LoadDefaults(nativeEnabled)
 		if mockMode == "true" {
 			// Dev mode: enable the base mock agent alongside the real
 			// agents. KANDEV_MOCK_PROVIDERS is opt-in — when set, the
@@ -65,6 +112,21 @@ func Provide(log *logger.Logger) (*Registry, func() error, error) {
 	reg.MarkLoaded()
 
 	return reg, func() error { return nil }, nil
+}
+
+func registerAntigravityMockAgent(reg *Registry, log *logger.Logger) error {
+	if !strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true") ||
+		!strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK_ANTIGRAVITY"), "true") {
+		return nil
+	}
+	// Browser coverage needs Antigravity's curated profile settings without a native install.
+	agent := agents.NewMockAgentWithID(agents.AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
+	agent.SetDisplayOrder(1003)
+	if err := reg.Register(agent); err != nil {
+		return err
+	}
+	configureMockAgent(reg, agents.AntigravityACPAgentID, log)
+	return nil
 }
 
 // validateMockProviders logs an error if any provider listed in the raw
@@ -133,6 +195,23 @@ func (r *Registry) resolveProviderCommand(
 		Runtime:               agentruntime.RuntimeStandalone,
 		ManagedRuntimeVersion: managedRuntimeVersion,
 	}
+	if openCode, isOpenCode := ag.(*agents.OpenCodeACP); isOpenCode {
+		selection, err := openCode.ResolveSelectedRuntime(ctx)
+		if err != nil {
+			return nil, nil, false
+		}
+		opts.ManagedRuntimeFamily = selection.Family
+		opts.ManagedRuntimeSource = selection.Source
+		opts.ManagedRuntimeVersion = selection.Version
+		if selection.Source == managedruntime.OpenCodeSourceNative && selection.Spec.NativeBinaryOnPath() {
+			native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+			if err != nil || !found {
+				return nil, nil, false
+			}
+			opts.PreferNativeBinary = true
+			opts.NativeRuntimeVersion = native.Version
+		}
+	}
 	cmd := ag.BuildCommand(opts)
 	if cmd.IsEmpty() {
 		return nil, nil, false
@@ -155,6 +234,13 @@ func (r *Registry) resolveManagedProviderVersion(
 	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return "", true
+	}
+	if openCode, ok := ag.(*agents.OpenCodeACP); ok {
+		selection, err := openCode.ResolveSelectedRuntime(ctx)
+		if err != nil {
+			return "", false
+		}
+		return selection.Version, true
 	}
 	selectionStore := r.managedRuntimeSelectionReader()
 	if selectionStore == nil {

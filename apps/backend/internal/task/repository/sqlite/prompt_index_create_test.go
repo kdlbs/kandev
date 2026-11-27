@@ -163,6 +163,43 @@ func TestPromptIndexDurableAcrossDeletion(t *testing.T) {
 	if gotC.PromptIndex != 3 {
 		t.Errorf("reread C ordinal = %d, want 3", gotC.PromptIndex)
 	}
+
+	// Deleting a middle prompt leaves both surviving ordinals untouched.
+	d := &models.Message{ID: "del-d", TaskSessionID: "sess-DEL", TurnID: "turn-DEL", AuthorType: models.MessageAuthorUser, Content: "D"}
+	if err := repo.CreateMessage(ctx, d); err != nil {
+		t.Fatalf("create D: %v", err)
+	}
+	if d.PromptIndex != 4 {
+		t.Fatalf("D ordinal = %d, want 4", d.PromptIndex)
+	}
+	if err := repo.DeleteMessage(ctx, c.ID); err != nil {
+		t.Fatalf("delete C: %v", err)
+	}
+	gotB, err = repo.GetMessageWithPromptIndex(ctx, b.ID)
+	if err != nil {
+		t.Fatalf("reread B after middle delete: %v", err)
+	}
+	gotD, err := repo.GetMessageWithPromptIndex(ctx, d.ID)
+	if err != nil {
+		t.Fatalf("reread D after middle delete: %v", err)
+	}
+	if gotB.PromptIndex != 2 || gotD.PromptIndex != 4 {
+		t.Errorf("surviving ordinals = (%d, %d), want (2, 4) after deleting the middle prompt", gotB.PromptIndex, gotD.PromptIndex)
+	}
+	e := &models.Message{ID: "del-e", TaskSessionID: "sess-DEL", TurnID: "turn-DEL", AuthorType: models.MessageAuthorUser, Content: "E"}
+	if err := repo.CreateMessage(ctx, e); err != nil {
+		t.Fatalf("create E after middle delete: %v", err)
+	}
+	if e.PromptIndex != 5 {
+		t.Fatalf("E ordinal = %d, want 5 (deleted ordinal must not be reused)", e.PromptIndex)
+	}
+	gotE, err := repo.GetMessageWithPromptIndex(ctx, e.ID)
+	if err != nil {
+		t.Fatalf("reread E after middle delete: %v", err)
+	}
+	if gotE.PromptIndex != 5 {
+		t.Errorf("reread E ordinal = %d, want 5", gotE.PromptIndex)
+	}
 }
 
 // TestExplicitUserTimestampMustBeStrictlyAfterMax covers the zero-vs-explicit

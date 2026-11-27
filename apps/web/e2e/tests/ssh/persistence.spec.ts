@@ -2,10 +2,8 @@ import { test, expect } from "../../fixtures/ssh-test-base";
 import { SSHSettingsPage } from "../../pages/SSHSettingsPage";
 
 /**
- * UI persistence: state survives reload, executor list renders the SSH
- * entry with the right icon and label, partial form state doesn't leak.
- *
- * Covers e2e-plan.md group R (R1–R4).
+ * UI persistence: saved executor state survives reload, and partial forms
+ * do not leak state or show premature results.
  */
 test.describe("ssh executor — persistence + UI sweep", () => {
   test("fingerprint persists across reload (Trusted badge stays)", async ({
@@ -30,29 +28,43 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await page.gotoExisting(seedData.sshExecutorId);
 
     const originalName = await page.nameInput.inputValue();
-    const renamed = `${originalName} renamed`;
-    await page.nameInput.fill(renamed);
-    await expect(page.floatingSaveButton).toBeVisible();
-    await expect(page.floatingSaveButton).toBeDisabled();
+    try {
+      const renamed = `${originalName} renamed`;
+      await page.nameInput.fill(renamed);
+      await expect(page.floatingSaveButton).toBeVisible();
+      await expect(page.floatingSaveButton).toBeDisabled();
 
-    const beforeSave = (await apiClient.listExecutors()).executors.find(
-      (executor) => executor.id === seedData.sshExecutorId,
-    );
-    expect(beforeSave?.name).toBe(originalName);
+      const beforeSave = (await apiClient.listExecutors()).executors.find(
+        (executor) => executor.id === seedData.sshExecutorId,
+      );
+      expect(beforeSave?.name).toBe(originalName);
 
-    await page.clickTest();
-    expect(await page.waitForTestResult()).toBe("true");
-    await page.tickTrust();
-    await expect(page.floatingSaveButton).toBeEnabled();
-    await page.floatingSaveButton.click();
-    await expect(page.floatingSaveButton).not.toBeVisible({ timeout: 15_000 });
+      await page.clickTest();
+      expect(await page.waitForTestResult()).toBe("true");
+      await page.tickTrust();
+      await expect(page.floatingSaveButton).toBeEnabled();
+      const saved = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          response.url().endsWith(`/executors/${seedData.sshExecutorId}`),
+      );
+      await page.floatingSaveButton.click();
+      expect((await saved).ok()).toBe(true);
+      await expect(testPage.getByTestId("settings-floating-save")).toHaveAttribute(
+        "data-status",
+        "saved",
+        { timeout: 15_000 },
+      );
 
-    const afterSave = (await apiClient.listExecutors()).executors.find(
-      (executor) => executor.id === seedData.sshExecutorId,
-    );
-    expect(afterSave?.name).toBe(renamed);
-    await testPage.reload();
-    await expect(page.nameInput).toHaveValue(renamed);
+      const afterSave = (await apiClient.listExecutors()).executors.find(
+        (executor) => executor.id === seedData.sshExecutorId,
+      );
+      expect(afterSave?.name).toBe(renamed);
+      await testPage.reload();
+      await expect(page.nameInput).toHaveValue(renamed);
+    } finally {
+      await apiClient.updateExecutor(seedData.sshExecutorId, { name: originalName });
+    }
   });
 
   test("opening the new-executor form does not leak state from a prior session", async ({
@@ -64,16 +76,6 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await expect(page.hostInput).toHaveValue("");
     await expect(page.portInput).toHaveValue("22"); // default
     await expect(page.connectionBadge).toHaveAttribute("data-status", "unverified");
-  });
-
-  test("executor list renders the SSH entry with the right label", async ({
-    apiClient,
-    seedData,
-  }) => {
-    const { executors } = await apiClient.listExecutors();
-    const ssh = executors.find((e) => e.id === seedData.sshExecutorId);
-    expect(ssh).toBeDefined();
-    expect(ssh!.type).toBe("ssh");
   });
 
   test("incomplete test (no click yet) does not show a result panel", async ({

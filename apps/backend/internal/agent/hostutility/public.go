@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +17,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // ExecuteProfilePrompt resolves a complete profile snapshot at call start
@@ -40,11 +45,13 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			return nil, err
 		}
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
+	if err != nil {
+		return nil, err
+	}
+	profileContext := ProfileProbeContext{
+		Env: env, CLIFlags: cliFlags, CommandPrefix: prefix,
+		CopilotSelectedPlugins: append([]string{}, profile.CopilotSelectedPlugins...),
 	}
 	var gatewayAuth *acpprovider.GatewayAuth
 	var providerKeyEnvVar, providerKey string
@@ -64,13 +71,22 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cfg := inferenceConfigForHostUtility(ia)
-	command, err := m.resolveInferenceCommand(ctx, profile.AgentID, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
+	defer release()
+	pluginFlags, err := m.profileCopilotPluginFlags(ctx, profile.AgentID, profileContext, inst.workDir, command.Args())
+	if err != nil {
+		return nil, err
+	}
+	if pluginFlags != nil {
+		cliFlags = pluginFlags
+	}
+	cfg := inferenceConfigForHostUtility(ia)
 	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
 	autoApprove := profile.AutoApprove
+	env = mergeInferenceEnv(env, localEnv)
 	req := &agentctlutil.PromptRequest{
 		Prompt:                 prompt,
 		AgentID:                profile.AgentID,
@@ -78,17 +94,13 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		Mode:                   profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
-			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
-			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
+			Protocol: cfg.Protocol,
+			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
+			ProviderGatewayAuth: gatewayAuth, AuthPolicy: hostUtilityAuthPolicy(ia, command), OperatorDefined: cfg.OperatorDefined,
 		},
 	}
-	release, err := inst.acquireOperation(ctx, false)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
-	release()
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +157,9 @@ func (m *Manager) ResolveModelConfig(
 	agentType string,
 	req ModelConfigResolutionRequest,
 ) (ModelConfigResolution, error) {
+	if req.ProfileContext != nil {
+		return m.resolveProfileModelConfig(ctx, agentType, req)
+	}
 	if m == nil || m.modelCache == nil {
 		return ModelConfigResolution{}, errors.New("host utility manager not configured")
 	}
@@ -199,16 +214,11 @@ func (m *Manager) resolveModelConfigFlight(
 	if cfg == nil || !cfg.Supported {
 		return nil, errors.New("inference config not available")
 	}
-	command, err := m.resolveInferenceCommand(probeCtx, agentType, ia, agents.Command{})
-	if err != nil {
-		return nil, err
-	}
-
-	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
+	probeReq := buildProbeRequest(inst, ia, req.Refresh, agents.Command{})
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, command, probeReq)
+	resp, _, err := m.probeManagedRuntime(probeCtx, inst, ia, agents.Command{}, probeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -256,12 +266,16 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 		if errors.Is(err, errAgentNotInstalled) {
 			status = StatusNotInstalled
 		}
-		m.cache.set(AgentCapabilities{
+		caps := AgentCapabilities{
 			AgentType:     agentType,
 			Status:        status,
 			Error:         err.Error(),
 			LastCheckedAt: time.Now(),
-		})
+		}
+		if ia, ok := m.registry.GetInferenceAgent(agentType); ok {
+			m.stampConfiguredRuntime(ctx, &caps, ia)
+		}
+		m.cache.set(caps)
 		return AgentCapabilities{}, err
 	}
 	caps := m.probe(ctx, inst, ia, true)
@@ -288,6 +302,22 @@ func (m *Manager) RefreshWithCommand(
 	return caps, nil
 }
 
+func (m *Manager) probeWithLocalRuntime(
+	ctx context.Context,
+	agentType string,
+	selection agents.LocalRuntimeSelection,
+) (AgentCapabilities, error) {
+	if selection.Command.IsEmpty() {
+		return AgentCapabilities{}, errors.New("local runtime command is empty")
+	}
+	m.invalidateModelConfigCache(agentType)
+	inst, ia, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	return m.probeWithOverrides(ctx, inst, ia, true, selection.Command, "", selection.Env, nil), nil
+}
+
 // ProbeWithCommand runs a trusted command override without changing the live
 // capability cache. Runtime activation uses this boundary before persistence.
 func (m *Manager) ProbeWithCommand(
@@ -304,6 +334,80 @@ func (m *Manager) ProbeWithCommand(
 	return caps, nil
 }
 
+// ProbeIsolatedWithCommand probes a candidate in a job-owned workspace and
+// runtime home. The caller supplies paths inside a private temporary root.
+func (m *Manager) ProbeIsolatedWithCommand(
+	ctx context.Context,
+	agentType string,
+	command agents.Command,
+	root string,
+) (AgentCapabilities, error) {
+	inst, ia, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	npmCache, err := hostNPMConfig(ctx, "cache")
+	if err != nil {
+		return AgentCapabilities{}, fmt.Errorf("resolve host npm cache for isolated OpenCode probe: %w", err)
+	}
+	npmUserConfig, err := hostNPMConfig(ctx, "userconfig")
+	if err != nil {
+		return AgentCapabilities{}, fmt.Errorf("resolve host npm user config for isolated OpenCode probe: %w", err)
+	}
+	paths := map[string]string{
+		"HOME":                  filepath.Join(root, "home"),
+		"XDG_CONFIG_HOME":       filepath.Join(root, "config"),
+		"XDG_DATA_HOME":         filepath.Join(root, "data"),
+		"XDG_CACHE_HOME":        filepath.Join(root, "cache"),
+		"XDG_STATE_HOME":        filepath.Join(root, "state"),
+		"OPENCODE_CONFIG":       filepath.Join(root, "config", "opencode.json"),
+		"OPENCODE_DB":           filepath.Join(root, "data", "opencode", "opencode.db"),
+		"NPM_CONFIG_CACHE":      npmCache,
+		"npm_config_cache":      npmCache,
+		"NPM_CONFIG_USERCONFIG": npmUserConfig,
+		"npm_config_userconfig": npmUserConfig,
+	}
+	for _, path := range []string{
+		paths["HOME"], paths["XDG_CONFIG_HOME"], paths["XDG_DATA_HOME"],
+		paths["XDG_CACHE_HOME"], paths["XDG_STATE_HOME"], filepath.Join(root, "workspace"),
+	} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return AgentCapabilities{}, fmt.Errorf("create isolated OpenCode probe directory: %w", err)
+		}
+	}
+	caps := m.probeWithOverrides(
+		ctx, inst, ia, true, command, filepath.Join(root, "workspace"), paths,
+		[]string{
+			"OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "OPENCODE_CACHE_DIR",
+			"OPENCODE_STATE_DIR", "OPENCODE_CONFIG_CONTENT",
+		},
+	)
+	return caps, nil
+}
+
+func hostNPMConfig(ctx context.Context, key string) (string, error) {
+	command := exec.CommandContext(ctx, "npm", "config", "get", key)
+	output, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(string(output))
+	if value == "" || value == "undefined" {
+		return "", fmt.Errorf("npm returned an empty %s path", key)
+	}
+	return value, nil
+}
+
+// AcquireRuntimeMaintenance waits for any in-flight utility process for this
+// agent and prevents another one until release.
+func (m *Manager) AcquireRuntimeMaintenance(ctx context.Context, agentType string) (func(), error) {
+	inst, _, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return nil, err
+	}
+	return inst.acquireOperation(ctx, true)
+}
+
 // PublishCapabilities makes a successful candidate the live catalogue. The
 // caller is responsible for persisting the active selection first.
 func (m *Manager) PublishCapabilities(agentType string, caps AgentCapabilities) {
@@ -311,7 +415,15 @@ func (m *Manager) PublishCapabilities(agentType string, caps AgentCapabilities) 
 		return
 	}
 	m.invalidateModelConfigCache(agentType)
+	m.invalidateProfileCapabilities(agentType)
 	m.cache.set(caps)
+}
+
+// InvalidateCapabilities removes a stale runtime catalogue after activation
+// when discovery of the newly selected runtime fails.
+func (m *Manager) InvalidateCapabilities(agentType string) {
+	m.cache.delete(agentType)
+	m.invalidateModelConfigCache(agentType)
 }
 
 // ExecutePrompt runs a sessionless utility prompt against the warm instance
@@ -341,11 +453,12 @@ func (m *Manager) ExecutePromptWithMCP(
 	if err != nil {
 		return nil, err
 	}
-	cfg := inferenceConfigForHostUtility(ia)
-	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
+	command, localEnv, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
 	if err != nil {
 		return nil, err
 	}
+	defer release()
+	cfg := inferenceConfigForHostUtility(ia)
 
 	resolved := m.resolveModel(agentType, model, ia)
 
@@ -355,21 +468,18 @@ func (m *Manager) ExecutePromptWithMCP(
 		Model:   resolved,
 		Mode:    mode,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
+			Protocol:        cfg.Protocol,
 			Command:         command.Args(),
 			ModelFlag:       cfg.ModelFlag.Args(),
 			WorkDir:         inst.workDir,
-			Env:             agents.RuntimeEnvFor(ia),
+			Env:             mergeInferenceEnv(agents.RuntimeEnvFor(ia), localEnv),
 			StripEnv:        agents.StripEnvFor(ia),
+			AuthPolicy:      hostUtilityAuthPolicy(ia, command),
 			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,
 	}
-	release, err := inst.acquireOperation(ctx, false)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
-	release()
 	if err != nil {
 		return nil, err
 	}
@@ -428,6 +538,7 @@ func configOptionsFromProbe(options []agentctlutil.ProbeConfigOption) []ConfigOp
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 			Options:      choices,
+			Catalog:      option.Catalog,
 		})
 	}
 	return out

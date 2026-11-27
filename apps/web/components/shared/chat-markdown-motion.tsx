@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import type { ExtraProps } from "react-markdown";
+import { releaseAnimation } from "@kandev/ui/animation-utils";
 import {
   appendedTextRuns,
   CHAT_TEXT_DURATION_MS,
@@ -26,7 +27,7 @@ export function ChatMotionSpan({
       [{ opacity: 0.6 + (0.4 * elapsed) / CHAT_TEXT_DURATION_MS }, { opacity: 1 }],
       { duration: CHAT_TEXT_DURATION_MS - elapsed, easing: "linear" },
     );
-    return () => animation.cancel();
+    return () => releaseAnimation(animation);
   }, [receivedAt]);
   return <span {...props} ref={ref} />;
 }

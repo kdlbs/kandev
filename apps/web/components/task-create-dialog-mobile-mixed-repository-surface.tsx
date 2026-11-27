@@ -26,6 +26,7 @@ export function MobileMixedRepositorySurface({
   selectionsCount,
   selectionRows,
   actions,
+  onOpenRepositoryPicker,
 }: {
   props: MixedRepositoryChipsProps;
   localRows: TaskRepoRow[];
@@ -33,11 +34,13 @@ export function MobileMixedRepositorySurface({
   selectionsCount: number;
   selectionRows: React.ReactNode;
   actions: MobileMixedRepositoryActions;
+  onOpenRepositoryPicker: () => void;
 }) {
   return (
     <>
       <MobileRepositoryBranchHydrators
         rows={localRows}
+        repositories={props.repositories}
         fs={props.fs}
         workspaceId={props.workspaceId}
         isLocalExecutor={props.isLocalExecutor}
@@ -51,6 +54,8 @@ export function MobileMixedRepositorySurface({
         repositories={props.repositories}
         discoveredRepositories={props.fs.discoveredRepositories}
         accessible={accessible}
+        onOpenRepositoryPicker={onOpenRepositoryPicker}
+        selectedLocalRows={localRows}
         workspaceId={props.workspaceId}
         remoteOriginMode={props.executorSourcePolicy?.capabilities.requiresCloneableLocalRepository}
         selectionsCount={selectionsCount}

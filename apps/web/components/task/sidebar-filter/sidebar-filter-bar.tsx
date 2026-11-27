@@ -3,7 +3,7 @@
 import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 
 import { useMemo, useRef } from "react";
-import { IconAdjustments, IconPlus } from "@tabler/icons-react";
+import { IconFilter, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
@@ -12,10 +12,13 @@ import type { CommandItem } from "@/lib/commands/types";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 import { SidebarViewChips } from "./sidebar-view-chips";
+import { SidebarFilterIndicators } from "@/components/task/sidebar-filter/sidebar-filter-indicators";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
 import { useSidebarViewPopover } from "./use-sidebar-view-popover";
 import { useTranslation } from "react-i18next";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { SidebarPluginGroupingPicker } from "./sidebar-plugin-grouping-picker";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 // `group` is the command-palette bucket shared with `components/session-commands.tsx`;
 // it is grouping taxonomy rather than this surface's copy, so it migrates with
@@ -26,6 +29,7 @@ function useSidebarCommands(
   setActiveView: (id: string) => void,
 ): CommandItem[] {
   const { t } = useTranslation();
+  const pending = useAppStore((state) => Boolean(selectSidebarViews(state).transitionPending));
   return useMemo<CommandItem[]>(() => {
     const list: CommandItem[] = [
       {
@@ -33,6 +37,8 @@ function useSidebarCommands(
         label: t("task:openSidebarFilters"),
         group: "Sidebar",
         keywords: ["filter", "sort", "group", "view", "sidebar"],
+        disabled: pending,
+        context: pending ? t("common:loadingIndicatorLabel") : undefined,
         action: () => onOpenChange(true),
       },
     ];
@@ -42,22 +48,24 @@ function useSidebarCommands(
         label: t("task:switchSidebarView", { name: sidebarViewName(view, t) }),
         group: "Sidebar",
         keywords: ["view", "switch", "sidebar", sidebarViewName(view, t).toLowerCase()],
+        disabled: pending,
+        context: pending ? t("common:loadingIndicatorLabel") : undefined,
         action: () => setActiveView(view.id),
       });
     }
     return list;
-  }, [t, onOpenChange, views, setActiveView]);
+  }, [t, onOpenChange, views, setActiveView, pending]);
 }
 
-export function SidebarFilterBar() {
+export function SidebarFilterBar({
+  groupingSurface,
+}: { groupingSurface?: "inline" | "sheet" | "drawer" } = {}) {
   const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const draft = useAppStore((s) => selectSidebarViews(s).draft);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
   const views = useAppStore((s) => selectSidebarViews(s).views);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
-  const hasDraft = !!draft && draft.baseViewId === activeViewId;
+  const { pending, interactionProps } = useSidebarViewTransition();
   const {
     open,
     onOpenChange,
@@ -82,11 +90,12 @@ export function SidebarFilterBar() {
     >
       <SidebarViewChips />
       <Button
+        {...interactionProps}
         type="button"
         variant="ghost"
         size="sm"
         className={cn(
-          "h-10 shrink-0 cursor-pointer px-2 text-[11px] md:h-6",
+          "h-11 shrink-0 cursor-pointer px-2 text-[11px] md:h-7 [@media(pointer:coarse)]:min-h-11",
           newViewDisabledReason && "cursor-not-allowed opacity-45",
         )}
         onClick={() => {
@@ -100,7 +109,7 @@ export function SidebarFilterBar() {
           filterTriggerRef.current?.focus();
           filterTriggerRef.current?.click();
         }}
-        aria-disabled={!!newViewDisabledReason}
+        aria-disabled={pending || !!newViewDisabledReason}
         data-testid="sidebar-new-view"
         data-disabled-reason={newViewDisabledReason ?? undefined}
         aria-label={
@@ -113,6 +122,7 @@ export function SidebarFilterBar() {
         <IconPlus className="h-3.5 w-3.5" />
         {t("task:newView")}
       </Button>
+      <SidebarPluginGroupingPicker parentSurface={groupingSurface} />
       <SidebarFilterPopover
         key={workspaceId}
         open={open}
@@ -121,21 +131,17 @@ export function SidebarFilterBar() {
         onRenameRequestHandled={consumeRenameRequest}
         trigger={
           <Button
+            {...interactionProps}
             ref={filterTriggerRef}
             type="button"
             variant="ghost"
             size="icon"
-            className="h-10 w-10 shrink-0 cursor-pointer md:h-6 md:w-6"
+            className="relative h-11 w-11 shrink-0 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:size-11"
             data-testid="sidebar-filter-gear"
             aria-label={t("task:sidebarFilters")}
           >
-            <IconAdjustments className="h-4 w-4" />
-            {hasDraft && (
-              <span
-                className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-amber-500 md:right-1 md:top-1"
-                data-testid="sidebar-filter-gear-indicator"
-              />
-            )}
+            <IconFilter className="h-4 w-4" />
+            <SidebarFilterIndicators />
           </Button>
         }
       />

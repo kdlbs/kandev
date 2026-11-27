@@ -20,7 +20,10 @@ func PublicTaskMetadata(metadata map[string]interface{}) map[string]interface{} 
 	}
 	public := maps.Clone(metadata)
 	delete(public, MetaKeyWorkflowMovePending)
+	delete(public, MetaKeyTaskManagementDeferredFence)
 	delete(public, MetaKeyStepHandoffCarry)
+	delete(public, MetaKeyInterruptedSessions)
+	delete(public, MetaKeyLegacyInterruptedAt)
 	deferred, ok := public[MetaKeyDeferredLaunch].(map[string]interface{})
 	if !ok {
 		return public

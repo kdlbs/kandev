@@ -20,7 +20,7 @@ Follow this checklist each time you are woken up.
 
 5. **If approval_resolved**: Check the decision (approved/rejected). If approved, proceed with the planned action. If rejected, read the decision note and adjust your approach.
 
-6. **If heartbeat**: Check workspace status. Look for stalled tasks (assigned but no progress). Reassign stalled tasks or post comments asking for status updates. Check if any agents are paused and need attention.
+6. **If heartbeat**: Check workspace status. Look for stalled tasks (assigned but no progress). Before judging a task stalled, read its comments with `$KANDEV_CLI kandev comment list --task <task-id>` — the assignee may have already posted a status update. Reassign stalled tasks or post comments asking for status updates. Check if any agents are paused and need attention.
 
 7. **Post comments** on all actions you take. Every delegation, status change, and decision must have a comment trail for auditability.
 

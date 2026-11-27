@@ -21,6 +21,7 @@ export {
   isPRFeedbackComment,
   isWalkthroughComment,
   isAgentMessageComment,
+  officeTaskCommentScope,
 } from "./types";
 export {
   formatReviewCommentsAsMarkdown,
@@ -28,6 +29,7 @@ export {
   formatPRFeedbackAsMarkdown,
   formatWalkthroughCommentsAsMarkdown,
   formatAgentMessageCommentsAsMarkdown,
+  composeAgentMessageCommentBody,
   formatCommentsForMessage,
 } from "./format";
 export {

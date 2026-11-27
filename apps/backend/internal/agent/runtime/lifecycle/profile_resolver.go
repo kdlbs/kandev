@@ -37,8 +37,9 @@ func (e *DeletedProfileError) Unwrap() error { return store.ErrAgentProfileDelet
 
 // StoreProfileResolver implements ProfileResolver using the agent settings store
 type StoreProfileResolver struct {
-	store    store.Repository
-	registry *registry.Registry
+	store              store.Repository
+	registry           *registry.Registry
+	resourceCircuitKey func(*models.AgentProfile) string
 }
 
 // NewStoreProfileResolver creates a new profile resolver using the given store and registry.
@@ -79,6 +80,8 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
 
 	return &AgentProfileInfo{
+		ExecutionGrade:             profile.ExecutionGrade,
+		ResourceCircuitKey:         r.resolveResourceCircuitKey(profile),
 		ProfileID:                  profile.ID,
 		ProfileName:                profile.Name,
 		AgentID:                    agent.ID,
@@ -99,6 +102,11 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		ProviderBaseURL:            profile.ProviderBaseURL,
 		ProviderAPIKeySecretID:     profile.ProviderAPIKeySecretID,
 		CLIPassthrough:             profile.CLIPassthrough,
+		CursorMCPAuthEnabled:       profile.CursorMCPAuthEnabled,
+		CursorPluginsMCPEnabled:    profile.CursorPluginsMCPEnabled,
+		MCPSelectionMode:           profile.MCPSelectionMode,
+		MCPSelectedServers:         append([]string{}, profile.MCPSelectedServers...),
+		CopilotSelectedPlugins:     append([]string{}, profile.CopilotSelectedPlugins...),
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil

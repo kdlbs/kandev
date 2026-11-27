@@ -14,6 +14,12 @@ type RateLimitFetcher interface {
 	FetchRateLimit(ctx context.Context) error
 }
 
+// RepoRefSHAResolver exposes ref resolution for operations that need a stable
+// repository snapshot without widening every GitHub client implementation.
+type RepoRefSHAResolver interface {
+	ResolveRepoRefSHA(ctx context.Context, owner, repo, ref string) (string, error)
+}
+
 type MergeOutcome string
 
 const (
@@ -91,6 +97,11 @@ type Client interface {
 
 	// ListAuthoredPRs lists open PRs authored by the authenticated user for a repo.
 	ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error)
+
+	// ListOpenPRs lists every open PR in a repository, following pagination.
+	// complete is false when a later page failed after earlier pages were read;
+	// the returned PRs are then a prefix of the listing and err is nil.
+	ListOpenPRs(ctx context.Context, owner, repo string) (prs []*PR, complete bool, err error)
 
 	// ListReviewRequestedPRs lists open PRs where the user's review is requested.
 	// scope controls the search qualifier: ReviewScopeUser uses user-review-requested:@me,

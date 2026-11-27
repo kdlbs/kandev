@@ -1,0 +1,26 @@
+{
+  "fixtures": [
+    {
+      "name": "title-match-after-source-page",
+      "workspace_id": "ws-sidebar-view-conformance",
+      "task_id_prefix": "sidebar-view-task-",
+      "source_count": 101,
+      "matching_task_index": 100,
+      "title_prefix": "Unrelated sidebar task",
+      "matching_title": "Needle match beyond source page",
+      "query": {
+        "filters": [
+          { "dimension": "titleMatch", "op": "matches", "value": "needle" }
+        ],
+        "sort": { "key": "title", "direction": "asc" },
+        "group": "none",
+        "collapsed_group_keys": [],
+        "collapsed_task_ids": [],
+        "page": 1,
+        "page_size": 100,
+        "locale": "en"
+      },
+      "expected_task_ids": ["sidebar-view-task-100"]
+    }
+  ]
+}

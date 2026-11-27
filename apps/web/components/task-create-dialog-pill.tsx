@@ -25,6 +25,7 @@ export type PillAction = {
   label: string;
   icon?: React.ReactNode;
   onSelect: () => void;
+  testId?: string;
 };
 
 /**
@@ -45,10 +46,11 @@ export type PillProps = {
   /** When provided alongside `disabled`, surfaces a tooltip explaining why. */
   disabledReason?: string;
   searchPlaceholder: string;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   testId?: string;
   triggerClassName?: string;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   dropdownTestId?: string;
   onOpenChange?: (open: boolean) => void;
   /** Optional refresh action rendered next to the search input. */
@@ -72,6 +74,8 @@ export type PillProps = {
   prefix?: string;
   /** Optional icon action rendered beside the search input. */
   action?: PillAction;
+  /** Optional multiple icon actions rendered beside the search input. */
+  actions?: PillAction[];
   /** Optional contextual controls rendered above the searchable list. */
   popoverHeader?: React.ReactNode;
   /** Title used by the mobile picker sheet. */
@@ -141,9 +145,10 @@ type PillPopoverShellProps = {
   value: string;
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
   portalContainer: HTMLElement | null;
   action?: PillAction;
+  actions?: PillAction[];
   popoverHeader?: React.ReactNode;
   dropdownTestId?: string;
   tooltip?: string;
@@ -172,6 +177,7 @@ function renderPillPopover({
   emptyMessage,
   portalContainer,
   action,
+  actions,
   popoverHeader,
   dropdownTestId,
   tooltip,
@@ -203,6 +209,7 @@ function renderPillPopover({
       onSelect={handleSelect}
       emptyMessage={emptyMessage}
       action={action}
+      actions={actions}
       popoverHeader={popoverHeader}
       dropdownTestId={dropdownTestId}
       mobileTitle={mobileTitle}
@@ -224,6 +231,7 @@ function renderPillPopover({
       emptyMessage={emptyMessage}
       portalContainer={portalContainer}
       action={action}
+      actions={actions}
       popoverHeader={popoverHeader}
       dropdownTestId={dropdownTestId}
     />
@@ -251,6 +259,7 @@ function renderPillTriggerButton({
   testId,
   triggerClassName,
   ariaLabel,
+  ariaDescribedBy,
   prefix,
   touchTarget,
   onClick,
@@ -267,6 +276,7 @@ function renderPillTriggerButton({
   | "testId"
   | "triggerClassName"
   | "ariaLabel"
+  | "ariaDescribedBy"
   | "prefix"
 > & {
   hasValue: boolean;
@@ -282,6 +292,7 @@ function renderPillTriggerButton({
       type="button"
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       data-testid={testId}
       className={cn(
         pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue, touchTarget),
@@ -366,6 +377,42 @@ function renderDisabledPill(
   );
 }
 
+function usePillState(onOpenChange?: (open: boolean) => void) {
+  const [open, setOpenState] = useState(false);
+  const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
+  const portalContainer = useTaskCreateDialogPortalContainer();
+  const {
+    suppressTooltip,
+    suppressTooltipRef,
+    suppressTooltipUntilLeave,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+  } = usePillTooltipSuppression(open);
+  const { setOpen, suppressForSelection, recordPointerSelection } = usePillOpenHandlers(
+    setOpenState,
+    closeTooltip,
+    suppressTooltipUntilLeave,
+    onOpenChange,
+  );
+  const handleTooltipChange = useTooltipOpenChange(suppressTooltipRef, handleTooltipOpenChange);
+  return {
+    open,
+    setOpen,
+    tooltipOpenState,
+    handleTooltipOpenChange,
+    portalContainer,
+    suppressTooltip,
+    suppressTooltipRef,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+    suppressForSelection,
+    recordPointerSelection,
+    handleTooltipChange,
+  };
+}
+
 /**
  * Compact pill trigger that opens a popover with a search list. Auto-widths
  * to its content (no `w-full`, no chevron) so multiple pills can sit on one
@@ -389,34 +436,19 @@ export function Pill({
   flat = false,
   triggerClassName,
   ariaLabel,
+  ariaDescribedBy,
   dropdownTestId,
   onOpenChange,
   filter,
   tooltip,
   prefix,
   action,
+  actions,
   popoverHeader,
   mobileTitle,
 }: PillProps) {
-  const [open, setOpenState] = useState(false);
-  const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
-  const portalContainer = useTaskCreateDialogPortalContainer();
-  const {
-    suppressTooltip,
-    suppressTooltipRef,
-    suppressTooltipUntilLeave,
-    handlePointerEnter,
-    handlePointerLeave,
-    handleBlur,
-  } = usePillTooltipSuppression(open);
   const usesTouchDrawer = useTouchDrawer();
-  const { setOpen, suppressForSelection, recordPointerSelection } = usePillOpenHandlers(
-    setOpenState,
-    closeTooltip,
-    suppressTooltipUntilLeave,
-    onOpenChange,
-  );
-  const handleTooltipChange = useTooltipOpenChange(suppressTooltipRef, handleTooltipOpenChange);
+  const state = usePillState(onOpenChange);
   const triggerButton = renderPillTriggerButton({
     icon,
     value,
@@ -427,24 +459,25 @@ export function Pill({
     testId,
     triggerClassName,
     ariaLabel,
+    ariaDescribedBy,
     prefix,
     touchTarget: usesTouchDrawer,
-    onClick: usesTouchDrawer ? () => setOpen(true) : undefined,
-    onPointerEnter: tooltip ? handlePointerEnter : undefined,
-    onPointerLeave: tooltip ? handlePointerLeave : undefined,
-    onBlur: tooltip ? handleBlur : undefined,
+    onClick: usesTouchDrawer ? () => state.setOpen(true) : undefined,
+    onPointerEnter: tooltip ? state.handlePointerEnter : undefined,
+    onPointerLeave: tooltip ? state.handlePointerLeave : undefined,
+    onBlur: tooltip ? state.handleBlur : undefined,
   });
-  if (disabled && disabledReason && !open)
+  if (disabled && disabledReason && !state.open)
     return renderDisabledPill(
-      tooltipOpenState,
-      handleTooltipOpenChange,
+      state.tooltipOpenState,
+      state.handleTooltipOpenChange,
       triggerButton,
       disabledReason,
     );
 
   return renderPillPopover({
-    open,
-    setOpen,
+    open: state.open,
+    setOpen: state.setOpen,
     triggerButton: pillTriggerSurface(triggerButton, usesTouchDrawer, tooltip),
     filter,
     searchPlaceholder,
@@ -453,19 +486,20 @@ export function Pill({
     refreshLabel,
     options,
     value: selectedValue ?? value,
-    onPointerSelect: recordPointerSelection,
+    onPointerSelect: state.recordPointerSelection,
     onSelect,
     emptyMessage,
-    portalContainer,
+    portalContainer: state.portalContainer,
     action,
+    actions,
     popoverHeader,
     dropdownTestId,
     tooltip,
-    tooltipOpenState,
-    suppressTooltip,
-    suppressTooltipRef,
-    handlePillTooltipOpenChange: handleTooltipChange,
-    suppressForSelection,
+    tooltipOpenState: state.tooltipOpenState,
+    suppressTooltip: state.suppressTooltip,
+    suppressTooltipRef: state.suppressTooltipRef,
+    handlePillTooltipOpenChange: state.handleTooltipChange,
+    suppressForSelection: state.suppressForSelection,
     usesTouchDrawer,
     mobileTitle: mobileTitle ?? placeholder,
   });

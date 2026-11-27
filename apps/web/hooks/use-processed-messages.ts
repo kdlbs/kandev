@@ -7,7 +7,7 @@ import {
   type MessageType,
   type TaskPendingAction,
 } from "@/lib/types/http";
-import { isRichOutputMessage } from "@/components/task/chat/types";
+import { isContextCompactionMessage, isRichOutputMessage } from "@/components/task/chat/types";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
@@ -17,6 +17,7 @@ import {
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
+import { insertionIndexAtTime, insertLocalStatusMessages } from "./transcript-status-placement";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -24,6 +25,7 @@ import {
   buildToolCallIds,
   filterVisibleMessages,
   isSetupScriptMessage,
+  isFooterActionMessage,
 } from "./processed-message-filtering";
 
 export {
@@ -120,6 +122,8 @@ export type TurnGroup = {
   id: string;
   turnId: string | null;
   messages: Message[];
+  /** Set on the coordinator copilot's collapsed tool-call chip; renders in place of the group. */
+  activityChip?: { count: number; failed: number; durationSeconds: number | null };
 };
 
 export type PrepareProgressItem = {
@@ -149,6 +153,8 @@ export type ProcessedMessagesOptions = {
   initialPromptPreview?: unknown;
   historyInitialized?: boolean;
   hasOlderMessages?: boolean;
+  isPassthrough?: boolean;
+  localStatusMessages?: Message[];
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
   currentTurnCompleted?: boolean;
@@ -298,6 +304,7 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
       message.type &&
       ACTIVITY_MESSAGE_TYPES.has(message.type) &&
       !isSubagentMessage(message) &&
+      !isContextCompactionMessage(message) &&
       !isRichOutputMessage(message);
     const messageTurnId = message.turn_id ?? null;
     if (isActivity && messageTurnId) {
@@ -370,29 +377,6 @@ function buildGroupedItemsForHook(args: {
   );
 }
 
-function itemCreatedAt(item: RenderItem): string | undefined {
-  if (item.type === "message") return item.message.created_at;
-  if (item.type === "turn_group") return item.messages[item.messages.length - 1]?.created_at;
-  return undefined;
-}
-
-function insertionIndexForAgentError(items: RenderItem[], occurredAt?: string): number {
-  if (items.length === 0) return 0;
-  const errorTime = occurredAt ? Date.parse(occurredAt) : Number.NaN;
-  if (Number.isNaN(errorTime)) return items.length;
-  let insertAt = 0;
-  let sawTimestamp = false;
-  for (let i = 0; i < items.length; i++) {
-    const createdAt = itemCreatedAt(items[i]);
-    if (!createdAt) continue;
-    const itemTime = Date.parse(createdAt);
-    if (Number.isNaN(itemTime)) continue;
-    sawTimestamp = true;
-    if (itemTime <= errorTime) insertAt = i + 1;
-  }
-  return sawTimestamp ? insertAt : items.length;
-}
-
 export function insertLastAgentErrorItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
@@ -413,7 +397,7 @@ export function insertLastAgentErrorItem(
     sessionId: resolvedSessionId,
     error,
   };
-  const insertAt = insertionIndexForAgentError(items, error.occurredAt);
+  const insertAt = insertionIndexAtTime(items, error.occurredAt);
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
 }
 
@@ -502,10 +486,12 @@ function useVisibleMessages(
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   scope: PendingClarificationScope | undefined,
+  options: Pick<ProcessedMessagesOptions, "isPassthrough">,
 ) {
+  const isPassthrough = options.isPassthrough ?? false;
   return useMemo(
-    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, scope),
-    [messages, toolCallIds, subagentChildIds, scope],
+    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, scope, isPassthrough),
+    [messages, toolCallIds, subagentChildIds, scope, isPassthrough],
   );
 }
 
@@ -550,6 +536,19 @@ function buildTaskDescriptionMessage(
   };
 }
 
+function partitionFooterActionMessages(messages: Message[]) {
+  const regularMessages: Message[] = [];
+  const footerActionMessages: Message[] = [];
+  for (const message of messages) {
+    if (isFooterActionMessage(message)) {
+      footerActionMessages.push(message);
+    } else {
+      regularMessages.push(message);
+    }
+  }
+  return { regularMessages, footerActionMessages };
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -575,7 +574,13 @@ export function useProcessedMessages(
     options,
   );
 
-  const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
+  const visibleMessages = useVisibleMessages(
+    messages,
+    toolCallIds,
+    subagentChildIds,
+    scope,
+    options,
+  );
 
   const taskDescriptionMessage = useMemo(() => {
     return buildTaskDescriptionMessage(
@@ -607,34 +612,27 @@ export function useProcessedMessages(
 
   // Separate footer action messages (e.g. missing branch guidance with archive/delete
   // buttons) from regular messages so they render after the env prep error status.
-  const { regularMessages, footerActionMessages } = useMemo(() => {
-    const regular: Message[] = [];
-    const footer: Message[] = [];
-    for (const msg of allMessages) {
-      const meta = msg.metadata as Record<string, unknown> | undefined;
-      if (Array.isArray(meta?.actions) && !meta?.recovery_actions) {
-        footer.push(msg);
-      } else {
-        regular.push(msg);
-      }
-    }
-    return { regularMessages: regular, footerActionMessages: footer };
-  }, [allMessages]);
+  const { regularMessages, footerActionMessages } = useMemo(
+    () => partitionFooterActionMessages(allMessages),
+    [allMessages],
+  );
 
   const rawGroupedItems = useMemo<RenderItem[]>(() => {
-    return buildGroupedItemsForHook({
+    const items = buildGroupedItemsForHook({
       regularMessages,
       allSessionMessages: messages,
       resolvedSessionId,
       hasOlderMessages: options.hasOlderMessages ?? false,
       lastAgentError: options.lastAgentError,
     });
+    return insertLocalStatusMessages(items, options.localStatusMessages);
   }, [
     regularMessages,
     resolvedSessionId,
     messages,
     options.hasOlderMessages,
     options.lastAgentError,
+    options.localStatusMessages,
   ]);
   const groupedItems = useStableGroupedItems(rawGroupedItems);
 

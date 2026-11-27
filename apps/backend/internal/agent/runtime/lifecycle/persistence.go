@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"net/url"
 	"strconv"
 	"strings"
@@ -28,9 +29,8 @@ import (
 // refactor, executors_running is the single source of truth and the lifecycle
 // manager owns its lifecycle.
 type ExecutorRunningWriter interface {
-	// UpsertExecutorRunning inserts or updates the row. Caller passes a fully
-	// populated *models.ExecutorRunning; the underlying SQL preserves nothing
-	// from the prior row (idempotent re-creation on every successful Add).
+	// UpsertExecutorRunning inserts or updates the row. Idle-suspension provenance
+	// changes only through its compare-and-set methods, not lifecycle snapshots.
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 
 	// DeleteExecutorRunningBySessionID removes the row when an execution is
@@ -43,6 +43,13 @@ type ExecutorRunningWriter interface {
 	// row (#1597 resume-safety invariant). Idempotent-friendly: returns
 	// ErrExecutorRunningNotFound if no row exists.
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+}
+
+type idleSuspensionInventory interface {
+	GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error)
+	ClaimExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, time.Time) (bool, error)
+	ValidateExecutorRunningIdleSuspensionPolicy(context.Context, string, string, string, time.Time) (bool, error)
+	CompareAndSetExecutorRunningIdleSuspension(context.Context, string, string, time.Time, string, string) error
 }
 
 // SetExecutorRunningWriter wires the writer used to persist row state in
@@ -74,11 +81,28 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	activityAt, _, _ := execution.promptActivitySnapshot()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	delete(metadata, idleActivityMetadataKey)
+	if !activityAt.IsZero() {
+		metadata[idleActivityMetadataKey] = map[string]interface{}{
+			"execution_id": execution.ID,
+			"activity_at":  activityAt.UTC().Format(time.RFC3339Nano),
+		}
+	}
 	if execution.OfficeAgentProfileID != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
 		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
+	if execution.OriginalWorkspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOriginalWorkspacePath] = execution.OriginalWorkspacePath
 	}
 	running := &models.ExecutorRunning{
 		ID:                 executionInventorySessionID(execution),
@@ -100,6 +124,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
+	if execution.TaskEnvironmentID != "" {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[MetadataKeyTaskEnvironmentID] = execution.TaskEnvironmentID
+	}
 	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
 		if running.Metadata == nil {
 			running.Metadata = make(map[string]interface{})
@@ -115,6 +145,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		running.WorktreePath = execution.WorkspacePath
 	}
 	if prior != nil {
+		running.IdleSuspensionState = prior.IdleSuspensionState
 		if strings.TrimSpace(prior.ExecutorID) != "" {
 			running.ExecutorID = prior.ExecutorID
 		}
@@ -130,6 +161,14 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey ||
+				k == MetadataKeySSHLaunchReceipt {
+				// Current execution metadata owns claim state. Copying an absent
+				// claim or clock from a prior row would undo its removal. The SSH
+				// launch receipt is the same shape of fact: a replacement launch
+				// that cleared it must never inherit the predecessor's proof.
+				continue
+			}
 			if _, ok := running.Metadata[k]; !ok {
 				running.Metadata[k] = v
 			}
@@ -177,6 +216,9 @@ func (m *Manager) resolveLocalPID(execution *AgentExecution) int {
 		return 0
 	}
 	if execution.RuntimeName == agentruntime.RuntimeStandalone {
+		if execution.standaloneHostPID > 0 {
+			return execution.standaloneHostPID
+		}
 		return int(m.standaloneHostPID.Load())
 	}
 	return 0
@@ -501,6 +543,14 @@ type executorRunningLister interface {
 	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
 }
 
+type pluginExecutorRunningLister interface {
+	ListExecutorsRunningPluginRemote(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+type executorRunningInventoryLister interface {
+	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
 // every live standalone executors_running row, read at startup step 3 before
 // any control-server contact, so the recovery guard can be taken against it
@@ -515,6 +565,39 @@ func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*mo
 	return lister.ListExecutorsRunningLiveStandalone(ctx)
 }
 
+// ListLivePluginExecutorsRunning includes stopped inventory so callers can
+// distinguish a retained environment from an empty session record.
+func (m *Manager) ListLivePluginExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(pluginExecutorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningPluginRemote(ctx)
+}
+
+// ListLiveRemoteExecutorsRunning returns supported remote runtime rows from a
+// single persisted inventory snapshot. Plugin rows keep their separate
+// lister because it intentionally includes terminal rows for plugin cleanup.
+func (m *Manager) ListLiveRemoteExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningInventoryLister)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := lister.ListExecutorsRunning(ctx)
+	if err != nil {
+		return nil, err
+	}
+	remote := make([]*models.ExecutorRunning, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || remoteRecoveryOwnerUnsupported(row) || !isRemoteRecoveryRuntime(row.Runtime) || row.Runtime == agentruntime.RuntimePluginRemote ||
+			row.SessionID == "" || row.AgentExecutionID == "" || isTerminalExecutorRunningStatus(row.Status) {
+			continue
+		}
+		remote = append(remote, cloneRemoteRecoveryRecord(row))
+	}
+	return remote, nil
+}
+
 type executorRunningCASWriter interface {
 	RepairExecutorRunningDeadIfCurrent(
 		ctx context.Context,
@@ -525,5 +608,42 @@ type executorRunningCASWriter interface {
 		ctx context.Context,
 		sessionID, expectedExecutionID string,
 		expectedUpdatedAt time.Time,
+	) error
+}
+
+type executorRunningOwnerCASWriter interface {
+	RepairExecutorRunningDeadIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) error
+}
+
+type stoppedRemoteExecutionOwnerCASWriter interface {
+	SettleStoppedRemoteExecutionIfOwnerCurrent(
+		ctx context.Context,
+		sessionID, expectedExecutionID string,
+		expectedUpdatedAt time.Time,
+		expectedSessionState models.TaskSessionState,
+		interruptedTurnID string,
+		terminalOutcome models.DeliverySubmissionState,
+		workflowOutcome *models.AgentDeliveryEffect,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
+	) (bool, time.Time, error)
+}
+
+type activeSessionTurnReader interface {
+	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
+}
+
+type executorRunningOwnerAbsentWriter interface {
+	ConfirmExecutorRunningAbsentIfOwnerCurrent(
+		ctx context.Context,
+		sessionID string,
+		owner models.RemoteRecoveryOwnerLockIDs,
+		validateOwner func(context.Context) error,
 	) error
 }

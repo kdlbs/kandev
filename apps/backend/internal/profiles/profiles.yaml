@@ -37,9 +37,17 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
-  # Retains supported language-server leases across browser disconnects. The
-  # task-host and bounded lease lifecycle are opt-in while the feature settles.
-  KANDEV_FEATURES_LSP_BROWSER_CONTINUITY:
+  KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+  KANDEV_FEATURES_WORKSPACE_COLLABORATION:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Integrated navigation across existing authorized workspace conversations.
+  KANDEV_FEATURES_INTEGRATED_CONTROL:
     prod: "false"
     dev:  "false"
     e2e:  "false"
@@ -61,12 +69,12 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Agent-authored plugin web applications. Off in every shipped profile until
-  # the isolated runtime and lifecycle are ready for opt-in use.
+  # Agent-authored plugin web applications. The runtime toggle acts as the
+  # installation-wide off switch during rollout.
   KANDEV_FEATURES_CANVASES:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
   # Organizations: a tenant boundary above users. Requires KANDEV_FEATURES_AUTH;
   # the backend refuses to start with this on and auth off. Off everywhere until
@@ -80,6 +88,32 @@ features:
   # Dynamic agent profiles and provider-error routing. Off in every shipped
   # profile until the complete guarded implementation is ready.
   KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Native Codex app-server is separate from Codex ACP and remains opt-in.
+  KANDEV_FEATURES_CODEX_APP_SERVER:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  KANDEV_FEATURES_ACP_V2:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Normalized background work and subagent lifecycle management. Enabled by
+  # default so inspection is standard behavior; the runtime flag remains an
+  # operator off switch that gates the read/action endpoints as well.
+  KANDEV_FEATURES_AGENT_BACKGROUND_WORK:
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
+
+  # Kandev integration plugin for supported OpenCode v2 task launches. Off in
+  # every shipped profile until packaged conformance and operator docs exist.
+  KANDEV_FEATURES_OPENCODE_PLUGIN:
     prod: "false"
     dev:  "false"
     e2e:  "false"
@@ -99,20 +133,6 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # High-risk Office per-agent session identity: keys an Office task's session
-  # on the run's own agent instead of the runner seat, and binds an agent's
-  # decision re-evaluation to its own calling session. Default-on in every
-  # profile; it remains a high-risk, path-scoped change to durable session
-  # identity. A live (task_id, agent_profile_id) pair is guarded in-transaction
-  # on the office session creation path instead of by a table-level constraint.
-  # Pre-existing duplicate rows stay safe by selection, not migration. Disabling
-  # this toggle and restarting reverts to runner-seat binding and task-active-
-  # session decision re-evaluation.
-  KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
-    prod: "true"
-    dev:  "true"
-    e2e:  "true"
-
   # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
   # the answerable clarification bundles for the active workspace. Off in
   # prod until the feature is user-ready; on in dev/e2e so contributors and
@@ -131,6 +151,40 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Workspace coordinators: a per-workspace copilot conversation that
+  # proposes ordinary, unstarted tasks for a human to approve. Off in
+  # prod/dev until the feature is user-ready; on in e2e so tests exercise it.
+  KANDEV_FEATURES_COORDINATOR:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator control (phase 2): permissions, watches, standing orders,
+  # goals and the activity log. Only effective together with
+  # KANDEV_FEATURES_COORDINATOR.
+  KANDEV_FEATURES_COORDINATOR_PHASE2:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator autonomy (phase 3): unattended wakes, the spend ceiling and
+  # the automatic decision classes. Only effective together with
+  # KANDEV_FEATURES_COORDINATOR and KANDEV_FEATURES_COORDINATOR_PHASE2.
+  KANDEV_FEATURES_COORDINATOR_PHASE3:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator phase 3.1 (record and measure): pausing a coordinator, the
+  # Projects scope editor, and everything that reads or acts on the recorded
+  # turn ledger. Recording itself runs without it. Off in every shipped
+  # profile; only effective together with KANDEV_FEATURES_COORDINATOR, _PHASE2
+  # and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_PHASE31:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
@@ -145,12 +199,26 @@ mocks:
     dev:  "true"
     e2e:  "only"
 
+  # Register a disposable Copilot settings identity for browser coverage.
+  # Plugin discovery is intercepted by the E2E fixture; no native install or
+  # authentication is required.
+  KANDEV_E2E_MOCK_COPILOT:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+
   # Mount the /api/v1/_test/* test-harness routes. Hard-gated off in
   # production — never enable on a public backend.
   KANDEV_E2E_MOCK:
     prod: ""
     dev:  ""
     e2e:  "true"
+
+  # Opt-in watchdog acceleration for controlled silent-prompt browser tests.
+  KANDEV_E2E_PROMPT_STALL_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  ""
 
   # Replace third-party clients with in-memory fakes
   # so e2e specs don't hit live APIs (and dev doesn't need tokens).
@@ -171,10 +239,6 @@ mocks:
     dev:  ""
     e2e:  "true"
   KANDEV_MOCK_SENTRY:
-    prod: ""
-    dev:  ""
-    e2e:  "true"
-  KANDEV_MOCK_AZURE_DEVOPS:
     prod: ""
     dev:  ""
     e2e:  "true"

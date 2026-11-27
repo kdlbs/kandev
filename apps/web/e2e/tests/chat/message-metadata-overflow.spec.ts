@@ -7,6 +7,7 @@ import { test, expect, type Locator, type Page } from "../../fixtures/test-base"
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SEEDED_MESSAGE, largeTurnMetadata } from "../../helpers/message-metadata-fixtures";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 /** Seeds a task, session, and overflow-sized turn metadata message. */
@@ -62,6 +63,8 @@ async function openMetadataDialog(
   // fails the test if the selector ever resolves to more than one container.
   const entries = dialog.locator("> div.grid");
   await expect(entries).toBeVisible();
+  // Geometry assertions compare the dialog and its children after the opening animation.
+  await waitForFiniteAnimations(dialog);
   return {
     dialog,
     entries,

@@ -27,9 +27,10 @@ import (
 type workflowRepo struct {
 	mockRepository
 
-	workspaces  map[string]*models.Workspace
-	workflows   map[string]*models.Workflow
-	byWorkspace map[string][]*models.Workflow
+	workspaces    map[string]*models.Workspace
+	workflows     map[string]*models.Workflow
+	byWorkspace   map[string][]*models.Workflow
+	snapshotTasks []*models.Task
 
 	listErr    error
 	createErr  error
@@ -103,6 +104,31 @@ func (r *workflowRepo) UpdateWorkflow(_ context.Context, workflow *models.Workfl
 	return nil
 }
 
+func (r *workflowRepo) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	workflow, err := r.GetWorkflow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	copy := *workflow
+	for _, field := range []struct{ target, supplied *string }{
+		{&copy.Name, update.Name}, {&copy.Description, update.Description},
+		{&copy.Prompt, update.Prompt}, {&copy.AgentProfileID, update.AgentProfileID},
+		{&copy.Source, update.Source}, {&copy.SourcePath, update.SourcePath},
+	} {
+		if field.supplied != nil {
+			*field.target = *field.supplied
+		}
+	}
+	if update.Hidden != nil {
+		copy.Hidden = *update.Hidden
+	}
+	if err := r.UpdateWorkflow(ctx, &copy); err != nil {
+		return nil, err
+	}
+	r.workflows[id] = &copy
+	return &copy, nil
+}
+
 func (r *workflowRepo) DeleteWorkflow(_ context.Context, id string) error {
 	if r.deleteErr != nil {
 		return r.deleteErr
@@ -121,7 +147,7 @@ func (r *workflowRepo) ReorderWorkflows(_ context.Context, workspaceID string, i
 }
 
 func (r *workflowRepo) ListTasks(context.Context, string) ([]*models.Task, error) {
-	return nil, nil
+	return r.snapshotTasks, nil
 }
 
 // stubStepLister satisfies WorkflowStepLister without a workflow repository.

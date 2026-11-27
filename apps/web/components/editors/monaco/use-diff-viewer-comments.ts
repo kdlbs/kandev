@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 import type { DiffOnMount } from "@monaco-editor/react";
 import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { buildDiffComment, useCommentedLines, useCommentActions } from "@/lib/diff/comment-utils";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useDiffComments } from "@/components/diff/use-diff-comments";
@@ -31,6 +33,8 @@ interface UseDiffViewerCommentsOpts {
   sessionId?: string;
   repositoryName?: string;
   compact: boolean;
+  /** False while the displayed diff is only a retained, stale patch. */
+  enableComments?: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
   onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
@@ -46,6 +50,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     sessionId,
     repositoryName,
     compact,
+    enableComments,
     onCommentAdd,
     onCommentDelete,
     onCommentUpdate,
@@ -64,6 +69,11 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     end: number;
     side: string;
   } | null>(null);
+  const commentingEnabled = enableComments !== false && !!sessionId && !compact;
+  const commentingEnabledRef = useRef(commentingEnabled);
+  useLayoutEffect(() => {
+    commentingEnabledRef.current = commentingEnabled;
+  }, [commentingEnabled]);
 
   const {
     comments: internalComments,
@@ -84,7 +94,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   const comments = externalComments || internalComments;
 
   // Gutter comment interactions
-  const gutterEnabled = !!sessionId && !compact;
+  const gutterEnabled = commentingEnabled;
   const commentedLines = useCommentedLines(comments);
 
   const handleGutterSelect = useCallback(
@@ -94,6 +104,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
         code: string;
         position: { x: number; y: number };
       }) => {
+        if (!commentingEnabledRef.current) return;
         setSelectedLineRange({ start: params.range.start, end: params.range.end, side });
         setShowCommentForm(true);
       },
@@ -162,10 +173,13 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     [compact, data.filePath, handleContextMenuEvent],
   );
 
+  const taskId = useOptionalAppStore((state) => state.tasks.activeTaskId, null);
+  const attachmentTaskId = sessionId ? taskId : null;
+
   // Comment submission
   const handleCommentSubmit = useCallback(
-    (content: string) => {
-      if (!selectedLineRange) return;
+    (content: string, attachments?: MessageAttachment[]) => {
+      if (!commentingEnabledRef.current || !selectedLineRange) return;
       if (onCommentAdd && externalComments !== undefined) {
         onCommentAdd(
           buildDiffComment({
@@ -176,6 +190,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
             endLine: selectedLineRange.end,
             side: (selectedLineRange.side || "additions") as DiffComment["side"],
             text: content,
+            attachments,
           }),
         );
       } else if (sessionId) {
@@ -186,6 +201,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
             side: selectedLineRange.side as "additions" | "deletions",
           },
           content,
+          attachments,
         );
       }
       setShowCommentForm(false);
@@ -207,8 +223,8 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   );
 
   const handleCommentSubmitAndRun = useCallback(
-    (content: string) => {
-      if (!selectedLineRange || !onCommentRun) return;
+    (content: string, attachments?: MessageAttachment[]) => {
+      if (!commentingEnabledRef.current || !selectedLineRange || !onCommentRun) return;
       const comment = buildDiffComment({
         filePath: data.filePath,
         repositoryName,
@@ -217,20 +233,23 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
         endLine: selectedLineRange.end,
         side: (selectedLineRange.side || "additions") as DiffComment["side"],
         text: content,
+        attachments,
       });
+      let submitted = comment;
       if (onCommentAdd && externalComments !== undefined) {
         onCommentAdd(comment);
       } else if (sessionId) {
-        addComment(
+        submitted = addComment(
           {
             start: selectedLineRange.start,
             end: selectedLineRange.end,
             side: selectedLineRange.side as "additions" | "deletions",
           },
           content,
+          attachments,
         );
       }
-      onCommentRun(comment);
+      onCommentRun(submitted);
       setShowCommentForm(false);
       setSelectedLineRange(null);
       clearModifiedGutter();
@@ -282,6 +301,8 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   }, [onCommentRun]);
 
   useViewZones({
+    attachmentTaskId,
+    commentScope: JSON.stringify([sessionId, repositoryName, data.filePath]),
     modifiedEditor,
     originalEditor,
     comments,
@@ -294,6 +315,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     handleCommentDeleteRef,
     handleCommentUpdateRef,
     handleCommentRunRef,
+    submitDisabled: !commentingEnabled,
     clearModifiedGutter,
     clearOriginalGutter,
     setShowCommentForm,

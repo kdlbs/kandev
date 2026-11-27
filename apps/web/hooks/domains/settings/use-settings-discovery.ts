@@ -10,6 +10,8 @@ export function useSettingsDiscovery() {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
   const multiTenancyEnabled = useFeature("multiTenancy");
+  const coordinatorEnabled = useFeature("coordinator");
+  const officeEnabled = useFeature("office");
   const authMode = useAppStore((state) => state.auth.mode);
   const role = useAppStore((state) => state.auth.user?.role);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -29,10 +31,22 @@ export function useSettingsDiscovery() {
         showAccount,
         showUsers,
         showOrganizations,
+        coordinatorEnabled,
+        officeEnabled,
         workspaces,
         agents,
         executors,
       }),
-    [agents, executors, showAccount, showOrganizations, showUsers, t, workspaces],
+    [
+      agents,
+      coordinatorEnabled,
+      officeEnabled,
+      executors,
+      showAccount,
+      showOrganizations,
+      showUsers,
+      t,
+      workspaces,
+    ],
   );
 }

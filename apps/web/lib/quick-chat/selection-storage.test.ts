@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ANONYMOUS_QUICK_CHAT_SELECTION_IDENTITY,
   loadQuickChatSelection,
@@ -7,6 +7,7 @@ import {
 
 describe("Quick Chat selection storage", () => {
   beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
 
   it("keeps remembered selections separate for each identity", () => {
     persistQuickChatSelection("user-a", { "workspace-a": { chat: "chat-a" } }, ["workspace-a"]);
@@ -52,6 +53,11 @@ describe("Quick Chat selection storage", () => {
       Array.from({ length: 205 }, (_, index) => [`workspace-${index}`, { chat: `chat-${index}` }]),
     );
     const order = Object.keys(selections).reverse();
+    let clock = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      clock += 2;
+      return clock;
+    });
 
     persistQuickChatSelection("user-a", selections, order);
 

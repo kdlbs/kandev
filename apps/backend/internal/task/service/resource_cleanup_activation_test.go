@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +27,41 @@ type failOnceResetCleanupRepository struct {
 	calls     int
 	dueListed chan struct{}
 	dueOnce   sync.Once
+}
+
+type preparedCleanupCancellationRecorder struct {
+	repository.TaskResourceCleanupRepository
+	cancelled chan struct{}
+	once      sync.Once
+}
+
+func (r *preparedCleanupCancellationRecorder) CompleteTaskResourceCleanupJob(
+	ctx context.Context,
+	id string,
+	state models.TaskResourceCleanupState,
+	lastError string,
+	nextAttemptAt *time.Time,
+) error {
+	if err := r.TaskResourceCleanupRepository.CompleteTaskResourceCleanupJob(
+		ctx, id, state, lastError, nextAttemptAt,
+	); err != nil {
+		return err
+	}
+	if state == models.TaskResourceCleanupStateCancelled {
+		r.once.Do(func() { close(r.cancelled) })
+	}
+	return nil
+}
+
+func (r *preparedCleanupCancellationRecorder) CancelTaskResourceCleanupJobIfPending(
+	ctx context.Context,
+	id string,
+) (bool, error) {
+	cancelled, err := r.TaskResourceCleanupRepository.CancelTaskResourceCleanupJobIfPending(ctx, id)
+	if err == nil && cancelled {
+		r.once.Do(func() { close(r.cancelled) })
+	}
+	return cancelled, err
 }
 
 func (r *failOnceResetCleanupRepository) ResetRunningTaskResourceCleanupJobs(ctx context.Context) error {
@@ -291,9 +328,11 @@ func TestRestartReconcilesCommittedPreparedCleanup(t *testing.T) {
 				t.Fatalf("commit lifecycle mutation: %v", err)
 			}
 
+			taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
 			if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
 				t.Fatalf("restart cleanup worker: %v", err)
 			}
+			waitForCleanupDone(t, taskSvc)
 			job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
 			if err != nil {
 				t.Fatal(err)
@@ -319,14 +358,25 @@ func TestPreparedCleanupReconciliationFailsClosedBeforeMutationCommit(t *testing
 			taskSvc.StopTaskResourceCleanupWorker()
 			ctx := context.Background()
 			taskID := "task-uncommitted-" + test.name
-			seedCleanupTaskAndSession(t, repo, taskID, "session-uncommitted-"+test.name)
+			sessionID := "session-uncommitted-" + test.name
+			seedCleanupTaskAndSession(t, repo, taskID, sessionID)
 			operationID := test.name + ":uncommitted"
 			if err := taskSvc.PrepareTaskResourceCleanup(ctx, taskID, test.trigger, operationID, true); err != nil {
 				t.Fatalf("PrepareTaskResourceCleanup: %v", err)
 			}
 
+			cancellations := &preparedCleanupCancellationRecorder{
+				TaskResourceCleanupRepository: taskSvc.resourceCleanups,
+				cancelled:                     make(chan struct{}),
+			}
+			taskSvc.resourceCleanups = cancellations
 			if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
 				t.Fatalf("restart cleanup worker: %v", err)
+			}
+			select {
+			case <-cancellations.cancelled:
+			case <-time.After(2 * time.Second):
+				t.Fatal("startup worker did not cancel uncommitted prepared cleanup")
 			}
 			job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
 			if err != nil {
@@ -337,6 +387,92 @@ func TestPreparedCleanupReconciliationFailsClosedBeforeMutationCommit(t *testing
 			}
 		})
 	}
+}
+
+// @covers AC-TASKS-QUICK-CHAT-EXPIRATION-003.7
+func TestQuickChatLegacyCleanupCompatibility(t *testing.T) {
+	t.Run("committed deletion resumes", func(t *testing.T) {
+		taskSvc, repo := setupOfficeTest(t)
+		taskSvc.StopTaskResourceCleanupWorker()
+		ctx := context.Background()
+		const taskID = "legacy-quick-chat-committed"
+		const sessionID = "legacy-quick-chat-committed-session"
+		seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+		if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET workflow_id = '', is_ephemeral = 1 WHERE id = ?`, taskID); err != nil {
+			t.Fatalf("mark Quick Chat: %v", err)
+		}
+		if err := taskSvc.PrepareTaskResourceCleanup(ctx, taskID, models.TaskResourceCleanupTriggerQuickChatExpire, "legacy-quick-chat:committed", true); err != nil {
+			t.Fatalf("prepare legacy Quick Chat cleanup: %v", err)
+		}
+		if err := repo.DeleteTask(ctx, taskID); err != nil {
+			t.Fatalf("commit legacy Quick Chat deletion: %v", err)
+		}
+
+		taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+		if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
+			t.Fatalf("restart cleanup worker: %v", err)
+		}
+		waitForCleanupDone(t, taskSvc)
+		job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, "legacy-quick-chat:committed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.State != models.TaskResourceCleanupStateSucceeded {
+			t.Fatalf("committed legacy cleanup state = %q, want succeeded", job.State)
+		}
+	})
+
+	t.Run("uncommitted deletion preserves chat resources", func(t *testing.T) {
+		taskSvc, repo := setupOfficeTest(t)
+		taskSvc.StopTaskResourceCleanupWorker()
+		ctx := context.Background()
+		const taskID = "legacy-quick-chat-uncommitted"
+		const sessionID = "legacy-quick-chat-uncommitted-session"
+		seedCleanupTaskAndSession(t, repo, taskID, sessionID)
+		if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET workflow_id = '', is_ephemeral = 1 WHERE id = ?`, taskID); err != nil {
+			t.Fatalf("mark Quick Chat: %v", err)
+		}
+		quickChatDir := t.TempDir()
+		taskSvc.SetQuickChatDir(quickChatDir)
+		resourcePath := filepath.Join(quickChatDir, sessionID, "owned-resource")
+		if err := os.MkdirAll(filepath.Dir(resourcePath), 0o700); err != nil {
+			t.Fatalf("create Quick Chat resource: %v", err)
+		}
+		if err := os.WriteFile(resourcePath, []byte("keep"), 0o600); err != nil {
+			t.Fatalf("write Quick Chat resource: %v", err)
+		}
+		const operationID = "legacy-quick-chat:uncommitted"
+		if err := taskSvc.PrepareTaskResourceCleanup(ctx, taskID, models.TaskResourceCleanupTriggerQuickChatExpire, operationID, true); err != nil {
+			t.Fatalf("prepare legacy Quick Chat cleanup: %v", err)
+		}
+
+		cancellations := &preparedCleanupCancellationRecorder{
+			TaskResourceCleanupRepository: taskSvc.resourceCleanups,
+			cancelled:                     make(chan struct{}),
+		}
+		taskSvc.resourceCleanups = cancellations
+		if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
+			t.Fatalf("restart cleanup worker: %v", err)
+		}
+		select {
+		case <-cancellations.cancelled:
+		case <-time.After(2 * time.Second):
+			t.Fatal("startup worker did not cancel undeleted Quick Chat cleanup")
+		}
+		job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.State != models.TaskResourceCleanupStateCancelled {
+			t.Fatalf("uncommitted legacy cleanup state = %q, want cancelled", job.State)
+		}
+		if _, err := repo.GetTask(ctx, taskID); err != nil {
+			t.Fatalf("undeleted Quick Chat was removed: %v", err)
+		}
+		if _, err := os.Stat(resourcePath); err != nil {
+			t.Fatalf("undeleted Quick Chat resource was removed: %v", err)
+		}
+	})
 }
 
 func TestPeriodicReconciliationRecoversPreparedCleanupAfterActivationOutage(t *testing.T) {
@@ -466,8 +602,8 @@ func TestStartupActivationFailureKeepsWorkerRunningForRecovery(t *testing.T) {
 		failures:                      1,
 	}
 	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
-	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err == nil {
-		t.Fatal("worker startup unexpectedly hid initial activation failure")
+	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("start cleanup worker before asynchronous recovery: %v", err)
 	}
 	taskSvc.startTaskResourceCleanup(&models.TaskResourceCleanupJob{ID: "wake-after-recovery"})
 	waitForCleanupDone(t, taskSvc)
@@ -507,8 +643,8 @@ func TestWorkerRetriesFullResumeAfterStartupResetFailure(t *testing.T) {
 	taskSvc.resourceCleanups = failOnce
 	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 2))
 
-	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err == nil {
-		t.Fatal("worker startup unexpectedly hid reset failure")
+	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("start cleanup worker before asynchronous resume retry: %v", err)
 	}
 	taskSvc.startTaskResourceCleanup(&models.TaskResourceCleanupJob{ID: "retry-full-resume"})
 	waitForCleanupDone(t, taskSvc)
@@ -537,8 +673,8 @@ func TestWorkerResumeRetryPreservesPreparedCleanupCreatedAfterStartup(t *testing
 	}
 	taskSvc.resourceCleanups = failOnce
 
-	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err == nil {
-		t.Fatal("worker startup unexpectedly hid reset failure")
+	if err := taskSvc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("start cleanup worker before asynchronous resume retry: %v", err)
 	}
 	if err := taskSvc.PrepareTaskResourceCleanup(
 		ctx, "task-live-mutation", models.TaskResourceCleanupTriggerDelete, operationID, true,

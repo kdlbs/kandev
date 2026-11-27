@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -30,8 +31,19 @@ type messageListRepo struct {
 
 	listCalls        int
 	paginatedOptions []models.ListMessagesOptions
+	windowOptions    []models.ListMessagesOptions
+	turnWindow       models.MessageTurnWindow
 	searchOptions    []models.SearchMessagesOptions
 	hasMore          bool
+}
+
+func (r *messageListRepo) ReadMessageTurnWindow(
+	_ context.Context,
+	_ string,
+	opts models.ListMessagesOptions,
+) (models.MessageTurnWindow, error) {
+	r.windowOptions = append(r.windowOptions, opts)
+	return r.turnWindow, nil
 }
 
 func (r *messageListRepo) ListMessages(context.Context, string) ([]*models.Message, error) {
@@ -121,6 +133,46 @@ func TestHTTPListMessagesDefaultsToABoundedFirstPage(t *testing.T) {
 	require.Zero(t, repo.listCalls, "the unbounded query must not run")
 	require.Len(t, repo.paginatedOptions, 1)
 	require.Equal(t, service.DefaultMessagesPageSize, repo.paginatedOptions[0].Limit)
+}
+
+func TestHTTPListMessagesIncludesWindowTurnContextOnRequest(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageListRepo{turnWindow: models.MessageTurnWindow{
+		Messages: []*models.Message{{ID: "msg-window", TaskSessionID: "sess-b", TurnID: "turn-window"}},
+		Turns: []*models.Turn{{
+			ID: "turn-window", TaskSessionID: "sess-b", TaskID: "task-b",
+			StartedAt: now, CreatedAt: now, UpdatedAt: now,
+		}},
+		Coverage: &models.MessageTurnCoverage{MessageIDs: []string{"msg-window"}, ActiveTurnID: "turn-window"},
+	}}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?limit=20&sort=desc&include_turns=true", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response dto.ListMessagesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Messages, 1)
+	require.Len(t, response.Turns, 1)
+	require.Equal(t, []string{"msg-window"}, response.TurnCoverage.MessageIDs)
+	require.Equal(t, "turn-window", *response.TurnCoverage.ActiveTurnID)
+	require.Empty(t, repo.paginatedOptions)
+	require.Len(t, repo.windowOptions, 1)
+	require.Equal(t, 20, repo.windowOptions[0].Limit)
+	require.Equal(t, "desc", repo.windowOptions[0].Sort)
+}
+
+func TestHTTPListMessagesRejectsInvalidIncludeTurns(t *testing.T) {
+	repo := &messageListRepo{}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?include_turns=maybe", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, repo.windowOptions)
+	require.Empty(t, repo.paginatedOptions)
 }
 
 // TestHTTPListMessagesSwitchesToPaginationOnAnyCursorParam covers each param
@@ -363,6 +415,33 @@ func TestWSListMessagesReturnsPageAndCursor(t *testing.T) {
 	require.Len(t, repo.paginatedOptions, 1)
 	require.Equal(t, 10, repo.paginatedOptions[0].Limit)
 	require.Equal(t, "asc", repo.paginatedOptions[0].Sort)
+}
+
+func TestWSListMessagesIncludesWindowTurnContextOnRequest(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageListRepo{turnWindow: models.MessageTurnWindow{
+		Messages: []*models.Message{{ID: "msg-window", TaskSessionID: "sess-b", TurnID: "turn-window"}},
+		Turns: []*models.Turn{{
+			ID: "turn-window", TaskSessionID: "sess-b", TaskID: "task-b",
+			StartedAt: now, CreatedAt: now, UpdatedAt: now,
+		}},
+		Coverage: &models.MessageTurnCoverage{MessageIDs: []string{"msg-window"}},
+	}}
+	h := newMessageListHandlers(t, repo)
+
+	response, err := h.wsListMessages(context.Background(), wsWorkflowRequest(t, ws.ActionMessageList, map[string]any{
+		"session_id": "sess-b", "limit": 20, "sort": "desc", "include_turns": true,
+	}))
+
+	require.NoError(t, err)
+	var page dto.ListMessagesResponse
+	wsWorkflowResponse(t, response, &page)
+	require.Len(t, page.Turns, 1)
+	require.NotNil(t, page.TurnCoverage)
+	require.Nil(t, page.TurnCoverage.ActiveTurnID)
+	require.Len(t, repo.windowOptions, 1)
+	require.Equal(t, 20, repo.windowOptions[0].Limit)
+	require.Empty(t, repo.paginatedOptions)
 }
 
 // TestWSListMessagesDefaultsToABoundedFirstPage mirrors

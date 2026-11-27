@@ -39,24 +39,26 @@ export function usePRCommits(
   repo: string | null,
   prNumber: number | null,
   refreshKey?: string | null,
+  host = "github.com",
 ) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
   const sourceKey = hasParams
-    ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
+    ? `${workspaceId}/${host}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
     : "";
   const request = useMemo(
     () =>
       hasParams
         ? {
             workspaceId,
+            host,
             owner,
             repo,
             prNumber,
             sourceKey,
           }
         : null,
-    [hasParams, workspaceId, owner, repo, prNumber, sourceKey],
+    [host, hasParams, workspaceId, owner, repo, prNumber, sourceKey],
   );
   const subscribe = useCallback(
     (listener: () => void) => prCommitsResource.subscribe(request, listener),

@@ -19,6 +19,7 @@ type personalAuthMemoryRepository struct {
 	replaceErr  error
 	invalidated bool
 	version     int64
+	rotated     chan struct{}
 }
 
 func (r *personalAuthMemoryRepository) GetWorkspaceConnection(_ context.Context, _ string) (*WorkspaceConnection, error) {
@@ -75,6 +76,9 @@ func (r *personalAuthMemoryRepository) ReplacePersonalConnection(
 	r.connection = &copy
 	r.tokens = tokens
 	r.version = connection.CredentialGeneration
+	if r.rotated != nil {
+		close(r.rotated)
+	}
 	return nil
 }
 
@@ -524,6 +528,7 @@ func TestPersonalAuthRefreshCoalescesConcurrentCallers(t *testing.T) {
 func TestPersonalAuthRefreshCallerCancellationDoesNotCancelSharedRotation(t *testing.T) {
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	repo := expiringPersonalAuthRepository(now)
+	repo.rotated = make(chan struct{})
 	remote := &personalOAuthRemote{
 		fakeGitHubAppOAuth: fakeGitHubAppOAuth{user: GitHubOAuthUser{ID: 11, Login: "octocat"}, canAccess: true},
 		refreshed: GitHubOAuthTokens{
@@ -545,6 +550,11 @@ func TestPersonalAuthRefreshCallerCancellationDoesNotCancelSharedRotation(t *tes
 		t.Fatalf("canceled caller error = %v", err)
 	}
 	close(remote.release)
+	select {
+	case <-repo.rotated:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shared token rotation did not commit after caller cancellation")
+	}
 	token, _, err := service.ResolvePersonalToken(context.Background(), "workspace-1", "user-1")
 	if err != nil || token != "new" {
 		t.Fatalf("ResolvePersonalToken() after canceled caller = %q, %v", token, err)
@@ -678,4 +688,13 @@ func activeAppWorkspace(workspaceID string, installationID int64) *WorkspaceConn
 		InstallationAccountLogin: "acme", InstallationAccountType: "Organization",
 		Status: ConnectionStatusActive, CredentialGeneration: 1,
 	}
+}
+
+func (r *personalAuthMemoryRepository) GetPersonalTokensForConnection(_ context.Context, expected *UserConnection) (GitHubOAuthTokens, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !sameUserConnectionVersion(r.connection, expected) {
+		return GitHubOAuthTokens{}, ErrPersonalConnectionStale
+	}
+	return r.tokens, nil
 }

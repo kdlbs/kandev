@@ -27,17 +27,25 @@ let mockState: MockState = {
   hydrate: mockHydrate,
 };
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({
+function createMockStoreApi() {
+  return {
     getState: () => mockState,
     setState: (updater: (s: MockState) => MockState) => {
       const next = updater(mockState);
       mockSetState(next);
       mockState = next;
     },
-  }),
-}));
+  };
+}
+
+let mockStoreApi = createMockStoreApi();
+
+vi.mock("@/components/state-provider", () => {
+  return {
+    useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+    useAppStoreApi: () => mockStoreApi,
+  };
+});
 
 vi.mock("@/lib/api", () => ({
   fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
@@ -73,6 +81,8 @@ import { useWorkflowSnapshot } from "./use-workflow-snapshot";
 
 function resetState(kanban: Partial<MockKanban> = {}) {
   vi.clearAllMocks();
+  mockFetchWorkflowSnapshot.mockReset();
+  mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
   mockState = {
     connection: { status: "connected" },
     kanban: {
@@ -86,6 +96,7 @@ function resetState(kanban: Partial<MockKanban> = {}) {
     workspaceContextGeneration: 0,
     hydrate: mockHydrate,
   };
+  mockStoreApi = createMockStoreApi();
 }
 
 describe("useWorkflowSnapshot — kanban.isLoading", () => {
@@ -123,6 +134,16 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     renderHook(() => useWorkflowSnapshot("wf-1"));
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockState.kanban.isLoading).toBe(false);
+  });
+
+  it("fetches when hydration contains only a partial task seed and skipping is disabled", async () => {
+    resetState({ workflowId: "wf-1", tasks: [{ id: "parent" }], isLoading: false });
+    mockFetchWorkflowSnapshot.mockResolvedValue({ tasks: [{ id: "parent" }, { id: "sibling" }] });
+    renderHook(() => useWorkflowSnapshot("wf-1", { skipIfHydrated: false }));
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-1", expect.anything()),
+    );
+    await waitFor(() => expect(mockHydrate).toHaveBeenCalled());
   });
 
   it("does not clear isLoading on settle when it didn't raise the flag (already-hydrated re-fetch)", async () => {

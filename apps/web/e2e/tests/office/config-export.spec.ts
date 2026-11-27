@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 import { expect, test } from "../../fixtures/office-fixture";
+import { expectControlHeight } from "../../helpers/control-sizing";
 
 function readZipEntries(path: string): Map<string, Buffer> {
   const archive = readFileSync(path);
@@ -52,4 +53,35 @@ test("configuration export downloads the selected server manifest", async ({
   const entries = readZipEntries(archivePath!);
   expect(entries.has(".kandev/kandev.yml")).toBe(true);
   expect(entries.get(".kandev/kandev.yml")?.toString("utf8")).toContain("name:");
+});
+
+test("configuration export retry stays compact after the manifest changes", async ({
+  testPage,
+  officeSeed,
+}) => {
+  await testPage.goto("/office/workspace/settings/export");
+  await expect(testPage.getByText("kandev.yml", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await testPage.route(
+    `**/api/v1/office/workspaces/${officeSeed.workspaceId}/config/export/zip`,
+    (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "configuration revision changed" }),
+      }),
+  );
+
+  await testPage.getByRole("button", { name: /Export \d+ files?/ }).click();
+  const retry = testPage.getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  // @covers AC-UI-CONTROL-SIZING-001.2
+  await expectControlHeight(retry, 24);
+
+  const manifestReloaded = testPage.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith("/config/export/manifest"),
+  );
+  await retry.click();
+  await manifestReloaded;
+  await expect(retry).toHaveCount(0);
 });

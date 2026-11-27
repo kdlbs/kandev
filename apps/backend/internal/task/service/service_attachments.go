@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/previewfeedbacktx"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -95,6 +98,119 @@ func collectPreviewFeedbackAttachments(
 	return attachments, matched, nil
 }
 
+// prepareCreationAttachmentClaim authenticates and validates the file-backed
+// creation set. The task insert applies it in its own transaction.
+func (s *Service) prepareCreationAttachmentClaim(
+	ctx context.Context, req *CreateTaskRequest,
+) (*models.TaskCreationAttachmentClaim, error) {
+	ids := make([]string, 0, len(req.Attachments))
+	sizes := make([]int64, 0, len(req.Attachments))
+	for i, attachment := range req.Attachments {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if attachment.Data != "" {
+			return nil, fmt.Errorf("%w: attachment[%d] mixes a descriptor with inline data", ErrAttachmentInvalid, i)
+		}
+		if err := ValidateAttachmentMetadata(
+			attachment.Name, attachment.MimeType, attachment.Type, attachment.DeliveryMode,
+		); err != nil {
+			return nil, err
+		}
+		if err := ValidateAttachmentSize(attachment.SizeBytes); err != nil {
+			return nil, err
+		}
+		ids = append(ids, attachment.AttachmentID)
+		sizes = append(sizes, attachment.SizeBytes)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if err := ValidateAttachmentBatch(sizes); err != nil {
+		return nil, err
+	}
+	if s.attachmentSvc == nil {
+		return nil, errors.New("file-backed attachments are unavailable")
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.UserID == "" {
+		return nil, models.ErrAttachmentForbidden
+	}
+	return &models.TaskCreationAttachmentClaim{
+		OwnerID: identity.UserID, WorkspaceID: req.WorkspaceID, IDs: ids,
+	}, nil
+}
+
+// ReadTaskCreationAttachments returns the canonical ordered creation set for a
+// task-bound launch. A partial, foreign, or malformed set fails closed.
+func (s *Service) ReadTaskCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]v1.MessageAttachment, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, taskrepo.ErrTaskNotFound
+	}
+	reader, ok := s.tasks.(taskrepo.TaskCreationAttachmentRepository)
+	if !ok {
+		return nil, errors.New("task creation attachment reads are unavailable")
+	}
+	rows, err := reader.ListTaskCreationAttachments(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if len(rows) > MaxAttachmentCount {
+		return nil, ErrTooManyAttachments
+	}
+	attachments := make([]v1.MessageAttachment, 0, len(rows))
+	sizes := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		attachment, err := taskCreationAttachmentDescriptor(row, taskID, task.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		sizes = append(sizes, attachment.SizeBytes)
+		attachments = append(attachments, attachment)
+	}
+	if err := ValidateAttachmentBatch(sizes); err != nil {
+		return nil, err
+	}
+	return attachments, nil
+}
+
+func taskCreationAttachmentDescriptor(
+	row *models.TaskMessageAttachment, taskID, workspaceID string,
+) (v1.MessageAttachment, error) {
+	if row == nil || row.State != models.AttachmentStateClaimed ||
+		row.TaskID != taskID || row.SessionID != "" || row.WorkspaceID != workspaceID {
+		return v1.MessageAttachment{}, ErrAttachmentClaimConflict
+	}
+	if err := ValidateAttachmentMetadata(row.Name, row.MimeType, row.Kind, row.DeliveryMode); err != nil {
+		return v1.MessageAttachment{}, err
+	}
+	if err := ValidateAttachmentSize(row.SizeBytes); err != nil {
+		return v1.MessageAttachment{}, err
+	}
+	if row.StorageKey == "" || filepath.Base(row.StorageKey) != row.StorageKey {
+		return v1.MessageAttachment{}, ErrAttachmentInvalid
+	}
+	return v1.MessageAttachment{
+		Type: row.Kind, AttachmentID: row.ID, MimeType: row.MimeType,
+		Name: row.Name, SizeBytes: row.SizeBytes, DeliveryMode: row.DeliveryMode,
+	}, nil
+}
+
 // ClaimMessageAttachments binds staged descriptors to a task/session after
 // the normal task and session authorization checks have completed.
 func (s *Service) ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error {
@@ -127,6 +243,32 @@ func (s *Service) ClaimMessageAttachments(ctx context.Context, taskID, sessionID
 		return models.ErrAttachmentForbidden
 	}
 	return s.attachmentSvc.Claim(ctx, identity.UserID, task.WorkspaceID, taskID, sessionID, ids)
+}
+
+// RestoreLaunchMessageAttachments keeps staged uploads reusable when a
+// synchronous launch fails before the caller receives a session identity.
+func (s *Service) RestoreLaunchMessageAttachments(
+	ctx context.Context,
+	taskID, sessionID string,
+	attachments []v1.MessageAttachment,
+) error {
+	ids := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			ids = append(ids, attachment.AttachmentID)
+		}
+	}
+	if len(ids) == 0 || s.attachmentSvc == nil {
+		return nil
+	}
+	if _, err := s.GetTask(ctx, taskID); err != nil {
+		return err
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.UserID == "" {
+		return models.ErrAttachmentForbidden
+	}
+	return s.attachmentSvc.RestoreLaunchClaim(ctx, identity.UserID, taskID, sessionID, ids)
 }
 
 func (s *Service) attachmentIDs(attachments []v1.MessageAttachment) ([]string, error) {
@@ -313,4 +455,48 @@ func (s *Service) TransferSessionMessageAttachments(
 		return errors.New("file-backed attachments are unavailable")
 	}
 	return s.attachmentSvc.TransferSession(ctx, taskID, oldSessionID, newSessionID, attachmentIDs)
+}
+
+// CanonicalizeCommentFiles resolves display descriptors before admitting user
+// feedback. The claim transaction still checks owner, workspace and lifetime.
+func (s *Service) CanonicalizeCommentFiles(ctx context.Context, taskID string, attachments []v1.MessageAttachment) error {
+	if !v1.HasCommentAttachments(attachments) {
+		return nil
+	}
+	if s.attachmentSvc == nil {
+		return ErrAttachmentForbidden
+	}
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.UserID == "" {
+		return ErrAttachmentForbidden
+	}
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for index, input := range attachments {
+		if input.AttachmentID == "" {
+			continue
+		}
+		if input.Data != "" || !input.HasValidDeliveryMode() {
+			return ErrAttachmentInvalid
+		}
+		row, err := s.attachmentSvc.Get(ctx, identity.UserID, input.AttachmentID)
+		if err != nil || row.WorkspaceID != task.WorkspaceID {
+			return ErrAttachmentForbidden
+		}
+		if input.CommentID != "" && !validSessionCommentFile(input, row) {
+			return ErrAttachmentInvalid
+		}
+		attachments[index] = v1.MessageAttachment{
+			AttachmentID: row.ID, CommentID: input.CommentID, Type: row.Kind,
+			Name: row.Name, MimeType: row.MimeType, SizeBytes: row.SizeBytes, DeliveryMode: input.DeliveryMode,
+		}
+	}
+	return nil
+}
+
+func validSessionCommentFile(input v1.MessageAttachment, row *models.TaskMessageAttachment) bool {
+	return input.DeliveryMode == attachmentDeliveryModePath && row.DeliveryMode == attachmentDeliveryModePath &&
+		(row.State != models.AttachmentStateClaimed || row.SessionID != "")
 }

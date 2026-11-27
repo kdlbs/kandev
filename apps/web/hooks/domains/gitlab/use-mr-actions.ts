@@ -22,6 +22,7 @@ export type MRActionKind =
   | "reviewers"
   | "assignees"
   | "merge"
+  | "ready"
   | "unlink"
   | "reply"
   | "resolve"
@@ -38,6 +39,7 @@ const ACTION_COPY: Record<MRActionKind, { name: string; success: string }> = {
   reviewers: { name: "gitlab:actionReviewers", success: "gitlab:reviewersUpdated" },
   assignees: { name: "gitlab:actionAssignees", success: "gitlab:assigneesUpdated" },
   merge: { name: "gitlab:actionMerge", success: "gitlab:mergeRequestMerged" },
+  ready: { name: "gitlab:actionMarkReady", success: "gitlab:mergeRequestMarkedReady" },
   unlink: { name: "gitlab:actionUnlink", success: "gitlab:mergeRequestUnlinked" },
   reply: { name: "gitlab:actionReply", success: "gitlab:replyAdded" },
   resolve: { name: "gitlab:actionResolve", success: "gitlab:discussionResolved" },
@@ -50,13 +52,17 @@ export function useMRActions(onRefresh: () => void) {
   const { t } = useTranslation();
 
   const run = useCallback(
-    async (kind: MRActionKind, action: () => Promise<unknown>) => {
+    async (
+      kind: MRActionKind,
+      action: () => Promise<unknown>,
+      options?: { skipRefresh?: boolean },
+    ) => {
       const copy = ACTION_COPY[kind];
       setPendingAction(kind);
       try {
         await action();
         toast({ description: t(copy.success), variant: "success" });
-        onRefresh();
+        if (!options?.skipRefresh) onRefresh();
         return true;
       } catch (error) {
         toast({

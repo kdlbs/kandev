@@ -1,14 +1,16 @@
 import type { ClarificationRequestMetadata } from "@/lib/types/http-agents";
 import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
 
-function firstQuestion(bundle: ClarificationInboxBundle) {
+type BundleText = Pick<ClarificationInboxBundle, "messages" | "context">;
+
+function firstQuestion(bundle: BundleText) {
   const metadata = bundle.messages[0]?.metadata as ClarificationRequestMetadata | undefined;
   return metadata?.question;
 }
 
 // design-01#Data-and-contracts: title, else prompt, else the bundle's shared
 // context, else the caller-supplied localized fallback. Never blank.
-export function rowPrimaryText(bundle: ClarificationInboxBundle, fallback: string): string {
+export function rowPrimaryText(bundle: BundleText, fallback: string): string {
   const question = firstQuestion(bundle);
   if (question?.title?.trim()) return question.title;
   if (question?.prompt) return question.prompt;

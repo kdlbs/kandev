@@ -61,6 +61,7 @@ func TestReleaseChildLifecycle_Idempotent(t *testing.T) {
 // as part of process teardown.
 func TestInstallChildLifecycle_KillOnHandleClose(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/c", "ping", "-n", "30", "127.0.0.1")
+	cmd.SysProcAttr = buildSysProcAttr(false)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start child: %v", err)
 	}

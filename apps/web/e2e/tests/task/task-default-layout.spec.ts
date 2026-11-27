@@ -13,6 +13,12 @@ test.describe("Task default layout shape", () => {
     apiClient,
     seedData,
   }) => {
+    const preferences = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      show_todo_list_panel: false,
+      show_todo_list_panel_only_when_not_empty: false,
+    });
+    expect(preferences.ok).toBe(true);
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Repo-less Default Layout",

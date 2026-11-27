@@ -67,7 +67,7 @@ export function TaskSharedError({
       <section
         className={cn(
           "flex min-w-0 shrink-0 items-start gap-3 border-b border-destructive/25 bg-destructive/5 px-4 py-2.5",
-          isMobile && reserveMobileTopBar && "mt-[calc(3.5rem+env(safe-area-inset-top,0px))]",
+          isMobile && reserveMobileTopBar && "mt-[calc(3.5rem+1px+env(safe-area-inset-top,0px))]",
         )}
         data-testid="task-shared-error"
       >

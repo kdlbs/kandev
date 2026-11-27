@@ -10,7 +10,7 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
-import { stopAutomationRun } from "@/lib/api/domains/automation-api";
+import { stopAutomationRun, updateTrigger } from "@/lib/api/domains/automation-api";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { nextFiring } from "./automation-rows";
 import { RunsDrawer } from "./runs-drawer";
@@ -20,6 +20,7 @@ import { isOpenRun } from "./run-status";
 import { AUTOMATIONS_HREF, runHref, type AutomationDetailTab } from "./runs-view";
 import { useAutomationActivity } from "./use-automation-activity";
 import { useLiveRefresh } from "./use-live-refresh";
+import { useAutomationRunRecorded } from "./use-automation-run-recorded";
 import { useRailWidth } from "./use-rail-width";
 import { useManualTrigger } from "./use-manual-trigger";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -241,7 +242,7 @@ function ActivityView({
           <Button
             variant="destructive"
             size="sm"
-            className="min-h-11 shrink-0 cursor-pointer"
+            className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 shrink-0 cursor-pointer"
             onClick={() => void handleStop()}
             disabled={stopping}
             data-testid="automation-stop-run"
@@ -286,6 +287,7 @@ function DetailBody({
   isMobile,
   rail,
   onSelectRun,
+  onEnableSchedule,
 }: {
   automation: Automation;
   tab: AutomationDetailTab;
@@ -297,6 +299,7 @@ function DetailBody({
   isMobile: boolean;
   rail: ReturnType<typeof useRailWidth>;
   onSelectRun: (run: AutomationRun) => void;
+  onEnableSchedule?: (triggerId: string) => Promise<void>;
 }) {
   const switcher = isMobile ? (
     <RunsDrawer
@@ -305,6 +308,7 @@ function DetailBody({
       selectedRunId={selected?.id ?? null}
       onSelect={onSelectRun}
       openRuns={openRuns}
+      onEnableSchedule={onEnableSchedule}
     />
   ) : (
     <RunsRail
@@ -313,6 +317,7 @@ function DetailBody({
       selectedRunId={selected?.id ?? null}
       onSelect={onSelectRun}
       openRuns={openRuns}
+      onEnableSchedule={onEnableSchedule}
       width={rail.width}
       resizing={rail.resizing}
       onResizeStart={rail.onResizeStart}
@@ -362,6 +367,14 @@ export function AutomationDetailPage({
   const { automation, runs, openRuns, loading, error, refresh } =
     useAutomationActivity(automationId);
   const { runNow, triggering, settling } = useManualTrigger(automationId, refresh);
+  const enableSchedule = useCallback(
+    async (triggerId: string) => {
+      const result = await updateTrigger(triggerId, { enabled: true });
+      if (!result.updated) throw new Error("Schedule trigger update was not applied");
+      await refresh();
+    },
+    [refresh],
+  );
   const leaveForList = useCallback(() => router.push(AUTOMATIONS_HREF), [router]);
   const foreign = useWorkspaceGuard(automation, leaveForList);
   // `settling` as well as `openRuns`: the run row is written after the fire
@@ -374,11 +387,12 @@ export function AutomationDetailPage({
   // Running until the run query returns a terminal status.
   const hasVisibleOpenRun = runs.some((run) => isOpenRun(run.status));
   useLiveRefresh(!foreign && (openRuns > 0 || hasVisibleOpenRun || settling), refresh);
+  useAutomationRunRecorded(foreign ? undefined : automation?.workspace_id, automationId, refresh);
   const rail = useRailWidth();
   const { isMobile } = useResponsiveBreakpoint();
 
   const selected = selectRun(runs, runId);
-  const show = !error && !foreign && automation;
+  const show = !foreign && automation;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
@@ -404,6 +418,7 @@ export function AutomationDetailPage({
           isMobile={isMobile}
           rail={rail}
           onSelectRun={(run) => router.push(runHref(automationId, run.id))}
+          onEnableSchedule={tab === "activity" ? enableSchedule : undefined}
         />
       )}
     </div>

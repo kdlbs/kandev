@@ -101,6 +101,18 @@ current replacement identity.
 
 ## Accepted-turn cancellation successor
 
+PR #4044 hosted verification on head118abf0a exposed a delayed-load cancellation
+failure: caller-independent coalescing detached the resume owner's context,
+leaving initialization's client lease held while force-stop exhausted its
+deadline. The follow-up binds tagged subprocess startup to that existing owner
+while retaining the same per-execution slot and ordinary caller-independent
+work. Context/identity/manager-shutdown regressions accompany the fix. The
+existing generic guard-deadline tests, 30-second browser assertion and runtime
+timeouts are unchanged. A tiny contained standard-library context projection
+failed for detached owner cancellation and passed after the helper change;
+this is not caller/package/process coverage. Full updated-head hosted suites
+remain pending. This note supplements the historical completed work above.
+
 The [resumed turn cancellation package](../resumed-turn-cancellation/plan.md)
 corrects startup authority that remains active after prompt acceptance.
 It adds process-survival and follow-up assertions to the existing cancellation coverage.

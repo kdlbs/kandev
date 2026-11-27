@@ -1,0 +1,341 @@
+---
+status: current
+system: platform
+requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
+  - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
+---
+
+# Durable restart reconciliation system design
+
+## Ownership and boundaries
+
+Platform owns journal consistency and recovery evidence. Lifecycle owns authenticated
+execution control; orchestrator owns existing admission, turn, and workflow authority.
+This supplements [durable delivery](durable-agent-delivery.md),
+[reattachment](durable-agent-reattachment.md), and
+[explicit native recovery](interrupted-prompt-recovery.md).
+It introduces no new recovery UI, prompt authority, storage format, or endpoint.
+Existing source-process death, native identity, current owner context, and independent
+admission checks remain required before a restore-only operation.
+
+## Requirement mapping
+
+| Requirement | Design section |
+| --- | --- |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001 | Mapping-safe capacity accounting |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003 | Abandoned dispatch classification; no redispatch |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Compare-and-set settlement and projection |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006 | Existing restore-only checkpoints and explicit Resume |
+| REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001 | Automatic inconsistency repair and coherent recovery state |
+| REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002 | Retained cancellation before native resume |
+
+## Mapping-safe capacity accounting
+
+The journal lifetime lock excludes Close and compaction; it does not exclude concurrent
+bbolt write transactions or their mmap replacement. Runtime capacity reads must not call
+`DB.Info()` outside protected initialization. Capture the database page size before publishing
+a newly opened handle and retain it as immutable handle metadata. Refresh that metadata
+under exclusive journal ownership on every compaction reopen, including rename failure.
+Runtime reusable-page accounting combines that value with bbolt's synchronized `DB.Stats()`.
+Do not retain `Info.Data`, assume the operating-system page size, or add a nested transaction
+while holding disk-reservation locks. Existing pending reservations, overflow guards, file
+growth charges, and recovery reserves remain authoritative.
+
+## Abandoned dispatch after owner replacement
+
+The process-manager constructor opens its owner journal before starting a harness or accepting
+dispatch. At that boundary, exclusive journal ownership and a newly constructed dispatcher
+permit classification of its retained, abandoned `dispatching` records as `interrupted_unknown`.
+Validate session, incarnation, stream, and eligible generation across the complete affected
+record set before changing it. Preserve payloads, hashes, terminal evidence, retirement flags,
+and timestamps that describe historical admission; record only the new classification time.
+A failed classification keeps durable admission unavailable. Ordinary journal reads and
+read-only diagnostic opens do not perform this operation.
+
+Classification is not retirement or proof that an external harness or tool stopped. Backend
+reconciliation still requires exact process ownership and termination evidence before native
+restore. A retained live manager is reattached and never classified by a replacement-manager
+path. Prepared/accepted records and terminal outcomes retain their separate admission rules.
+No existing submission is automatically dispatched because its journal was reopened.
+A restore-only successor can read earlier-generation unknown history from the same session
+and incarnation. It preserves that history until authenticated native restoration retires it;
+an earlier dispatch can be classified only when its retained stream record proves the same
+session, incarnation, and historical harness generation. Foreign streams remain blocked.
+
+## Automatic repair of provable restart inconsistencies
+
+### Definitive remote absence
+
+Startup reconciliation and periodic remote attachment consume the same
+`DetailedRecoveryBackend` result. A missing returned instance alone leaves
+ownership unknown. `no_matching_instance` ends pending attachment only for
+runtime shapes accepted by `remoteRecoveryNoMatchProvesStopped`. Remote Docker
+and Sprites currently satisfy that predicate. SSH, Kubernetes, plugin runtimes,
+transport failures, and omitted outcomes retain their existing guards.
+
+Before settlement, re-read the pinned task, session, environment, recovery
+identity, and executor row. Fence changed owners, tracked successors, Stop,
+cleanup, and shutdown through the existing pending-attempt arbitration.
+Repair the exact executor row with `RepairExecutorRunningDeadIfCurrent`, using
+the execution ID and observed nonzero `UpdatedAt`. Preserve its resume token,
+workspace, metadata, and historical execution identity. Missing CAS support,
+storage failure, or changed evidence cannot authorize an unconditional write.
+Do not use a cleanup helper whose boolean hides persistence errors.
+
+After a successful repair, remove only the matching pending entry and release
+its retryable guard. Repeat attempts converge after interruption between SQL
+repair and guard release. Never clear an unstoppable guard or release a
+successor's pending entry. Network and storage operations run outside the
+global remote-recovery mutex. Final entry arbitration remains atomic.
+
+This disposition establishes completion of startup attachment, not prompt
+completion or authority to restore native state. Keep delivery blocks,
+uncertain submissions, queue claims, and independent admission gates unchanged.
+Existing recovery actions can then return their actual evidence-based result.
+Native restoration still requires the separate exact source-termination and
+journal proof. No Stop, launch, prompt, queue drain, availability notification,
+or terminal event accompanies absence settlement.
+
+Verification covers startup, deferred startup, periodic retries, SQL failure,
+crash after repair, changed owners, and concurrent Stop. A mixed inventory
+contains an absent owner and an independently live or unknown owner.
+The [remote absence fix package](../../../plans/remote-recovery-absence/plan.md)
+owns this correction. Older recovery results do not verify it.
+
+### Stopped agent in a retained remote environment
+
+For `AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.6`, startup and periodic
+retry can settle a stopped agent in a retained Remote Docker or plugin
+workspace.
+
+1. Require an authenticated `GET /api/v1/agent/session` with
+   `agent_status=stopped`, the exact saved agentctl instance ID, and the exact
+   session ID. Use the recorded Docker agentctl ID or plugin runtime ID,
+   with the existing execution ID fallback for older records. A stopped
+   adapter can omit the native session ID. A reported ID must agree with
+   the saved native ID when one exists. Require the recorded incarnation
+   and positive harness generation to match the peer. For durable delivery,
+   require the journal descriptor to match those values as well.
+2. For durable delivery, validate the stream, submission, and payload
+   identities and replay from the persisted projected cursor through the
+   retained journal's reported high water. Reuse the bounded replay path with
+   lifecycle callbacks suppressed. The durable projector applies any proven
+   terminal outcome. An exact abandoned dispatch with no terminal evidence
+   uses the existing interrupted-unknown result and Resume block. Keep any
+   independent delivery block for live or unverifiable work. A compatible
+   legacy peer can skip replay when its incarnation and generation match
+   SQL and there is no durable work to reconcile. Failed proof, a journal
+   gap, or a replay error keeps the applicable protection.
+3. Re-read the executor row after attachment and replay. Use its current
+   `UpdatedAt` and execution ID in the existing owner-locked repair. Check
+   the exact task, session, environment generation, and resource binding.
+   For plugins this includes the provider, resource handle, and agentctl ID
+   in the current checkpoint. A checkpoint refresh for the same owner can
+   advance the row revision. Stop, cleanup, shutdown, a successor, or an
+   unrelated ownership change fences the write.
+4. Settle the original turn from proven terminal evidence. If its outcome
+   remains unknown, use exact-turn abandonment to close it as interrupted
+   and retain the delivery records. Persist the stopped runtime and move a
+   matching `STARTING` or `RUNNING` session to `WAITING_FOR_INPUT` in the
+   owner-locked repair. Preserve an existing waiting, failed, or Office
+   resting state. After the writes commit, close the attempt transport,
+   release the matching startup guard, and publish the normal
+   `session.state_changed` update for a state transition.
+
+A failed Remote Docker or plugin session without a delivery source can reach
+ordinary Resume after recovery authenticates the exact agentctl instance,
+session, incarnation, and generation as stopped. A tokenless failed Remote
+Docker session also has one safe absence disposition when the executor
+definitively verifies that its exact recorded container exited during the
+outage. This disposition keeps the failed session state and only settles the
+runtime owner row. A missing agentctl instance inside a still-running
+container, an unknown process, or ambiguous provider evidence keeps the guard.
+Plugin sessions require the authenticated stopped association because their
+provider absence does not prove that the exact resource is gone.
+
+Settlement leaves the agent stopped and the queue intact. Ordinary Resume
+reuses the saved workspace and any available native conversation. Verified
+native restoration resolves the matching interrupted-delivery block through
+the existing path. An interrupted instruction is never sent again by recovery.
+
+The [retained remote restart package](../../../plans/retained-remote-restart-recovery/plan.md)
+records the checks for this disposition.
+
+### Retained cancellation before native resume
+
+An open, submission-bound delivery block can outlive a stopped local Worktree
+execution without a recovery snapshot. The startup worker reads the journal
+submission by the block's exact ID. The general journal inventory omits
+cancelled submissions.
+
+Replay requires the block's exact submission ID and matching session,
+incarnation, generation, stream, and payload hash. A blank block stream is
+allowed only when the exact authenticated submission proves the stream; a
+conflicting populated stream is rejected. Settlement records that proven
+stream on the resolved block. Replay also requires verified termination of
+the original owner and a complete inventory with no competing unresolved
+work. The SQL projected cursor must not pass the cancellation. A received
+cursor may be ahead of projection only within the authenticated retained
+range, because replay resumes from projection and accepts duplicate receipts.
+Incomplete evidence keeps the existing block and recovery controls available.
+
+The worker reserves automatic resume capacity and pauses queued work before
+replay. If capacity is unavailable, it leaves the block and cancellation
+pending for another pass. The runtime replays the original stream through
+ordered SQL receipt and projection. Acknowledgement follows committed
+projection. Terminal settlement records the cancellation and resolves the
+matching block through the existing terminal effect. Orchestrator settlement
+then retires the matching queue claim and publishes the cleared recovery
+state. Repeated replay uses the same cursor and effect identity.
+
+After settlement, the worker confirms no independent recovery block remains,
+reloads session and executor state, and uses normal resume admission with the
+saved native conversation required. Resume sends no prompt. If another
+restart interrupts the worker after settlement, the committed cancellation
+and block resolution allow ordinary resume.
+
+### Existing restore reconciliation
+
+Use the same bounded reconciliation worker at backend startup and after confirmed local
+shared-runtime replacement. Its inventory must include retained unresolved delivery records
+and execution identities even when an older row lacks current recovery metadata. A typed
+retired-runtime lease triggers identity reconciliation; it is not independently proof that
+the original process terminated. Remove a stale runtime handle only after existing exact
+process/epoch evidence and compare-and-set guards establish that it is obsolete. Preserve
+the saved native token and workspace. Never contact a successor through a recycled port.
+
+For each candidate, compare all unresolved SQL submissions with the authenticated owner's
+retained journal records. Match ID, session, incarnation, harness generation, stream binding,
+and payload hash. A freshly constructed journal owner classifies abandoned dispatches as
+described in [abandoned dispatch classification](#abandoned-dispatch-after-owner-replacement).
+With confirmed original-process death, matching SQL `dispatching` may become uncertain;
+SQL uncertainty and matching peer uncertainty can proceed through the existing restore-only
+checkpoint. Retained terminal evidence instead uses ordered projection and authoritative
+terminal settlement. Missing canonical associations use the existing record-reconstruction
+contract. Conflicting hashes, future/foreign generations, incomplete inventories, unavailable
+stores, and unknown process ownership permit no destructive normalization or native restore.
+
+SQL repair uses the existing session admission/lifecycle locks and repository transactions.
+Journal repair remains owner-scoped and durable. No cross-store atomicity is assumed: pin
+identities, use compare-and-set writes, and re-read both stores at each checkpoint. A crash
+after journal classification or retirement resumes from retained proof. A single bad candidate
+does not abort other sessions. Startup and replacement triggers must share bounded ownership
+and cancellation rather than start competing restore workers.
+
+Successor setup events wait within the bounded restore operation instead of
+using a shorter independent event deadline. The execution retains the launch
+owner through native startup and the SQL generation commit. Owner cancellation
+releases a pending wait. A final authoritative read handles cancellation
+immediately after a successful commit. Receipt, projection, and acknowledgement
+remain prohibited before committed generation authority.
+
+On native startup failure, the restore owner also owns cleanup after cancellation.
+It revalidates the pinned checkpoint, workspace owner, and execution identity
+under the session locks. A ready candidate remains available for commit retry.
+Otherwise lifecycle stops the exact failed runtime and calls the durable
+checkpoint writer before removing inventory. A failed SQL commit can disconnect a candidate stream when its launch owner ends.
+A later pass verifies the same execution and initialized native identity, binds
+the new attempt only after the old owner ends, and reconnects before checking
+readiness. A complete, unacknowledged setup prefix without submissions can replay
+from zero while its predecessor generation remains pinned; receipt still waits
+for the successor commit. A failed stop or checkpoint keeps
+the inventory. Confirmed termination advances `candidate_launching` to
+`candidate_dead`, so a later pass can rotate safely even after a crash during
+cleanup. An absent execution row without that proof remains blocked.
+
+When a recovery snapshot exists, both automatic restoration and successful explicit native Resume must commit a newer
+`restored` recovery revision with the matching recovery-block resolution. Keep the original
+recovery identity as historical evidence, and preserve its submission's unknown outcome.
+Guard this SQL commit against a new execution, generation, recovery revision, or independent
+block. Clear only the exact associated uncertainty error. Publish the complete recovery
+snapshot, including the cleared block projection, after commit. Repeated recovery reads the
+committed proof instead of returning success while leaving `phase=uncertain` or recreating
+the historical block. Existing frontend revision fences prevent delayed old snapshots from
+reviving the banner. Current desktop and phone composer layouts require no new controls.
+
+Verification seeds SQL uncertainty versus journal dispatching, a dead runtime row, stale
+uncertain metadata after successful Resume, and a mixed set containing one good and one
+conflicting unresolved record. It exercises actual journal reopen and authenticated adoption,
+backend restart and in-process runtime replacement, crash boundaries between store writes,
+normal follow-up admission, no interrupted-prompt replay, and an independent live sibling.
+
+Before durable dispatch, the existing executor prompt/turn binding also persists the
+original runtime process birth identity and admitted prompt generation. A replacement
+execution may retain that historical binding, but its own PID, runtime epoch, and prompt
+counter never stand in for the source. Reconstruction rechecks the exact saved binding
+around payload inspection. Legacy bindings without process proof remain blocked.
+
+A local agentctl runtime is shared by every session and can outlive the backend, so its
+termination is not the only proof that one session's agent stopped writing. The binding also
+records the agent child's process-group birth identity, which agentctl reports in its
+authenticated delivery descriptor. On Linux, original-owner termination is proven when either
+the runtime's owned session has terminated or the recorded agent group no longer exists.
+A valid group birth token names its boot. On the same boot, a kernel existence check must
+report `ESRCH`. A procfs snapshot cannot prove absence while members can fork and exit.
+An existing or reused group blocks group proof. Unreaped members can delay proof until the
+operating system removes the group. Missing or malformed evidence proves nothing.
+Darwin retains runtime-session proof. Windows retains its existing unverifiable result.
+Bindings without group identity keep the runtime-only rule. Remote executors keep
+their existing authenticated surviving-execution evidence. See
+[agent process-group termination proof](../../../decisions/2026-11-02-agent-process-group-termination-proof.md)
+and the delivery record
+[agent group termination proof](../../../plans/agent-group-termination-proof/plan.md).
+
+Standalone row liveness reports whether the shared agentctl still lists the session. It does
+not prove that the session's agent child is still active. When this row is alive and its
+execution ID matches the pinned source, lifecycle may use only the recorded agent-group proof;
+runtime-session termination cannot override the live shared-runtime evidence. When row
+liveness is unknown, lifecycle uses `processidentity.OriginalOwnerTerminated` for the pinned
+source. It validates the session and execution IDs before proof, then revalidates the recovery
+owner before cleanup. Cleanup remains conditional on that execution ID and row timestamp, so a
+successor cannot inherit the source proof.
+
+The restart inventory includes matching dispatching SQL rows without recovery metadata.
+The worker reconstructs a uniquely identified recovery block and source snapshot, including
+an existing generic delivery block with empty identities, then proves the original owner
+terminated before restoring or retiring work. If an idle successor already loaded the exact
+native conversation at the same generation, lifecycle validates its owner and every unknown
+SQL/peer record, retires matching history, and atomically resolves the block with the restored
+snapshot. It preserves that execution. An active, foreign, or unverifiable successor is never
+stopped or taken over. A later restart reads exact resolved native-resume proof and admits
+only a new instruction.
+
+A prepared restore checkpoint may refresh a strictly newer reconnecting/uncertain notice
+revision only while it has no allocated candidate and all immutable source, block, native,
+and workspace identity remains identical. Once a candidate is allocated, the entire source
+snapshot is pinned. Notice delivery cannot change an in-flight candidate's authority.
+
+The delivery record for this correction is
+[journal growth and restart reconciliation](../../../plans/journal-growth-restart-reconciliation/plan.md).
+
+Recovery block updates preserve a known stream binding when a later partial failure notice
+names the same submission without a stream. Existing incomplete blocks can be repaired only
+after authenticated full journal/SQL comparison and original-owner termination proof. The
+transaction pins the current notice, native generation, observed block timestamp and bindings,
+and the sole open admission fence. Foreign bindings and independent blocks remain unchanged.
+The production lifecycle adapter exposes the already-loaded-native recovery seam explicitly.
+
+Native identity and recovery-snapshot verification use the authorized session detail read.
+Compact navigation rows omit rich metadata and cannot prove native continuity or restoration.
+
+Explicit recovery shares the session infrastructure slot with workspace readers. If it joins
+a reader that rejects unresolved recovery, it reacquires that slot and performs its own
+launch admission. It never inherits the reader's recovery rejection as the outcome of a
+native restore. Ordinary launches, unrelated failures, cancellation, and failures from the
+recovery's own launch remain authoritative. Workspace admission stays blocked until the
+matching recovery commits its restored snapshot.
+
+Recovery attempts are scoped to the interrupted submission and original execution as well
+as the session, incarnation, and harness generation. Retries of one incident reuse its
+checkpoint; a later incident in an already loaded conversation gets its own identity.
+Existing generation-scoped checkpoints remain authoritative for their matching source.
+Historical SQL unknown outcomes may be excluded from unresolved work only after an
+authenticated, owner-scoped journal read proves that exact submission retired with the
+same hash, incarnation, and generation. This read omits the prompt payload and never
+acknowledges events. Missing-metadata reconstruction carries the verified immutable
+canonical snapshots into its write transaction; changed or live historical rows block it.

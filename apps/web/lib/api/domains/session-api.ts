@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { ApiError, fetchConditionalJson, fetchJson, type ApiRequestOptions } from "../client";
 import type {
   TaskSessionsResponse,
   TaskSessionResponse,
@@ -7,6 +7,7 @@ import type {
   ListTurnsResponse,
 } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import type { NativeMCPDiagnosticPayload } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type ShellCommandOutput = {
   exit_code?: number;
@@ -35,6 +36,71 @@ export type SearchMessagesResponse = {
   hits: MessageSearchHit[];
   total: number;
 };
+
+export type AgentMcpAuthenticateResponse = {
+  terminal_id: string;
+  task_environment_id: string;
+  label: string;
+  reused: boolean;
+};
+
+export type AgentMcpRetryResponse = {
+  provider_id: "cursor";
+  server_id: string;
+  status:
+    | "ready"
+    | "authentication_required"
+    | "approval_failed"
+    | "connection_failed"
+    | "unavailable";
+  reason_code?: string;
+  tool_count?: number;
+  mcp_diagnostic?: NativeMCPDiagnosticPayload;
+};
+
+export function isAgentMcpRecoveryBusyError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.errorCode === "mcp_recovery_session_busy"
+  );
+}
+
+export function authenticateAgentMcp(
+  taskSessionId: string,
+  serverId: string,
+  options?: ApiRequestOptions,
+): Promise<AgentMcpAuthenticateResponse> {
+  return fetchJson<AgentMcpAuthenticateResponse>(
+    `/api/v1/task-sessions/${encodeURIComponent(taskSessionId)}/mcp/authenticate`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ server_id: serverId }),
+      },
+    },
+  );
+}
+
+export function retryAgentMcpConnection(
+  taskSessionId: string,
+  serverId: string,
+  options?: ApiRequestOptions,
+): Promise<AgentMcpRetryResponse> {
+  return fetchJson<AgentMcpRetryResponse>(
+    `/api/v1/task-sessions/${encodeURIComponent(taskSessionId)}/mcp/retry`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ server_id: serverId }),
+      },
+    },
+  );
+}
 
 /** Search messages in a single session via WebSocket. */
 export async function searchSessionMessages(
@@ -69,6 +135,13 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
 
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
+}
+
+export function fetchTaskSessionConditional(taskSessionId: string, etag?: string) {
+  return fetchConditionalJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, {
+    cache: "no-store",
+    ...(etag ? { init: { headers: { "If-None-Match": etag } } } : {}),
+  });
 }
 
 export async function dismissLastAgentError(
@@ -109,19 +182,17 @@ export async function markSessionRead(
   });
 }
 
-/** Lists session messages with optional prompt filtering and around-window lookup. */
-export async function listTaskSessionMessages(
-  taskSessionId: string,
-  params?: {
-    limit?: number;
-    before?: string;
-    after?: string;
-    around?: string;
-    author_type?: "user";
-    sort?: "asc" | "desc";
-  },
-  options?: ApiRequestOptions,
-) {
+type ListTaskSessionMessageParams = {
+  limit?: number;
+  before?: string;
+  after?: string;
+  around?: string;
+  author_type?: "user";
+  sort?: "asc" | "desc";
+  include_turns?: boolean;
+};
+
+function buildMessageListQuery(params?: ListTaskSessionMessageParams): string {
   const query = new URLSearchParams();
   if (params?.limit !== undefined) query.set("limit", String(params.limit));
   if (params?.before) query.set("before", params.before);
@@ -129,7 +200,17 @@ export async function listTaskSessionMessages(
   if (params?.around) query.set("around", params.around);
   if (params?.author_type) query.set("author_type", params.author_type);
   if (params?.sort) query.set("sort", params.sort);
-  const suffix = query.toString();
+  if (params?.include_turns) query.set("include_turns", "true");
+  return query.toString();
+}
+
+/** Lists session messages with optional prompt filtering and around-window lookup. */
+export async function listTaskSessionMessages(
+  taskSessionId: string,
+  params?: ListTaskSessionMessageParams,
+  options?: ApiRequestOptions,
+) {
+  const suffix = buildMessageListQuery(params);
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ""}`;
   return fetchJson<ListMessagesResponse>(url, options);
 }
@@ -182,22 +263,62 @@ export async function openSessionFolder(
   });
 }
 
+export type SessionConfigurationResult = {
+  status?: "applied" | "unconfirmed" | "saved_for_launch" | "rejected" | "persistence_failed";
+  config_id?: string;
+  requested?: string;
+  effective?: string;
+  confirmed?: boolean;
+  execution_id?: string;
+};
+
+export type SetSessionConfigurationResponse = {
+  ok: boolean;
+  configuration_result?: SessionConfigurationResult;
+};
+
 export async function setSessionMode(sessionId: string, modeId: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-mode`, {
+  return fetchJson<SetSessionConfigurationResponse>(`/api/v1/task-sessions/${sessionId}/set-mode`, {
     init: { method: "POST", body: JSON.stringify({ mode_id: modeId }) },
   });
 }
 
 export async function setSessionModel(sessionId: string, modelId: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
-    init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
-  });
+  return fetchJson<SetSessionConfigurationResponse>(
+    `/api/v1/task-sessions/${sessionId}/set-model`,
+    { init: { method: "POST", body: JSON.stringify({ model_id: modelId }) } },
+  );
 }
 
-export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
-  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
-    init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },
-  });
+export async function resolveSessionModelConfig(
+  sessionId: string,
+  request: { model: string; mode?: string; config_options?: Record<string, string> },
+): Promise<import("@/lib/types/http").AgentModelConfigResponse> {
+  return fetchJson<import("@/lib/types/http").AgentModelConfigResponse>(
+    `/api/v1/task-sessions/${sessionId}/resolve-model-config`,
+    { init: { method: "POST", body: JSON.stringify(request) } },
+  );
+}
+
+export async function setSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+  expectedModelId?: string,
+) {
+  return fetchJson<SetSessionConfigurationResponse>(
+    `/api/v1/task-sessions/${sessionId}/set-config-option`,
+    {
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          config_id: configId,
+          value,
+          ...(expectedModelId ? { expected_model_id: expectedModelId } : {}),
+        }),
+      },
+    },
+  );
 }
 
 export async function authenticateSession(sessionId: string, methodId: string) {

@@ -7,7 +7,10 @@ import { CardContent } from "@kandev/ui/card";
 import { IconLoader2 } from "@tabler/icons-react";
 import type { SSHReachabilityRecord, SSHReachabilityReason } from "@/lib/types/http-ssh";
 import { formatRelative } from "@/lib/i18n/formats";
-import { useSSHReachability } from "@/hooks/domains/settings/use-ssh-reachability";
+import {
+  reachabilityTimestampMilliseconds,
+  useSSHReachability,
+} from "@/hooks/domains/settings/use-ssh-reachability";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -30,8 +33,8 @@ export function isReachabilityStale(
   now: number = Date.now(),
 ): boolean {
   if (!probingEnabled || !checkedAt || probeIntervalSeconds <= 0) return false;
-  const checkedMs = Date.parse(checkedAt);
-  if (Number.isNaN(checkedMs)) return false;
+  const checkedMs = reachabilityTimestampMilliseconds(checkedAt);
+  if (checkedMs === null) return false;
   return now - checkedMs > probeIntervalSeconds * 1000 * STALE_INTERVAL_MULTIPLIER;
 }
 
@@ -130,6 +133,8 @@ function ReachabilityBody({
     now,
   );
   const reasonKey = record.reason ? reachabilityReasonKey(record.reason) : null;
+  const checkedAt = reachabilityTimestampMilliseconds(record.checked_at);
+  const lastSuccessAt = reachabilityTimestampMilliseconds(record.last_success_at);
   return (
     <div className="space-y-2 text-sm">
       <div className="flex items-center gap-2">
@@ -161,14 +166,16 @@ function ReachabilityBody({
         {t("executors:sshReachabilityConsecutiveFailures", { count: record.consecutive_failures })}
       </p>
       <p data-testid="ssh-reachability-age">
-        {record.checked_at
-          ? t("executors:sshReachabilityAgeLastProbe", { age: formatRelative(record.checked_at) })
+        {checkedAt !== null
+          ? t("executors:sshReachabilityAgeLastProbe", {
+              age: formatRelative(new Date(checkedAt).toISOString()),
+            })
           : t("executors:sshReachabilityNeverProbed")}
       </p>
       <p data-testid="ssh-reachability-last-success">
-        {record.last_success_at
+        {lastSuccessAt !== null
           ? t("executors:sshReachabilityAgeLastSuccess", {
-              age: formatRelative(record.last_success_at),
+              age: formatRelative(new Date(lastSuccessAt).toISOString()),
             })
           : t("executors:sshReachabilityNoSuccess")}
       </p>

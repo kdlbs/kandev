@@ -36,8 +36,18 @@ func TestFormatKandevContext_CanvasGuidanceFollowsCapability(t *testing.T) {
 	assert.Contains(t, withCanvas, "Report publication status, including failures.")
 	assert.Contains(t, withCanvas, "Local files or a successful build do not publish a canvas.")
 	assert.NotContains(t, withCanvas, "Create the draft in Kandev before writing application files.")
-	assert.Contains(t, withCanvas, "Get the schema and examples from tool discovery.")
+	assert.Contains(t, withCanvas, "discover schema/examples.")
 	assert.NotContains(t, withCanvas, `"chart_type":"bar"`)
+}
+
+func TestFormatKandevContext_WorktreeAdoptionFollowsCapability(t *testing.T) {
+	without := FormatKandevContextWithOptions("task", "session", KandevContextOptions{})
+	assert.NotContains(t, without, "add_branch_to_task_kandev with worktree_path")
+
+	with := FormatKandevContextWithOptions("task", "session", KandevContextOptions{IncludeWorktreeAdoption: true})
+	assert.Contains(t, with, "create it inside the task workspace")
+	assert.Contains(t, with, "add_branch_to_task_kandev with worktree_path")
+	assert.Contains(t, with, "Kandev creates the worktree")
 }
 
 func TestKandevContextTemplate_IsCompactEnoughForEveryTask(t *testing.T) {
@@ -57,15 +67,32 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 	const (
 		recordedOrdinaryPromptBytesBeforeCompaction = 4804
 		minimumRenderedReductionBytes               = 400
+		taskReferenceGuidanceBudgetBytes            = 300
 	)
 	// This baseline is a recorded rendered prompt from before rich-output
 	// examples moved behind tool discovery. Keep the assertion on rendered
 	// bytes, not the reusable raw template, so interpolation cannot hide prompt
 	// growth or make a prompt-reduction claim from source-file size alone.
-	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes)
+	// Task reference guidance adds a bounded 300-byte allowance to that baseline.
+	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes+taskReferenceGuidanceBudgetBytes)
 	assert.True(t, utf8.ValidString(ordinary))
 	assert.True(t, utf8.ValidString(canvas))
 	t.Logf("rendered prompt sizes: ordinary=%d bytes, canvas=%d bytes, baseline=%d bytes, reduction=%d bytes",
 		len([]byte(ordinary)), len([]byte(canvas)), recordedOrdinaryPromptBytesBeforeCompaction,
 		recordedOrdinaryPromptBytesBeforeCompaction-len([]byte(ordinary)))
+}
+
+func TestKandevContext_TellsAgentsCallsMayWaitAndNotToPoll(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Calls wait offline.")
+	assert.Contains(t, context, "Do not poll; end turn at budget.")
+}
+
+func TestKandevContext_KeepsIdentityAndPlanEditingGuidance(t *testing.T) {
+	context := FormatKandevContext("task", "session", false)
+
+	assert.Contains(t, context, "Use these IDs for task_id/session_id.")
+	assert.Contains(t, context, "Never use fragments as replacement documents.")
+	assert.Contains(t, context, "Use discovered schemas.")
 }

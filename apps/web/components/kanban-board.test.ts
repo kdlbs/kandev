@@ -2,94 +2,109 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useMultiSelectDerived } from "./kanban-board";
 
-type SnapEntry = {
-  tasks: { id: string }[];
-  steps: { id: string; title: string; color?: string | null }[];
-};
+const board = { workflowId: null, tasks: [], steps: [] } as never;
+const snapshots = {
+  a: {
+    workflowId: "a",
+    tasks: [{ id: "task-a", workflowId: "a" }],
+    steps: [
+      { id: "a-start", title: "Start", position: 0, color: "blue" },
+      { id: "a-done", title: "Done", position: 1, color: null },
+    ],
+  },
+  b: {
+    workflowId: "b",
+    tasks: [{ id: "task-b", workflowId: "b" }],
+    steps: [{ id: "b-done", title: "Done B", position: 0, color: "blue" }],
+  },
+} as never;
 
-const ACTIVE_STEPS = [{ id: "active-1", title: "Active step", color: "blue" }];
-
-describe("useMultiSelectDerived — bulk-move step list hidden-step filter", () => {
-  it("falls back to the board's active steps when nothing is selected", () => {
-    const { result } = renderHook(() => useMultiSelectDerived(new Set(), {}, ACTIVE_STEPS, {}));
-
-    expect(result.current.multiSelectSteps).toEqual([
-      { id: "active-1", title: "Active step", color: "blue" },
-    ]);
+describe("bulk move destinations", () => {
+  it("offers only visible steps of the selected workflow", () => {
+    const { result } = renderHook(() =>
+      useMultiSelectDerived(new Set(["task-a"]), snapshots, [], { a: ["a-start"] }, board),
+    );
+    expect(result.current.multiSelectSteps).toEqual([{ id: "a-done", title: "Done", color: "" }]);
     expect(result.current.isMixedWorkflowSelection).toBe(false);
   });
 
-  it("excludes a step hidden in the selection's own workflow from the bulk-move list", () => {
-    const snapshots: Record<string, SnapEntry> = {
-      "wf-1": {
-        tasks: [{ id: "task-1" }],
-        steps: [
-          { id: "step-visible", title: "Visible" },
-          { id: "step-hidden", title: "Hidden" },
-        ],
-      },
-    };
-
+  it.each([
+    ["task-a", "task-b"],
+    ["task-a", "missing"],
+  ])("offers no destinations for mixed or unknown selection %s", (...ids) => {
     const { result } = renderHook(() =>
-      useMultiSelectDerived(new Set(["task-1"]), snapshots, ACTIVE_STEPS, {
-        "wf-1": ["step-hidden"],
-      }),
+      useMultiSelectDerived(new Set(ids), snapshots, [], {}, board),
     );
-
-    expect(result.current.multiSelectSteps.map((s) => s.id)).toEqual(["step-visible"]);
-  });
-
-  it("does not filter by a different workflow's hidden set", () => {
-    const snapshots: Record<string, SnapEntry> = {
-      "wf-1": {
-        tasks: [{ id: "task-1" }],
-        steps: [
-          { id: "step-a", title: "A" },
-          { id: "step-b", title: "B" },
-        ],
-      },
-      "wf-2": {
-        tasks: [{ id: "task-2" }],
-        steps: [{ id: "step-a", title: "A (wf-2)" }],
-      },
-    };
-
-    // Hiding step-a in wf-2 must not affect the bulk-move list for a selection
-    // whose task lives in wf-1.
-    const { result } = renderHook(() =>
-      useMultiSelectDerived(new Set(["task-1"]), snapshots, ACTIVE_STEPS, {
-        "wf-2": ["step-a"],
-      }),
-    );
-
-    expect(result.current.multiSelectSteps.map((s) => s.id)).toEqual(["step-a", "step-b"]);
-  });
-
-  it("normalizes a null step color to an empty string", () => {
-    const snapshots: Record<string, SnapEntry> = {
-      "wf-1": {
-        tasks: [{ id: "task-1" }],
-        steps: [{ id: "step-1", title: "Step 1", color: null }],
-      },
-    };
-
-    const { result } = renderHook(() =>
-      useMultiSelectDerived(new Set(["task-1"]), snapshots, ACTIVE_STEPS, {}),
-    );
-
-    expect(result.current.multiSelectSteps).toEqual([{ id: "step-1", title: "Step 1", color: "" }]);
-  });
-
-  it("flags a mixed-workflow selection across two workflows", () => {
-    const snapshots: Record<string, SnapEntry> = {
-      "wf-1": { tasks: [{ id: "task-1" }], steps: [] },
-      "wf-2": { tasks: [{ id: "task-2" }], steps: [] },
-    };
-
-    const { result } = renderHook(() =>
-      useMultiSelectDerived(new Set(["task-1", "task-2"]), snapshots, ACTIVE_STEPS, {}),
-    );
-
+    expect(result.current.multiSelectSteps).toEqual([]);
     expect(result.current.isMixedWorkflowSelection).toBe(true);
   });
+});
+
+it("uses matching hydrated board steps for a task-bearing placeholder", () => {
+  const placeholder = {
+    a: {
+      workflowId: "a",
+      workflowName: "A",
+      isPlaceholder: true,
+      tasks: [{ id: "task-a", workflowId: "a" }],
+      steps: [],
+    },
+  } as never;
+  const hydrated = {
+    workflowId: "a",
+    tasks: [{ id: "task-a", workflowId: "a" }],
+    steps: [{ id: "a-done", title: "Done", position: 1, color: "" }],
+  } as never;
+  const { result } = renderHook(() =>
+    useMultiSelectDerived(new Set(["task-a"]), placeholder, [], {}, hydrated),
+  );
+  expect(result.current.multiSelectSteps.map((step) => step.id)).toEqual(["a-done"]);
+});
+
+it("does not use another workflow's hydrated steps for a placeholder", () => {
+  const placeholder = {
+    b: {
+      workflowId: "b",
+      workflowName: "B",
+      isPlaceholder: true,
+      tasks: [{ id: "task-b", workflowId: "b" }],
+      steps: [],
+    },
+  } as never;
+  const hydrated = {
+    workflowId: "a",
+    tasks: [],
+    steps: [{ id: "a-done", title: "Done", position: 1, color: "" }],
+  } as never;
+  const { result } = renderHook(() =>
+    useMultiSelectDerived(new Set(["task-b"]), placeholder, [], {}, hydrated),
+  );
+  expect(result.current.multiSelectSteps).toEqual([]);
+});
+
+it("uses nonempty snapshot steps and rejects conflicting target ownership", () => {
+  const current = {
+    a: {
+      workflowId: "a",
+      tasks: [{ id: "task-a", workflowId: "a" }],
+      steps: [
+        { id: "shared", title: "Shared", position: 0, color: "" },
+        { id: "a-only", title: "A", position: 1, color: "" },
+      ],
+    },
+    b: {
+      workflowId: "b",
+      tasks: [],
+      steps: [{ id: "shared", title: "Shared B", position: 0, color: "" }],
+    },
+  } as never;
+  const hydrated = {
+    workflowId: "a",
+    tasks: [{ id: "task-a", workflowId: "a" }],
+    steps: [{ id: "board-only", title: "Board", position: 0, color: "" }],
+  } as never;
+  const { result } = renderHook(() =>
+    useMultiSelectDerived(new Set(["task-a"]), current, [], {}, hydrated),
+  );
+  expect(result.current.multiSelectSteps.map((step) => step.id)).toEqual(["a-only"]);
 });

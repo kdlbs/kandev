@@ -4,16 +4,19 @@ import {
   captureGatewayRequests,
   routeRecoveryFailureAndRetry,
   sessionLaunchRequests,
+  waitForTaskUnarchive,
 } from "../../helpers/archived-session-recovery";
 import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helpers/session";
 import {
   prepareArchiveRecoverySession,
   seedWorktreeRecoveryFixture,
+  waitForCascadeArchiveCleanup,
 } from "../../helpers/session-resume-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("archived session recovery", () => {
   test("keeps archived history read-only, then resumes the same session after unarchive", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -41,6 +44,7 @@ test.describe("archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the recovery session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     const requests = captureGatewayRequests(testPage);
     await testPage.goto(`/t/${fixture.task.id}`);
@@ -53,21 +57,22 @@ test.describe("archived session recovery", () => {
     expect(sessionLaunchRequests(requests, sessionId)).toHaveLength(0);
 
     requests.length = 0;
-    const unarchiveResponse = testPage.waitForResponse((response) =>
-      response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
-    );
+    const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
     await testPage.getByTestId("task-unarchive-button").click();
-    await unarchiveResponse;
+    await unarchiveSettled;
     await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
     await expect
       .poll(
-        () => sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
+        () =>
+          sessionLaunchRequests(requests, sessionId).some(
+            (request) => request.payload.intent === "resume",
+          ),
         {
           timeout: 60_000,
           message: "Unarchive did not trigger automatic same-session resume",
         },
       )
-      .toEqual(["resume"]);
+      .toBe(true);
     await waitForSessionDone(
       apiClient,
       fixture.task.id,
@@ -75,10 +80,6 @@ test.describe("archived session recovery", () => {
       "Waiting for automatic same-session resume to settle",
       60_000,
     );
-    expect(
-      sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
-    ).toEqual(["resume"]);
-
     const afterEnvironment = await apiClient.getTaskEnvironment(fixture.task.id);
     const afterRepository = afterEnvironment?.repos?.find(
       (repository) => repository.repository_id === seedData.repositoryId,
@@ -90,6 +91,12 @@ test.describe("archived session recovery", () => {
 
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 60_000 });
+    const launchIntents = sessionLaunchRequests(requests, sessionId).map(
+      (request) => request.payload.intent,
+    );
+    expect(launchIntents).toEqual(
+      launchIntents.includes("restore_workspace") ? ["resume", "restore_workspace"] : ["resume"],
+    );
     await assertNoDocumentHorizontalOverflow(testPage, "archived session recovery");
 
     await testPage.screenshot({
@@ -103,6 +110,7 @@ test.describe("archived session recovery", () => {
   });
 
   test("honors prevent-auto-start after an archived task is unarchived", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -125,6 +133,7 @@ test.describe("archived session recovery", () => {
         sessionId,
         "Waiting for archive cancellation to mark the preference session",
       );
+      await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
       const requests = captureGatewayRequests(testPage);
       await testPage.goto(`/t/${fixture.task.id}`);
@@ -134,11 +143,9 @@ test.describe("archived session recovery", () => {
       expect(sessionLaunchRequests(requests, sessionId)).toHaveLength(0);
 
       requests.length = 0;
-      const unarchiveResponse = testPage.waitForResponse((response) =>
-        response.url().endsWith(`/api/v1/tasks/${fixture.task.id}/unarchive`),
-      );
+      const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
       await testPage.getByTestId("task-unarchive-button").click();
-      await unarchiveResponse;
+      await unarchiveSettled;
       await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
       expect(
@@ -150,6 +157,7 @@ test.describe("archived session recovery", () => {
   });
 
   test("keeps both automatic recovery causes behind an accessible disclosure", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -171,6 +179,7 @@ test.describe("archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the feedback session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     await routeRecoveryFailureAndRetry(testPage, {
       taskId: fixture.task.id,
@@ -181,7 +190,9 @@ test.describe("archived session recovery", () => {
     await testPage.goto(`/t/${fixture.task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const unarchiveSettled = waitForTaskUnarchive(testPage, fixture.task.id);
     await testPage.getByTestId("task-unarchive-button").click();
+    await unarchiveSettled;
     await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
 
     const banner = testPage.getByTestId("session-recovery-error");
@@ -204,8 +215,10 @@ test.describe("archived session recovery", () => {
       fullPage: true,
     });
 
-    await expect(session.recoveryResumeButton()).toBeEnabled();
-    await session.recoveryResumeButton().click();
+    // Retry the failed automatic recovery while session inspection can still be pending.
+    const retry = banner.getByRole("button", { name: "Retry", exact: true });
+    await expect(retry).toBeEnabled();
+    await retry.click();
     await expect(banner).toHaveCount(0, { timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage, "archived recovery feedback");
 

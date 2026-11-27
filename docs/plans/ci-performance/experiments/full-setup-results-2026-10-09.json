@@ -1,0 +1,78 @@
+{
+  "source_sha": "5aa06bcefe02b6ce7b7c321f7092efe89f0c8992",
+  "node": "24.16.0",
+  "pnpm": "9.15.9",
+  "workers": 2,
+  "runner": "local task VM; 11 available CPUs; not GitHub hosted",
+  "cache_state": "Installed frozen-lockfile dependencies; OS page cache and shared-host load were not controlled",
+  "manifest_sha256": "3fbe6ced2d0345b909a558e03b3b8363b7625d2e66664bf7c040c0ac3419a848",
+  "method": "One full-suite baseline, a failed first candidate, then the corrected permanent configuration. Full-run timing uses Vitest report start through final suite end.",
+  "accepted_comparison": {
+    "all_passed_and_equivalent": true,
+    "reports": [
+      {
+        "report": "baseline-full.json",
+        "sha256": "92f0a51c690f18a0f250e92e39fa3aba83102fe50627b866ab79a94fbcc6349d",
+        "success": true,
+        "files": 2757,
+        "assertions": 24573,
+        "outcomes": {
+          "passed": 24569,
+          "skipped": 4
+        },
+        "report_elapsed_seconds": 2627.355
+      },
+      {
+        "report": "full-candidate-2.json",
+        "sha256": "fcc74e8ad3f067509a4c2870d4d12d5c8298cb53e2be6a26348d9000f8a2a9f5",
+        "success": true,
+        "files": 2757,
+        "assertions": 24573,
+        "outcomes": {
+          "passed": 24569,
+          "skipped": 4
+        },
+        "report_elapsed_seconds": 1641.299,
+        "files_match_baseline": true,
+        "identity_outcomes_match_baseline": true,
+        "missing_identity_outcomes": [],
+        "extra_identity_outcomes": []
+      }
+    ]
+  },
+  "failed_attempt": {
+    "report": "full-candidate-1.json",
+    "sha256": "13a0767e23891a7a59f067c3a27958c5045da52cf4d6013e60366720b37760a3",
+    "success": false,
+    "files": 2757,
+    "assertions": 24573,
+    "outcomes": {
+      "passed": 24568,
+      "failed": 1,
+      "skipped": 4
+    },
+    "report_elapsed_seconds": 1643.766,
+    "files_match_baseline": true,
+    "identity_outcomes_match_baseline": false,
+    "missing_identity_outcomes": [
+      [
+        [
+          "components/task/chat/clipboard-attachments.test.ts",
+          "readClipboardAttachments detects image-only HTML without parsing clipboard markup into a DOM",
+          "passed"
+        ],
+        1
+      ]
+    ],
+    "extra_identity_outcomes": [
+      [
+        [
+          "components/task/chat/clipboard-attachments.test.ts",
+          "readClipboardAttachments detects image-only HTML without parsing clipboard markup into a DOM",
+          "failed"
+        ],
+        1
+      ]
+    ]
+  }
+}

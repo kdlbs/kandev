@@ -12,8 +12,9 @@ test("whole-file review feedback survives reload and can be deleted", async ({
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
-  const task = await seedReviewTask(testPage, apiClient, seedData);
+  const task = await seedReviewTask(backend, apiClient, seedData);
   await loadSession(testPage, task.id);
   let dialog = await openDialogWithChanges(testPage);
   await exerciseFileComment(testPage, dialog, false);

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
-updated: 2026-09-17
+updated: 2026-10-28
 owners:
   - kandev
 ---
@@ -54,6 +54,12 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
   acceptance; the destination shall use the existing full task or overview
   surface. Focus shall move to the destination or its loading status, without
   returning to a removed control.
+- **AC-TASKS-REMOVAL-NAVIGATION-001.6:** An automatic replacement shall exclude
+  every task under a pending removal in the current workspace. This includes
+  independently accepted actions. If a candidate enters another removal during
+  validation or session loading, the system shall select the next eligible
+  candidate or the overview. A later user navigation shall cancel automatic
+  selection.
 
 ### REQ-TASKS-REMOVAL-NAVIGATION-002: Recovery and concurrent navigation
 
@@ -79,6 +85,11 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
 - **AC-TASKS-REMOVAL-NAVIGATION-002.5:** The outgoing task shall not create or
   restart a session because removal empties its session list. After confirmed
   failure, ordinary task behavior shall resume only for an available task.
+- **AC-TASKS-REMOVAL-NAVIGATION-002.6:** Independent archive actions shall retain
+  separate pending states on desktop and phone. Completion or failure of one
+  action shall not clear another target's busy controls or duplicate protection.
+  Unrelated task actions, navigation, and list scrolling shall remain usable
+  before the archive requests complete.
 
 ### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
 
@@ -126,13 +137,38 @@ archive request takes time to finish.
   confirmation shall show no progress toast and issue no request. Programmatic,
   API, CLI, MCP, and agent-driven archive operations shall remain unchanged.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-005: Pending delete visibility
+
+**Intent:** Give accepted deletions the same pending-row treatment
+as archiving, without presenting an unfinished deletion as success.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-005.1:** After delete acceptance, every visible
+  task in the removal set shall display a dimmed row and muted spinner in the
+  desktop sidebar and phone task picker on the next render, before network or
+  destination lookup completes. The row shall retain its position and expose
+  busy/disabled accessibility state and ignore pointer/keyboard row activation.
+  This includes archived tasks visible in
+  saved views. Opening or cancelling confirmation shall leave rows unchanged.
+- **AC-TASKS-REMOVAL-NAVIGATION-005.2:** Pending presentation shall survive
+  refreshes, live field updates, and reopening the phone picker. Confirmed
+  deletion shall remove the row; a failed deletion of an available task shall
+  restore its latest ordinary presentation. Recovery shall not recreate a task
+  removed by an authoritative event or override later navigation.
+- **AC-TASKS-REMOVAL-NAVIGATION-005.3:** Bulk and explicit cascade deletion shall
+  mark every visible member of the removal set; unrelated tasks and surviving
+  non-cascade children shall remain ordinary rows. Partial failure shall restore
+  only remaining failed targets. Archive presentation and existing saved-view
+  filtering shall retain their behavior.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
 by [archive confirmation](archive-confirmation.md). Backend deletion admission,
 cleanup, and discard consent remain governed by [runtime cleanup](runtime-cleanup.md).
 This adds local user-action presentation guarantees; it does not change task APIs,
-permissions, session-only deletion, Quick Chat expiration/close, or server cleanup.
+permissions, session-only deletion, Quick Chat manual lifetime and tab close, or server cleanup.
 Remote/API/MCP removal retains existing lifecycle reconciliation and redirects.
 Cold unavailable task routes retain [their current contract](missing-task-route-recovery.md).
 Undo, new settings, and a new mobile navigation composition are excluded.
@@ -147,3 +183,6 @@ Undo, new settings, and a new mobile navigation composition are excluded.
 
 - [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)
 - [Archive progress feedback](../../../plans/archive-progress-feedback/plan.md)
+
+- [Sidebar delete loading](../../../plans/sidebar-delete-loading/plan.md)
+- [Rapid sidebar archive](../../../plans/rapid-sidebar-archive/plan.md)

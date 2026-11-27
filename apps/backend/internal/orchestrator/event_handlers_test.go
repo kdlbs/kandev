@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -21,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	eventbus "github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -30,8 +27,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
@@ -159,9 +156,10 @@ type mockTaskRepo struct {
 	// callers must route guarded REVIEW writes through the CAS method so an
 	// archive can't race a late write; tests assert this stays 0 for those
 	// paths instead of just checking the resulting state.
-	unconditionalWrites  map[string]int
-	getTaskErr           error // if set, GetTask returns this error
-	updateIfSessionState func(
+	unconditionalWrites        map[string]int
+	getTaskErr                 error // if set, GetTask returns this error
+	updateStateIfCurrentInHook func(taskID string)
+	updateIfSessionState       func(
 		context.Context,
 		string,
 		string,
@@ -212,6 +210,9 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
 ) (bool, error) {
+	if m.updateStateIfCurrentInHook != nil {
+		m.updateStateIfCurrentInHook(taskID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.tasks[taskID]
@@ -299,10 +300,14 @@ type mockAgentManager struct {
 	promptErr                       error
 	promptResult                    *executor.PromptResult
 	promptAcceptedOnError           bool
+	promptAcceptedBeforeResult      bool // acceptance precedes the result, as for a full-turn prompt
 	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
+	promptAdmissionEntered          chan struct{}
+	promptAdmissionRelease          chan struct{}
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -354,7 +359,9 @@ type mockAgentManager struct {
 	// Optional override for GetExecutionIDForSession. When unset, the default
 	// implementation reads from repoForExecutionLookup if provided so tests that
 	// seed an executors_running row don't also have to mock this function.
-	getExecutionIDForSessionFunc func(context.Context, string) (string, error)
+	getExecutionIDForSessionFunc           func(context.Context, string) (string, error)
+	ensureWorkspaceExecutionForSessionFunc func(context.Context, string, string) error
+	waitForAgentctlReadyFunc               func(context.Context, string) error
 	// Optional repo used as a fallback by GetExecutionIDForSession when no
 	// override is provided — keeps tests that seed executors_running automatically
 	// resolvable without per-test boilerplate.
@@ -394,10 +401,11 @@ type mockAgentManager struct {
 	cancelAgentForPromptFunc  func(context.Context, string, string, uint64, uint64) error
 	cancelAgentForPromptCalls atomic.Int32
 
-	currentPromptGeneration     atomic.Uint64
-	currentPromptActivityEpoch  atomic.Uint64
-	currentPromptExecutionID    string
-	currentPromptLastActivityAt time.Time
+	currentPromptGeneration            atomic.Uint64
+	currentPromptActivityEpoch         atomic.Uint64
+	currentPromptExecutionID           string
+	currentPromptLastActivityAt        time.Time
+	advancePromptGenerationOnAdmission bool
 
 	// getPromptActivityForSessionFunc, when set, overrides
 	// GetPromptActivityForSession's default (report the current*
@@ -415,6 +423,7 @@ type mockAgentManager struct {
 	setSessionModelCalls              []sessionModelCall
 	setSessionModelSupported          bool
 	setSessionModelErr                error
+	setSessionModelFunc               func(context.Context, string, string) error
 	setSessionConfigCalls             []sessionConfigCall
 	setSessionConfigSupported         bool
 	setSessionConfigErr               error
@@ -455,6 +464,14 @@ type passthroughStdinCall struct {
 	Data      string
 }
 
+func (m *mockAgentManager) RequiresCloneURL(string) bool          { return false }
+func (m *mockAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (m *mockAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (m *mockAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	if m.launchAgentFunc != nil {
 		return m.launchAgentFunc(ctx, req)
@@ -474,7 +491,16 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 }
 
 func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks("", nil, onDispatched, onFailure)
+}
+
+func (m *mockAgentManager) RegisterInitialPromptAdmissionCallbacks(
+	_ string,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched, onFailure func(),
+) error {
 	m.mu.Lock()
+	m.initialPromptAdmissionCallback = beforeAdmission
 	m.initialPromptDispatchCallback = onDispatched
 	m.initialPromptFailureCallback = onFailure
 	m.mu.Unlock()
@@ -534,11 +560,47 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 }
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	if m.promptAcceptedBeforeResult && onDispatched != nil {
+		onDispatched()
+		onDispatched = nil
+	}
 	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if (err == nil || m.promptAcceptedOnError) && onDispatched != nil {
 		onDispatched()
 	}
 	return result, err
+}
+
+func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	entered := m.promptAdmissionEntered
+	release := m.promptAdmissionRelease
+	m.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		<-release
+	}
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	if m.advancePromptGenerationOnAdmission {
+		m.currentPromptGeneration.Add(1)
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 }
 
 func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
@@ -735,7 +797,10 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, executionI
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
 	return nil
 }
-func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, sessionID, modelID string) error {
+func (m *mockAgentManager) SetSessionModelBySessionID(ctx context.Context, sessionID, modelID string) error {
+	if m.setSessionModelFunc != nil {
+		return m.setSessionModelFunc(ctx, sessionID, modelID)
+	}
 	if !m.setSessionModelSupported {
 		return fmt.Errorf("not supported")
 	}
@@ -816,7 +881,17 @@ func (m *mockAgentManager) PollRemoteStatusForRecords(_ context.Context, _ []exe
 func (m *mockAgentManager) CleanupStaleExecutionBySessionID(_ context.Context, _ string) error {
 	return nil
 }
-func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(_ context.Context, _, _ string) error {
+func (m *mockAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, _ string,
+	_ time.Time,
+) error {
+	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
+	if m.ensureWorkspaceExecutionForSessionFunc != nil {
+		return m.ensureWorkspaceExecutionForSessionFunc(ctx, taskID, sessionID)
+	}
 	return nil
 }
 func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
@@ -877,7 +952,10 @@ func (m *mockAgentManager) GetGitStatusFresh(ctx context.Context, sessionID stri
 	}
 	return nil, nil
 }
-func (m *mockAgentManager) WaitForAgentctlReady(_ context.Context, _ string) error {
+func (m *mockAgentManager) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
+	if m.waitForAgentctlReadyFunc != nil {
+		return m.waitForAgentctlReadyFunc(ctx, sessionID)
+	}
 	return nil
 }
 
@@ -920,28 +998,39 @@ func newAuthoritativeMemoryQueue(repo *sqliterepo.Repository, log *logger.Logger
 
 func strPtr(s string) *string { return &s }
 
-// setupTestRepo creates a real in-memory SQLite repository for testing.
+var orchestratorTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	_, err := sqliterepo.NewWithDB(database, database, nil)
+	return err
+})
+
+// setupTestRepo creates a separate disk-backed SQLite repository for testing.
 func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	t.Cleanup(func() { _ = sqlxDB.Close() })
+	database, _ := orchestratorTestSQLiteTemplate.Open(t)
+	return sqliterepo.NewWithInitializedDB(database, database, nil)
+}
 
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
+// seedExecutorRow registers a built-in executor row so a session that selects
+// it resolves a concrete executor type during launch admission. Required
+// runtime selection refuses an executor ID whose lookup has no type.
+func seedExecutorRow(t *testing.T, repo *sqliterepo.Repository, id string, executorType models.ExecutorType) {
+	t.Helper()
+	ctx := context.Background()
+	if existing, err := repo.GetExecutor(ctx, id); err == nil && existing != nil {
+		return
 	}
-	t.Cleanup(func() { _ = cleanup() })
-
-	return repo
+	now := time.Now().UTC()
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID: id, Name: id, Type: executorType,
+		Status: models.ExecutorStatusActive, IsSystem: true, Resumable: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed executor %q: %v", id, err)
+	}
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
-func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string) {
+func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string, queueIncarnationID ...string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -982,6 +1071,9 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 		State:     models.TaskSessionStateRunning,
 		StartedAt: now,
 		UpdatedAt: now,
+	}
+	if len(queueIncarnationID) == 1 {
+		session.QueueIncarnationID = queueIncarnationID[0]
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create task session: %v", err)
@@ -1246,7 +1338,7 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
-		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 
 		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
@@ -1667,7 +1759,7 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -1734,7 +1826,7 @@ func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *test
 		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1810,7 +1902,7 @@ func TestExecuteQueuedMessage_FiresOnTurnStart(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1865,7 +1957,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 	}
 	svc.SetWorkflowStepGetter(stepGetter)
-	svc.executor = executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1889,7 +1981,7 @@ func TestExecuteQueuedMessage_NoOnTurnStart_StepUnchanged(t *testing.T) {
 
 func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *mockStepGetter, taskRepo *mockTaskRepo, agentMgr executor.AgentManagerClient) *Service {
 	log := testLogger()
-	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	exec := withTestExecutorActor(executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}))
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
 		logger:             log,
@@ -2966,7 +3058,7 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	})
 
-	classified := classifyManagedRuntimeNpmStartFailure(err)
+	classified := classifyManagedRuntimeStartupFailure(err)
 	if classified == nil {
 		t.Fatal("expected structured npm startup error to classify")
 	}
@@ -2981,22 +3073,34 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Code:    routingerr.CodeAgentRuntime,
 		Details: "sanitized runtime failure",
 	})
-	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+	if classifyManagedRuntimeStartupFailure(generic) != nil {
 		t.Fatal("generic structured startup failure must not use the npm recovery card")
 	}
 
-	if classifyManagedRuntimeNpmStartFailure(errors.New(
+	if classifyManagedRuntimeStartupFailure(errors.New(
 		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	)) != nil {
 		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
 	}
 
-	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+	policy := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
 		Code:    routingerr.Code("managed_runtime_npm_policy"),
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
 	}))
 	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
 		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
+	}
+
+	startup := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeStartup,
+		Details: "reason=unexpected_process_exit attempts=2",
+	}))
+	if startup == nil || startup.Code != routingerr.CodeManagedRuntimeStartup ||
+		startup.RawExcerpt != "reason=unexpected_process_exit attempts=2" || startup.AutoRetryable || startup.FallbackAllowed {
+		t.Fatalf("managed startup classification = %#v, want exact safe details without generic recovery", startup)
+	}
+	if !isManagedRuntimeStartupFailureCode(string(routingerr.CodeManagedRuntimeStartup)) {
+		t.Fatal("managed startup code must route through managed-runtime recovery")
 	}
 }
 

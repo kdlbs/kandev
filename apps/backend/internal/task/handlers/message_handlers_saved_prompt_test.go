@@ -43,6 +43,7 @@ type savedPromptDeliveryOrchestrator struct {
 	independentlyResolvesCanvas bool
 	dispatched                  chan string
 	started                     chan savedPromptStarted
+	deliverySubmissionID        string
 }
 
 type canvasGuidanceResult struct {
@@ -55,6 +56,7 @@ type savedPromptStarted struct {
 	promptReferenceContext string
 	canvasGuidanceResolved bool
 	includeCanvasGuidance  bool
+	deliverySubmissionID   string
 }
 
 func (o *savedPromptDeliveryOrchestrator) PrepareDirectPrompt(
@@ -94,6 +96,19 @@ func (o *savedPromptDeliveryOrchestrator) PromptTask(
 	return &orchestrator.PromptResult{}, nil
 }
 
+func (o *savedPromptDeliveryOrchestrator) PromptTaskWithDeliverySubmissionID(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	submissionID string,
+	accepted ...orchestrator.DirectPromptStartOptions,
+) (*orchestrator.PromptResult, error) {
+	o.deliverySubmissionID = submissionID
+	return o.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, dispatchOnly)
+}
+
 func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithPromptContext(
 	ctx context.Context,
 	taskID, sessionID, _ string, prompt string,
@@ -131,6 +146,22 @@ func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithPromptContextAn
 		promptReferenceContext: promptReferenceContext,
 		canvasGuidanceResolved: canvasGuidanceResolved,
 		includeCanvasGuidance:  includeCanvasGuidance,
+	}
+	return &executor.TaskExecution{}, nil
+}
+
+func (o *savedPromptDeliveryOrchestrator) StartCreatedSessionWithDeliverySubmission(
+	_ context.Context,
+	_, _, _, prompt string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	o.deliverySubmissionID = options.DeliverySubmissionID
+	o.started <- savedPromptStarted{
+		prompt:                 prompt,
+		promptReferenceContext: options.PromptReferenceContext,
+		canvasGuidanceResolved: options.CanvasGuidanceResolved,
+		includeCanvasGuidance:  options.IncludeCanvasGuidance,
+		deliverySubmissionID:   options.DeliverySubmissionID,
 	}
 	return &executor.TaskExecution{}, nil
 }
@@ -208,6 +239,8 @@ func TestWSAddMessage_PreparesSavedPromptBeforePersistenceAndDispatch(t *testing
 		synctest.Wait()
 		dispatched := <-orch.dispatched
 		require.Equal(t, stored, dispatched)
+		require.Equal(t, repo.messages[0].ID, orch.deliverySubmissionID,
+			"the agent submission must use the persisted direct-message identity")
 	})
 }
 
@@ -266,6 +299,8 @@ func TestWSAddMessage_CanvasGuidanceUsesOneResolutionForSavedAndDispatchedPrompt
 		assert.NotContains(t, stored, "create_canvas_kandev")
 		assert.True(t, started.canvasGuidanceResolved)
 		assert.False(t, started.includeCanvasGuidance)
+		assert.Equal(t, repo.messages[0].ID, started.deliverySubmissionID,
+			"the initial prompt must use the persisted message identity")
 		assert.Equal(t, 1, orch.canvasGuidanceCalls,
 			"the launch must use the handler's failed resolution instead of retrying")
 	})
@@ -423,4 +458,24 @@ func TestWSAddMessage_PassesTrustedPromptContextToCreatedSessionStart(t *testing
 		require.Equal(t, repo.messages[0].Content, started.prompt)
 		require.Equal(t, savedPromptTrustedContext, started.promptReferenceContext)
 	})
+}
+
+func (o *readySessionPromptCapture) PromptTaskWithDeliverySubmissionID(
+	_ context.Context,
+	_, _, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	submissionID string,
+	accepted ...orchestrator.DirectPromptStartOptions,
+) (*orchestrator.PromptResult, error) {
+	options := orchestrator.DirectPromptStartOptions{}
+	if len(accepted) > 0 {
+		options = accepted[0]
+	}
+	return o.promptTaskWithPromptContext(
+		prompt, model, planMode, attachments, options.PromptReferenceContext,
+		options.PromptReferencesPrepared, options.References, dispatchOnly,
+		options.InitialTaskBriefDispatchOwner, submissionID,
+	)
 }

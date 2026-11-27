@@ -223,5 +223,9 @@
   "oauthPopupBlocked": "瀏覽器已阻止授權視窗。請允許彈出視窗，然後重試。",
   "oauthComplete": "完成",
   "oauthCancel": "取消",
-  "oauthPasteInvalid": "網址無效。請確保複製了包含 code 和 state 引數的完整重定向網址。"
+  "oauthPasteInvalid": "網址無效。請確保複製了包含 code 和 state 引數的完整重定向網址。",
+  "clearViewAsDefault": "取消 {{name}} 的預設檢視",
+  "defaultViewDeleteFailed": "無法刪除已儲存的 Jira 檢視。請重試。",
+  "defaultViewSaveFailed": "無法儲存 Jira 預設檢視。請重試。",
+  "setViewAsDefault": "將 {{name}} 設為預設檢視"
 }

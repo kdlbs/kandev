@@ -1,43 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { DockviewApi } from "dockview-react";
+import { createDockview, type DockviewApi } from "dockview-react";
 import { filterEphemeral, fromDockviewApi, toSerializedDockview } from "./serializer";
-import {
-  panel,
-  CENTER_GROUP,
-  PROMPT_HISTORY_PANEL_ID,
-  RIGHT_BOTTOM_GROUP,
-  RIGHT_TOP_GROUP,
-} from "./constants";
-import type { LayoutPanel, LayoutState } from "./types";
+import type { LayoutState } from "./types";
+import { CENTER_GROUP, RIGHT_BOTTOM_GROUP, RIGHT_TOP_GROUP } from "./constants";
 
 const SESSION_PANEL_ID = "session:session-a";
-
-/** Builds an ephemeral LayoutPanel whose title is its id. */
-function ephemeralPanel(id: string, component: string): LayoutPanel {
-  return { id, component, title: id };
-}
-
-/**
- * Capture/restore survival for the reusable `prompt-history` panel, mirroring
- * the Todos registration. Without membership in `KNOWN_PANEL_IDS`,
- * `filterEphemeral` drops the panel from captured layouts and restore skips
- * canonical-title normalization (`serializer.ts` keys off that set).
- */
-function layoutWithPromptHistory(extraPanels: LayoutPanel[] = []): LayoutState {
-  return {
-    columns: [
-      {
-        id: "center",
-        groups: [
-          {
-            id: CENTER_GROUP,
-            panels: [panel(PROMPT_HISTORY_PANEL_ID), ...extraPanels],
-          },
-        ],
-      },
-    ],
-  } as unknown as LayoutState;
-}
 
 type CapturedGroup = {
   id: string;
@@ -222,48 +189,173 @@ describe("contextual pane width ownership", () => {
   });
 });
 
-describe("filterEphemeral — prompt-history survival", () => {
-  it("keeps the prompt-history panel when filtering a captured layout", () => {
-    const filtered = filterEphemeral(layoutWithPromptHistory());
+const PLUGIN_PANEL_ID = "plugin:kandev-plugin-prompt-history:prompt-history";
+const PLUGIN_PANEL = {
+  id: PLUGIN_PANEL_ID,
+  component: "plugin-panel",
+  title: "Prompt History",
+  tabComponent: "pluginPanelTab",
+  params: { pluginId: "kandev-plugin-prompt-history", panelKey: "prompt-history" },
+};
 
-    const groups = filtered.columns.flatMap((column) => column.groups);
-    const ids = groups.flatMap((group) => group.panels.map((p) => p.id));
-    expect(ids).toContain(PROMPT_HISTORY_PANEL_ID);
+/** Non-square VERTICAL root: a short Agent row above a taller right row split in three tabs-wide. */
+function verticalLayout(): LayoutState {
+  const files = { id: "group-files", panels: [panelOf("files")], activePanel: "files" };
+  const plugin = { id: "group-plugin", panels: [PLUGIN_PANEL], activePanel: PLUGIN_PANEL_ID };
+  const changes = { id: "group-changes", panels: [panelOf("changes")], activePanel: "changes" };
+  const tree = {
+    type: "branch" as const,
+    size: 400,
+    children: [
+      { type: "leaf" as const, size: 200, group: files },
+      { type: "leaf" as const, size: 400, group: changes },
+      { type: "leaf" as const, size: 600, group: plugin },
+    ],
+  };
+  return {
+    rootOrientation: "VERTICAL",
+    columns: [
+      {
+        id: "center",
+        width: 300,
+        groups: [{ id: "group-center", panels: [panelOf("chat")], activePanel: "chat" }],
+      },
+      // Historical snapshots carry horizontal pin metadata on this row.
+      {
+        id: "right",
+        pinned: true,
+        width: 400,
+        maxWidth: 120,
+        groups: [files, changes, plugin],
+        tree,
+      },
+    ],
+  };
+}
+
+function panelOf(id: string) {
+  return { id, component: id, title: id };
+}
+
+type GridNode = { type: string; size: number; data: unknown };
+
+describe("toSerializedDockview — VERTICAL root axis", () => {
+  /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+  it("sizes root rows by height and nested columns by width, ignoring horizontal pinning", () => {
+    const serialized = toSerializedDockview(
+      verticalLayout(),
+      1400,
+      700,
+      new Map([["right", 250]]),
+    ) as unknown as {
+      grid: { orientation: string; root: GridNode; width: number; height: number };
+    };
+
+    const { root } = serialized.grid;
+    const rows = root.data as GridNode[];
+    expect(serialized.grid.orientation).toBe("VERTICAL");
+    expect(root.size).toBe(1400);
+    expect(rows.map((row) => row.size)).toEqual([300, 400]);
+    const nested = rows[1].data as GridNode[];
+    expect(rows[1].size).toBe(400);
+    expect(nested.map((node) => node.size)).toEqual([233, 467, 700]);
   });
 
-  it("keeps prompt-history next to other reusable panels and drops ephemeral ones", () => {
-    const filtered = filterEphemeral(
-      layoutWithPromptHistory([
-        panel("todos"),
-        ephemeralPanel("file:src/app.ts", "file-editor"),
-        ephemeralPanel("diff:file:src/app.ts", "diff-viewer"),
-      ]),
-    );
+  it("scales the complete root row extents when the host height changes", () => {
+    const serialized = toSerializedDockview(verticalLayout(), 1400, 350, new Map()) as unknown as {
+      grid: { root: GridNode };
+    };
 
-    const groups = filtered.columns.flatMap((column) => column.groups);
-    const ids = groups.flatMap((group) => group.panels.map((p) => p.id));
-    expect(ids).toContain(PROMPT_HISTORY_PANEL_ID);
-    expect(ids).toContain("todos");
-    expect(ids).not.toContain("file:src/app.ts");
-    expect(ids).not.toContain("diff:file:src/app.ts");
+    expect((serialized.grid.root.data as GridNode[]).map((row) => row.size)).toEqual([150, 200]);
   });
 
-  it("normalizes the stored prompt-history title to canonical English", () => {
-    const filtered = filterEphemeral(layoutWithPromptHistory());
+  it("keeps the horizontal pin policy for explicit HORIZONTAL and legacy roots", () => {
+    for (const rootOrientation of ["HORIZONTAL", undefined] as const) {
+      const layout = verticalLayout();
+      if (rootOrientation) layout.rootOrientation = rootOrientation;
+      else delete layout.rootOrientation;
+      layout.columns[1].maxWidth = undefined;
 
-    const groups = filtered.columns.flatMap((column) => column.groups);
-    const promptHistory = groups
-      .flatMap((group) => group.panels)
-      .find((p) => p.id === PROMPT_HISTORY_PANEL_ID);
-    expect(promptHistory?.title).toBe("Prompt History");
+      const serialized = toSerializedDockview(
+        layout,
+        1400,
+        700,
+        new Map([["right", 250]]),
+      ) as unknown as {
+        grid: { root: GridNode };
+      };
+
+      expect((serialized.grid.root.data as GridNode[]).map((column) => column.size)).toEqual([
+        1150, 250,
+      ]);
+    }
   });
 });
 
-describe("toSerializedDockview — prompt-history title normalization", () => {
-  it("serializes the prompt-history panel with its localized registry title", () => {
-    const serialized = toSerializedDockview(layoutWithPromptHistory(), 1000, 800, new Map());
-    const panels = (serialized as unknown as { panels: Record<string, { title: string }> }).panels;
+describe("VERTICAL root through a real Dockview", () => {
+  function mountDockview(width: number, height: number): DockviewApi {
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const api = createDockview(element, {
+      createComponent: () => ({ element: document.createElement("div"), init() {}, dispose() {} }),
+    } as never);
+    api.layout(width, height);
+    return api;
+  }
 
-    expect(panels[PROMPT_HISTORY_PANEL_ID].title).toBe("Prompt history");
+  /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+  it("round-trips unequal root-axis proportions and nested widths without inferring a pin", () => {
+    const api = mountDockview(1400, 700);
+    api.fromJSON(toSerializedDockview(verticalLayout(), 1400, 700, new Map([["right", 250]])));
+
+    const captured = fromDockviewApi(api);
+
+    expect(captured.rootOrientation).toBe("VERTICAL");
+    expect(captured.columns.map((column) => column.width)).toEqual([300, 400]);
+    expect(captured.columns.map((column) => column.pinned)).toEqual([undefined, undefined]);
+    expect(captured.columns[1].tree).toMatchObject({
+      type: "branch",
+      children: [
+        { size: 233, group: { panels: [{ id: "files" }] } },
+        { size: 467, group: { panels: [{ id: "changes" }] } },
+        { size: 700, group: { panels: [{ id: PLUGIN_PANEL_ID }], activePanel: PLUGIN_PANEL_ID } },
+      ],
+    });
+    api.dispose();
+  });
+
+  it("still infers the pinned right column for a HORIZONTAL root", () => {
+    const api = mountDockview(1400, 700);
+    const layout = verticalLayout();
+    layout.rootOrientation = "HORIZONTAL";
+    api.fromJSON(toSerializedDockview(layout, 1400, 700, new Map()));
+
+    expect(fromDockviewApi(api).columns[1].pinned).toBe(true);
+    api.dispose();
+  });
+});
+
+describe("filterEphemeral — layout metadata", () => {
+  /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+  it.each(["VERTICAL", "HORIZONTAL"] as const)(
+    "keeps an explicit %s root orientation",
+    (rootOrientation) => {
+      const layout = verticalLayout();
+      layout.rootOrientation = rootOrientation;
+
+      const filtered = filterEphemeral(layout);
+
+      expect(filtered.rootOrientation).toBe(rootOrientation);
+      expect(filtered.columns[1].tree).toMatchObject({
+        children: [{}, {}, { group: { panels: [PLUGIN_PANEL] } }],
+      });
+    },
+  );
+
+  it("does not invent an orientation for a legacy snapshot", () => {
+    const layout = verticalLayout();
+    delete layout.rootOrientation;
+
+    expect("rootOrientation" in filterEphemeral(layout)).toBe(false);
   });
 });

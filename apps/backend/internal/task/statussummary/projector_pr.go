@@ -19,20 +19,27 @@ func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
 			key = fmt.Sprintf("index:%d", index)
 		}
 		state.prs[key] = pullRequestObservation{
-			state:                 input.State,
-			number:                maxInt(input.Number, 0),
-			url:                   input.URL,
-			reviewState:           input.ReviewState,
-			checksState:           input.ChecksState,
-			mergeableState:        input.MergeableState,
-			mergeQueueState:       input.MergeQueueState,
-			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
-			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
-			requiredReviews:       maxInt(input.RequiredReviews, 0),
-			checksTotal:           maxInt(input.ChecksTotal, 0),
-			checksPassing:         maxInt(input.ChecksPassing, 0),
-			autoFixEnabled:        input.AutoFixEnabled,
-			autoMergeEnabled:      input.AutoMergeEnabled,
+			state:                    input.State,
+			owner:                    input.Owner,
+			repo:                     input.Repo,
+			number:                   maxInt(input.Number, 0),
+			url:                      input.URL,
+			reviewState:              input.ReviewState,
+			checksState:              input.ChecksState,
+			mergeableState:           input.MergeableState,
+			hasMergeConflicts:        input.HasMergeConflicts,
+			mergeQueueState:          input.MergeQueueState,
+			unresolvedReviewCount:    maxInt(input.UnresolvedReviewCount, 0),
+			pendingReviewCount:       maxInt(input.PendingReviewCount, 0),
+			requiredReviews:          maxInt(input.RequiredReviews, 0),
+			checksTotal:              maxInt(input.ChecksTotal, 0),
+			checksPassing:            maxInt(input.ChecksPassing, 0),
+			autoFixEnabled:           input.AutoFixEnabled,
+			autoMergeEnabled:         input.AutoMergeEnabled,
+			headSHA:                  boundedWorkflowValue(input.HeadSHA),
+			workflowAttentionState:   boundedWorkflowValue(input.WorkflowAttentionState),
+			workflowAttentionHeadSHA: boundedWorkflowValue(input.WorkflowAttentionHeadSHA),
+			workflowAttentionStale:   input.WorkflowAttentionStale,
 		}
 	}
 }
@@ -44,6 +51,9 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	}
 	var summary PullRequestSummary
 	var representative *pullRequestObservation
+	var approvalRepresentative *pullRequestObservation
+	var conflictRepresentative *pullRequestObservation
+	var ciPick ciSelection
 	keys := make([]string, 0, len(state.prs))
 	for key := range state.prs {
 		keys = append(keys, key)
@@ -52,8 +62,28 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	for _, key := range keys {
 		observation := state.prs[key]
 		summary.Count++
+		hasMergeConflict := strings.EqualFold(observation.state, prStateOpen) &&
+			((observation.hasMergeConflicts != nil && *observation.hasMergeConflicts) ||
+				(observation.hasMergeConflicts == nil && strings.EqualFold(observation.mergeableState, "dirty")))
+		if hasMergeConflict {
+			summary.HasMergeConflicts = true
+			if conflictRepresentative == nil || betterPRRepresentative(observation, *conflictRepresentative) {
+				copy := observation
+				conflictRepresentative = &copy
+			}
+		}
 		if strings.EqualFold(observation.state, prStateOpen) {
 			summary.OpenCount++
+			ciPick.consider(observation)
+			if workflowApprovalRequired(observation) {
+				if approvalRepresentative == nil ||
+					(approvalRepresentative.workflowAttentionStale && !observation.workflowAttentionStale) ||
+					(approvalRepresentative.workflowAttentionStale == observation.workflowAttentionStale &&
+						betterPRRepresentative(observation, *approvalRepresentative)) {
+					copy := observation
+					approvalRepresentative = &copy
+				}
+			}
 			if observation.autoFixEnabled {
 				summary.AutoFixEnabled = true
 			}
@@ -76,7 +106,136 @@ func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	summary.Number = representative.number
 	summary.URL = truncateString(representative.url, maxPullRequestURLBytes)
 	summary.AggregateState = aggregatePullRequestState(state.prs)
+	if approvalRepresentative != nil {
+		summary.WorkflowApprovalRequired = true
+		summary.WorkflowApprovalStale = approvalRepresentative.workflowAttentionStale
+		summary.WorkflowApprovalPRNumber = approvalRepresentative.number
+		summary.WorkflowApprovalRepository = pullRequestRepositoryIdentity(*approvalRepresentative)
+	}
+	if conflictRepresentative != nil {
+		summary.MergeConflictPRNumber = conflictRepresentative.number
+		summary.MergeConflictRepository = pullRequestRepositoryIdentity(*conflictRepresentative)
+	}
+	ciPick.apply(&summary)
 	return &summary
+}
+
+// ciSelection keeps the highest-priority CI observation and its state
+// together so the reduction does not track parallel variables.
+type ciSelection struct {
+	observation *pullRequestObservation
+	state       string
+}
+
+func (c *ciSelection) consider(observation pullRequestObservation) {
+	next := pullRequestCIState(observation)
+	if next == prCIStateNone || !betterCIRepresentative(observation, next, c.observation, c.state) {
+		return
+	}
+	copy := observation
+	c.observation, c.state = &copy, next
+}
+
+func (c ciSelection) apply(summary *PullRequestSummary) {
+	summary.CIState = prCIStateNone
+	if c.observation == nil {
+		return
+	}
+	summary.CIState = c.state
+	summary.CIPRNumber = c.observation.number
+	summary.CIRepository = pullRequestRepositoryIdentity(*c.observation)
+	summary.CIStale = c.observation.workflowAttentionStale
+}
+
+func pullRequestRepositoryIdentity(observation pullRequestObservation) string {
+	owner := strings.TrimSpace(observation.owner)
+	repo := strings.TrimSpace(observation.repo)
+	if owner == "" || repo == "" {
+		return ""
+	}
+	return truncateString(owner+"/"+repo, maxPullRequestRepositoryBytes)
+}
+
+func workflowApprovalRequired(pr pullRequestObservation) bool {
+	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
+		pr.headSHA != "" &&
+		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
+		strings.EqualFold(pr.workflowAttentionState, "approval_required")
+}
+
+// pullRequestCIState is the ordered display decision table for one pull
+// request. It is intentionally independent of the aggregate icon state, which
+// mutes draft PRs, and never infers CI from review, queue, or mergeability.
+func pullRequestCIState(pr pullRequestObservation) string {
+	if !strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) {
+		return prCIStateNone
+	}
+	if strings.EqualFold(strings.TrimSpace(pr.checksState), prStateFailure) {
+		return prCIStateFailed
+	}
+	if workflowApprovalRequired(pr) {
+		return prCIStateApprovalRequired
+	}
+	if workflowActionRequired(pr) || strings.EqualFold(strings.TrimSpace(pr.checksState), prStateUnstable) {
+		return prCIStateAttention
+	}
+	if strings.EqualFold(strings.TrimSpace(pr.checksState), prStatePending) {
+		return prCIStateInProgress
+	}
+	return prCIStateNone
+}
+
+func workflowActionRequired(pr pullRequestObservation) bool {
+	return strings.EqualFold(strings.TrimSpace(pr.state), prStateOpen) &&
+		pr.headSHA != "" &&
+		strings.EqualFold(pr.headSHA, pr.workflowAttentionHeadSHA) &&
+		strings.EqualFold(pr.workflowAttentionState, prStateActionRequired)
+}
+
+func pullRequestCIStateRank(state string) int {
+	switch state {
+	case prCIStateFailed:
+		return 4
+	case prCIStateApprovalRequired:
+		return 3
+	case prCIStateAttention:
+		return 2
+	case prCIStateInProgress:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func betterCIRepresentative(
+	candidate pullRequestObservation,
+	candidateState string,
+	current *pullRequestObservation,
+	currentState string,
+) bool {
+	if current == nil {
+		return true
+	}
+	candidateRank := pullRequestCIStateRank(candidateState)
+	currentRank := pullRequestCIStateRank(currentState)
+	if candidateRank != currentRank {
+		return candidateRank > currentRank
+	}
+	if candidate.workflowAttentionStale != current.workflowAttentionStale {
+		return current.workflowAttentionStale
+	}
+	if candidate.number != current.number {
+		return candidate.number < current.number
+	}
+	return candidate.url < current.url
+}
+
+func boundedWorkflowValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 {
+		return ""
+	}
+	return value
 }
 
 func equalPullRequestSummary(left, right *PullRequestSummary) bool {

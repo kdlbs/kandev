@@ -82,6 +82,22 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	)`); err != nil {
 		t.Fatalf("create workspaces table: %v", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflows (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		workflow_template_id TEXT DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		description TEXT DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
+		hidden INTEGER NOT NULL DEFAULT 0,
+		style TEXT NOT NULL DEFAULT 'kanban',
+		source TEXT NOT NULL DEFAULT 'manual',
+		is_system INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("create workflows table: %v", err)
+	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
 		agent_profile_id TEXT NOT NULL DEFAULT '',

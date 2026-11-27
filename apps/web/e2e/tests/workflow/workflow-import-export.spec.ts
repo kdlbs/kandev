@@ -1,7 +1,79 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow import/export", () => {
+  test("imports a version 3 profile using its options", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    const seed = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const model = `portable-import-${Date.now()}`;
+    const low = await apiClient.createAgentProfile(
+      seed.agentId,
+      `Portable import low ${Date.now()}`,
+      {
+        model,
+        mode: seed.mode,
+        config_options: { reasoning_effort: "low" },
+      },
+    );
+    let highId: string | undefined;
+    try {
+      const high = await apiClient.createAgentProfile(
+        seed.agentId,
+        `Portable import high ${Date.now()}`,
+        {
+          model,
+          mode: seed.mode,
+          config_options: { reasoning_effort: "high" },
+        },
+      );
+      highId = high.id;
+      const name = `Option import ${Date.now()}`;
+      const yaml = `version: 3
+type: kandev_workflow
+workflows:
+  - name: ${name}
+    steps:
+      - name: Work
+        position: 0
+        color: bg-blue-500
+        complete_task_on_enter: false
+        agent_profile:
+          agent_name: ${JSON.stringify(seed.agentDisplayName)}
+          model: ${JSON.stringify(model)}
+          mode: ${JSON.stringify(seed.mode ?? "")}
+          config_options: { reasoning_effort: low }`;
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+      await testPage.getByRole("button", { name: "Import", exact: true }).click();
+      const dialog = testPage.getByRole("dialog");
+      await dialog.locator("textarea").fill(yaml);
+      const imported = waitForHttp(
+        testPage,
+        "POST",
+        new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
+      );
+      await dialog.getByRole("button", { name: "Import", exact: true }).click();
+      expect((await imported).ok()).toBe(true);
+      await expect(dialog).not.toBeVisible();
+      await expect(await page.findWorkflowCard(name, { waitForName: true })).toBeVisible();
+      const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+      const workflow = workflows.find((item) => item.name === name);
+      expect(workflow).toBeDefined();
+      expect((await apiClient.listWorkflowSteps(workflow!.id)).steps[0].agent_profile_id).toBe(
+        low.id,
+      );
+      await testPage.reload();
+      await expect(await page.findWorkflowCard(name, { waitForName: true })).toBeVisible();
+    } finally {
+      if (highId) await apiClient.deleteAgentProfile(highId, true);
+      await apiClient.deleteAgentProfile(low.id, true);
+    }
+  });
+
   test("export all button opens dialog with valid YAML", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
@@ -105,14 +177,20 @@ workflows:
     await dialog.locator("textarea").fill(yamlContent);
 
     // Click Import button in dialog
+    const imported = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/api/v1/workspaces/${seedData.workspaceId}/workflows/import$`),
+    );
     await dialog.getByRole("button", { name: "Import" }).click();
+    await imported;
 
     // Dialog should close and toast should appear
     await expect(dialog).not.toBeVisible();
 
-    // Reload to see the imported workflow
-    await page.goto(seedData.workspaceId);
-    const card = await page.findWorkflowCard("Pasted Workflow");
+    // The import refreshes the workflow list in place. Wait for its new name
+    // instead of starting a competing navigation while that refresh settles.
+    const card = await page.findWorkflowCard("Pasted Workflow", { waitForName: true });
     await expect(card).toBeVisible();
     await expect(card.getByText("Open")).toBeVisible();
     await expect(card.getByText("Closed")).toBeVisible();
@@ -256,8 +334,7 @@ workflows:
       expect(implement?.agent_profile_id).toBe(replacement.id);
       expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
 
-      await page.goto(seedData.workspaceId);
-      const importedCard = await page.findWorkflowCard(workflowName);
+      const importedCard = await page.findWorkflowCard(workflowName, { waitForName: true });
       await expect(importedCard).toBeVisible();
     } finally {
       const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
@@ -306,8 +383,7 @@ workflows:
     await expect(importDialog).not.toBeVisible();
 
     // Verify the workflow is back with its structure
-    await page.goto(seedData.workspaceId);
-    const reimportedCard = await page.findWorkflowCard("Roundtrip WF");
+    const reimportedCard = await page.findWorkflowCard("Roundtrip WF", { waitForName: true });
     await expect(reimportedCard).toBeVisible();
     await expect(reimportedCard.getByText("Plan")).toBeVisible();
     await expect(reimportedCard.getByText("Implementation")).toBeVisible();

@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@kandev/ui/separator";
 import { createExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import type { Executor } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -242,8 +242,7 @@ function ExecutorCreatePageContent() {
   const [dockerCertPath, setDockerCertPath] = useState("");
   const [gitToken, setGitToken] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const store = useAppStoreApi();
 
   const handleTypeChange = (value: ExecutorType) => {
     setType(value);
@@ -271,7 +270,8 @@ function ExecutorCreatePageContent() {
       const created = client
         ? await client.request<Executor>("executor.create", payload)
         : await createExecutorAction(payload);
-      setExecutors([...executors.filter((item: Executor) => item.id !== created.id), created]);
+      const current = store.getState().executors.items;
+      store.getState().setExecutors([...current.filter((item) => item.id !== created.id), created]);
       router.push("/settings/executors");
     } finally {
       setIsCreating(false);

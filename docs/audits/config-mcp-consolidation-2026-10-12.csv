@@ -1,0 +1,22 @@
+old_title,keeper
+agent can list workspaces and workflows,workflow CRUD and cross-resource setup preserve every config tool result
+agent can create and list workflow steps,workflow CRUD and cross-resource setup preserve every config tool result
+agent can create a step with all optional fields,workflow CRUD and cross-resource setup preserve every config tool result
+agent can create a workflow,workflow CRUD and cross-resource setup preserve every config tool result
+agent can update a workflow,workflow CRUD and cross-resource setup preserve every config tool result
+agent can delete a workflow,workflow CRUD and cross-resource setup preserve every config tool result
+agent can update a workflow step,workflow CRUD and cross-resource setup preserve every config tool result
+agent executes multiple config tools in sequence,workflow CRUD and cross-resource setup preserve every config tool result
+"agent performs workflow setup with a step, profile, and MCP config",workflow CRUD and cross-resource setup preserve every config tool result
+agent can list agents and profiles,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can create and delete an agent profile,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can update an agent,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can update an agent profile name,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can update agent profile model via MCP,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can get and update MCP config,"agent and profile lifecycle preserves model, name and MCP configuration"
+agent can list tasks in a workflow,"task listing, movement, archive and deletion use config-mode MCP"
+agent can move a task to a different step,"task listing, movement, archive and deletion use config-mode MCP"
+agent can archive a task,"task listing, movement, archive and deletion use config-mode MCP"
+agent can delete a task,"task listing, movement, archive and deletion use config-mode MCP"
+agent can list executors,executor listing and profile lifecycle use config-mode MCP
+agent can create and delete an executor profile,executor listing and profile lifecycle use config-mode MCP

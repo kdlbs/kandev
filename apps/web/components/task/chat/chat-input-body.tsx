@@ -1,5 +1,7 @@
 "use client";
 
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -8,9 +10,11 @@ import { cn } from "@/lib/utils";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
+import { ComposerPromptSuggestionHint } from "./composer-prompt-suggestion-hint";
 import { ResizeHandle } from "./resize-handle";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
+import { Button } from "@kandev/ui/button";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
@@ -22,9 +26,13 @@ import {
 } from "@/lib/plugins/composer-capability";
 import type { PluginComposerCapability } from "@/lib/plugins/types";
 import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
+import { shouldCancelAgentWithEscape } from "./chat-escape-cancel";
+import { wasEscapeClaimedByDialog } from "@/hooks/use-clarification-escape-guard";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
   value: string;
   handleChange: (val: string) => void;
   handleSubmitWithReset: () => void;
@@ -37,9 +45,11 @@ export type ChatInputEditorAreaProps = {
   planModeAvailable: boolean;
   mcpServers: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
+  mcpSelection?: TaskSessionMCPSelection | null;
   submitKey: "enter" | "cmd_enter";
   setIsInputFocused: (focused: boolean) => void;
   sessionId: string | null;
+  detailActive: boolean;
   taskId: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
@@ -54,7 +64,10 @@ export type ChatInputEditorAreaProps = {
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
+  onEscape?: (event: React.KeyboardEvent<HTMLElement>) => void;
   canCancelAgent?: boolean;
+  escapeCancelsAgent?: boolean;
+  hasPendingClarification?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
   taskDescription: string;
@@ -180,88 +193,156 @@ function useChatPluginComposer(p: {
   );
 }
 
+function composerPluginOptions(
+  p: ChatInputEditorAreaProps,
+  hasContent: boolean,
+): Parameters<typeof useChatPluginComposer>[0] {
+  return {
+    inputRef: p.inputRef,
+    submitDisabled: p.submitDisabled,
+    isEnhancingPrompt: Boolean(p.isEnhancingPrompt),
+    hasContent,
+    identity: composerIdentity(p.taskId ? "task-chat" : "quick-chat", p.taskId, p.sessionId),
+    onSubmit: p.handleSubmitWithReset,
+  };
+}
+
+/** The editable composer surface: the TipTap editor and its suggestion accept affordance. */
+function ChatInputEditorField({
+  p,
+  shouldHandleEscape,
+  onSubmit,
+}: {
+  p: ChatInputEditorAreaProps;
+  shouldHandleEscape: (event: KeyboardEvent) => boolean;
+  onSubmit: () => void;
+}) {
+  const { inputRef, value, isDisabled, setIsInputFocused, promptSuggestion } = p;
+  return (
+    <EditorWithTooltip
+      showTooltip={p.showRequestChangesTooltip}
+      isEnhancingPrompt={p.isEnhancingPrompt}
+      className={p.editorClassName}
+    >
+      <TipTapInput
+        ref={inputRef}
+        value={value}
+        onChange={p.handleChange}
+        onSubmit={onSubmit}
+        placeholder={p.inputPlaceholder}
+        disabled={isDisabled}
+        planModeEnabled={p.planModeEnabled}
+        submitKey={p.submitKey}
+        onFocus={() => setIsInputFocused(true)}
+        onBlur={() => setIsInputFocused(false)}
+        sessionId={p.sessionId}
+        detailActive={p.detailActive}
+        taskId={p.taskId}
+        workspaceId={p.workspaceId ?? null}
+        entityReferencesEnabled={p.entityReferencesEnabled ?? false}
+        onAddContextFile={p.onAddContextFile}
+        onToggleContextFile={p.onToggleContextFile}
+        planContextEnabled={p.planContextEnabled}
+        onImagePaste={p.addFiles}
+        onPlanModeChange={p.onPlanModeChange}
+        promptSuggestion={promptSuggestion ?? null}
+        onPromptSuggestionDismiss={p.onPromptSuggestionDismiss}
+        onEscape={p.onEscape}
+        shouldHandleEscape={shouldHandleEscape}
+      />
+      {promptSuggestion && !value.trim() && !isDisabled && (
+        <ComposerPromptSuggestionHint
+          suggestion={promptSuggestion}
+          submitKey={p.submitKey}
+          onAccept={() => inputRef.current?.acceptPromptSuggestion()}
+        />
+      )}
+    </EditorWithTooltip>
+  );
+}
+
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   useComposerActivity({ busy: Boolean(p.isEnhancingPrompt) });
   const { t } = useTranslation("chat");
-  const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
-  const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
-  const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
-  const { onAddContextFile, onToggleContextFile, addFiles, fileInputRef } = p;
-  const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
-    p;
+  const { inputRef, value, handleSubmitWithReset, planModeEnabled, planModeAvailable } = p;
+  const { mcpServers, submitKey, sessionId, taskId, planContextEnabled } = p;
+  const { onToggleContextFile, addFiles, fileInputRef } = p;
+  const { isAgentBusy, onPlanModeChange, taskTitle, taskDescription } = p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
-  const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
-  const { hidePlanMode } = p;
   // Exclude auto-added plan context from the count — it's always present in plan mode
   // and shouldn't by itself enable the send button.
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
-  const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
+  const canSubmit = !isEnhancingPrompt && !p.submitDisabled;
+  const wrappedSubmit = canSubmit ? handleSubmitWithReset : () => {};
+  // The send button, like the submit shortcut, sends a visible suggestion from an empty draft.
+  const toolbarSubmit = canSubmit
+    ? () => {
+        const handle = inputRef.current;
+        if (handle) handle.submitWithPromptSuggestion(handleSubmitWithReset);
+        else handleSubmitWithReset();
+      }
+    : wrappedSubmit;
+  const shouldHandleEscape = useCallback(
+    (event: KeyboardEvent) =>
+      shouldCancelAgentWithEscape(event, {
+        canCancelAgent: Boolean(p.canCancelAgent),
+        escapeCancelsAgent: Boolean(p.escapeCancelsAgent),
+        hasPendingClarification: Boolean(p.hasPendingClarification),
+      }),
+    [p.canCancelAgent, p.escapeCancelsAgent, p.hasPendingClarification],
+  );
+  const handleEscape = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      if (
+        !shouldHandleEscape(event.nativeEvent) &&
+        !(event.defaultPrevented && wasEscapeClaimedByDialog(event.nativeEvent))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      p.onCancel();
+    },
+    [p.onCancel, shouldHandleEscape],
+  );
 
-  const composerCapability = useChatPluginComposer({
-    inputRef,
-    submitDisabled: p.submitDisabled,
-    isEnhancingPrompt: Boolean(isEnhancingPrompt),
-    hasContent,
-    // The container is not remounted when the user switches task or session,
-    // so this is what tells a captured plugin handle it has been superseded.
-    identity: composerIdentity(taskId ? "task-chat" : "quick-chat", taskId, sessionId),
-    onSubmit: handleSubmitWithReset,
-  });
+  const composerCapability = useChatPluginComposer(composerPluginOptions(p, hasContent));
   const submitDisabledReason = p.hasPendingAttachmentUploads
     ? t("chat:attachmentUploadPendingSubmit")
     : p.submitDisabledReason;
+  const pendingPlanReason = p.hasPendingAttachmentUploads ? submitDisabledReason : undefined;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <EditorWithTooltip
-        showTooltip={showRequestChangesTooltip}
-        isEnhancingPrompt={isEnhancingPrompt}
-        className={p.editorClassName}
-      >
-        <TipTapInput
-          ref={inputRef}
-          value={value}
-          onChange={handleChange}
-          onSubmit={wrappedSubmit}
-          placeholder={inputPlaceholder}
-          disabled={isDisabled}
-          planModeEnabled={planModeEnabled}
-          submitKey={submitKey}
-          onFocus={() => setIsInputFocused(true)}
-          onBlur={() => setIsInputFocused(false)}
-          sessionId={sessionId}
-          taskId={taskId}
-          workspaceId={p.workspaceId ?? null}
-          entityReferencesEnabled={p.entityReferencesEnabled ?? false}
-          onAddContextFile={onAddContextFile}
-          onToggleContextFile={onToggleContextFile}
-          planContextEnabled={planContextEnabled}
-          onImagePaste={addFiles}
-          onPlanModeChange={onPlanModeChange}
-        />
-      </EditorWithTooltip>
+      <ChatInputEditorField
+        p={{ ...p, onEscape: handleEscape }}
+        shouldHandleEscape={shouldHandleEscape}
+        onSubmit={wrappedSubmit}
+      />
       <FileInput fileInputRef={fileInputRef} addFiles={addFiles} />
       <ChatInputToolbar
         planModeEnabled={planModeEnabled}
         planModeAvailable={planModeAvailable}
         mcpServers={mcpServers}
         mcpAttachmentHistory={p.mcpAttachmentHistory}
+        mcpSelection={p.mcpSelection}
         onPlanModeChange={onPlanModeChange}
         sessionId={sessionId}
+        detailActive={p.detailActive}
         taskId={taskId}
         taskTitle={taskTitle}
         taskDescription={taskDescription}
         isAgentBusy={isAgentBusy}
         canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
+        planActionDisabledReason={pendingPlanReason}
         isDisabled={p.submitDisabled}
         submitDisabledReason={submitDisabledReason}
         isSending={isSending}
         onCancel={onCancel}
-        onSubmit={wrappedSubmit}
+        onSubmit={toolbarSubmit}
         composerCapability={composerCapability}
         composerSurface={taskId ? "task-chat" : "quick-chat"}
         submitKey={submitKey}
@@ -274,12 +355,12 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         onImplementPlan={onImplementPlan}
         onEnhancePrompt={onEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
-        isUtilityConfigured={isUtilityConfigured}
+        isUtilityConfigured={p.isUtilityConfigured}
         onAttachFiles={handleAttachFiles}
-        hideSessionsDropdown={hideSessionsDropdown}
-        minimalToolbar={minimalToolbar}
-        hideAgentControls={hideAgentControls}
-        hidePlanMode={hidePlanMode}
+        hideSessionsDropdown={p.hideSessionsDropdown}
+        minimalToolbar={p.minimalToolbar}
+        hideAgentControls={p.hideAgentControls}
+        hidePlanMode={p.hidePlanMode}
       />
     </div>
   );
@@ -289,15 +370,46 @@ export type ChatInputContextAreaProps = {
   hasContextZone: boolean;
   allItems: ContextItem[];
   sessionId: string | null;
+  scopeError?: boolean;
+  onRetryScope?: () => void;
 };
 
 export function ChatInputContextArea({
   hasContextZone,
   allItems,
   sessionId,
+  scopeError,
+  onRetryScope,
 }: ChatInputContextAreaProps) {
-  if (!hasContextZone) return null;
-  return <ContextZone items={allItems} sessionId={sessionId} />;
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  if (!hasContextZone && !scopeError) return null;
+  return (
+    <>
+      {hasContextZone && <ContextZone items={allItems} sessionId={sessionId} />}
+      {scopeError && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 px-3 py-2 text-xs text-destructive"
+          data-testid="attachment-scope-error"
+        >
+          <span>{t("chat:attachmentWorkspaceUnavailable")}</span>
+          {onRetryScope && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={isFinePointer ? undefined : "min-h-11"}
+              onClick={onRetryScope}
+              data-testid="attachment-scope-retry"
+            >
+              {t("task:retry")}
+            </Button>
+          )}
+        </div>
+      )}
+    </>
+  );
 }
 
 export type ChatInputBodyProps = {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -56,8 +57,8 @@ func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Clie
 	return sprite, nil
 }
 
-func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sprite) error {
-	binaryPath, err := r.agentctlResolver.ResolveLinuxBinary()
+func (r *SpritesExecutor) uploadAgentctl(ctx, helperCtx context.Context, sprite *sprites.Sprite, onProgress PrepareProgressCallback) error {
+	binaryPath, err := r.agentctlResolver.ResolveLinuxBinaryContext(helperCtx, onProgress)
 	if err != nil {
 		return fmt.Errorf("agentctl binary not found: %w", err)
 	}
@@ -441,15 +442,21 @@ func (r *SpritesExecutor) createAgentInstance(
 	ctx context.Context,
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
-) (int, error) {
-	instanceReq := spriteCreateInstanceRequest(req)
+) (*agentctl.CreateInstanceResponse, error) {
+	instanceReq := agentctlInstanceRequest(req, spritesWorkspacePath)
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
-		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
+		return nil, fmt.Errorf("failed to marshal instance request: %w", err)
 	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+
+	if err := requireBuiltinRemoteHelper(stepCtx, req, func(ctx context.Context) ([]byte, error) {
+		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
+	}); err != nil {
+		return nil, err
+	}
 
 	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
 		fmt.Sprintf("curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' -d @-",
@@ -457,52 +464,64 @@ func (r *SpritesExecutor) createAgentInstance(
 	cmd.Stdin = bytes.NewReader(reqJSON)
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, fmt.Errorf("failed to create agent instance: %w", err)
+		return nil, fmt.Errorf("failed to create agent instance: %w", err)
 	}
 
 	var resp agentctl.CreateInstanceResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return 0, fmt.Errorf("failed to parse instance response: %w (output: %s)", err, string(out))
+		return nil, fmt.Errorf("failed to parse instance response: %w (output: %s)", err, string(out))
+	}
+	if resp.Port < 1 || resp.Port > 65535 || resp.ID == "" {
+		return nil, fmt.Errorf("agentctl returned an invalid instance response")
 	}
 
 	r.logger.Debug("agent instance created inside sprite",
 		zap.String("instance_id", resp.ID),
 		zap.Int("port", resp.Port))
 
-	return resp.Port, nil
+	return &resp, nil
 }
 
-func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInstanceRequest {
+func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
+		ID:                    req.InstanceID,
+		ScopedMCPRoutes:       true,
+		WorkspacePath:         workspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKillFromReq(req),
+		OfflineBudgetMinutes:       offlineBudgetFromMetadata(req.Metadata),
 		StripEnv:                   stripEnvFromReq(req),
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
 
 type spriteReconnectInstanceControl interface {
 	Delete(context.Context, string) error
-	Create(context.Context, *ExecutorCreateRequest) (int, error)
+	Create(context.Context, *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error)
 }
 
 type liveSpriteReconnectInstanceControl struct {
@@ -514,7 +533,7 @@ func (c liveSpriteReconnectInstanceControl) Delete(ctx context.Context, instance
 	return c.executor.deleteAgentInstance(ctx, c.sprite, instanceID)
 }
 
-func (c liveSpriteReconnectInstanceControl) Create(ctx context.Context, req *ExecutorCreateRequest) (int, error) {
+func (c liveSpriteReconnectInstanceControl) Create(ctx context.Context, req *ExecutorCreateRequest) (*agentctl.CreateInstanceResponse, error) {
 	return c.executor.createAgentInstance(ctx, c.sprite, req)
 }
 
@@ -523,9 +542,9 @@ func replaceSpriteReconnectInstance(
 	control spriteReconnectInstanceControl,
 	req *ExecutorCreateRequest,
 	instanceID string,
-) (int, error) {
+) (*agentctl.CreateInstanceResponse, error) {
 	if err := control.Delete(ctx, instanceID); err != nil {
-		return 0, err
+		return nil, err
 	}
 	return control.Create(ctx, req)
 }
@@ -553,33 +572,70 @@ func (r *SpritesExecutor) getExistingInstancePort(
 	sprite *sprites.Sprite,
 	instanceID string,
 ) (int, error) {
-	if instanceID == "" {
-		return 0, fmt.Errorf("no instance ID")
+	info, err := r.getExistingInstanceInfo(ctx, sprite, instanceID)
+	if err != nil {
+		return 0, err
 	}
+	return info.Port, nil
+}
 
-	checkCmd := fmt.Sprintf(
-		"curl -sf http://localhost:%d/api/v1/instances/%s",
-		r.agentctlPort, instanceID)
+func (r *SpritesExecutor) getExistingInstanceInfo(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+) (*agentctl.InstanceInfo, error) {
+	if instanceID == "" {
+		return nil, fmt.Errorf("no instance ID")
+	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	out, err := sprite.CommandContext(stepCtx, "sh", "-c", checkCmd).Output()
+	proxy, err := sprite.ProxyPort(stepCtx, 0, r.agentctlPort)
 	if err != nil {
-		return 0, fmt.Errorf("instance %s not found: %w", instanceID, err)
+		return nil, fmt.Errorf("open Sprite agentctl proxy for instance %s: %w", instanceID, err)
+	}
+	defer func() { _ = proxy.Close() }()
+	if proxy.LocalAddr() == nil {
+		return nil, fmt.Errorf("sprite agentctl proxy for instance %s has no local address", instanceID)
 	}
 
-	var resp struct {
-		Port int `json:"port"`
+	requestURL := fmt.Sprintf("http://%s/api/v1/instances/%s", proxy.LocalAddr(), url.PathEscape(instanceID))
+	request, err := http.NewRequestWithContext(stepCtx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create instance lookup request: %w", err)
 	}
-	if err := json.Unmarshal(out, &resp); err != nil || resp.Port == 0 {
-		return 0, fmt.Errorf("failed to parse instance response: %v", err)
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("instance %s not found: %w", instanceID, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("instance %s lookup returned HTTP %d", instanceID, response.StatusCode)
+	}
+	const maxInstanceInfoBytes = 64 * 1024
+	out, err := io.ReadAll(io.LimitReader(response.Body, maxInstanceInfoBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read exact instance response: %w", err)
+	}
+	if len(out) > maxInstanceInfoBytes {
+		return nil, fmt.Errorf("instance %s response exceeds %d bytes", instanceID, maxInstanceInfoBytes)
+	}
+
+	var info agentctl.InstanceInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse exact instance response: %v", err)
+	}
+	if info.Port == 0 || info.ID != instanceID {
+		return nil, fmt.Errorf("agentctl returned a different instance for %q", instanceID)
 	}
 
 	r.logger.Info("reusing existing agent instance",
 		zap.String("instance_id", instanceID),
-		zap.Int("port", resp.Port))
-	return resp.Port, nil
+		zap.Int("port", info.Port))
+	return &info, nil
 }
 
 // isAgentSubprocessRunning checks whether the agent subprocess (e.g., Claude Code)

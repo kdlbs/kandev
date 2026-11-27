@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-UI-MOBILE-CONFIRMATION-001.2
   - AC-UI-MOBILE-CONFIRMATION-001.3
   - AC-UI-MOBILE-CONFIRMATION-001.4
+  - AC-UI-MOBILE-CONFIRMATION-001.6
   - AC-UI-MOBILE-CONFIRMATION-001.5
   - AC-UI-MOBILE-CONFIRMATION-001.7
   - AC-UI-MOBILE-CONFIRMATION-002.1
@@ -127,3 +128,11 @@ Reused `mobile-subtask-detachment.spec.ts` and
 `review/mobile-walkthrough.spec.ts` for their actual mutation outcomes rather
 than duplicating those fixtures. The new `mobile-content-confirmations.spec.ts`
 covers the previously untested hosted Quick Chat reset path.
+
+## File confirmation follow-up (2026-09-30)
+
+Single-file deletion opens confirmation after the context-menu focus scope closes.
+The adapter explicitly selects the touch Drawer for coarse pointers at every width.
+The default for other callers remains width-based.
+A surface or target change cancels an unsubmitted decision.
+Phone and 820px touch browser cases cover Cancel, focus return, and confirmed deletion.

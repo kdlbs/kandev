@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -49,9 +50,31 @@ func TestUpdateTaskIfWorkflowStepHasCapacity_ReturnsTypedWIPError(t *testing.T) 
 		ID: "wip-candidate", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
 		WorkflowStepID: "other-step", Title: "Candidate", State: v1.TaskStateCreated,
 	}
-	err := repo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, "wip-step", "wip-candidate", 1)
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+	beforeCandidate, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeOccupant, err := repo.GetTask(ctx, "wip-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = repo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, "wip-step", "wip-candidate", 1)
 	if err == nil || !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
 		t.Fatalf("error=%v, want typed WIP limit error", err)
+	}
+	afterCandidate, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterOccupant, err := repo.GetTask(ctx, "wip-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(beforeCandidate, afterCandidate) || !reflect.DeepEqual(beforeOccupant, afterOccupant) {
+		t.Fatal("rejected WIP update changed candidate or target occupant")
 	}
 }
 

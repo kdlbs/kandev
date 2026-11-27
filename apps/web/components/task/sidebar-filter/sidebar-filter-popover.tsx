@@ -1,4 +1,5 @@
 "use client";
+import { useSidebarViewTransition } from "@/hooks/domains/sidebar/use-sidebar-view-transition";
 
 import { useSidebarWorkspaceGuard } from "@/hooks/domains/sidebar/use-sidebar-workspace-guard";
 import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
@@ -38,12 +39,48 @@ type Props = {
 
 type SidebarFilterSurfaceProps = Pick<Props, "trigger" | "open" | "onOpenChange"> & {
   editor: React.ReactNode;
+  contentRef: RefObject<HTMLDivElement | null>;
   deletion: {
     target: SavedTaskViewDeleteTarget | null;
     anchorRef: RefObject<HTMLButtonElement | null>;
     close: () => void;
   };
 };
+
+function preventReorderDismissal(event: KeyboardEvent, content: HTMLDivElement | null) {
+  if (content?.querySelector('[data-sidebar-reorder-list] [data-dragging="true"]')) {
+    // Keep the surface mounted while the keyboard sensor receives Escape during bubbling.
+    event.preventDefault();
+  }
+}
+
+function inlineViewDeleteConfirmation({
+  shouldRender,
+  target,
+  anchorRef,
+  close,
+  onConfirm,
+}: {
+  shouldRender: boolean;
+  target: SavedTaskViewDeleteTarget | null;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  close: () => void;
+  onConfirm: (viewId: string) => void;
+}) {
+  if (!shouldRender || !target) return undefined;
+  return (
+    <SavedTaskViewDeleteConfirmation
+      target={target}
+      presentation="inline"
+      open
+      anchorRef={anchorRef}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) close();
+      }}
+      onConfirm={onConfirm}
+    />
+  );
+}
 
 export function SidebarFilterPopover({
   trigger,
@@ -54,9 +91,10 @@ export function SidebarFilterPopover({
 }: Props) {
   const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => selectSidebarViews(s).views);
-  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
-  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
+  const sidebarViews = useAppStore(selectSidebarViews);
+  const { views, activeViewId, draft: storedDraft, syncPending: savePending } = sidebarViews;
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { pending } = useSidebarViewTransition();
   const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
   const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
   const saveOverwrite = guard(useAppStore((s) => s.saveSidebarDraftOverwrite));
@@ -71,31 +109,25 @@ export function SidebarFilterPopover({
   const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
   const usesInlineDeleteConfirmation = !usesDesktopWorkbench || !isFinePointer;
 
-  const inlineDeleteConfirmation =
-    usesInlineDeleteConfirmation && deletion.target ? (
-      <SavedTaskViewDeleteConfirmation
-        target={deletion.target}
-        presentation="inline"
-        open
-        anchorRef={deletion.anchorRef}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) deletion.close();
-        }}
-        onConfirm={deleteView}
-      />
-    ) : undefined;
+  const inlineDeleteConfirmation = inlineViewDeleteConfirmation({
+    shouldRender: usesInlineDeleteConfirmation,
+    target: deletion.target,
+    anchorRef: deletion.anchorRef,
+    close: deletion.close,
+    onConfirm: deleteView,
+  });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
+    savePending,
     activeView,
     hasDraft,
+    draftOwner: hasDraft ? storedDraft : null,
     canDelete: views.length > 1,
     onSaveOverwrite: saveOverwrite,
     onSaveAs: saveAs,
     onRename: renameView,
     onDiscard: discard,
-    onDelete: () => {
-      if (!activeView) return;
-      deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) });
-    },
+    onDelete: () =>
+      activeView && deletion.request({ id: activeView.id, label: sidebarViewName(activeView, t) }),
     deleteAnchorRef: deletion.anchorRef,
     deleteDensity: usesInlineDeleteConfirmation ? "touch" : "compact",
     deleteConfirmation: inlineDeleteConfirmation,
@@ -103,23 +135,26 @@ export function SidebarFilterPopover({
     onRenameRequestHandled,
   };
   const editor = (
-    <SidebarViewEditor
-      current={current}
-      isDrawerLayout={!usesDesktopWorkbench}
-      headerProps={headerProps}
-      onUpdate={updateDraft}
-      onAddFilter={() =>
-        updateDraft({ filters: [...current.filters, createSidebarFilterClause()] })
-      }
-      onChangeClause={(next: FilterClause) =>
-        updateDraft({
-          filters: current.filters.map((clause) => (clause.id === next.id ? next : clause)),
-        })
-      }
-      onRemoveClause={(id) =>
-        updateDraft({ filters: current.filters.filter((clause) => clause.id !== id) })
-      }
-    />
+    <SidebarViewPendingSurface pending={pending}>
+      <SidebarViewEditor
+        current={current}
+        isDrawerLayout={!usesDesktopWorkbench}
+        reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
+        headerProps={headerProps}
+        onUpdate={updateDraft}
+        onAddFilter={() =>
+          updateDraft({ filters: [...current.filters, createSidebarFilterClause()] })
+        }
+        onChangeClause={(next: FilterClause) =>
+          updateDraft({
+            filters: current.filters.map((clause) => (clause.id === next.id ? next : clause)),
+          })
+        }
+        onRemoveClause={(id) =>
+          updateDraft({ filters: current.filters.filter((clause) => clause.id !== id) })
+        }
+      />
+    </SidebarViewPendingSurface>
   );
 
   if (usesDesktopWorkbench) {
@@ -144,6 +179,7 @@ export function SidebarFilterPopover({
       onOpenChange={onOpenChange}
       editor={editor}
       deletion={deletion}
+      contentRef={popoverContentRef}
       title={t("task:sidebarFilters")}
     />
   );
@@ -159,7 +195,6 @@ function DesktopSidebarFilterSurface({
   isFinePointer,
   onDelete,
 }: SidebarFilterSurfaceProps & {
-  contentRef: RefObject<HTMLDivElement | null>;
   isFinePointer: boolean;
   onDelete: (id: string) => void;
 }) {
@@ -179,6 +214,7 @@ function DesktopSidebarFilterSurface({
           style={{ maxHeight: "var(--radix-popper-available-height, calc(100dvh - 1rem))" }}
           align="end"
           data-testid="sidebar-filter-popover"
+          onEscapeKeyDown={(event) => preventReorderDismissal(event, contentRef.current)}
           onFocusOutside={(event) => {
             if (deletion.target && isActionConfirmationTarget(event.target)) event.preventDefault();
           }}
@@ -212,6 +248,7 @@ function MobileSidebarFilterSurface({
   onOpenChange,
   editor,
   deletion,
+  contentRef,
   title,
 }: SidebarFilterSurfaceProps & { title: string }) {
   return (
@@ -226,8 +263,13 @@ function MobileSidebarFilterSurface({
         >
           <DrawerTrigger asChild>{trigger}</DrawerTrigger>
           <DrawerContent
+            ref={contentRef}
             aria-describedby={undefined}
             {...contentProps}
+            onEscapeKeyDown={(event) => {
+              contentProps.onEscapeKeyDown?.(event);
+              if (!event.defaultPrevented) preventReorderDismissal(event, contentRef.current);
+            }}
             data-testid="sidebar-filter-drawer"
             className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
           >
@@ -246,5 +288,25 @@ function MobileSidebarFilterSurface({
         </Drawer>
       )}
     </MobileConfirmationHost>
+  );
+}
+
+function SidebarViewPendingSurface({
+  pending,
+  children,
+}: {
+  pending: boolean;
+  children: ComponentProps<"fieldset">["children"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <fieldset disabled={pending} aria-busy={pending || undefined} className="min-w-0">
+      {pending && (
+        <span role="status" className="sr-only">
+          {t("common:loadingIndicatorLabel")}
+        </span>
+      )}
+      {children}
+    </fieldset>
   );
 }

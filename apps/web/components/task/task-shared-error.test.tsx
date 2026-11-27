@@ -87,7 +87,7 @@ describe("TaskSharedError", () => {
     render(<TaskSharedError reserveMobileTopBar />);
 
     expect(screen.getByTestId("task-shared-error").className).toContain(
-      "mt-[calc(3.5rem+env(safe-area-inset-top,0px))]",
+      "mt-[calc(3.5rem+1px+env(safe-area-inset-top,0px))]",
     );
 
     fireEvent.click(screen.getByTestId("task-shared-error-details"));

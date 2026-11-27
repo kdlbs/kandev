@@ -31,7 +31,31 @@ export function archivedTaskWorkspaceId(
   return toKanbanTask(payload).workspaceId;
 }
 
+export function bumpSidebarTaskQueryRevision(state: AppState, workspaceId?: string): AppState {
+  if (!workspaceId) return state;
+  const sidebar = state.sidebarArchivedTasks ?? {
+    itemsByWorkspaceId: {},
+    loadedByWorkspaceId: {},
+    loadingByWorkspaceId: {},
+    errorByWorkspaceId: {},
+    revisionByWorkspaceId: {},
+  };
+  const revisions = sidebar.revisionByWorkspaceId ?? {};
+  return {
+    ...state,
+    sidebarArchivedTasks: {
+      ...sidebar,
+      revisionByWorkspaceId: {
+        ...revisions,
+        [workspaceId]: (revisions[workspaceId] ?? 0) + 1,
+      },
+    },
+  };
+}
+
 export function findArchivedTaskInCache(state: AppState, taskId: string): KanbanTask | undefined {
+  const canonical = state.taskOverview?.byId[taskId];
+  if (canonical?.isArchived) return canonical;
   for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
     const task = tasks.find((item) => item.id === taskId);
     if (task) return task;
@@ -77,7 +101,6 @@ export function removeTaskFromBothKanbans(state: AppState, taskId: string): AppS
     .map(([workspaceId]) => workspaceId);
   if (changedWorkspaceIds.length === 0) return next;
 
-  const revisions = next.sidebarArchivedTasks.revisionByWorkspaceId ?? {};
   return {
     ...next,
     sidebarArchivedTasks: {
@@ -88,15 +111,6 @@ export function removeTaskFromBothKanbans(state: AppState, taskId: string): AppS
           tasks.filter((task) => task.id !== taskId),
         ]),
       ),
-      revisionByWorkspaceId: {
-        ...revisions,
-        ...Object.fromEntries(
-          changedWorkspaceIds.map((workspaceId) => [
-            workspaceId,
-            (revisions[workspaceId] ?? 0) + 1,
-          ]),
-        ),
-      },
     },
   };
 }

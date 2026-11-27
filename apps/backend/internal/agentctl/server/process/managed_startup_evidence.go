@@ -1,0 +1,213 @@
+package process
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/npmresolution"
+)
+
+const managedStartupEvidenceTimeout = 2 * time.Second
+
+func (m *Manager) beginManagedStartupGeneration() uint64 {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	m.startupGeneration++
+	m.startupEvidence = nil
+	m.startupEvidenceDone = make(chan struct{})
+	m.startupRuntime = managedRuntimeStartupSnapshot{}
+	if m.cfg != nil {
+		m.startupRuntime = managedRuntimeStartupSnapshot{
+			AgentID:  m.cfg.AgentType,
+			Command:  append([]string(nil), m.managedRuntimeCommand...),
+			Env:      append([]string(nil), m.cfg.AgentEnv...),
+			StripEnv: append([]string(nil), m.cfg.StripEnv...),
+			WorkDir:  m.cfg.WorkDir,
+			Wrapped:  !m.cfg.LaunchWrapper.IsZero() || m.cfg.LaunchWrapperRequired,
+			Valid:    true,
+		}
+		if len(m.startupRuntime.Command) == 0 {
+			m.startupRuntime.Command = append([]string(nil), m.cfg.AgentArgs...)
+		}
+	}
+	return m.startupGeneration
+}
+
+// ProcessGeneration returns the generation of the current child process.
+func (m *Manager) ProcessGeneration() uint64 {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	return m.startupGeneration
+}
+
+// ProcessManagerID identifies this process manager lifetime. ProcessGeneration
+// is local to a manager, so retained events also need this identity when a new
+// manager starts its counter again at one.
+func (m *Manager) ProcessManagerID() string {
+	if m == nil {
+		return ""
+	}
+	return m.processManagerID
+}
+
+// ManagedStartupEvidence waits briefly for the current child exit record and
+// returns it only when the caller names the exact process generation.
+func (m *Manager) ManagedStartupEvidence(ctx context.Context, generation uint64) *types.ManagedStartupEvidence {
+	if generation == 0 {
+		return nil
+	}
+	m.startupEvidenceMu.Lock()
+	if generation != m.startupGeneration {
+		m.startupEvidenceMu.Unlock()
+		return nil
+	}
+	evidence := cloneManagedStartupEvidence(m.startupEvidence)
+	done := m.startupEvidenceDone
+	m.startupEvidenceMu.Unlock()
+	if evidence != nil || done == nil {
+		return evidence
+	}
+
+	timer := time.NewTimer(managedStartupEvidenceTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return nil
+	case <-timer.C:
+		return nil
+	}
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	if generation != m.startupGeneration {
+		return nil
+	}
+	return cloneManagedStartupEvidence(m.startupEvidence)
+}
+
+func (m *Manager) recordManagedStartupEvidence(evidence *types.ManagedStartupEvidence) {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	if evidence == nil || evidence.ProcessGeneration != m.startupGeneration || m.startupEvidenceDone == nil {
+		return
+	}
+	m.startupEvidence = cloneManagedStartupEvidence(evidence)
+	close(m.startupEvidenceDone)
+	m.startupEvidenceDone = nil
+}
+
+func cloneManagedStartupEvidence(evidence *types.ManagedStartupEvidence) *types.ManagedStartupEvidence {
+	if evidence == nil {
+		return nil
+	}
+	cloned := *evidence
+	if evidence.ExitCode != nil {
+		code := *evidence.ExitCode
+		cloned.ExitCode = &code
+	}
+	if evidence.CacheEvidence != nil {
+		cacheEvidence := *evidence.CacheEvidence
+		cloned.CacheEvidence = &cacheEvidence
+	}
+	return &cloned
+}
+
+func (m *Manager) takeManagedRuntimeStartupSnapshot(generation uint64) managedRuntimeStartupSnapshot {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	if generation != m.startupGeneration {
+		return managedRuntimeStartupSnapshot{}
+	}
+	snapshot := m.startupRuntime.clone()
+	m.startupRuntime = managedRuntimeStartupSnapshot{}
+	return snapshot
+}
+
+type managedRuntimeStartupSnapshot struct {
+	AgentID  string
+	Command  []string
+	Env      []string
+	StripEnv []string
+	WorkDir  string
+	Wrapped  bool
+	Valid    bool
+}
+
+func (s managedRuntimeStartupSnapshot) clone() managedRuntimeStartupSnapshot {
+	s.Command = append([]string(nil), s.Command...)
+	s.Env = append([]string(nil), s.Env...)
+	s.StripEnv = append([]string(nil), s.StripEnv...)
+	return s
+}
+
+func newManagedStartupEvidence(
+	generation uint64,
+	exitErr error,
+	intentionalStop bool,
+	collectionComplete bool,
+	stderrRetainedComplete bool,
+	stderrPresent bool,
+	stderr []string,
+	diagnosticReason string,
+	diagnosticRetained bool,
+) *types.ManagedStartupEvidence {
+	disposition, exitCode := managedProcessExitDisposition(exitErr)
+	if intentionalStop {
+		disposition = types.ManagedStartupExitIntentional
+		exitCode = nil
+	}
+	diagnostics := npmresolution.AnalyzeManagedStartupDiagnostics(strings.Join(stderr, "\n"))
+	diagnosticComplete := collectionComplete && stderrRetainedComplete && diagnosticRetained
+	npmDiagnosticComplete := collectionComplete && stderrRetainedComplete && diagnostics.Complete &&
+		(!stderrPresent || diagnostics.Present)
+	npmCode := ""
+	if npmDiagnosticComplete {
+		npmCode = preferredManagedStartupCode(diagnostics.Codes)
+	}
+	reason := ""
+	if diagnosticComplete {
+		reason = diagnosticReason
+	}
+	return &types.ManagedStartupEvidence{
+		ProcessGeneration:     generation,
+		ExitDisposition:       disposition,
+		ExitCode:              exitCode,
+		NPMCode:               npmCode,
+		CollectionComplete:    collectionComplete,
+		NPMDiagnosticPresent:  diagnostics.Present,
+		NPMDiagnosticComplete: npmDiagnosticComplete,
+		UnclassifiedNPMCode:   diagnostics.UnclassifiedCode,
+		DiagnosticReason:      reason,
+		DiagnosticComplete:    diagnosticComplete,
+	}
+}
+
+func preferredManagedStartupCode(codes []string) string {
+	for _, code := range codes {
+		if npmresolution.IsPermanentManagedStartupCode(code) {
+			return code
+		}
+	}
+	for _, code := range codes {
+		if code == "ETARGET" {
+			return code
+		}
+	}
+	if len(codes) == 0 {
+		return ""
+	}
+	return codes[0]
+}
+
+func (m *Manager) invalidateManagedStartupEvidence() {
+	m.startupEvidenceMu.Lock()
+	defer m.startupEvidenceMu.Unlock()
+	m.startupEvidence = nil
+	if m.startupEvidenceDone != nil {
+		close(m.startupEvidenceDone)
+		m.startupEvidenceDone = nil
+	}
+	m.startupRuntime.Valid = false
+}

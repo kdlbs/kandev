@@ -17,6 +17,7 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 	}
 	for _, key := range []string{
 		"server.trustedProxies",
+		"notifications.webhookAllowPrivateNetworks",
 		"tasks.preparationTimeout",
 		"credentials.file",
 		"limits.ghMaxConcurrent",
@@ -38,6 +39,22 @@ func TestConfigurationCatalogIsComplete(t *testing.T) {
 func TestConfigurationCatalogMatchesAuditedEnvironmentInventory(t *testing.T) {
 	if err := validateCatalogAgainstAuditedInventory(ConfigurationCatalog(), ConfigurationExclusions(), auditedStartupEnvironmentInventory()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRetiredOfficeSessionIdentityEnvironmentIsNotCataloged(t *testing.T) {
+	const envVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	for _, entry := range ConfigurationCatalog() {
+		for _, candidate := range entry.EnvVars {
+			if candidate == envVar {
+				t.Fatalf("retired environment variable %q remains in configuration catalog", envVar)
+			}
+		}
+	}
+	for _, exclusion := range ConfigurationExclusions() {
+		if exclusion.EnvVar == envVar {
+			t.Fatalf("retired environment variable %q remains in configuration exclusions", envVar)
+		}
 	}
 }
 
@@ -75,6 +92,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_INTERNAL_URL", class: "catalog"},
 		{envVar: "KANDEV_WEB_TITLE_PREFIX", class: "catalog"},
 		{envVar: "KANDEV_TRUSTED_PROXIES", class: "catalog"},
+		{envVar: "KANDEV_WEBHOOK_ALLOW_PRIVATE_NETWORKS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_DRIVER", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_PATH", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_HOST", class: "catalog"},
@@ -85,6 +103,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_DATABASE_SSLMODE", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MAXCONNS", class: "catalog"},
 		{envVar: "KANDEV_DATABASE_MINCONNS", class: "catalog"},
+		{envVar: "KANDEV_SQLITE_READER_CONNS", class: "catalog"},
 		{envVar: "KANDEV_NATS_URL", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLUSTERID", class: "catalog"},
 		{envVar: "KANDEV_NATS_CLIENTID", class: "catalog"},
@@ -95,7 +114,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "DOCKER_HOST", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_APIVERSION", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_TLSVERIFY", class: "catalog"},
-		{envVar: "KANDEV_DOCKER_DEFAULTNETWORK", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_VOLUMEBASEPATH", class: "catalog"},
 		{envVar: "KANDEV_AGENT_STANDALONE_HOST", class: "catalog"},
 		{envVar: "AGENTCTL_PORT", class: "catalog"},
@@ -104,6 +122,8 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_AUTH_TOKENDURATION", class: "catalog"},
 		{envVar: "KANDEV_AUTH_SESSIONTTLHOURS", class: "catalog"},
 		{envVar: "KANDEV_AUTH_COOKIE_NAME", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_SUBJECT", class: "catalog"},
+		{envVar: "KANDEV_WEBPUSH_ALLOWED_HOSTS", class: "catalog"},
 		{envVar: "KANDEV_LOG_LEVEL", class: "catalog"},
 		{envVar: "KANDEV_LOGGING_FORMAT", class: "catalog"},
 		{envVar: "KANDEV_REPOSITORYDISCOVERY_ROOTS", class: "catalog"},
@@ -128,8 +148,16 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_GATE_FAILURE_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
+		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_DISABLE_REISSUE", class: "catalog"},
+		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_REISSUE_SIGNING_KEY", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_TASK_STALL_DETECTION_THRESHOLD", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_PAYLOAD_GRACE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_REPLAY_EVENTS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_INTERVAL", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS", class: "catalog"},
+		{envVar: "KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES", class: "catalog"},
 		{envVar: "KANDEV_CREDENTIALS_FILE", class: "catalog"},
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},
@@ -173,7 +201,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_FEATURES_CANVASES", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", class: "exclusion"},
-		{envVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", class: "exclusion"},
 		{envVar: "KANDEV_FEATURES_AGENT_SURVIVAL", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_AGENT_MESSAGES", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_ACP_MAX_FILES", class: "exclusion"},
@@ -324,6 +351,52 @@ func TestManagedAgentctlStartupConfigReflectsAgentSurvivalFlag(t *testing.T) {
 	cfg.Features.AgentSurvival = true
 	if got := cfg.ManagedAgentctlStartupConfig(); !got.AgentSurvivalEnabled {
 		t.Fatal("AgentSurvivalEnabled = false, want true when the runtime flag is on")
+	}
+}
+
+// TestManagedAgentctlStartupConfigReflectsAgentBackgroundWorkFlag pins that
+// the resolved child contract carries the effective
+// features.agentBackgroundWork value for this launch, so the adapter gate and
+// the backend read/action endpoints agree. An older backend omits the field,
+// which decodes as false and keeps provider-neutral behavior.
+func TestManagedAgentctlStartupConfigReflectsAgentBackgroundWorkFlag(t *testing.T) {
+	cfg := &Config{}
+	cfg.Agentctl.NotificationQueueCapacity = 4096
+	cfg.Agentctl.IdleReaperInterval = time.Minute
+
+	cfg.Features.AgentBackgroundWork = false
+	if got := cfg.ManagedAgentctlStartupConfig(); got.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = true, want false when the runtime flag is off")
+	}
+
+	cfg.Features.AgentBackgroundWork = true
+	if got := cfg.ManagedAgentctlStartupConfig(); !got.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = false, want true when the runtime flag is on")
+	}
+
+	encoded, err := EncodeAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig())
+	if err != nil {
+		t.Fatalf("EncodeAgentctlStartupConfig: %v", err)
+	}
+	decoded, err := DecodeAgentctlStartupConfig(encoded)
+	if err != nil {
+		t.Fatalf("DecodeAgentctlStartupConfig: %v", err)
+	}
+	if !decoded.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled did not survive the child-process encoding round trip")
+	}
+}
+
+// TestAgentctlStartupConfigOmittedBackgroundWorkDecodesDisabled pins the
+// older-peers contract: a backend that never heard of this field leaves the
+// provider-neutral behavior in place.
+func TestAgentctlStartupConfigOmittedBackgroundWorkDecodesDisabled(t *testing.T) {
+	decoded, err := DecodeAgentctlStartupConfig(`{"configured":true,"idleTimeout":3600000000000,"idleReaperInterval":60000000000,"notificationQueueCapacity":4096}`)
+	if err != nil {
+		t.Fatalf("DecodeAgentctlStartupConfig: %v", err)
+	}
+	if decoded.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = true for a peer that omits it, want false")
 	}
 }
 

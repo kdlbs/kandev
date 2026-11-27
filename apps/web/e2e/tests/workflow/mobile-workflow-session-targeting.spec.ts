@@ -11,12 +11,12 @@ test.describe("mobile: workflow session targeting", () => {
   }) => {
     test.setTimeout(90_000);
     await testPage.setViewportSize({ width: 390, height: 844 });
-    const { profileA } = await createWorkflowAgentProfiles(apiClient);
-    const { agents } = await apiClient.listAgents();
-    const agentId = agents.find((agent) => agent.id !== "dynamic")?.id;
-    if (!agentId) test.fail(true, "the E2E fixture has no launchable agent family");
+    const { agentId, profileA } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     for (let index = 0; index < 10; index++) {
-      await apiClient.createAgentProfile(agentId!, `Long list ${index}`, { model: "mock-fast" });
+      await apiClient.createAgentProfile(agentId, `Long list ${index}`, { model: "mock-fast" });
     }
 
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile Session Targets");

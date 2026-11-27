@@ -28,6 +28,7 @@ import {
 import { StepCircleIndicator } from "./workflow-step-marker";
 import { useTranslation } from "react-i18next";
 import { StepDisclosureMoveControls } from "./workflow-step-disclosure-move-controls";
+import { keepMoveOpenForPromptSuggestions } from "./workflow-move-surface";
 
 /** Move callback shared by every compact-disclosure surface. A revealed,
  * filled options draft rides along as one-shot `entry_options`. */
@@ -46,6 +47,7 @@ export type WorkflowStepperStep = {
   prompt?: string;
   is_start_step?: boolean;
   agent_profile_id?: string;
+  complete_task_on_enter?: boolean;
 };
 
 type Step = WorkflowStepperStep;
@@ -256,6 +258,7 @@ function CompactWorkflowStepDisclosure({
       taskId={taskId}
       workflowId={workflowId}
       movingToStepId={movingToStepId}
+      previewEnabled={controls.open}
       isTouchSurface={usesTouchDrawer}
       progressByStepId={progressByStepId}
       agentLabelsByProfileId={agentLabelsByProfileId}
@@ -293,7 +296,7 @@ function CompactWorkflowDisclosureSurface({
     return (
       <Drawer open={controls.open} onOpenChange={controls.setOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent className="max-h-[80dvh]">
+        <DrawerContent className="max-h-[80dvh]" onEscapeKeyDown={keepMoveOpenForPromptSuggestions}>
           <DrawerHeader className="shrink-0 text-left">
             <DrawerTitle>{t("task:moveTo")}</DrawerTitle>
             <DrawerDescription>{t("task:stepCount", { count: stepCount })}</DrawerDescription>
@@ -316,7 +319,10 @@ function CompactWorkflowDisclosureSurface({
         className="w-[25rem] max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
-        onEscapeKeyDown={(event) => event.stopPropagation()}
+        onEscapeKeyDown={(event) => {
+          keepMoveOpenForPromptSuggestions(event);
+          if (!event.defaultPrevented) event.stopPropagation();
+        }}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}
         onFocusCapture={controls.handleContentFocus}
@@ -403,6 +409,7 @@ function StepDisclosureBody({
   taskId,
   workflowId,
   movingToStepId,
+  previewEnabled,
   isTouchSurface,
   progressByStepId,
   agentLabelsByProfileId,
@@ -414,6 +421,7 @@ function StepDisclosureBody({
   taskId: string;
   workflowId: string;
   movingToStepId: string | null;
+  previewEnabled: boolean;
   isTouchSurface: boolean;
   progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
@@ -452,7 +460,7 @@ function StepDisclosureBody({
             isTouchSurface={isTouchSurface}
             taskId={taskId}
             workflowId={workflowId}
-            previewEnabled={canMove}
+            previewEnabled={previewEnabled && canMove}
             progress={progressByStepId[step.id]}
             agentLabelsByProfileId={agentLabelsByProfileId}
             onMove={onMove}

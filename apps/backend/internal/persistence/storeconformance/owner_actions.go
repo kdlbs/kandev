@@ -14,10 +14,10 @@ import (
 	"github.com/kandev/kandev/internal/auth/hostnames"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
-	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/delivery"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -67,7 +67,8 @@ type queueAdmissionStore interface {
 		*messagequeue.QueuedMessage,
 		*messagequeue.QueueAttachmentClaim,
 		int,
-		*messagequeue.AutoMergePolicy,
+		*messagequeue.AdmissionPolicy,
+		*messagequeue.WorkflowEntryIdentity,
 	) (*messagequeue.QueuedMessage, bool, error)
 	LookupQueueAdmission(
 		context.Context,
@@ -180,16 +181,18 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["plugin-state"] = ownerBehavior{actions: []apiAction{pluginStateAction()}}
 	behaviors["plugin-instance-state"] = ownerBehavior{actions: []apiAction{pluginInstanceStateAction()}}
 	behaviors["plugin-user-state"] = ownerBehavior{actions: []apiAction{pluginUserStateAction()}}
+	behaviors["plugin-command-receipts"] = ownerBehavior{actions: []apiAction{pluginIdentityLinkAction()}}
 	behaviors["canvas"] = ownerBehavior{actions: []apiAction{canvasAction()}}
 	behaviors["github"] = ownerBehavior{actions: []apiAction{githubAction()}}
 	behaviors["gitlab"] = ownerBehavior{actions: []apiAction{gitlabAction()}}
 	behaviors["jira"] = ownerBehavior{actions: []apiAction{jiraAction()}}
 	behaviors["linear"] = ownerBehavior{actions: []apiAction{linearAction()}}
 	behaviors["sentry"] = ownerBehavior{actions: []apiAction{sentryAction()}}
-	behaviors["azure-devops"] = ownerBehavior{actions: []apiAction{azureDevOpsAction()}}
 	behaviors["workflow-sync"] = ownerBehavior{actions: []apiAction{workflowSyncAction()}}
+	behaviors["prompt-sync"] = ownerBehavior{actions: []apiAction{promptSyncAction()}}
 	behaviors["office-config-sync"] = ownerBehavior{actions: []apiAction{officeConfigSyncAction()}}
 	behaviors["automation"] = ownerBehavior{actions: []apiAction{automationAction()}}
+	behaviors["coordinator"] = ownerBehavior{actions: []apiAction{coordinatorAction()}}
 
 	analytics := standardAction(reflectedSpec{
 		name: "analytics-task-view", factory: taskFactory,
@@ -355,10 +358,6 @@ func sentryFactory(s testconformance.ScenarioContext) (any, error) {
 	return sentry.NewStore(s.DB, s.DB)
 }
 
-func azureDevOpsFactory(s testconformance.ScenarioContext) (any, error) {
-	return azuredevops.NewStore(s.DB, s.DB)
-}
-
 func workflowSyncFactory(s testconformance.ScenarioContext) (any, error) {
 	return workflowsync.NewStore(s.DB, s.DB)
 }
@@ -369,6 +368,10 @@ func officeConfigSyncFactory(s testconformance.ScenarioContext) (any, error) {
 
 func automationFactory(s testconformance.ScenarioContext) (any, error) {
 	return automation.NewStore(s.DB, s.DB)
+}
+
+func coordinatorFactory(s testconformance.ScenarioContext) (any, error) {
+	return coordinator.NewStore(s.DB, s.DB)
 }
 
 func userAction() apiAction {
@@ -504,7 +507,10 @@ func taskAction() apiAction {
 		return nil
 	}
 	action.transaction = func(s testconformance.ScenarioContext, id string) error {
-		return transactionAPICheck(action, s, id)
+		if err := transactionAPICheck(action, s, id); err != nil {
+			return err
+		}
+		return silentRestoreRepositoryCheck(s, id)
 	}
 	return action
 }
@@ -1238,7 +1244,7 @@ func messageQueueAction() apiAction {
 			Content: "admitted", Model: "model", QueuedBy: "conformance",
 			Metadata: map[string]interface{}{},
 		}
-		admitted, replay, err := admissions.AdmitQueueMessage(s.Context, identity, admissionID, candidate, nil, 10, nil)
+		admitted, replay, err := admissions.AdmitQueueMessage(s.Context, identity, admissionID, candidate, nil, 10, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("admit identified queue message: %w", err)
 		}
@@ -2820,87 +2826,6 @@ func sentryConfigRead(s testconformance.ScenarioContext, store *sentry.Store, id
 	return requireProviderConfig(cfg, "Sentry")
 }
 
-//nolint:funlen // This adapter enumerates every Azure DevOps store assertion.
-func azureDevOpsAction() apiAction {
-	action := apiAction{name: "azure_devops_configs", key: providerConfigKey}
-	action.create = func(s testconformance.ScenarioContext, _ string) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		workspaceID, err := conformanceWorkspaceID(s)
-		if err != nil {
-			return nil, err
-		}
-		cfg := &azuredevops.Config{WorkspaceID: workspaceID, OrganizationURL: "https://dev.azure.example.test", DefaultProjectID: "project", DefaultProjectName: "Conformance", AuthMethod: azuredevops.AuthMethodPAT}
-		if err := store.(*azuredevops.Store).UpsertConfig(s.Context, cfg); err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), workspaceID)
-	}
-	action.read = func(s testconformance.ScenarioContext, id string) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-	}
-	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		cfg, err := azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-		if err != nil {
-			return err
-		}
-		cfg.DefaultProjectName = "Updated"
-		return store.(*azuredevops.Store).UpsertConfig(s.Context, cfg)
-	}
-	action.delete = func(s testconformance.ScenarioContext, id string) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		return store.(*azuredevops.Store).DeleteConfig(s.Context, id)
-	}
-	action.assertDeleted = func(s testconformance.ScenarioContext, id string, _ any) error {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return err
-		}
-		cfg, err := store.(*azuredevops.Store).GetConfig(s.Context, id)
-		if err != nil {
-			return err
-		}
-		if cfg != nil {
-			return fmt.Errorf("azure DevOps config %q remains after delete", id)
-		}
-		return nil
-	}
-	action.setBoolean = func(s testconformance.ScenarioContext, id string, _ any, enabled bool) (any, error) {
-		store, err := azureDevOpsFactory(s)
-		if err != nil {
-			return nil, err
-		}
-		if err := store.(*azuredevops.Store).UpdateAuthHealth(s.Context, id, enabled, "", time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		return azureDevOpsConfigRead(s, store.(*azuredevops.Store), id)
-	}
-	action.readBoolean = providerBoolean
-	action.conflict = action.update
-	return action
-}
-
-func azureDevOpsConfigRead(s testconformance.ScenarioContext, store *azuredevops.Store, workspaceID string) (*azuredevops.Config, error) {
-	cfg, err := store.GetConfig(s.Context, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	return requireProviderConfig(cfg, "Azure DevOps")
-}
-
 //nolint:funlen // This adapter enumerates every workflow-sync store assertion.
 func workflowSyncAction() apiAction {
 	action := apiAction{name: "workflow_sync_configs", key: providerConfigKey}
@@ -3187,6 +3112,113 @@ func automationRead(s testconformance.ScenarioContext, store *automation.Store, 
 		return nil, err
 	}
 	return requireProviderConfig(value, "automation")
+}
+
+// coordinatorAction covers coordinator.Store, whose Get/Patch/Delete methods
+// are workspace-scoped (unlike automation's bare-ID lookups), so every
+// closure resolves the conformance workspace itself.
+func coordinatorAction() apiAction {
+	action := apiAction{name: "coordinators", key: func(record any, fallback string) string {
+		if value, ok := record.(*coordinator.Coordinator); ok && value.ID != "" {
+			return value.ID
+		}
+		return fallback
+	}}
+	action.assertUpdated = assertCoordinatorUpdated
+	action.setBoolean = setCoordinatorBoolean
+	action.readBoolean = func(record any) (bool, bool) {
+		value, ok := record.(*coordinator.Coordinator)
+		return ok && value != nil && value.AutonomyEnabled, ok && value != nil
+	}
+	action.create = func(s testconformance.ScenarioContext, id string) (any, error) {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return nil, err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return nil, err
+		}
+		record := &coordinator.Coordinator{
+			ID: id, WorkspaceID: workspaceID, Name: "Conformance " + id,
+			AgentProfileID: "conformance-agent-profile", ExecutorProfileID: "conformance-executor-profile",
+			Context: "conformance context",
+		}
+		if err := store.(*coordinator.Store).CreateCoordinator(s.Context, record); err != nil {
+			return nil, err
+		}
+		return store.(*coordinator.Store).GetCoordinator(s.Context, workspaceID, id)
+	}
+	action.read = func(s testconformance.ScenarioContext, id string) (any, error) {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return nil, err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return nil, err
+		}
+		return store.(*coordinator.Store).GetCoordinator(s.Context, workspaceID, id)
+	}
+	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return err
+		}
+		name := "Updated " + id
+		_, _, err = store.(*coordinator.Store).PatchCoordinator(s.Context, workspaceID, id, coordinator.CoordinatorPatch{Name: &name}, nil)
+		return err
+	}
+	action.delete = func(s testconformance.ScenarioContext, id string) error {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return err
+		}
+		return store.(*coordinator.Store).DeleteCoordinator(s.Context, workspaceID, id)
+	}
+	action.transaction = func(s testconformance.ScenarioContext, id string) error {
+		return transactionAPICheck(action, s, id)
+	}
+	return action
+}
+
+func assertCoordinatorUpdated(_ any, after any, id string) error {
+	value, ok := after.(*coordinator.Coordinator)
+	if !ok || value == nil {
+		return fmt.Errorf("GetCoordinator returned %T", after)
+	}
+	if value.Name != "Updated "+id {
+		return fmt.Errorf("coordinator name = %q, want %q", value.Name, "Updated "+id)
+	}
+	return nil
+}
+
+func setCoordinatorBoolean(s testconformance.ScenarioContext, id string, _ any, enabled bool) (any, error) {
+	owner, err := coordinatorFactory(s)
+	if err != nil {
+		return nil, err
+	}
+	workspaceID, err := conformanceWorkspaceID(s)
+	if err != nil {
+		return nil, err
+	}
+	ceiling := int64(1000)
+	store := owner.(*coordinator.Store)
+	_, _, err = store.PatchCoordinator(s.Context, workspaceID, id, coordinator.CoordinatorPatch{
+		AutonomyEnabled: &enabled, CeilingSet: true, CostCeilingSubcents: &ceiling,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return store.GetCoordinator(s.Context, workspaceID, id)
 }
 
 func reflectValue(record any) reflect.Value {

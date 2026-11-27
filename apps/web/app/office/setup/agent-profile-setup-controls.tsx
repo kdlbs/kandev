@@ -10,6 +10,7 @@ import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Tier } from "@/lib/state/slices/office/types";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useTranslation } from "react-i18next";
+import { insertFirstInAgentGroup } from "@/lib/settings/agent-profile-order";
 
 export type ProfileSetupChange = {
   agentProfileId?: string;
@@ -42,7 +43,7 @@ function upsertProfileOption(
   profiles: AgentProfileOption[],
   option: AgentProfileOption,
 ): AgentProfileOption[] {
-  return [...profiles.filter((p) => p.id !== option.id), option];
+  return insertFirstInAgentGroup(profiles, option.agent_id, option);
 }
 
 export function useSelectableProfileOptions(agentProfiles: AgentProfileOption[]) {
@@ -91,13 +92,36 @@ export function CreateProfilePanel({
         showAdvanced
         allowCliPassthrough={false}
         onSaved={(saved) => {
-          const agentForProfile = settingsAgents.find((a) => a.id === saved.agentId) ?? {
+          const agentForProfile = settingsAgents.find((agent) => agent.id === saved.agentId) ?? {
             id: saved.agentId ?? "",
             name: saved.agentId ?? "",
           };
           const option = toAgentProfileOption(agentForProfile, saved);
-          setAgentProfiles(upsertProfileOption(store.getState().agentProfiles.items, option));
-          onAgentProfilesChange?.(upsertProfileOption(wizardProfiles, option));
+          const state = store.getState();
+          setAgentProfiles(
+            insertFirstInAgentGroup(state.agentProfiles.items, option.agent_id, option),
+          );
+          const existingAgent = state.settingsAgents.items.find(
+            (agent) => agent.id === option.agent_id,
+          );
+          if (existingAgent) {
+            state.setSettingsAgents(
+              state.settingsAgents.items.map((agent) =>
+                agent.id === option.agent_id
+                  ? {
+                      ...agent,
+                      profiles: [
+                        saved,
+                        ...agent.profiles.filter((profile) => profile.id !== saved.id),
+                      ],
+                    }
+                  : agent,
+              ),
+            );
+          }
+          state.bumpAgentProfilesVersion();
+          const nextWizardProfiles = upsertProfileOption(wizardProfiles, option);
+          onAgentProfilesChange?.(nextWizardProfiles);
           onProfileSaved(saved.id);
           onClose();
         }}

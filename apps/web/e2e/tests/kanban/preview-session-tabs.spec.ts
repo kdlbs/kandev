@@ -30,6 +30,13 @@ test.describe("Preview session tabs", () => {
   }) => {
     test.setTimeout(180_000);
 
+    // This fixture owns primary selection. Workflow automation must not replace
+    // that selection after a session finishes.
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Preview tabs");
+    const step = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+
     // 1. Create a task — first session becomes primary.
     // Task descriptions use the scenario registry (`/e2e:<name>`), so we pick a
     // scenario with a unique, agent-only response string to avoid prompt/response
@@ -40,8 +47,8 @@ test.describe("Preview session tabs", () => {
       seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
+        workflow_id: workflow.id,
+        workflow_step_id: step.id,
         repository_ids: [seedData.repositoryId],
       },
     );
@@ -58,7 +65,8 @@ test.describe("Preview session tabs", () => {
       .toBe(true);
 
     const { sessions: afterFirst } = await apiClient.listTaskSessions(task.id);
-    const primaryId = afterFirst[0].id;
+    const initialSessionId = afterFirst[0]?.id;
+    if (!initialSessionId) throw new Error("Initial session not created");
 
     // 3. Launch a second session through the same WS API path the UI uses.
     // This spec is about preview tabs, not dialog mechanics, so it avoids the
@@ -68,7 +76,7 @@ test.describe("Preview session tabs", () => {
         task_id: task.id,
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        workflow_step_id: seedData.startStepId,
+        workflow_step_id: step.id,
         prompt: 'e2e:message("secondary-session-response")',
       },
       60_000,
@@ -83,40 +91,62 @@ test.describe("Preview session tabs", () => {
       60_000,
     );
 
-    // Keep the original preview semantics under test: the first session should
-    // remain the task's primary/default tab even after another session exists.
-    // The direct WS launch path can promote the new session, so restore the
-    // original primary explicitly before opening the kanban preview.
-    await apiClient.setPrimarySession(primaryId);
+    await apiClient.setPrimarySession(initialSessionId);
     await expect
-      .poll(
-        async () => {
-          const taskData = await apiClient.getTask(task.id);
-          return taskData.primary_session_id ?? null;
-        },
-        { timeout: 15_000, message: "Waiting for primary session to be restored" },
-      )
-      .toBe(primaryId);
+      .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id), {
+        timeout: 30_000,
+        message: "the original session should become primary before opening the preview",
+      })
+      .toBe(initialSessionId);
 
     const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
-    const secondaryId = afterSecond.find((s) => s.id !== primaryId)?.id;
-    if (!secondaryId) throw new Error("Secondary session not created");
+    expect(afterSecond.map((session) => session.id)).toEqual(
+      expect.arrayContaining([initialSessionId, launched.session_id]),
+    );
+    const primaryId = initialSessionId;
+    const secondaryId = launched.session_id;
+    const responseBySessionId: Record<string, string> = {
+      [initialSessionId]: "simple mock response",
+      [launched.session_id]: "secondary-session-response",
+    };
+    const primaryResponse = responseBySessionId[primaryId];
+    const secondaryResponse = responseBySessionId[secondaryId];
+    if (!primaryResponse || !secondaryResponse) {
+      throw new Error("Session response markers do not match the task sessions");
+    }
 
-    // The first session remains primary by default — creating a second via the
-    // new-session dialog does not steal the primary flag (verified by
-    // preview-primary-session.spec.ts).
+    // Mark the older session primary before the full page load so the fixture
+    // checks the persisted default independently of launch-time promotion.
+    expect(primaryId).toBe(initialSessionId);
 
     const kanban = new KanbanPage(testPage);
 
     // 5. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
-    await kanban.goto();
+    await kanban.goto(workflow.id);
 
     const previewCard = kanban.taskCardByTitle("Preview Tabs Task");
     await expect(previewCard).toBeVisible({ timeout: 10_000 });
     await expect(previewCard.getByRole("button", { name: "Open full page" })).toBeVisible({
       timeout: 10_000,
     });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((taskId) => {
+            type KandevStore = {
+              getState: () => {
+                kanban: { tasks: { id: string; primarySessionId?: string | null }[] };
+              };
+            };
+            const store = (window as unknown as { __KANDEV_E2E_STORE__?: KandevStore })
+              .__KANDEV_E2E_STORE__;
+            return store?.getState().kanban.tasks.find((task) => task.id === taskId)
+              ?.primarySessionId;
+          }, task.id),
+        { timeout: 15_000, message: "Waiting for the board task's primary session projection" },
+      )
+      .toBe(primaryId);
     await previewCard.click();
 
     // 6. Preview panel + both tabs are visible.
@@ -129,27 +159,16 @@ test.describe("Preview session tabs", () => {
     await expect(secondaryTab).toBeVisible();
 
     // 7. Primary tab is active by default and its session content is visible.
-    // "simple mock response" appears only in the agent's reply, not in any prompt,
-    // so the single getByText match is unambiguous.
     await expect(primaryTab).toHaveAttribute("data-state", "active");
     await expect(secondaryTab).toHaveAttribute("data-state", "inactive");
-    await expect(previewPanel.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(previewPanel.getByText(primaryResponse, { exact: false }).first()).toBeVisible();
 
     // 8. Click the secondary tab → content switches, URL updates.
-    // The echoed marker "secondary-session-response" appears in both the user
-    // prompt and the agent reply; `.first()` picks one deterministically and
-    // is enough to prove the secondary session's body is rendered.
     await secondaryTab.click();
     await expect(secondaryTab).toHaveAttribute("data-state", "active");
     await expect(primaryTab).toHaveAttribute("data-state", "inactive");
-    await expect(
-      previewPanel.getByText("secondary-session-response", { exact: false }).first(),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      previewPanel.getByText("simple mock response", { exact: false }),
-    ).not.toBeVisible();
+    await expect(previewPanel.getByText(secondaryResponse, { exact: false }).first()).toBeVisible();
+    await expect(previewPanel.getByText(primaryResponse, { exact: false })).not.toBeVisible();
     await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 5_000 });
 
     // 9. Read-only tab bar: no close buttons and no add button are rendered.

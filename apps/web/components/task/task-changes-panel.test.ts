@@ -27,8 +27,36 @@ describe("shouldCloseFileDiffPanel", () => {
     expect(shouldCloseFileDiffPanel(undefined, PATH)).toBe(false);
   });
 
-  it("returns true when gitStatus.files is undefined (loaded, no changes)", () => {
-    expect(shouldCloseFileDiffPanel({}, PATH)).toBe(true);
+  it("does not close while membership is loading or incomplete", () => {
+    expect(shouldCloseFileDiffPanel({ status_state: "loading" }, PATH)).toBe(false);
+    expect(shouldCloseFileDiffPanel({ files: {}, files_complete: false }, PATH)).toBe(false);
+  });
+
+  it("uses the selected repository and change layer as the membership scope", () => {
+    const statusByRepo: NonNullable<Parameters<typeof shouldCloseFileDiffPanel>[4]> = [
+      {
+        repository_name: "frontend",
+        status: { files: { [PATH]: { staged: true } } },
+      },
+      { repository_name: "backend", status: { files: {} } },
+    ];
+
+    expect(shouldCloseFileDiffPanel(undefined, PATH, "frontend", "staged", statusByRepo)).toBe(
+      false,
+    );
+    expect(shouldCloseFileDiffPanel(undefined, PATH, "frontend", "unstaged", statusByRepo)).toBe(
+      true,
+    );
+    expect(shouldCloseFileDiffPanel(undefined, PATH, "backend", undefined, statusByRepo)).toBe(
+      true,
+    );
+    expect(shouldCloseFileDiffPanel(undefined, PATH, "missing", undefined, statusByRepo)).toBe(
+      false,
+    );
+  });
+
+  it("does not close when gitStatus has no complete file map", () => {
+    expect(shouldCloseFileDiffPanel({}, PATH)).toBe(false);
   });
 
   it("returns true when the file is missing from gitStatus.files (discarded)", () => {
@@ -40,14 +68,14 @@ describe("shouldCloseFileDiffPanel", () => {
     expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(false);
   });
 
-  it("returns true when the file entry exists but diff is an empty string", () => {
+  it("keeps a file open when membership exists but its diff is empty", () => {
     const gitStatus = { files: { [PATH]: { diff: "" } } };
-    expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(true);
+    expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(false);
   });
 
-  it("returns true when the file entry exists but diff is undefined", () => {
+  it("keeps a file open when membership exists but its diff is not ready", () => {
     const gitStatus = { files: { [PATH]: {} } };
-    expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(true);
+    expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(false);
   });
 
   it("is not affected by unrelated files in gitStatus.files", () => {

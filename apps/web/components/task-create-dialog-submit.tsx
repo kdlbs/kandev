@@ -20,6 +20,22 @@ import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edi
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { switchTaskRunner } from "@/lib/api/domains/task-runner-api";
 import { WebSocketRequestError } from "@/lib/ws/client";
+import type { TaskCreateRecovery } from "@/components/task-create-dialog-recovery";
+import { useLiveDraftMatch } from "@/components/task-create-dialog-live-draft";
+import {
+  isStaleBranchPolicyError,
+  useAcceptCreatedTask,
+  useNativeCreateTransport,
+} from "@/components/task-create-dialog-native-handoff";
+import {
+  useNativeSubmission,
+  useRecoveryLookupActions,
+  useRecoveryTaskOpen,
+} from "@/components/task-create-dialog-native-recovery";
+import {
+  finishTaskCreateNavigation,
+  shouldNavigateAfterTaskCreate,
+} from "@/components/task-create-dialog-navigation";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -39,6 +55,56 @@ import {
 import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 
+/**
+ * Safe stand-in for callers that have no native recovery owner (custom
+ * transports and focused submit tests). The native branch only runs when a
+ * real owner is present, so these methods are never on a product path.
+ */
+const NO_RECOVERY: TaskCreateRecovery = {
+  receipt: null,
+  busy: false,
+  storageUnavailable: false,
+  beginOperation: () => true,
+  endOperation: () => undefined,
+  beginSubmission: () => null,
+  markUncertain: () => undefined,
+  markHandoffAttempted: () => undefined,
+  acknowledge: () => undefined,
+  retire: () => undefined,
+  lookup: async () => ({ kind: "error" }),
+  applyLookupResult: () => null,
+  applyLookupMiss: () => null,
+  applyCreateResult: () => null,
+  updateConsent: (candidate) => candidate,
+  hydrateTask: async () => null,
+  hydrateSessionId: async () => null,
+  isCurrent: () => false,
+  isOwnerCurrent: () => true,
+  getGeneration: () => -1,
+  getReceipt: () => null,
+};
+
+function hasNativeRecovery(
+  recovery: TaskCreateRecovery | undefined,
+  createTask: SubmitHandlersDeps["createTask"],
+): boolean {
+  return Boolean(recovery) && !createTask;
+}
+
+function selectRecoveryOwner(
+  recovery: TaskCreateRecovery | undefined,
+  createTask: SubmitHandlersDeps["createTask"],
+): TaskCreateRecovery {
+  return recovery && !createTask ? recovery : NO_RECOVERY;
+}
+
+function buildFreshBranchPayloadFor(
+  isActive: boolean,
+  consentedDirtyFiles: string[],
+): { confirmDiscard: boolean; consentedDirtyFiles: string[] } | undefined {
+  return isActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
+}
+
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
   notify: (input: { title: string; description: string }) => unknown,
@@ -48,31 +114,6 @@ function notifyQueuedTask(
     title: t("task:taskQueued"),
     description: t("task:taskQueuedWipLimit"),
   });
-}
-
-function shouldNavigateAfterTaskCreate(
-  withAgent: boolean,
-  isPassthroughProfile: boolean,
-  planMode: boolean | undefined,
-  sessionId: string | null,
-) {
-  return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
-}
-
-function finishTaskCreateNavigation(args: {
-  planMode: boolean | undefined;
-  newSessionId: string | null;
-  autoFocusNewTasks: boolean;
-  withAgent: boolean;
-  isPassthroughProfile: boolean;
-  activatePlan: (sessionId: string) => void;
-  openPassthroughTask: () => void;
-}) {
-  if (args.planMode && args.newSessionId) {
-    args.activatePlan(args.newSessionId);
-  } else if (args.autoFocusNewTasks && args.withAgent && args.isPassthroughProfile) {
-    args.openPassthroughTask();
-  }
 }
 
 type NoAgentTaskRequirements = {
@@ -92,12 +133,6 @@ function hasNoAgentTaskRequirements(input: {
 function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
   if (!noRepository) return undefined;
   return workspacePath.trim() || undefined;
-}
-
-function isStaleBranchPolicyError(error: unknown): boolean {
-  return (
-    error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
-  );
 }
 
 const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
@@ -246,11 +281,33 @@ async function issueRunnerSwitchIfChanged(
   }
 }
 
+function canSubmitFreshBranch({
+  freshBranchEnabled,
+  isLocalExecutor,
+  noRepository,
+  repositoryLocalPath,
+  selections,
+  useRemote,
+}: {
+  freshBranchEnabled?: boolean;
+  isLocalExecutor?: boolean;
+  noRepository: boolean;
+  repositoryLocalPath: string;
+  selections?: ReturnType<typeof resolveRepositorySelections>;
+  useRemote: boolean;
+}) {
+  if (!freshBranchEnabled || !isLocalExecutor || noRepository || !repositoryLocalPath) return false;
+  return selections ? selections.length === 1 && selections[0]?.kind === "local" : !useRemote;
+}
+
 type SaveEditedTaskFieldsArgs = {
   editingTask: { id: string };
   updatePayload: Parameters<typeof updateTask>[1];
   trimmedDescription: string;
   runnerChanged: boolean;
+  mcpServerIds: string[];
+  mcpServerIdsDirty: boolean;
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
 } & Omit<EditDependencySaveArgs, "updatedTask">;
 
 // A runner switch that already committed is never rolled back; tag a
@@ -261,10 +318,19 @@ async function saveEditedTaskFields({
   updatePayload,
   trimmedDescription,
   runnerChanged,
+  mcpServerIds,
+  mcpServerIdsDirty,
+  saveTaskMCPSelections,
   ...dependencySaveArgs
 }: SaveEditedTaskFieldsArgs) {
   try {
     const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveMCPSelectionIfNeeded({
+      isStartedEdit: dependencySaveArgs.isStartedEdit,
+      dirty: mcpServerIdsDirty,
+      definitionIds: mcpServerIds,
+      save: saveTaskMCPSelections,
+    });
     await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
     return { updatedTask, trimmedDescription };
   } catch (error) {
@@ -273,28 +339,22 @@ async function saveEditedTaskFields({
   }
 }
 
-async function shouldKeepEditDialogOpen(
-  error: unknown,
-  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
-): Promise<boolean> {
-  if (isRepositorySelectionError(error)) return true;
-  if (isTaskDependencyUpdateFailure(error)) return true;
-  // A rejected switch, or a later call failing after the switch already
-  // committed, both need the user back in the dialog to see the reason and
-  // retry.
-  if (error instanceof RunnerSwitchRejectedError) return true;
-  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
-  if (error instanceof LaunchAfterTaskUpdateError) return true;
-  return refreshStaleBranchPolicies(error);
+async function saveMCPSelectionIfNeeded({
+  isStartedEdit,
+  dirty,
+  definitionIds,
+  save,
+}: {
+  isStartedEdit: boolean;
+  dirty: boolean;
+  definitionIds: string[];
+  save?: (definitionIds: string[]) => Promise<unknown>;
+}) {
+  if (isStartedEdit || !dirty || !save) return;
+  await save(definitionIds);
 }
 
-function isRepositorySelectionError(error: unknown): boolean {
-  return (
-    error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
-  );
-}
-
-// eslint-disable-next-line max-lines-per-function
+// eslint-disable-next-line max-lines-per-function -- one submit owner composes the edit and create lifecycle.
 export function useTaskSubmitHandlers({
   isSessionMode,
   isEditMode,
@@ -338,8 +398,11 @@ export function useTaskSubmitHandlers({
   resetRepositorySelections,
   setAgentProfileId,
   setExecutorId,
+  setMcpServerIds,
+  setMcpServerIdsDirty,
   setSelectedWorkflowId,
   setFetchedSteps,
+  setInitialWorkspaceLayout,
   clearDraft,
   freshBranchEnabled,
   isLocalExecutor,
@@ -351,9 +414,16 @@ export function useTaskSubmitHandlers({
   priority,
   workflowAgentOverrides,
   workflowAgentOverridesBlockedReason,
+  initialWorkspaceLayout,
   blockedBy,
+  relatedTaskIds,
+  mcpServerIds = [],
+  builtinMCPPreferences,
+  saveTaskMCPSelections,
+  mcpServerIdsDirty,
   editDependencies,
   transformDescriptionBeforeSubmit,
+  recovery,
 }: SubmitHandlersDeps) {
   const router = useRouter();
   const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
@@ -362,6 +432,10 @@ export function useTaskSubmitHandlers({
   const setPlanMode = useAppStore((state) => state.setPlanMode);
   const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
+  const nativeRecoveryActive = hasNativeRecovery(recovery, createTask);
+  const recoveryOwner = selectRecoveryOwner(recovery, createTask);
+  const taskNameRef = useRef(taskName);
+  taskNameRef.current = taskName;
   const seededRunnerRef = useRef(seededExecutorProfileId);
   const confirmedRunnerRef = useRef<string | null>(seededExecutorProfileId);
   if (seededRunnerRef.current !== seededExecutorProfileId) {
@@ -381,21 +455,26 @@ export function useTaskSubmitHandlers({
   const usesWorkspaceSources = repositorySelections !== undefined;
   const emptyWorkspaceSelection = usesWorkspaceSources && selections.length === 0;
   const effectiveNoRepository = noRepository || emptyWorkspaceSelection;
-  const isFreshBranchActive =
-    freshBranchEnabled &&
-    isLocalExecutor &&
-    !effectiveNoRepository &&
-    selections.length === 1 &&
-    selections[0]?.kind === "local" &&
-    repositoryLocalPath !== "";
-  const { pendingDiscard, ensureFreshBranchConsent, createTaskWithFreshBranchRetry } =
-    useFreshBranchConsent({
-      isFreshBranchActive,
-      workspaceId,
-      repositoryLocalPath,
-      toast,
-      createTask,
-    });
+  const isFreshBranchActive = canSubmitFreshBranch({
+    freshBranchEnabled,
+    isLocalExecutor,
+    noRepository: effectiveNoRepository,
+    repositoryLocalPath,
+    selections: repositorySelections,
+    useRemote,
+  });
+  const {
+    pendingDiscard,
+    ensureFreshBranchConsent,
+    confirmForDirtyFiles,
+    createTaskWithFreshBranchRetry,
+  } = useFreshBranchConsent({
+    isFreshBranchActive,
+    workspaceId,
+    repositoryLocalPath,
+    toast,
+    createTask,
+  });
 
   const refreshStaleBranchPolicies = useCallback(
     async (error: unknown) => {
@@ -407,7 +486,7 @@ export function useTaskSubmitHandlers({
   );
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
-    isFreshBranchActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
+    buildFreshBranchPayloadFor(isFreshBranchActive, consentedDirtyFiles);
 
   const validateForCreate = useCallback(
     (trimmedTitle: string, trimmedDescription = "") =>
@@ -504,6 +583,9 @@ export function useTaskSubmitHandlers({
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
+    setMcpServerIds([]);
+    setMcpServerIdsDirty(false);
+    setInitialWorkspaceLayout("repository");
     // State setters are stable; only workflowId can change
   }, [
     workflowId,
@@ -517,6 +599,9 @@ export function useTaskSubmitHandlers({
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
+    setMcpServerIds,
+    setMcpServerIdsDirty,
+    setInitialWorkspaceLayout,
   ]);
 
   const getRepositoriesPayload = useCallback(
@@ -554,6 +639,7 @@ export function useTaskSubmitHandlers({
   const getWorkspaceSourcesPayload = useCallback(
     (consentedDirtyFiles: string[] = []) => {
       if (!usesWorkspaceSources) return undefined;
+      if (effectiveNoRepository) return [];
       return buildWorkspaceSourcesPayload({
         selections,
         useRemote,
@@ -569,6 +655,7 @@ export function useTaskSubmitHandlers({
     },
     [
       usesWorkspaceSources,
+      effectiveNoRepository,
       selections,
       useRemote,
       remoteRepos,
@@ -595,6 +682,7 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         agentProfileId,
         executorId,
+        mcpServerIds,
         attachments: toMessageAttachments(attachments),
       });
       onOpenChange(false);
@@ -610,6 +698,7 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
+        mcpServerIds,
       });
       const response = await launchSession(request);
       if (response.session_id) {
@@ -643,6 +732,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingSession,
     applyAgentProfileRecentUse,
+    mcpServerIds,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -677,6 +767,9 @@ export function useTaskSubmitHandlers({
       updatePayload,
       trimmedDescription,
       runnerChanged,
+      mcpServerIds,
+      mcpServerIdsDirty,
+      saveTaskMCPSelections,
       editDependencies,
       isStartedEdit,
       descriptionInputRef,
@@ -690,6 +783,9 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     isStartedEdit,
     repositoriesDirty,
+    mcpServerIds,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     editDependencies,
     isEditMode,
     setTaskName,
@@ -736,7 +832,8 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -755,6 +852,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     applyAgentProfileRecentUse,
@@ -772,7 +871,8 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -788,11 +888,80 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     editDependencies,
     isEditMode,
   ]);
+
+  const submissionMatchesLiveDraft = useLiveDraftMatch({
+    taskNameRef,
+    descriptionInputRef,
+  });
+  const sendNativeCreate = useNativeCreateTransport({
+    recovery: recoveryOwner,
+    isFreshBranchActive,
+    confirmForDirtyFiles,
+    refreshStaleBranchPolicies,
+  });
+  const acceptCreatedTask = useAcceptCreatedTask({
+    recovery: recoveryOwner,
+    matchesLiveDraft: submissionMatchesLiveDraft,
+    autoFocusNewTasks,
+    isPassthroughProfile,
+    onSuccess,
+    onOpenChange,
+    clearDraft,
+    queueLastUsed: queueTaskCreateLastUsedFromPayload,
+    preserveLastUsedOnClose: preserveTaskCreateLastUsedOnClose,
+    activatePlan: (taskId, sessionId) =>
+      activatePlanMode({
+        sessionId,
+        taskId,
+        autoFocus: autoFocusNewTasks,
+        setActiveDocument,
+        setPlanMode,
+        router,
+      }),
+    openPassthroughTask: (taskId) => router.push(linkToTask(taskId)),
+  });
+  const { applyNativeObservation, runNativeSubmission } = useNativeSubmission({
+    recovery: recoveryOwner,
+    acceptCreatedTask,
+    sendNativeCreate,
+    getDraftTitle: () => taskNameRef.current,
+    errorMessage: taskSubmitErrorMessage,
+    toast,
+  });
+  const { checkStatus: checkRecoveryStatus, retry: retryRecovery } = useRecoveryLookupActions({
+    recovery: recoveryOwner,
+    acceptCreatedTask,
+    sendNativeCreate,
+    applyObservation: applyNativeObservation,
+    errorMessage: taskSubmitErrorMessage,
+    toast,
+  });
+  const openRecoveryTask = useRecoveryTaskOpen({
+    recovery: recoveryOwner,
+    onOpenChange,
+    router,
+  });
+  const closeRecovery = useCallback(() => {
+    onOpenChange(false);
+  }, [onOpenChange]);
+  const runGuardedCreate = useCallback(
+    async (operation: () => Promise<void>) => {
+      if (!recoveryOwner.beginOperation()) return;
+      try {
+        await operation();
+      } finally {
+        recoveryOwner.endOperation();
+      }
+    },
+    [recoveryOwner],
+  );
 
   const performCreate = useCallback(
     async (opts: {
@@ -802,9 +971,11 @@ export function useTaskSubmitHandlers({
       withAgent: boolean;
       planMode?: boolean;
       attachments?: ReturnType<typeof toMessageAttachments>;
+      generation: number;
     }) => {
       if (!isSessionMode && !isEditMode && workflowAgentOverridesBlockedReason) return;
       if (!workspaceId || !effectiveWorkflowId) return;
+      if (!recoveryOwner.isOwnerCurrent(opts.generation)) return;
       let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
         const payload = buildCreateTaskPayload({
@@ -830,11 +1001,19 @@ export function useTaskSubmitHandlers({
           autopilot,
           priority,
           workflowAgentOverrides,
+          initialWorkspaceLayout,
           blockedBy,
+          relatedTaskIds,
+          mcpServerIds,
+          builtinMCPPreferences,
         });
         submittedPayload = payload;
         return payload;
       };
+      if (nativeRecoveryActive) {
+        await runNativeSubmission(buildPayload, opts.consented, opts.generation);
+        return;
+      }
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
@@ -890,6 +1069,7 @@ export function useTaskSubmitHandlers({
       effectiveNoRepository,
       workspacePath,
       priority,
+      initialWorkspaceLayout,
       onSuccess,
       onOpenChange,
       preserveTaskCreateLastUsedOnClose,
@@ -900,10 +1080,17 @@ export function useTaskSubmitHandlers({
       getRepositoriesPayload,
       getWorkspaceSourcesPayload,
       createTaskWithFreshBranchRetry,
+      createTask,
+      nativeRecoveryActive,
+      runNativeSubmission,
+      builtinMCPPreferences,
       isSessionMode,
       isEditMode,
       workflowAgentOverrides,
       workflowAgentOverridesBlockedReason,
+      mcpServerIds,
+      relatedTaskIds,
+      recoveryOwner,
     ],
   );
 
@@ -911,7 +1098,8 @@ export function useTaskSubmitHandlers({
     (
       trimmedTitle: string,
       consented: string[],
-      attachments?: ReturnType<typeof toMessageAttachments>,
+      attachments: ReturnType<typeof toMessageAttachments> | undefined,
+      generation: number,
     ) =>
       performCreate({
         trimmedTitle,
@@ -920,6 +1108,7 @@ export function useTaskSubmitHandlers({
         withAgent: false,
         planMode: true,
         attachments,
+        generation,
       }),
     [performCreate],
   );
@@ -967,6 +1156,57 @@ export function useTaskSubmitHandlers({
     applyAgentProfileRecentUse,
   ]);
 
+  const submitPlanModeCreate = useCallback(async () => {
+    if (workflowAgentOverridesBlockedReason) return;
+    await runGuardedCreate(async () => {
+      const generation = recoveryOwner.getGeneration();
+      const trimmedTitle = taskName.trim();
+      const description = descriptionInputRef.current?.getValue() ?? "";
+      const trimmedDescription = description.trim();
+      const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+      if (hasPendingAttachmentUploads(selectedAttachments)) return;
+      const attachments = toMessageAttachments(selectedAttachments);
+      if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
+      if (hasRemoteSubmitBlocker()) return;
+      const consent = await ensureFreshBranchConsent();
+      if (consent === null || !recoveryOwner.isOwnerCurrent(generation)) return;
+      setIsCreatingTask(true);
+      try {
+        await performCreate({
+          trimmedTitle,
+          trimmedDescription,
+          consented: consent,
+          withAgent: true,
+          planMode: true,
+          attachments,
+          generation,
+        });
+      } catch (error) {
+        await refreshStaleBranchPolicies(error);
+        toast({
+          title: t("task:failedToStartTaskPlanMode"),
+          description: taskSubmitErrorMessage(error),
+          variant: "error",
+        });
+      } finally {
+        setIsCreatingTask(false);
+      }
+    });
+  }, [
+    taskName,
+    validateForCreate,
+    hasRemoteSubmitBlocker,
+    ensureFreshBranchConsent,
+    performCreate,
+    refreshStaleBranchPolicies,
+    toast,
+    descriptionInputRef,
+    setIsCreatingTask,
+    workflowAgentOverridesBlockedReason,
+    recoveryOwner,
+    runGuardedCreate,
+  ]);
+
   const handleCreateWithPlanMode = useCallback(async () => {
     if (isEditMode) {
       if (editDependencies && !editDependencies.ready) return;
@@ -985,51 +1225,15 @@ export function useTaskSubmitHandlers({
       }
       return;
     }
-    if (workflowAgentOverridesBlockedReason) return;
-    const trimmedTitle = taskName.trim();
-    const description = descriptionInputRef.current?.getValue() ?? "";
-    const trimmedDescription = description.trim();
-    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
-    if (hasPendingAttachmentUploads(selectedAttachments)) return;
-    const attachments = toMessageAttachments(selectedAttachments);
-    if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (hasRemoteSubmitBlocker()) return;
-    const consent = await ensureFreshBranchConsent();
-    if (consent === null) return;
-    setIsCreatingTask(true);
-    try {
-      await performCreate({
-        trimmedTitle,
-        trimmedDescription,
-        consented: consent,
-        withAgent: true,
-        planMode: true,
-        attachments,
-      });
-    } catch (error) {
-      await refreshStaleBranchPolicies(error);
-      toast({
-        title: t("task:failedToStartTaskPlanMode"),
-        description: taskSubmitErrorMessage(error),
-        variant: "error",
-      });
-    } finally {
-      setIsCreatingTask(false);
-    }
+    await submitPlanModeCreate();
   }, [
     isEditMode,
     performEditWithPlanMode,
-    taskName,
-    validateForCreate,
-    hasRemoteSubmitBlocker,
-    ensureFreshBranchConsent,
-    performCreate,
+    submitPlanModeCreate,
     refreshStaleBranchPolicies,
     toast,
-    descriptionInputRef,
     setIsCreatingTask,
     editDependencies,
-    workflowAgentOverridesBlockedReason,
   ]);
 
   const submitCreateTask = useCallback(
@@ -1038,57 +1242,77 @@ export function useTaskSubmitHandlers({
       trimmedDescription,
       consent,
       attachments,
+      generation,
     }: {
       trimmedTitle: string;
       trimmedDescription: string;
       consent: string[];
       attachments: ReturnType<typeof toMessageAttachments>;
+      generation: number;
     }) => {
+      if (!recoveryOwner.isOwnerCurrent(generation)) return;
       if (trimmedDescription) {
         const finalDescription = transformDescriptionBeforeSubmit
           ? await transformDescriptionBeforeSubmit(trimmedDescription)
           : trimmedDescription;
+        if (!recoveryOwner.isOwnerCurrent(generation)) return;
         await performCreate({
           trimmedTitle,
           trimmedDescription: finalDescription,
           consented: consent,
           withAgent: true,
           attachments,
+          generation,
         });
         return;
       }
       if (!autoTitle) {
-        await handleCreatePlanMode(trimmedTitle, consent, attachments);
+        await handleCreatePlanMode(trimmedTitle, consent, attachments, generation);
       }
     },
-    [autoTitle, handleCreatePlanMode, performCreate, transformDescriptionBeforeSubmit],
+    [
+      autoTitle,
+      handleCreatePlanMode,
+      performCreate,
+      recoveryOwner,
+      transformDescriptionBeforeSubmit,
+    ],
   );
 
   const handleCreateSubmit = useCallback(async () => {
     if (workflowAgentOverridesBlockedReason) return;
-    const trimmedTitle = taskName.trim();
-    const description = descriptionInputRef.current?.getValue() ?? "";
-    const trimmedDescription = description.trim();
-    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
-    if (hasPendingAttachmentUploads(selectedAttachments)) return;
-    const attachments = toMessageAttachments(selectedAttachments);
-    if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (hasRemoteSubmitBlocker()) return;
-    const consent = await ensureFreshBranchConsent();
-    if (consent === null) return;
-    setIsCreatingTask(true);
-    try {
-      await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
-    } catch (error) {
-      await refreshStaleBranchPolicies(error);
-      toast({
-        title: t("task:failedToCreateTask"),
-        description: taskSubmitErrorMessage(error),
-        variant: "error",
-      });
-    } finally {
-      setIsCreatingTask(false);
-    }
+    await runGuardedCreate(async () => {
+      const generation = recoveryOwner.getGeneration();
+      const trimmedTitle = taskName.trim();
+      const description = descriptionInputRef.current?.getValue() ?? "";
+      const trimmedDescription = description.trim();
+      const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+      if (hasPendingAttachmentUploads(selectedAttachments)) return;
+      const attachments = toMessageAttachments(selectedAttachments);
+      if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
+      if (hasRemoteSubmitBlocker()) return;
+      const consent = await ensureFreshBranchConsent();
+      if (consent === null || !recoveryOwner.isOwnerCurrent(generation)) return;
+      setIsCreatingTask(true);
+      try {
+        await submitCreateTask({
+          trimmedTitle,
+          trimmedDescription,
+          consent,
+          attachments,
+          generation,
+        });
+      } catch (error) {
+        await refreshStaleBranchPolicies(error);
+        toast({
+          title: t("task:failedToCreateTask"),
+          description: taskSubmitErrorMessage(error),
+          variant: "error",
+        });
+      } finally {
+        setIsCreatingTask(false);
+      }
+    });
   }, [
     taskName,
     validateForCreate,
@@ -1100,101 +1324,155 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     workflowAgentOverridesBlockedReason,
+    recovery,
+    runGuardedCreate,
   ]);
+
+  const submitNoAgentCreate = useCallback(
+    async ({
+      trimmedTitle,
+      trimmedDescription,
+      consent,
+      attachments,
+      generation,
+    }: {
+      trimmedTitle: string;
+      trimmedDescription: string;
+      consent: string[];
+      attachments: ReturnType<typeof toMessageAttachments>;
+      generation: number;
+    }) => {
+      if (!recoveryOwner.isOwnerCurrent(generation)) return;
+      setIsCreatingTask(true);
+      try {
+        let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
+        const buildPayload = (c: string[]) => {
+          const p = buildCreateTaskPayload({
+            workspaceId: workspaceId as string,
+            effectiveWorkflowId: effectiveWorkflowId as string,
+            trimmedTitle,
+            trimmedDescription,
+            autoTitle,
+            repositoriesPayload: getRepositoriesPayload(c),
+            workspaceSourcesPayload: getWorkspaceSourcesPayload(c),
+            agentProfileId,
+            executorId,
+            executorProfileId,
+            withAgent: false,
+            attachments,
+            parentId: parentTaskId,
+            workspacePath: resolveWorkspacePath(effectiveNoRepository, workspacePath),
+            autopilot,
+            priority,
+            workflowAgentOverrides,
+            initialWorkspaceLayout,
+            blockedBy,
+            relatedTaskIds,
+            mcpServerIds,
+            builtinMCPPreferences,
+          });
+          submittedPayload = p;
+          return p;
+        };
+        if (nativeRecoveryActive) {
+          await runNativeSubmission(buildPayload, consent, generation);
+          return;
+        }
+        const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
+        if (!taskResponse) return;
+        notifyQueuedTask(taskResponse, toast);
+        onSuccess?.(taskResponse, "create", { autoFocus: autoFocusNewTasks });
+        clearDraft();
+        queueTaskCreateLastUsedFromPayload(submittedPayload);
+        preserveTaskCreateLastUsedOnClose?.();
+        onOpenChange(false);
+      } catch (error) {
+        await refreshStaleBranchPolicies(error);
+        toast({
+          title: t("task:failedToCreateTask"),
+          description: taskSubmitErrorMessage(error),
+          variant: "error",
+        });
+      } finally {
+        setIsCreatingTask(false);
+      }
+    },
+    [
+      autoFocusNewTasks,
+      autoTitle,
+      workspaceId,
+      effectiveWorkflowId,
+      agentProfileId,
+      executorId,
+      executorProfileId,
+      effectiveNoRepository,
+      autopilot,
+      workspacePath,
+      priority,
+      getRepositoriesPayload,
+      getWorkspaceSourcesPayload,
+      createTaskWithFreshBranchRetry,
+      createTask,
+      runNativeSubmission,
+      refreshStaleBranchPolicies,
+      onSuccess,
+      onOpenChange,
+      preserveTaskCreateLastUsedOnClose,
+      clearDraft,
+      toast,
+      setIsCreatingTask,
+      parentTaskId,
+      blockedBy,
+      relatedTaskIds,
+      workflowAgentOverrides,
+      mcpServerIds,
+      builtinMCPPreferences,
+      initialWorkspaceLayout,
+      nativeRecoveryActive,
+    ],
+  );
 
   const handleCreateWithoutAgent = useCallback(async () => {
     if (workflowAgentOverridesBlockedReason) return;
-    const trimmedTitle = taskName.trim();
-    const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
-    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
-    if (hasPendingAttachmentUploads(selectedAttachments)) return;
-    const attachments = toMessageAttachments(selectedAttachments);
-    if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    const requirements = {
-      description: trimmedDescription,
-      workspaceId,
-      workflowId: effectiveWorkflowId,
-    };
-    if (!hasNoAgentTaskRequirements(requirements)) return;
-    if (hasRemoteSubmitBlocker()) return;
-
-    const consent = await ensureFreshBranchConsent();
-    if (consent === null) return;
-    setIsCreatingTask(true);
-    try {
-      let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
-      const buildPayload = (c: string[]) => {
-        const p = buildCreateTaskPayload({
-          workspaceId: requirements.workspaceId,
-          effectiveWorkflowId: requirements.workflowId,
-          trimmedTitle,
-          trimmedDescription,
-          autoTitle,
-          repositoriesPayload: getRepositoriesPayload(c),
-          workspaceSourcesPayload: getWorkspaceSourcesPayload(c),
-          agentProfileId,
-          executorId,
-          executorProfileId,
-          withAgent: false,
-          attachments,
-          workspacePath: resolveWorkspacePath(effectiveNoRepository, workspacePath),
-          autopilot,
-          priority,
-          workflowAgentOverrides,
-          blockedBy,
-        });
-        submittedPayload = p;
-        return p;
+    await runGuardedCreate(async () => {
+      const generation = recoveryOwner.getGeneration();
+      const trimmedTitle = taskName.trim();
+      const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
+      const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+      if (hasPendingAttachmentUploads(selectedAttachments)) return;
+      const attachments = toMessageAttachments(selectedAttachments);
+      if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
+      const requirements = {
+        description: trimmedDescription,
+        workspaceId,
+        workflowId: effectiveWorkflowId,
       };
-      const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
-      if (!taskResponse) return;
-      notifyQueuedTask(taskResponse, toast);
-      onSuccess?.(taskResponse, "create", { autoFocus: autoFocusNewTasks });
-      clearDraft();
-      queueTaskCreateLastUsedFromPayload(submittedPayload);
-      preserveTaskCreateLastUsedOnClose?.();
-      onOpenChange(false);
-    } catch (error) {
-      await refreshStaleBranchPolicies(error);
-      toast({
-        title: t("task:failedToCreateTask"),
-        description: taskSubmitErrorMessage(error),
-        variant: "error",
+      if (!hasNoAgentTaskRequirements(requirements)) return;
+      if (hasRemoteSubmitBlocker()) return;
+
+      const consent = await ensureFreshBranchConsent();
+      if (consent === null || !recoveryOwner.isOwnerCurrent(generation)) return;
+      await submitNoAgentCreate({
+        trimmedTitle,
+        trimmedDescription,
+        consent,
+        attachments,
+        generation,
       });
-    } finally {
-      setIsCreatingTask(false);
-    }
+    });
   }, [
     taskName,
-    autoTitle,
     workspaceId,
     effectiveWorkflowId,
-    agentProfileId,
-    executorId,
-    executorProfileId,
-    noRepository,
-    effectiveNoRepository,
-    autopilot,
-    workspacePath,
-    priority,
     validateForCreate,
     hasRemoteSubmitBlocker,
-    getRepositoriesPayload,
-    getWorkspaceSourcesPayload,
     ensureFreshBranchConsent,
-    createTaskWithFreshBranchRetry,
-    refreshStaleBranchPolicies,
-    autoFocusNewTasks,
-    onSuccess,
-    onOpenChange,
-    preserveTaskCreateLastUsedOnClose,
-    clearDraft,
+    submitNoAgentCreate,
     toast,
     descriptionInputRef,
-    setIsCreatingTask,
-    blockedBy,
-    workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
+    recoveryOwner,
+    runGuardedCreate,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;
@@ -1213,6 +1491,7 @@ export function useTaskSubmitHandlers({
     onOpenChange(false);
   }, [resetForm, onOpenChange]);
 
+  const recoveryReceipt = recoveryOwner.receipt;
   return {
     resetForm,
     handleSubmit,
@@ -1221,5 +1500,25 @@ export function useTaskSubmitHandlers({
     handleCreateWithPlanMode,
     handleCancel,
     pendingDiscard,
+    recovery: {
+      receipt: recoveryReceipt,
+      busy: recoveryOwner.busy,
+      storageUnavailable: recoveryOwner.storageUnavailable,
+      checkStatus: checkRecoveryStatus,
+      retry: retryRecovery,
+      openTask: openRecoveryTask,
+      close: closeRecovery,
+      canRetry: Boolean(
+        recoveryReceipt?.replayable &&
+        recoveryReceipt.state === "unknown" &&
+        !recoveryReceipt.taskId,
+      ),
+      canOpen: Boolean(recoveryReceipt?.taskId && recoveryReceipt.state !== "unavailable"),
+      canCheck: Boolean(
+        recoveryReceipt &&
+        recoveryReceipt.state !== "accepted" &&
+        recoveryReceipt.state !== "submitting",
+      ),
+    },
   };
 }

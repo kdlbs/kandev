@@ -12,7 +12,8 @@ import { useFileEditors } from "@/hooks/use-file-editors";
  * On desktop: delegates to dockview store.
  * On mobile/tablet: delegates to layout store (kept for backward compat).
  */
-export function usePanelActions() {
+export function usePanelActions(options: { detailActive?: boolean } = {}) {
+  const detailActive = options.detailActive ?? true;
   const { usesDesktopWorkbench } = useResponsiveBreakpoint();
 
   // Desktop: dockview store
@@ -25,7 +26,7 @@ export function usePanelActions() {
 
   // File editors (works on desktop through dockview)
   const { openFile: dockOpenFile, openFileInMarkdownPreview: dockOpenFileInPreview } =
-    useFileEditors();
+    useFileEditors(detailActive);
 
   // Mobile/Tablet: layout store
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);

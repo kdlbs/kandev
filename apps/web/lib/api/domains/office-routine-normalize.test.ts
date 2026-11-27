@@ -225,6 +225,29 @@ describe("buildCreateRoutineBody", () => {
     });
   });
 
+  // @covers AC-OFFICE-ROUTINE-WIRE-001.2
+  it("serializes an optional trigger with snake_case keys and a trimmed cron expression", () => {
+    const body = buildCreateRoutineBody({
+      name: ROUTINE_NAME,
+      trigger: {
+        kind: "cron",
+        cronExpression: "  0 9 * * *  ",
+        timezone: "Europe/Lisbon",
+      },
+    });
+
+    expect(body.trigger).toEqual({
+      kind: "cron",
+      cron_expression: "0 9 * * *",
+      timezone: "Europe/Lisbon",
+    });
+    expect(body.trigger).not.toHaveProperty("cronExpression");
+  });
+
+  it("omits the trigger when the caller does not supply one", () => {
+    expect(buildCreateRoutineBody({ name: ROUTINE_NAME })).not.toHaveProperty("trigger");
+  });
+
   it("omits concurrency_policy and catch_up_policy when not supplied", () => {
     const body = buildCreateRoutineBody({ name: "n" });
     expect(body).not.toHaveProperty("concurrency_policy");

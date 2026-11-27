@@ -5,19 +5,22 @@ export type JobBucket = "passed" | "in_progress" | "failed";
 /**
  * Bucket a GitLabPipelineJob's status into Passed / In Progress / Failed.
  * Mirrors the backend's pipelineJobBucket (apps/backend/internal/gitlab/models_pipeline_jobs.go):
- * a job with allow_failure=true never buckets as failed, matching GitLab's
- * own pipeline-status rollup.
+ * passed includes skipped jobs, allowed failures and optional manual jobs;
+ * other nonterminal jobs remain in progress even when allowed to fail.
+ * Raw execution status is preserved.
  */
 export function bucketJob(job: GitLabPipelineJob): JobBucket {
   switch (job.status) {
     case "success":
     case "skipped":
       return "passed";
+    case "manual":
+      return job.allow_failure ? "passed" : "in_progress";
     case "failed":
     case "canceled":
       return job.allow_failure ? "passed" : "failed";
     default:
-      // running, pending, created, manual, scheduled, ...
+      // running, pending, created, scheduled, ...
       return "in_progress";
   }
 }

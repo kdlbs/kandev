@@ -33,9 +33,11 @@ type sqliteRepository struct {
 	// OUTSIDE any transaction because a failed statement on PostgreSQL aborts
 	// the whole transaction — the guard must never issue its UPDATE against a
 	// missing table inside a tx.
-	tasksTablePresent          bool
-	taskSessionsTablePresent   bool
-	taskStepTransitionsPresent bool
+	tasksTablePresent           bool
+	taskSessionsTablePresent    bool
+	taskSessionsTaskIDPresent   bool
+	queuedMessagesTaskIDPresent bool
+	taskStepTransitionsPresent  bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -73,6 +75,16 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		return nil, fmt.Errorf("messagequeue: resolve task_sessions table presence: %w", err)
 	}
 	r.taskSessionsTablePresent = present
+	if present {
+		r.taskSessionsTaskIDPresent, err = internaldb.ColumnExists(writer, "task_sessions", "task_id")
+		if err != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task session task id column: %w", err)
+		}
+	}
+	r.queuedMessagesTaskIDPresent, err = internaldb.ColumnExists(writer, "queued_messages", "task_id")
+	if err != nil {
+		return nil, fmt.Errorf("messagequeue: resolve queue task id column: %w", err)
+	}
 	r.taskStepTransitionsPresent, err = r.sharedTablePresent("task_step_transitions")
 	if err != nil {
 		return nil, fmt.Errorf("messagequeue: resolve task step transitions table presence: %w", err)
@@ -239,21 +251,24 @@ func (r *sqliteRepository) validateWorkflowEntryTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	taskID string,
+	sessionID string,
 	entry *WorkflowEntryIdentity,
 ) error {
 	if entry == nil {
 		return nil
 	}
-	if !r.tasksTablePresent || !r.taskStepTransitionsPresent || entry.TransitionID <= 0 {
+	if !r.tasksTablePresent || !r.taskStepTransitionsPresent ||
+		(entry.TransitionID <= 0 && entry.ExpectedTaskResourceVersion == "") {
 		return ErrWorkflowEntryMismatch
 	}
-	query := `SELECT COALESCE(workflow_id, ''), COALESCE(workflow_step_id, '')
+	query := `SELECT COALESCE(workflow_id, ''), COALESCE(workflow_step_id, ''), updated_at
 		FROM tasks WHERE id = ? AND archived_at IS NULL`
 	if r.db.DriverName() == "pgx" {
 		query += ` FOR UPDATE`
 	}
 	var workflowID, workflowStepID string
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), taskID).Scan(&workflowID, &workflowStepID); err != nil {
+	var taskUpdatedAt time.Time
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), taskID).Scan(&workflowID, &workflowStepID, &taskUpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrTaskInactive
 		}
@@ -262,20 +277,76 @@ func (r *sqliteRepository) validateWorkflowEntryTx(
 	if workflowID != entry.WorkflowID || workflowStepID != entry.WorkflowStepID {
 		return ErrWorkflowEntryMismatch
 	}
-	var transitionID int64
-	if err := tx.GetContext(ctx, &transitionID, r.db.Rebind(`
-		SELECT id FROM task_step_transitions
-		WHERE task_id = ?
-		ORDER BY id DESC
-		LIMIT 1
-	`), taskID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	if entry.ExpectedTaskResourceVersion != "" {
+		expected, err := time.Parse(time.RFC3339Nano, entry.ExpectedTaskResourceVersion)
+		if err != nil || !taskUpdatedAt.Equal(expected) {
 			return ErrWorkflowEntryMismatch
 		}
-		return fmt.Errorf("read workflow transition for queue admission: %w", err)
 	}
-	if transitionID != entry.TransitionID {
-		return ErrWorkflowEntryMismatch
+	if entry.EnforceTaskManagementClaim {
+		var ownerKind, installationID, instanceKey string
+		var claimGeneration int64
+		claimErr := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT owner_kind, installation_id, instance_key, generation
+			FROM task_management_claims WHERE task_id = ?
+		`), taskID).Scan(&ownerKind, &installationID, &instanceKey, &claimGeneration)
+		if claimErr != nil && !errors.Is(claimErr, sql.ErrNoRows) {
+			return fmt.Errorf("read task management claim during queue admission: %w", claimErr)
+		}
+		if errors.Is(claimErr, sql.ErrNoRows) &&
+			(entry.ManagementInstallationID != "" || entry.ManagementInstanceKey != "" || entry.ExpectedClaimGeneration != 0) {
+			return ErrTaskManagementClaimChanged
+		}
+		if claimErr == nil && ownerKind != "" &&
+			(ownerKind != "plugin" || entry.ManagementInstallationID != installationID || entry.ManagementInstanceKey != instanceKey || entry.ExpectedClaimGeneration != claimGeneration) {
+			return ErrTaskManagementClaimChanged
+		}
+		if claimErr == nil && ownerKind == "" &&
+			(entry.ManagementInstallationID != "" || entry.ManagementInstanceKey != "" || entry.ExpectedClaimGeneration != claimGeneration) {
+			return ErrTaskManagementClaimChanged
+		}
+	}
+	if entry.ExpectedSessionResourceVersion != "" {
+		sessionQuery := `SELECT updated_at FROM task_sessions WHERE id = ? AND task_id = ?`
+		if r.db.DriverName() == postgresDriverName {
+			sessionQuery += ` FOR UPDATE`
+		}
+		var sessionUpdatedAt time.Time
+		if err := tx.QueryRowxContext(ctx, r.db.Rebind(sessionQuery), sessionID, taskID).Scan(&sessionUpdatedAt); err != nil {
+			return ErrWorkflowEntryMismatch
+		}
+		expected, err := time.Parse(time.RFC3339Nano, entry.ExpectedSessionResourceVersion)
+		if err != nil || !sessionUpdatedAt.Equal(expected) {
+			return ErrWorkflowEntryMismatch
+		}
+	}
+	if entry.RejectPendingMove {
+		var pending bool
+		if err := tx.GetContext(ctx, &pending, r.db.Rebind(`
+			SELECT EXISTS (SELECT 1 FROM pending_moves WHERE task_id = ? AND session_id = ?)
+		`), taskID, sessionID); err != nil {
+			return fmt.Errorf("check pending workflow transition: %w", err)
+		}
+		if pending {
+			return ErrWorkflowEntryMismatch
+		}
+	}
+	if entry.TransitionID > 0 {
+		var transitionID int64
+		if err := tx.GetContext(ctx, &transitionID, r.db.Rebind(`
+			SELECT id FROM task_step_transitions
+			WHERE task_id = ?
+			ORDER BY id DESC
+			LIMIT 1
+		`), taskID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrWorkflowEntryMismatch
+			}
+			return fmt.Errorf("read workflow transition for queue admission: %w", err)
+		}
+		if transitionID != entry.TransitionID {
+			return ErrWorkflowEntryMismatch
+		}
 	}
 	generation, err := getLifecycleGenerationTx(ctx, tx, r.db, taskID)
 	if err != nil {
@@ -287,6 +358,69 @@ func (r *sqliteRepository) validateWorkflowEntryTx(
 	return nil
 }
 
+func persistTaskManagementFenceTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	queueID, taskID string,
+	entry WorkflowEntryIdentity,
+) error {
+	if !entry.EnforceTaskManagementClaim {
+		return nil
+	}
+	if queueID == "" || taskID == "" || entry.ExpectedClaimGeneration < 0 ||
+		(entry.ManagementInstallationID == "") != (entry.ManagementInstanceKey == "") {
+		return ErrTaskManagementClaimChanged
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		INSERT INTO queue_task_management_fences (queue_id, task_id, installation_id, instance_key, generation)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(queue_id) DO UPDATE SET
+			task_id = excluded.task_id,
+			installation_id = excluded.installation_id,
+			instance_key = excluded.instance_key,
+			generation = excluded.generation
+	`), queueID, taskID, entry.ManagementInstallationID, entry.ManagementInstanceKey, entry.ExpectedClaimGeneration); err != nil {
+		return fmt.Errorf("persist queue task management fence: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) taskManagementFenceIsStaleTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	queueID, taskID string,
+) (bool, error) {
+	var installationID, instanceKey string
+	var expectedGeneration int64
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT installation_id, instance_key, generation
+		FROM queue_task_management_fences WHERE queue_id = ? AND task_id = ?
+	`), queueID, taskID).Scan(&installationID, &instanceKey, &expectedGeneration)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read queue task management fence: %w", err)
+	}
+	var ownerKind, currentInstallation, currentInstance string
+	var currentGeneration int64
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT owner_kind, installation_id, instance_key, generation
+		FROM task_management_claims WHERE task_id = ?
+	`), taskID).Scan(&ownerKind, &currentInstallation, &currentInstance, &currentGeneration)
+	if errors.Is(err, sql.ErrNoRows) {
+		return installationID != "" || instanceKey != "" || expectedGeneration != 0, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read current task management claim for queued message: %w", err)
+	}
+	if ownerKind == "plugin" {
+		return installationID != currentInstallation || instanceKey != currentInstance || expectedGeneration != currentGeneration, nil
+	}
+	return ownerKind != "" || installationID != "" || instanceKey != "" || expectedGeneration != currentGeneration, nil
+}
+
 // guardSessionTx verifies that the owning task session still exists. The
 // session lock acquired before this call already rejects active transfers.
 func (r *sqliteRepository) guardSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
@@ -294,7 +428,7 @@ func (r *sqliteRepository) guardSessionTx(ctx context.Context, tx *sqlx.Tx, sess
 }
 
 func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
-	if !r.tasksTablePresent || !r.taskSessionsTablePresent {
+	if !r.tasksTablePresent || !r.taskSessionsTablePresent || !r.taskSessionsTaskIDPresent {
 		return nil
 	}
 	query := `SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ?`
@@ -502,7 +636,15 @@ func (r *sqliteRepository) initSchema() error {
 		queued_at        TIMESTAMP NOT NULL,
 		queued_by        TEXT NOT NULL DEFAULT ''
 	);
-	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_position ON queued_messages(session_id, position);
+	CREATE TABLE IF NOT EXISTS queue_task_management_fences (
+		queue_id TEXT PRIMARY KEY REFERENCES queued_messages(id) ON DELETE CASCADE,
+		task_id TEXT NOT NULL,
+		installation_id TEXT NOT NULL DEFAULT '',
+		instance_key TEXT NOT NULL DEFAULT '',
+		generation BIGINT NOT NULL DEFAULT 0
+	);
+	DROP INDEX IF EXISTS idx_queued_messages_session_position;
+	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_order ON queued_messages(session_id, position, id);
 	CREATE INDEX IF NOT EXISTS idx_queued_messages_task_activity ON queued_messages(task_id, queued_by, queued_at);
 
 	CREATE TABLE IF NOT EXISTS lifecycle_queue_generations (
@@ -518,6 +660,8 @@ func (r *sqliteRepository) initSchema() error {
 		task_id          TEXT NOT NULL DEFAULT '',
 		workflow_id      TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
+		from_step_id     TEXT NOT NULL DEFAULT '',
+		from_transition_id BIGINT NOT NULL DEFAULT 0,
 		step_position    INTEGER NOT NULL DEFAULT 0,
 		queued_at        TIMESTAMP NOT NULL,
 		actor            TEXT NOT NULL DEFAULT '',
@@ -544,12 +688,25 @@ func (r *sqliteRepository) initSchema() error {
 		status_generation     BIGINT NOT NULL DEFAULT 0,
 		next_position         BIGINT NOT NULL DEFAULT 0
 	);
+
+	-- One durable handoff per session. reserveHeadTx decodes claim_json to
+	-- keep FIFO from taking a row an open Send Now claim still owns.
+	CREATE TABLE IF NOT EXISTS queue_send_now_claims (
+		session_id  TEXT PRIMARY KEY,
+		claim_id    TEXT NOT NULL,
+		claim_json  TEXT NOT NULL,
+		accepted    INTEGER NOT NULL DEFAULT 0,
+		created_at  TIMESTAMP NOT NULL
+	);
 	`)
 	if err != nil {
 		return err
 	}
 	if _, err := r.db.Exec(queueAdmissionReceiptSchema); err != nil {
 		return fmt.Errorf("create queue admission receipts: %w", err)
+	}
+	if err := initManagedInputSchema(r.db); err != nil {
+		return err
 	}
 	// Existing installations may have the pre-audit shape; fresh installs
 	// already get both audit columns from CREATE TABLE above, so these replay
@@ -567,6 +724,12 @@ func (r *sqliteRepository) initSchema() error {
 		return alterErr
 	}
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_step_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_transition_id BIGINT NOT NULL DEFAULT 0`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	for _, migration := range []struct {
@@ -667,7 +830,7 @@ func (r *sqliteRepository) InsertForSessionWithPolicy(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -682,7 +845,7 @@ func (r *sqliteRepository) InsertForSessionWithWorkflowEntry(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
@@ -696,7 +859,7 @@ func (r *sqliteRepository) insert(
 	msg *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
@@ -707,7 +870,7 @@ func (r *sqliteRepository) insert(
 	if err := r.guardActiveTaskTx(ctx, tx, msg.TaskID); err != nil {
 		return err
 	}
-	if err := r.validateWorkflowEntryTx(ctx, tx, msg.TaskID, workflowEntry); err != nil {
+	if err := r.validateWorkflowEntryTx(ctx, tx, msg.TaskID, msg.SessionID, workflowEntry); err != nil {
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
@@ -761,6 +924,11 @@ func (r *sqliteRepository) insert(
 	); err != nil {
 		return fmt.Errorf("insert queued_messages: %w", err)
 	}
+	if workflowEntry != nil {
+		if err := persistTaskManagementFenceTx(ctx, tx, r.db, msg.ID, msg.TaskID, *workflowEntry); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -768,7 +936,7 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	identity *QueueSessionIdentity,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) error {
 	if identity == nil || policy == nil {
 		return nil
@@ -781,7 +949,7 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 		WHERE session_id = ? AND session_incarnation_id = ?
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		if policy.Source == AutoMergeSourceGlobal {
+		if policy.AutoMerge.Source == AutoMergeSourceGlobal {
 			return nil
 		}
 		return ErrAutoMergePolicyChanged
@@ -789,13 +957,13 @@ func (r *sqliteRepository) validateAutoMergePolicyTx(
 	if err != nil {
 		return fmt.Errorf("validate queue Auto-merge policy: %w", err)
 	}
-	switch policy.Source {
+	switch policy.AutoMerge.Source {
 	case AutoMergeSourceGlobal:
 		if enabled.Valid {
 			return ErrAutoMergePolicyChanged
 		}
 	case AutoMergeSourceSession:
-		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.Enabled)) || revision != policy.Revision {
+		if !enabled.Valid || enabled.Int64 != int64(boolToInt(policy.AutoMerge.Enabled)) || revision != policy.AutoMerge.Revision {
 			return ErrAutoMergePolicyChanged
 		}
 	default:
@@ -1856,6 +2024,13 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return ErrSessionIdentityMismatch
 	}
+	available, err := sessionQueueSchemaAvailable(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return nil
+	}
 	if err := lockSessionTxIn(ctx, tx, db, identity.SessionID); err != nil {
 		return err
 	}
@@ -1864,7 +2039,7 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if db.DriverName() == "pgx" {
 		query += postgresForUpdateSuffix
 	}
-	err := tx.GetContext(ctx, &incarnationID, db.Rebind(query), identity.SessionID, identity.TaskID)
+	err = tx.GetContext(ctx, &incarnationID, db.Rebind(query), identity.SessionID, identity.TaskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrSessionIdentityMismatch
 	}
@@ -1990,14 +2165,12 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 // caller must hold the session lock and must commit the surrounding
 // transaction after this function returns successfully.
 func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) (int, error) {
-	for _, table := range []string{"queued_messages", "queue_session_locks"} {
-		present, err := internaldb.TableExists(tx, table)
-		if err != nil {
-			return 0, fmt.Errorf("check %s table: %w", table, err)
-		}
-		if !present {
-			return 0, nil
-		}
+	available, err := sessionQueueSchemaAvailable(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if !available {
+		return 0, nil
 	}
 
 	if err := ensureTaskPurgeRecoverySchemas(ctx, tx); err != nil {
@@ -2053,6 +2226,19 @@ func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, se
 		return 0, fmt.Errorf("purge session dispatch claims: %w", err)
 	}
 	return int(removed), nil
+}
+
+func sessionQueueSchemaAvailable(ctx context.Context, tx *sqlx.Tx) (bool, error) {
+	for _, table := range []string{"queued_messages", "queue_session_locks"} {
+		present, err := internaldb.TableExistsContext(ctx, tx, table)
+		if err != nil {
+			return false, fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // replaceCoalesced overwrites the existing coalesced row with msg inside the transaction.
@@ -2208,7 +2394,7 @@ func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued: %w", err)
@@ -2277,12 +2463,7 @@ func (r *sqliteRepository) Snapshot(
 	`), identity.SessionID, identity.SessionIncarnationID).Scan(&enabled, &revision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		snapshot.AutoMergeError = fmt.Errorf("get queue snapshot Auto-merge override: %w", err)
-		if commitErr := tx.Commit(); commitErr != nil {
-			return RepositorySnapshot{}, commitErr
-		}
-		return snapshot, nil
-	}
-	if err == nil && enabled.Valid {
+	} else if err == nil && enabled.Valid {
 		snapshot.AutoMergeOverride = &AutoMergeOverride{
 			Enabled: enabled.Int64 != 0, Revision: revision,
 		}
@@ -2337,17 +2518,19 @@ func (r *sqliteRepository) nextStatusGenerationTx(
 func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (*PendingMove, error) {
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -2361,8 +2544,10 @@ func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, se
 	}
 	return &PendingMove{
 		MoveID: moveID, SessionIncarnationID: sessionIncarnationID, TaskID: taskID,
-		WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position,
-		QueuedAt: queuedAt, Actor: actor, SenderSessionID: senderSessionID,
+		WorkflowID: workflowID, WorkflowStepID: workflowStepID, FromStepID: fromStepID,
+		FromTransitionID: fromTransitionID,
+		Position:         position,
+		QueuedAt:         queuedAt, Actor: actor, SenderSessionID: senderSessionID,
 		EntryOptions: entryOptions,
 	}, nil
 }
@@ -2377,7 +2562,7 @@ func (r *sqliteRepository) listBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		  FROM queued_messages
 		 WHERE session_id = ?
-		 ORDER BY position ASC
+		 ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued snapshot: %w", err)
@@ -2402,7 +2587,7 @@ func (r *sqliteRepository) ListDurableLifecycleEntries(ctx context.Context) ([]Q
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable lifecycle queued: %w", err)
@@ -2442,14 +2627,14 @@ func (r *sqliteRepository) FindByID(ctx context.Context, entryID string) (*Queue
 	return message, nil
 }
 
-// ListDurableDeliveryEntries returns every retained lifecycle or plan-comment
-// receipt across sessions.
+// ListDurableDeliveryEntries returns every retained managed-input, lifecycle,
+// or plan-comment receipt across sessions.
 func (r *sqliteRepository) ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		ORDER BY session_id ASC, position ASC
+		ORDER BY session_id ASC, position ASC, id ASC
 	`))
 	if err != nil {
 		return nil, fmt.Errorf("list durable delivery queued: %w", err)
@@ -2552,6 +2737,8 @@ func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []
 }
 
 // TakeHead atomically returns and deletes the lowest-position entry for the session.
+//
+//nolint:nestif // Queue ownership and head advancement must remain in one transaction.
 func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	// Share the per-session lock with MergeIntoAbove so a drain and a merge on
 	// the same queue are serialized in-process, not just at the DB layer.
@@ -2566,24 +2753,61 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 		return nil, fmt.Errorf("begin take tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if r.taskSessionsTablePresent && r.taskSessionsTaskIDPresent {
+		var taskID string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID); err == nil {
+			if err := r.guardActiveTaskTx(ctx, tx, taskID); err != nil {
+				return nil, err
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("resolve task before queue take: %w", err)
+		}
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
-
-	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+	if r.taskSessionsTablePresent && r.taskSessionsTaskIDPresent {
+		var taskID string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID); err == nil {
+			if err := r.guardSessionTx(ctx, tx, sessionID, taskID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var msg *QueuedMessage
+	discardedStaleManagerEntry := false
+	for {
+		row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 		LIMIT 1
-	`), sessionID)
-	msg, err := scanQueuedRow(row)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+		`), sessionID)
+		msg, err = scanQueuedRow(row)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				if discardedStaleManagerEntry {
+					if err := tx.Commit(); err != nil {
+						return nil, err
+					}
+				}
+				return nil, nil
+			}
+			return nil, fmt.Errorf("take head: %w", err)
 		}
-		return nil, fmt.Errorf("take head: %w", err)
+		staleFence, err := r.taskManagementFenceIsStaleTx(ctx, tx, msg.ID, msg.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if !staleFence {
+			break
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), msg.ID, sessionID); err != nil {
+			return nil, fmt.Errorf("discard stale manager queue entry: %w", err)
+		}
+		discardedStaleManagerEntry = true
 	}
 	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, msg.ID)
 	if err != nil {
@@ -2623,7 +2847,7 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	return msg, nil
 }
 
-// ReserveHead returns the lowest-position entry, deleting ordinary rows and reserving durable lifecycle rows.
+// ReserveHead returns the lowest-position entry, deleting ordinary rows and retaining durable deliveries.
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	msg, _, err := r.reserveHead(ctx, nil, sessionID, false, false)
 	return msg, err
@@ -2712,58 +2936,6 @@ func (r *sqliteRepository) GetAutoMergeOverride(
 		return nil, nil
 	}
 	return &AutoMergeOverride{Enabled: enabled.Int64 != 0, Revision: revision}, nil
-}
-
-func (r *sqliteRepository) SetAutoMergeOverride(
-	ctx context.Context,
-	identity QueueSessionIdentity,
-	enabled bool,
-) (AutoMergeOverride, error) {
-	unlock := r.withSessionLock(identity.SessionID)
-	defer unlock()
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("begin set Auto-merge override: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := r.guardActiveTaskTx(ctx, tx, identity.TaskID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.lockSessionTx(ctx, tx, identity.SessionID); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if err := r.validateSessionIdentityTx(ctx, tx, identity); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO queue_session_state (
-			session_id, session_incarnation_id, auto_merge_override, auto_merge_revision
-		) VALUES (?, ?, ?, 1)
-		ON CONFLICT(session_id) DO UPDATE SET
-			session_incarnation_id = excluded.session_incarnation_id,
-			auto_merge_override = excluded.auto_merge_override,
-			auto_merge_revision = queue_session_state.auto_merge_revision + 1
-		WHERE queue_session_state.session_incarnation_id = ''
-		   OR queue_session_state.session_incarnation_id = excluded.session_incarnation_id
-	`), identity.SessionID, identity.SessionIncarnationID, boolToInt(enabled)); err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("set queue Auto-merge override: %w", err)
-	}
-	var result AutoMergeOverride
-	var storedEnabled int
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT auto_merge_override, auto_merge_revision
-		  FROM queue_session_state
-		 WHERE session_id = ? AND session_incarnation_id = ?
-	`), identity.SessionID, identity.SessionIncarnationID).Scan(&storedEnabled, &result.Revision); errors.Is(err, sql.ErrNoRows) {
-		return AutoMergeOverride{}, ErrSessionIdentityMismatch
-	} else if err != nil {
-		return AutoMergeOverride{}, fmt.Errorf("read written queue Auto-merge override: %w", err)
-	}
-	result.Enabled = storedEnabled != 0
-	if err := tx.Commit(); err != nil {
-		return AutoMergeOverride{}, err
-	}
-	return result, nil
 }
 
 // PauseAutoRunIfPending persists OFF only when a visible pending row exists.
@@ -2997,6 +3169,18 @@ func (r *sqliteRepository) reserveHead(
 	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
 		return nil, true, err
 	}
+	if identity == nil && r.taskSessionsTablePresent && r.taskSessionsTaskIDPresent {
+		var taskID string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, true, fmt.Errorf("resolve task before queue reservation: %w", err)
+		}
+		if err == nil {
+			if err := r.guardActiveTaskTx(ctx, tx, taskID); err != nil {
+				return nil, true, err
+			}
+		}
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, true, err
 	}
@@ -3030,7 +3214,7 @@ func (r *sqliteRepository) reserveHeadTx(
 			       attachments_json, metadata_json, queued_at, queued_by
 			FROM queued_messages
 			WHERE session_id = ?
-			ORDER BY position ASC
+			ORDER BY position ASC, id ASC
 			LIMIT 1
 		`), sessionID)
 		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
@@ -3045,7 +3229,34 @@ func (r *sqliteRepository) reserveHeadTx(
 		if err != nil {
 			return nil, true, fmt.Errorf("reserve head: %w", err)
 		}
+		staleFence, err := r.taskManagementFenceIsStaleTx(ctx, tx, msg.ID, msg.TaskID)
+		if err != nil {
+			return nil, true, err
+		}
+		if staleFence {
+			deleted, err := tx.ExecContext(ctx, r.db.Rebind(`
+				DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?
+			`), msg.ID, msg.SessionID, storedMetadataJSON)
+			if err != nil {
+				return nil, true, fmt.Errorf("discard stale manager queue entry: %w", err)
+			}
+			if affected, err := deleted.RowsAffected(); err != nil || affected != 1 {
+				if err != nil {
+					return nil, true, err
+				}
+				return nil, true, ErrQueueChanged
+			}
+			discardedStaleReservation = true
+			continue
+		}
 		if hasLivePlanCommentReservation(msg, identity, time.Now()) {
+			return nil, true, commitReservationDiscardIfNeeded(tx, discardedStaleReservation)
+		}
+		claimOwned, err := r.sendNowClaimOwnsEntryTx(ctx, tx, sessionID, msg.ID)
+		if err != nil {
+			return nil, true, err
+		}
+		if claimOwned {
 			return nil, true, commitReservationDiscardIfNeeded(tx, discardedStaleReservation)
 		}
 		discarded, err := r.discardStaleReservationHead(
@@ -3113,7 +3324,7 @@ func (r *sqliteRepository) discardStaleReservationHead(
 	msg *QueuedMessage,
 	storedMetadataJSON string,
 ) (bool, error) {
-	if msg.IsDeliveryAttempted() {
+	if msg.IsDeliveryAttempted() && !isManagedInputQueueEntry(msg) {
 		result, err := tx.ExecContext(ctx, r.db.Rebind(`
 			DELETE FROM queued_messages
 			WHERE id = ? AND session_id = ? AND metadata_json = ?
@@ -3442,7 +3653,8 @@ func (r *sqliteRepository) MarkDeliveryAttemptedForSession(
 
 func validateDeliveryAttemptCandidate(candidate *QueuedMessage, identity QueueSessionIdentity) error {
 	if candidate == nil || candidate.ID == "" || candidate.SessionID != identity.SessionID ||
-		candidate.TaskID != identity.TaskID || !candidate.IsDurablePlanComment() {
+		candidate.TaskID != identity.TaskID ||
+		(!candidate.IsDurablePlanComment() && !isManagedInputQueueEntry(candidate)) {
 		return ErrEntryNotFound
 	}
 	return nil
@@ -3661,11 +3873,29 @@ func (r *sqliteRepository) takeByID(
 		return nil, fmt.Errorf("begin take tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var taskID string
+	if identity != nil {
+		taskID = identity.TaskID
+	} else if r.tasksTablePresent && r.queuedMessagesTaskIDPresent {
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM queued_messages WHERE id = ? AND session_id = ?`), entryID, sessionID).Scan(&taskID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("resolve task before queue take by id: %w", err)
+		}
+	}
+	if taskID != "" {
+		if err := r.guardActiveTaskTx(ctx, tx, taskID); err != nil {
+			return nil, err
+		}
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
 	if err := r.validateOptionalSessionIdentityTx(ctx, tx, identity); err != nil {
 		return nil, err
+	}
+	if taskID != "" {
+		if err := r.guardSessionTx(ctx, tx, sessionID, taskID); err != nil {
+			return nil, err
+		}
 	}
 
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -3680,6 +3910,19 @@ func (r *sqliteRepository) takeByID(
 			return nil, nil
 		}
 		return nil, fmt.Errorf("take by id: %w", err)
+	}
+	staleFence, err := r.taskManagementFenceIsStaleTx(ctx, tx, msg.ID, msg.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if staleFence {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE id = ? AND session_id = ?`), msg.ID, sessionID); err != nil {
+			return nil, fmt.Errorf("discard stale manager queue entry: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, nil
 	}
 	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
 	if err != nil {
@@ -3818,6 +4061,7 @@ func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSess
 		SourceGenerations: generations,
 		SessionGeneration: sessionGeneration,
 	}
+	claim.setDeliverySubmission(DeliveryProtocolPending, "send-now:"+claim.ClaimID, "")
 
 	if err := r.applySQLiteSendNowClaim(ctx, tx, identity, sessionID, sources, storedByID); err != nil {
 		return nil, err
@@ -4103,7 +4347,7 @@ func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list stored send-now entries: %w", err)
@@ -4652,7 +4896,7 @@ func (r *sqliteRepository) mergeIntoAbove(ctx context.Context, identity *QueueSe
 		return nil, err
 	}
 
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position, source.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -4707,7 +4951,7 @@ func (r *sqliteRepository) AutoMergeIntoAboveForSessionWithPolicy(
 	ctx context.Context,
 	identity QueueSessionIdentity,
 	sourceID string,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	return r.autoMergeIntoAbove(ctx, &identity, identity.SessionID, sourceID, &policy)
 }
@@ -4716,7 +4960,7 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
 	sessionID, sourceID string,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
@@ -4746,25 +4990,19 @@ func (r *sqliteRepository) autoMergeIntoAbove(
 	if err != nil {
 		return nil, false, err
 	}
-	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
-	if errors.Is(err, ErrNoMergeTarget) {
-		return source, false, nil
-	}
+	target, values, err := r.readAutoFoldTargetTx(ctx, tx, source, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	values, compatible := buildAutoMergedEntry(target, source)
-	if !compatible {
+	if values == nil {
 		return source, false, nil
 	}
-	for _, entryID := range []string{source.ID, target.ID} {
-		blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, entryID)
-		if err != nil {
-			return nil, false, err
-		}
-		if blocked {
-			return nil, false, ErrEditConflict
-		}
+	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, sessionID, source.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if blocked {
+		return nil, false, ErrEditConflict
 	}
 	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
 		if errors.Is(err, ErrEntryNotFound) {
@@ -4813,7 +5051,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy AutoMergePolicy,
+	policy AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -4827,7 +5065,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntr
 	entry WorkflowEntryIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 ) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
@@ -4841,7 +5079,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	identity *QueueSessionIdentity,
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
+	policy *AdmissionPolicy,
 	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
@@ -4860,7 +5098,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	if err := r.guardActiveTaskTx(ctx, tx, candidate.TaskID); err != nil {
 		return nil, false, err
 	}
-	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, workflowEntry); err != nil {
+	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, candidate.SessionID, workflowEntry); err != nil {
 		return nil, false, err
 	}
 	if err := r.lockSessionTx(ctx, tx, candidate.SessionID); err != nil {
@@ -4876,30 +5114,15 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 		return nil, false, err
 	}
 
-	target, storedContent, storedAttachmentsJSON, storedMetadataJSON, err := r.scanTailWithRawJSON(ctx, tx, candidate.SessionID)
+	fold, err := r.readCandidateFoldTx(ctx, tx, candidate, policy)
 	if err != nil {
 		return nil, false, err
 	}
-	if target == nil {
+	if fold == nil {
 		return nil, false, nil
 	}
-	// The tail scan already captured the exact stored bytes for the
-	// compare-and-swap below. The CAS compares raw storage bytes, not
-	// re-marshalled structs: metadata values round-trip through JSON as maps
-	// whose key order differs from the struct field order used at write time,
-	// so re-marshalling would never match. Comparing the raw strings keeps the
-	// guard exact.
-	values, compatible := buildAutoMergedEntry(target, candidate)
-	if !compatible {
-		return nil, false, nil
-	}
-	blocked, err := r.editLeaseBlocksEntryTx(ctx, tx, candidate.SessionID, target.ID)
-	if err != nil {
-		return nil, false, err
-	}
-	if blocked {
-		return nil, false, ErrEditConflict
-	}
+	target, values := fold.target, fold.values
+	storedContent, storedAttachmentsJSON, storedMetadataJSON := fold.rawContent, fold.rawAttachments, fold.rawMetadata
 	if err := claimOptionalMessageAttachmentsTx(
 		ctx, tx, identity, claim, candidate.TaskID, candidate.SessionID,
 	); err != nil {
@@ -4968,7 +5191,7 @@ func (r *sqliteRepository) readReorderEntriesTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("read reorder rows: %w", err)
@@ -5111,15 +5334,17 @@ func readMergeSource(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sess
 
 // readMergeTarget loads the entry with the greatest position strictly below
 // the source, mapping a missing row to ErrNoMergeTarget.
-func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64) (*QueuedMessage, error) {
+// readMergeTarget reads the row directly above (sourcePosition, sourceID) in
+// the queue's total (position, id) order; positions alone can tie.
+func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64, sourceID string) (*QueuedMessage, error) {
 	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
-		WHERE session_id = ? AND position < ?
-		ORDER BY position DESC
+		WHERE session_id = ? AND (position, id) < (?, ?)
+		ORDER BY position DESC, id DESC
 		LIMIT 1
-	`), sessionID, sourcePosition)
+	`), sessionID, sourcePosition, sourceID)
 	target, err := scanQueuedRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -5287,7 +5512,7 @@ func listQueuedMessagesBySessionTx(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list retained queue entries: %w", err)
@@ -5478,7 +5703,7 @@ func cancellationCandidates(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list queued cancellation candidates: %w", err)
@@ -6149,13 +6374,13 @@ func (r *sqliteRepository) restorePendingMoveTx(
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		uuid.New().String(), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
-		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID,
-		pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
+		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID, pendingMove.FromStepID,
+		pendingMove.FromTransitionID, pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
 		marshalEntryOptions(pendingMove.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("restore pending move: %w", err)
@@ -6283,14 +6508,16 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			task_id = excluded.task_id,
 			session_incarnation_id = excluded.session_incarnation_id,
 			workflow_id = excluded.workflow_id,
 			workflow_step_id = excluded.workflow_step_id,
+			from_step_id = excluded.from_step_id,
+			from_transition_id = excluded.from_transition_id,
 			step_position = excluded.step_position,
 			queued_at = excluded.queued_at,
 			actor = excluded.actor,
@@ -6299,7 +6526,7 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 			entry_options_json = excluded.entry_options_json
 	`),
 		uuid.New().String(), move.MoveID, move.SessionIncarnationID, sessionID, move.TaskID,
-		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor,
+		move.WorkflowID, move.WorkflowStepID, move.FromStepID, move.FromTransitionID, move.Position, move.QueuedAt, move.Actor,
 		move.SenderSessionID, marshalEntryOptions(move.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("upsert pending move: %w", err)
@@ -6311,17 +6538,19 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6338,6 +6567,8 @@ func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string)
 		TaskID:               taskID,
 		WorkflowID:           workflowID,
 		WorkflowStepID:       workflowStepID,
+		FromStepID:           fromStepID,
+		FromTransitionID:     fromTransitionID,
 		Position:             position,
 		QueuedAt:             queuedAt,
 		Actor:                actor,
@@ -6361,17 +6592,19 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 
 	var (
 		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		fromStepID                                                       string
+		fromTransitionID                                                 int64
 		position                                                         int
 		queuedAt                                                         time.Time
 		actor, senderSessionID, optionsJSON                              string
 	)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		       from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
 		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6394,6 +6627,8 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 		TaskID:               taskID,
 		WorkflowID:           workflowID,
 		WorkflowStepID:       workflowStepID,
+		FromStepID:           fromStepID,
+		FromTransitionID:     fromTransitionID,
 		Position:             position,
 		QueuedAt:             queuedAt,
 		Actor:                actor,
@@ -6410,7 +6645,7 @@ func (r *sqliteRepository) scanTail(ctx context.Context, tx *sqlx.Tx, sessionID 
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, err := scanQueuedRow(row)
@@ -6435,7 +6670,7 @@ func (r *sqliteRepository) scanTailWithRawJSON(ctx context.Context, tx *sqlx.Tx,
 		       content, attachments_json, metadata_json
 		FROM queued_messages
 		WHERE session_id = ?
-		ORDER BY position DESC
+		ORDER BY position DESC, id DESC
 		LIMIT 1
 	`), sessionID)
 	msg, rawContent, rawAttachments, rawMetadata, err := scanQueuedRowWithRawJSON(row)
@@ -6474,7 +6709,7 @@ func (r *sqliteRepository) findCoalesced(
 		       attachments_json, metadata_json, queued_at, queued_by
 		FROM queued_messages
 		WHERE session_id = ? AND queued_by = ?
-		ORDER BY position ASC
+		ORDER BY position ASC, id ASC
 	`), sessionID, queuedBy)
 	if err != nil {
 		return nil, false, fmt.Errorf("scan coalesced queued: %w", err)

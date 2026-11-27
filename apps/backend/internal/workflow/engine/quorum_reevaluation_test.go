@@ -563,9 +563,8 @@ func (s *sessionScopedStateStore) MarkOperationApplied(_ context.Context, op str
 
 // TestEvaluateStepQuorum_InsensitiveToWhichLiveSessionIsNewest pins the
 // invariant that lets engine_dispatcher's resolveLatestSessionID stay
-// task-scoped ("the task's most recent session, any state") once
-// features.officeSessionIdentity gives each participant agent its own
-// session per task and a task therefore has SEVERAL live sessions.
+// task-scoped ("the task's most recent session, any state") when a task has
+// several live participant sessions.
 //
 // Today EvaluateStepQuorum's guard evaluation reads TaskID, CurrentStepID
 // and WorkflowID off the loaded MachineState, all task-derived, so which

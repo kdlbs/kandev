@@ -122,7 +122,37 @@ beforeEach(() => {
   };
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+// @covers AC-PLUGINS-PLUGIN-SHORTCUT-SETTINGS-001.5
+it("direct conflict labels name only accepted peers across the Mod bridge", () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  const mod = plugin({
+    ui: { keybindings: [{ id: "open-panel", default: "mod+q", description: "Open" }] },
+  });
+  const ctrl = plugin({
+    id: "ctrl",
+    display_name: "Ctrl Plugin",
+    ui: { keybindings: [{ id: "open", default: "ctrl+q", description: "Control" }] },
+  });
+  const meta = plugin({
+    id: "meta",
+    display_name: "Meta Plugin",
+    ui: { keybindings: [{ id: "open", default: "cmd+q", description: "Command" }] },
+  });
+  updateStoreUserSettings({ keyboardShortcuts: {} });
+  const view = renderCard(mod, [mod, ctrl, meta]);
+  expect(
+    screen.getByTitle("Same shortcut as: Ctrl Plugin: Control, Meta Plugin: Command"),
+  ).toBeTruthy();
+
+  rerenderCard(view.rerender, ctrl, [mod, ctrl, meta]);
+  expect(screen.getByTitle("Same shortcut as: Session Cost: Open")).toBeTruthy();
+  expect(screen.queryByTitle(/Same shortcut as:.*Meta Plugin/)).toBeNull();
+});
 
 describe("PluginShortcutsCard", () => {
   it("renders only the selected plugin and keeps other plugin names in conflict labels", () => {
@@ -386,4 +416,13 @@ describe("PluginShortcutsCard reset", () => {
       keyboard_shortcuts: { "plugin:other:keep": { key: "x" } },
     });
   });
+});
+
+it("names conflicts with host integration navigation without moving plugin actions", () => {
+  updateStoreUserSettings({
+    keyboardShortcuts: { "integration:github": { key: "u", modifiers: { ctrlOrCmd: true } } },
+  });
+  renderCard(plugin());
+  expect(screen.getByTitle("Same shortcut as: Open GitHub")).toBeTruthy();
+  expect(screen.queryByTestId("shortcut-recorder-integration:github")).toBeNull();
 });

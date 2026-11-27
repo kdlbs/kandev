@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 import { splitFilesByChangeLayer } from "./git-change-facets";
 
+const MIXED_PATH = "src/mixed.ts";
+
 describe("splitFilesByChangeLayer", () => {
   it("uses independent link metadata for mixed layers", () => {
     const file = {
@@ -18,7 +20,7 @@ describe("splitFilesByChangeLayer", () => {
   });
   it("projects one mixed raw file into staged and unstaged views", () => {
     const mixed = {
-      path: "src/mixed.ts",
+      path: MIXED_PATH,
       status: "modified",
       staged: false,
       additions: 2,
@@ -41,7 +43,7 @@ describe("splitFilesByChangeLayer", () => {
 
     expect(result.stagedFiles).toEqual([
       expect.objectContaining({
-        path: "src/mixed.ts",
+        path: MIXED_PATH,
         staged: true,
         change_layer: "staged",
         additions: 1,
@@ -50,7 +52,7 @@ describe("splitFilesByChangeLayer", () => {
     ]);
     expect(result.unstagedFiles).toEqual([
       expect.objectContaining({
-        path: "src/mixed.ts",
+        path: MIXED_PATH,
         staged: false,
         change_layer: "unstaged",
         additions: 1,
@@ -58,6 +60,37 @@ describe("splitFilesByChangeLayer", () => {
       }),
     ]);
     expect(mixed.diff).toBe("combined");
+  });
+
+  it("preserves stale freshness on separately displayed mixed facets", () => {
+    const mixed = {
+      path: MIXED_PATH,
+      status: "modified",
+      staged: false,
+      diff_state: "pending",
+      staged_change: {
+        status: "modified",
+        additions: 1,
+        diff: "old staged patch",
+        diff_state: "pending",
+        display_stale: true,
+      },
+      unstaged_change: {
+        status: "modified",
+        additions: 2,
+        diff: "old unstaged patch",
+        diff_state: "unavailable",
+        display_stale: true,
+      },
+    } as FileInfo;
+
+    const result = splitFilesByChangeLayer([mixed]);
+
+    expect(result.stagedFiles[0]).toMatchObject({ diff_state: "pending", display_stale: true });
+    expect(result.unstagedFiles[0]).toMatchObject({
+      diff_state: "unavailable",
+      display_stale: true,
+    });
   });
 
   it("keeps legacy files in exactly one section", () => {

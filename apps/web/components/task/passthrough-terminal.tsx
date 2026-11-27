@@ -24,7 +24,6 @@ import {
   useFitAndResize,
 } from "./use-passthrough-terminal";
 import { useTouchScroll } from "./use-touch-scroll";
-import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -38,6 +37,8 @@ import {
   type WorkspaceRestorationResult,
 } from "@/hooks/domains/session/use-workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { isMissingTerminalEnvironment } from "./ws-reconnect";
+import { TerminalJumpToLatest } from "./terminal-jump-to-latest";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -192,12 +193,10 @@ export function shouldGuardPassthroughEscape(
 /**
  * Whether every session sharing this environment has ended.
  *
- * Shell terminals are environment-scoped, but the session handle this component
- * holds is not a proxy for one: `useEnvironmentSessionId` deliberately caches
- * the first session seen for an environment, so once session A ends and session
- * B reuses that environment, the handle still resolves to A. Gating on A's
- * state alone would refuse a shell on a live environment — worse than the loop
- * this exists to stop.
+ * Shell terminals are environment-scoped. The selected conversation is not a
+ * proxy for the whole environment: an ended session can share it with a live
+ * sibling. Gating on the selected session alone would refuse a shell on that
+ * live environment.
  *
  * So refuse only on positive knowledge: sessions for this environment are
  * known, and every one of them is terminal. Anything unknown connects.
@@ -230,9 +229,37 @@ export function computeTerminalPaneState(
   environmentEnded: boolean,
   isConnected: boolean,
   workspaceReady = false,
+  isUnavailable = false,
 ): "connected" | "connecting" | "ended" {
+  if (isUnavailable) return "ended";
   if (mode === "shell" && environmentEnded && !workspaceReady) return "ended";
   return isConnected ? "connected" : "connecting";
+}
+
+function PassthroughJumpToLatest({
+  terminal,
+  mode,
+  paneState,
+  restorationStatus,
+  searchOpen,
+}: {
+  terminal: Terminal | null;
+  mode: "agent" | "shell";
+  paneState: ReturnType<typeof computeTerminalPaneState>;
+  restorationStatus: WorkspaceRestorationResult["status"];
+  searchOpen: boolean;
+}) {
+  return (
+    <TerminalJumpToLatest
+      terminal={terminal}
+      enabled={
+        mode === "shell" &&
+        paneState === "connected" &&
+        (!restorationStatus || restorationStatus === "ready") &&
+        !searchOpen
+      }
+    />
+  );
 }
 
 /** Reads the two store slices `isEnvironmentEnded` needs. */
@@ -257,10 +284,12 @@ type PassthroughConnectionOptions = {
 
 type PassthroughConnectionState = {
   isTerminalReady: boolean;
+  terminal: Terminal | null;
   isConnected: boolean;
+  isUnavailable: boolean;
   onTerminalReady: () => void;
   onConnected: () => void;
-  onDisconnected: () => void;
+  onDisconnected: (event: CloseEvent) => void;
 };
 
 function usePassthroughConnection({
@@ -272,15 +301,19 @@ function usePassthroughConnection({
   wsRef,
 }: PassthroughConnectionOptions): PassthroughConnectionState {
   const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const [terminal, setTerminal] = useState<Terminal | null>(null);
   const onTerminalReady = useCallback(() => {
     setIsTerminalReady(true);
+    setTerminal(xtermRef.current);
     if (xtermRef.current) onXtermReady?.(xtermRef.current);
   }, [onXtermReady, xtermRef]);
 
   // Track which terminal target has an active WebSocket connection. The loading
   // overlay resets on target switches without needing a separate setState effect.
   const [connectedTargetId, setConnectedTargetId] = useState<string | null>(null);
+  const [unavailableTargetId, setUnavailableTargetId] = useState<string | null>(null);
   const isConnected = connectionID != null && connectedTargetId === connectionID;
+  const isUnavailable = connectionID != null && unavailableTargetId === connectionID;
   const passthroughEscapeGuard = useCallback(
     (event: KeyboardEvent) =>
       shouldGuardPassthroughEscape(
@@ -298,12 +331,24 @@ function usePassthroughConnection({
     setConnectedTargetId(connectionID ?? null);
     if (autoFocus) xtermRef.current?.textarea?.focus({ preventScroll: true });
   }, [connectionID, autoFocus, xtermRef]);
-  const onDisconnected = useCallback(() => {
-    const disconnectedTargetId = connectionID ?? null;
-    setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
-  }, [connectionID]);
+  const onDisconnected = useCallback(
+    (event: CloseEvent) => {
+      const disconnectedTargetId = connectionID ?? null;
+      setConnectedTargetId((current) => (current === disconnectedTargetId ? null : current));
+      if (isMissingTerminalEnvironment(event)) setUnavailableTargetId(disconnectedTargetId);
+    },
+    [connectionID],
+  );
 
-  return { isTerminalReady, isConnected, onTerminalReady, onConnected, onDisconnected };
+  return {
+    isTerminalReady,
+    terminal,
+    isConnected,
+    isUnavailable,
+    onTerminalReady,
+    onConnected,
+    onDisconnected,
+  };
 }
 
 type PassthroughEffectsOptions = {
@@ -397,9 +442,9 @@ function usePassthroughEffects({
   useTouchScroll({ terminalRef, xtermRef, enabled: !!enableTouchScroll, isTerminalReady });
   useWebSocketConnection({
     taskId,
-    sessionId,
+    sessionId: mode === "agent" ? sessionId : null,
     environmentId,
-    canConnect,
+    canConnect: canConnect && !connection.isUnavailable,
     isTerminalReady,
     fitAndResize,
     wsBaseUrl,
@@ -428,8 +473,9 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const refs = useTerminalRefs();
   const { terminalRef, xtermRef, wsRef, attachAddonRef } = refs;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const environmentSessionId = useEnvironmentSessionId();
-  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
+  // The shell connection remains environment-scoped, but restoration must
+  // inspect and repair the conversation the user currently selected.
+  const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : storeSessionId;
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
   const workspaceRestoration = useWorkspaceRestoration(
@@ -457,6 +503,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     environmentEnded,
     connection.isConnected,
     workspaceReady,
+    connection.isUnavailable,
   );
   const effectiveProps: PassthroughTerminalProps = {
     ...props,
@@ -488,10 +535,18 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
+      <PassthroughJumpToLatest
+        terminal={connection.terminal}
+        mode={mode}
+        paneState={paneState}
+        restorationStatus={workspaceRestoration.status}
+        searchOpen={search.isOpen}
+      />
       <TerminalPaneOverlay
         paneState={paneState}
         mode={mode}
         workspaceRestoration={workspaceRestoration}
+        isUnavailable={connection.isUnavailable}
       />
     </div>
   );
@@ -505,13 +560,20 @@ function TerminalPaneOverlay({
   paneState,
   mode,
   workspaceRestoration,
+  isUnavailable,
 }: {
   paneState: ReturnType<typeof computeTerminalPaneState>;
   mode: "agent" | "shell";
   workspaceRestoration?: WorkspaceRestorationResult;
+  isUnavailable: boolean;
 }) {
   const { t } = useTranslation();
-  if (mode === "shell" && workspaceRestoration?.status && workspaceRestoration.status !== "ready") {
+  if (
+    !isUnavailable &&
+    mode === "shell" &&
+    workspaceRestoration?.status &&
+    workspaceRestoration.status !== "ready"
+  ) {
     return (
       <div className="absolute inset-0 z-10 bg-background">
         <WorkspaceUnavailable

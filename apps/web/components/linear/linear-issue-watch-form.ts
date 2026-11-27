@@ -4,6 +4,7 @@ import type {
   LinearSearchFilter,
   LinearUser,
 } from "@/lib/types/linear";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { DEFAULT_LINEAR_ISSUE_WATCH_PROMPT } from "./linear-issue-watch-placeholders";
 
 export const ASSIGNED_ANY = "__any__";
@@ -51,9 +52,12 @@ export interface FormState {
   assigned: string;
   priorities: LinearPriority[];
   labelIds: string[];
+  projectIds: string[];
   creatorId: string;
   estimateMin: string;
   estimateMax: string;
+  /** Hold issues until their Linear blockers are completed. */
+  requireBlockersDone: boolean;
   workflowId: string;
   workflowStepId: string;
   /** Optional repository binding; "" = unbound (repo-less task). */
@@ -85,9 +89,11 @@ export function makeEmptyForm(workspaceId: string): FormState {
     assigned: "",
     priorities: [],
     labelIds: [],
+    projectIds: [],
     creatorId: "",
     estimateMin: "",
     estimateMax: "",
+    requireBlockersDone: false,
     workflowId: "",
     workflowStepId: "",
     repositoryId: "",
@@ -99,6 +105,23 @@ export function makeEmptyForm(workspaceId: string): FormState {
     pollInterval: 300,
     maxInflightTasks: "5",
     sortBy: "priority",
+  };
+}
+
+/**
+ * Switches the form to another workspace. Besides the shared workflow and
+ * repository fields, it clears the Linear IDs picked from the previous
+ * workspace's organization (states, labels, projects, creator); the team key
+ * is kept because it is a human-readable key the user can re-check.
+ */
+export function switchWatchWorkspace(prev: FormState, workspaceId: string): FormState {
+  if (prev.workspaceId === workspaceId) return prev;
+  return {
+    ...clearWorkspaceScopedForm(prev, workspaceId),
+    stateIds: [],
+    labelIds: [],
+    projectIds: [],
+    creatorId: "",
   };
 }
 
@@ -116,9 +139,11 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     assigned: f.assigned ?? "",
     priorities: f.priorities ?? [],
     labelIds: f.labelIds ?? [],
+    projectIds: f.projectIds ?? [],
     creatorId: f.creatorId ?? "",
     estimateMin: estimateString(f.estimateMin),
     estimateMax: estimateString(f.estimateMax),
+    requireBlockersDone: f.requireBlockersDone ?? false,
     workflowId: w.workflowId,
     workflowStepId: w.workflowStepId,
     repositoryId: w.repositoryId ?? "",
@@ -224,6 +249,8 @@ export function parseEstimate(raw: string): number | undefined {
   return n;
 }
 
+// requireBlockersDone only holds back issues the other fields match, so it is
+// not counted here.
 export function filterIsEmpty(form: FormState): boolean {
   return (
     form.query.trim() === "" &&
@@ -232,6 +259,7 @@ export function filterIsEmpty(form: FormState): boolean {
     form.stateIds.length === 0 &&
     form.priorities.length === 0 &&
     form.labelIds.length === 0 &&
+    form.projectIds.length === 0 &&
     form.creatorId.trim() === "" &&
     parseEstimate(form.estimateMin) === undefined &&
     parseEstimate(form.estimateMax) === undefined
@@ -246,9 +274,11 @@ export function buildFilterPayload(form: FormState): LinearSearchFilter {
     assigned: form.assigned.trim() || undefined,
     priorities: form.priorities.length > 0 ? form.priorities : undefined,
     labelIds: form.labelIds.length > 0 ? form.labelIds : undefined,
+    projectIds: form.projectIds.length > 0 ? form.projectIds : undefined,
     creatorId: form.creatorId.trim() || undefined,
     estimateMin: parseEstimate(form.estimateMin),
     estimateMax: parseEstimate(form.estimateMax),
+    requireBlockersDone: form.requireBlockersDone || undefined,
   };
 }
 

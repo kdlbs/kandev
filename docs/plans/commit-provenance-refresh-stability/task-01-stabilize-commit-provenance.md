@@ -109,3 +109,20 @@ None.
 - Extended the Chromium task-switch scenario with a failed provider refresh and a pushed-marker check.
 - No public docs change is needed because this correction changes no command, setting, label, or user
   workflow.
+
+
+### Hosted phone timeline observation follow-up, 2026-10-06
+
+Run `37460626206`, shard 8 job `112264886327`, expected the shared pushed
+commit to stay mounted while the provider overlay moved it below older
+unpushed history. The phone fixture now includes sixteen older commits and
+uses the actual timeline scroll owner to reveal both commit targets within
+the same twenty-second budget. It waits for browser layout after scrolling.
+The local-snapshot, pushed-provenance, absence-of-warning, unknown-statistics,
+remote-detail, and viewport-containment assertions remain. No missing
+commit, provider error, or absent provenance is accepted. Production behavior
+and test deadlines are unchanged.
+
+- RED: the long-history fixture failed the original direct shared-row visibility assertion with retries disabled. The first attempted bottom-only navigation also failed the earlier local-snapshot assertion, so the final helper scans the real viewport in bounded steps.
+- GREEN: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-changes-panel.spec.ts -- --retries 0 --trace=retain-on-failure`: all nine cases passed in 1.3 minutes, including the long-history shared-provenance and remote-detail case.
+- Full web ESLint, focused ESLint, web typecheck, catalog/spec lint, and whitespace passed. Hosted verification follows the next pushed head.

@@ -91,7 +91,10 @@ test.describe("New Subtask mixed repository selection on mobile", () => {
       .filter({ hasText: "Mobile Subtask Mixed Local" })
       .dispatchEvent("click");
 
-    await expect(testPage.getByTestId("mobile-repository-sheet-content")).toHaveCount(1);
+    const sheet = testPage.getByTestId("mobile-repository-sheet-content");
+    await expect(sheet).toBeHidden();
+    await dialog.getByTestId("mobile-repository-manager").tap();
+    await expect(sheet).toHaveCount(1);
     await expect(testPage.getByTestId("repo-chip")).toHaveCount(2);
     await expect(testPage.getByTestId("remote-repo-chip")).toHaveCount(1);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile mixed subtask repository sheet");

@@ -221,7 +221,7 @@ through the conversion.
 
 ### Office / Phase-2 triggers
 
-The seven event-driven "office" triggers use the generic action shape
+The seven event-driven "office" triggers and the two PR triggers use the generic action shape
 (`GenericAction`):
 
 | Trigger | Fires when |
@@ -233,6 +233,8 @@ The seven event-driven "office" triggers use the generic action shape
 | `on_heartbeat` | A periodic heartbeat tick. |
 | `on_budget_alert` | A budget threshold is crossed. |
 | `on_agent_error` | The agent errors out. |
+| `on_pr_merged` | Every GitHub pull request linked to the task is merged (PR poller, no agent turn). |
+| `on_pr_closed` | A linked pull request is closed without merging (PR poller, no agent turn). |
 
 Each holds a list of generic actions whose `type` is one of `move_to_next`,
 `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`,
@@ -260,9 +262,9 @@ events:
         step_position: 3
 ```
 
-These seven triggers round-trip through export and import (fixed by
+These nine triggers round-trip through export and import (fixed by
 [#1109](https://github.com/kdlbs/kandev/issues/1109); the portable conversion
-in `export.go` now carries all eleven `StepEvents` fields, not just
+in `export.go` now carries all thirteen `StepEvents` fields, not just
 `on_enter`/`on_turn_start`/`on_turn_complete`/`on_exit`). What still does not
 round-trip is Office step *metadata* with no portable representation:
 `stage_type`, step participants (reviewers/approvers), recorded decisions,

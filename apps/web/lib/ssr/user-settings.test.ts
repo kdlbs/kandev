@@ -1,3 +1,5 @@
+import { mapLatestUserSettingsResponse } from "./user-settings";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
 /* eslint-disable max-lines -- User-settings hydration cases share one contract test file. */
 
 import { describe, it, expect } from "vitest";
@@ -8,6 +10,7 @@ import {
   mapUserSettingsResponse,
   parseChangesPanelLayout,
   parseLastSeenDisplay,
+  parseMessageTimeDisplay,
   parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
@@ -18,6 +21,53 @@ import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings"
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+// @covers AC-UI-NAV-HIERARCHY-004.2, AC-UI-NAV-HIERARCHY-004.6
+it("ignores older preference responses after a newer settings event", () => {
+  const current = { ...createDefaultUserSettings(), revision: 8, sidebarFastActionsEnabled: true };
+  expect(
+    mapLatestUserSettingsResponse(
+      { settings: { revision: 7, sidebar_fast_actions_enabled: false } } as UserSettingsResponse,
+      current,
+    ),
+  ).toBe(current);
+});
+
+it("hydrates sidebar presentation defaults and preserves partial updates", () => {
+  const fresh = createDefaultUserSettings();
+  expect(fresh).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "simple" });
+  const legacy = mapUserSettingsData(
+    Object.assign(
+      {},
+      { sidebar_fast_actions_enabled: true, sidebar_new_task_style: "compact" as const },
+    ),
+    fresh,
+  );
+  expect(legacy).toMatchObject({ sidebarFastActionsEnabled: true, sidebarNewTaskStyle: "compact" });
+  expect(mapUserSettingsData({ app_status_bar_enabled: true }, legacy)).toMatchObject({
+    sidebarFastActionsEnabled: true,
+    sidebarNewTaskStyle: "compact",
+  });
+  expect(
+    mapUserSettingsData(Object.assign({}, { sidebar_fast_actions_enabled: false }), legacy),
+  ).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "compact" });
+});
+
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+it("hydrates legacy state grouping as workflow step without changing sort", () => {
+  const mapped = mapUserSettingsResponse({
+    settings: {
+      user_id: DEFAULT_USER_ID,
+      workspace_id: toWorkspaceId(""),
+      repository_ids: [],
+      tasks_list_group: "state",
+      tasks_list_sort: "title_desc",
+      updated_at: UPDATED_AT,
+    },
+  });
+  expect(mapped.tasksListGroup).toBe("workflow_step");
+  expect(mapped.tasksListSort).toBe("title_desc");
+});
 
 describe("user settings revision ordering", () => {
   it("orders atomic revisions and hydrates the current revision", () => {
@@ -182,6 +232,31 @@ describe("agent-generated task title defaults", () => {
     expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
       false,
     );
+  });
+});
+
+// @covers AC-UI-PROMPT-SUGGEST-001.1
+describe("prompt suggestion preference defaults", () => {
+  it("defaults the switch to disabled", () => {
+    expect(buildCoreFields({}).promptSuggestions).toBe(false);
+  });
+
+  it("maps explicit values", () => {
+    expect(buildCoreFields({ prompt_suggestions: true }).promptSuggestions).toBe(true);
+  });
+});
+
+describe("agent tab close behavior defaults", () => {
+  it("defaults unknown and missing values to delete_session", () => {
+    expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");
+    expect(buildCoreFields({ agent_tab_close_behavior: "hide_panel" }).agentTabCloseBehavior).toBe(
+      "hide_panel",
+    );
+    expect(
+      buildCoreFields({ agent_tab_close_behavior: "unknown" } as unknown as Parameters<
+        typeof buildCoreFields
+      >[0]).agentTabCloseBehavior,
+    ).toBe("delete_session");
   });
 });
 
@@ -395,20 +470,6 @@ describe("buildCoreFields task-create last-used mapping", () => {
   });
 });
 
-describe("Azure DevOps browse preferences", () => {
-  it("maps portable workspace preferences", () => {
-    const preferences = { "workspace-a": { mode: "board", projectId: "project-a" } };
-    const settings = {
-      azure_devops_browse_preferences: preferences,
-    } as unknown as Parameters<typeof buildCoreFields>[0];
-
-    expect(
-      (buildCoreFields(settings) as unknown as { azureDevOpsBrowsePreferences?: unknown })
-        .azureDevOpsBrowsePreferences,
-    ).toEqual(preferences);
-  });
-});
-
 describe("buildTerminalFields via buildCoreFields", () => {
   it("maps terminal_font_size to terminalFontSize", () => {
     const settings = {
@@ -430,25 +491,6 @@ describe("buildTerminalFields via buildCoreFields", () => {
 
     const result = buildCoreFields(settings);
     expect(result.terminalFontSize).toBeNull();
-  });
-});
-
-describe("Azure DevOps browse preference mapping", () => {
-  it("maps saved preferences and leaves them absent without settings", () => {
-    expect(mapUserSettingsResponse(null).azureDevOpsBrowsePreferences).toBeUndefined();
-
-    const preferences = { "project-1": { teamId: "team-1", boardId: "board-1" } };
-    const result = mapUserSettingsResponse({
-      settings: {
-        user_id: DEFAULT_USER_ID,
-        workspace_id: toWorkspaceId(""),
-        repository_ids: [],
-        azure_devops_browse_preferences: preferences,
-        updated_at: UPDATED_AT,
-      },
-    });
-
-    expect(result.azureDevOpsBrowsePreferences).toEqual(preferences);
   });
 });
 
@@ -581,6 +623,7 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      groupIndent: true,
       taskRow: {
         detailsEnabled: true,
         detailOrder: ["relative_time", "repository", "pull_request_number"],
@@ -736,6 +779,26 @@ describe("last seen display hydration", () => {
   });
 });
 
+describe("message time display hydration", () => {
+  it("defaults to relative and normalizes unknown values", () => {
+    expect(createDefaultUserSettings().messageTimeDisplay).toBe("relative");
+    expect(parseMessageTimeDisplay("absolute_short")).toBe("absolute_short");
+    expect(parseMessageTimeDisplay("absolute_long")).toBe("absolute_long");
+    expect(parseMessageTimeDisplay("future")).toBe("relative");
+  });
+
+  it("maps saved values and preserves the current value when omitted", () => {
+    const current = {
+      ...createDefaultUserSettings(),
+      messageTimeDisplay: "absolute_long" as const,
+    };
+    expect(
+      mapUserSettingsData({ message_time_display: "absolute_short" }, current).messageTimeDisplay,
+    ).toBe("absolute_short");
+    expect(mapUserSettingsData({}, current).messageTimeDisplay).toBe("absolute_long");
+  });
+});
+
 describe("auto-hide empty steps preference hydration", () => {
   it("hydrates the canonical workflow-scoped key", () => {
     const mapped = mapUserSettingsData(
@@ -805,4 +868,12 @@ describe("task creation auto-focus preference", () => {
       buildCoreFields({}, { ...createDefaultUserSettings(), autoFocusNewTasks: false }),
     ).toHaveProperty("autoFocusNewTasks", false);
   });
+});
+
+it("defaults Markdown Preview on and preserves explicit false across partial updates", () => {
+  const fresh = createDefaultUserSettings();
+  expect(fresh.markdownPreviewByDefault).toBe(true);
+  const disabled = mapUserSettingsData({ markdown_preview_by_default: false }, fresh);
+  expect(disabled.markdownPreviewByDefault).toBe(false);
+  expect(mapUserSettingsData({}, disabled).markdownPreviewByDefault).toBe(false);
 });

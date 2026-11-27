@@ -1,3 +1,7 @@
+import {
+  readMoveInstructions,
+  setMoveInstructions,
+} from "./workflow-move-instructions-test-helpers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -210,12 +214,13 @@ describe("TaskItemWithContextMenu — grouped single-task actions", () => {
       "Edit",
       "Rename",
       "Duplicate",
+      "Show in graph",
       "Create Subtask",
       "Nest under",
       "Link",
       "Detach from parent",
       "Move to",
-      "Send to workflow",
+      "Change workflow...",
       PLUGIN_ACTION_LABEL,
       "Archive",
       "Delete",
@@ -277,7 +282,7 @@ describe("TaskItemWithContextMenu — grouped bulk actions", () => {
       "Pin 2 tasks",
       "Color",
       "Move to",
-      "Send to workflow",
+      "Change workflow for selected tasks",
       "Archive 2 tasks",
       "Delete 2 tasks",
     ]);
@@ -367,12 +372,12 @@ function stubTouchEvent() {
 }
 
 describe("TaskItemWithContextMenu — pointer containment", () => {
-  it("shows a flag-labelled priority submenu with the current value", async () => {
+  it("shows a ranked-list priority submenu with the current value", async () => {
     renderWithDragHandle({ priority: "high" } as Partial<TaskSwitcherItem>);
     await openContextMenu();
 
     const priority = screen.getByTestId("task-context-priority");
-    expect(priority.querySelector("svg")).not.toBeNull();
+    expect(priority.querySelector("svg.tabler-icon-list-numbers")).not.toBeNull();
     fireEvent.pointerMove(priority, { pointerType: "mouse" });
 
     expect(await screen.findByTestId("task-context-priority-current-high")).not.toBeNull();
@@ -464,7 +469,7 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     await openMoveSubmenu();
 
     const instructions = await screen.findByTestId(INSTRUCTIONS_TEST_ID);
-    fireEvent.change(instructions, { target: { value: "  start review with tests  " } });
+    setMoveInstructions(instructions, "  start review with tests  ");
     fireEvent.click(screen.getByTestId("workflow-move-submit"));
 
     await waitFor(() =>
@@ -487,13 +492,11 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     await openMoveSubmenu();
 
     const instructions = await screen.findByTestId(INSTRUCTIONS_TEST_ID);
-    fireEvent.change(instructions, { target: { value: "  retry review later  " } });
+    setMoveInstructions(instructions, "  retry review later  ");
     fireEvent.click(screen.getByTestId("workflow-move-submit"));
 
     await waitFor(() => expect(workflowMoveMock.move).toHaveBeenCalledOnce());
-    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe(
-      "  retry review later  ",
-    );
+    expect(readMoveInstructions(instructions)).toBe("  retry review later  ");
   });
 
   it("exposes inline move options under a one-task selection step", async () => {
@@ -703,4 +706,18 @@ describe("TaskItemWithContextMenu — touch drag cancellation identifier lifecyc
       vi.unstubAllGlobals();
     }
   });
+});
+
+describe("TaskItemWithContextMenu — pending archive controls", () => {
+  it.each([false, true])(
+    "derives the archive action's busy boundary from this row (pending=%s)",
+    async (isPendingRemoval) => {
+      renderWithDragHandle({ isPendingRemoval });
+      await openContextMenu();
+
+      const archive = screen.getByRole("menuitem", { name: "Archive" });
+      if (isPendingRemoval) expect(archive.getAttribute("data-disabled")).not.toBeNull();
+      else expect(archive.getAttribute("data-disabled")).toBeNull();
+    },
+  );
 });

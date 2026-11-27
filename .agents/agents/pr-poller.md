@@ -15,23 +15,29 @@ conversation. This is a user-authorized waiting aid, not a remediation worker.
 Do not read source code, edit files, push, post or resolve GitHub comments,
 trigger workflows, fetch full CI logs, or spawn subagents.
 
-Use `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>` as the
+Use `scripts/pr-state --compact <PR>` and `scripts/pr-resolve list <PR>` as the
 primary sources. In the default mode, poll at a 60-second cadence for at most
 20 minutes and return early for a failed check, merge conflict, actionable
-review feedback, or a terminal clean state. Keep polling directly in this mode:
-`scripts/pr-await` waits for every check to finish, which cannot return early on
-a failure or conflict while other checks are still pending. If the caller says "wait N
-minutes" or "then fix up", pass the caller's value to
-`scripts/pr-await <PR> --deadline-min N` as a maximum deadline. The helper can
-return early when checks are terminal; do not describe that as a full-duration
-wait. If the caller explicitly requires the full N minutes, the helper has no
-minimum-wait mode: without that script, poll at a 60-second cadence for the
-caller's full N minutes, calculate and include the absolute deadline in the
-polling prompt, accumulate findings, and do not return early for findings,
-pending checks, or a clean snapshot. Stop early only if the PR is merged/closed
-or access is revoked. At the deadline,
-return the latest named pending checks and named actionable review findings,
-not only aggregate CI and review states.
+review feedback, or a provisional terminal state. Keep direct polling for these
+early alerts. `pr-await --mode first-failure` stops on a failed check, but does
+not stop on conflicts or review findings while CI is pending.
+
+For a maximum N-minute wait, use
+`scripts/pr-await <PR> --mode all-terminal --deadline-min N` when available.
+This mode can return before N minutes when all checks finish.
+For an explicit full-duration wait, use
+`scripts/pr-await <PR> --mode strict-deadline --deadline-min N` when available.
+Do not interpret "then fix up" alone as a full-duration requirement.
+
+If the helper is unavailable or policy lookup is blocked, use direct polling
+for the remaining authorized window. Calculate the absolute deadline first.
+For a full-duration fallback, accumulate findings and do not return early for
+findings, pending checks, or a provisional terminal snapshot.
+Honor rate-limit cooldowns. Stop early if the PR closes, merges, or access is
+revoked. Treat unknown policy, incomplete evidence, and head mismatches as
+unknown. Leave final review classification and completion to the primary
+conversation. At the deadline, name pending checks and actionable review
+findings, not only aggregate states.
 
 Before the first GitHub request, obtain any runtime network approval required by
 the platform. A denied, cancelled, or interrupted approval is terminal: do not

@@ -134,6 +134,9 @@ func (ss *SchedulerService) ApplyTaskMutation(
 			if errors.Is(err, shared.ErrWorkspacePaused) {
 				// A confirmed operator pause is not a reactivity failure —
 				// the paused workspace already logged its own pause event.
+				if c.Reason == RunReasonTaskAssigned {
+					ss.recordDeferredAssignmentFromError(ctx, c, err)
+				}
 				ss.logger.Debug("reactivity run skipped (workspace paused)",
 					zap.String("agent", agentID),
 					zap.String("reason", c.Reason))
@@ -173,7 +176,7 @@ func (ss *SchedulerService) ApplyTaskMutation(
 	// gates on the two ids differing. reactToAssigneeChange itself guards the
 	// session interrupt.
 	if change.NewAssigneeID != nil {
-		ss.reactToAssigneeChange(task, *change.NewAssigneeID, change, queue, res)
+		ss.reactToAssigneeChange(ctx, task, *change.NewAssigneeID, change, queue, res)
 	}
 
 	// --- Comment reactions (assignee + @mentions) ---
@@ -187,6 +190,25 @@ func (ss *SchedulerService) ApplyTaskMutation(
 // reactToStatusChange queues runs based on what the new status
 // triggers. Mutates `res` directly for results that aren't runs
 // (interrupt session ID).
+// recordDeferredAssignmentFromError persists that c's task_assigned wake
+// was blocked by a confirmed workspace pause (paused-assignment-replay),
+// so pause.Service.Resume or the recovery tick can replay it later. A no-op
+// when err does not carry a *pausedQueueError — defensive, since the
+// caller already confirmed errors.Is(err, shared.ErrWorkspacePaused).
+func (ss *SchedulerService) recordDeferredAssignmentFromError(ctx context.Context, c RunContext, err error) {
+	var pe *pausedQueueError
+	if !errors.As(err, &pe) || pe.pause == nil {
+		return
+	}
+	if c.AssignmentGeneration != nil {
+		ss.svc.RecordDeferredAssignmentWithActorAtGeneration(
+			ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID, *c.AssignmentGeneration,
+		)
+		return
+	}
+	ss.svc.RecordDeferredAssignmentWithActor(ctx, c.TaskID, pe.pause.ID, c.ActorType, c.ActorID)
+}
+
 func (ss *SchedulerService) reactToStatusChange(
 	ctx context.Context,
 	task *TaskSnapshot,
@@ -285,6 +307,7 @@ func (ss *SchedulerService) reactToStatusChange(
 // gate, this comparison stays local to the interrupt decision and does not
 // also guard the wake.
 func (ss *SchedulerService) reactToAssigneeChange(
+	ctx context.Context,
 	task *TaskSnapshot,
 	newAssigneeID string,
 	change TaskMutation,
@@ -303,6 +326,13 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		return
 	}
 
+	// The current step and blockers must permit assignment before this wake is
+	// queued — the interrupt above already fired and is unaffected. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if !shared.IsAssignmentWakeEligible(ctx, ss.logger, ss.repo, ss.workflowStepGetter, task.ID, "reactivity.assignee_change") {
+		return
+	}
+
 	commentID := ""
 	if change.Comment != nil {
 		commentID = change.Comment.ID
@@ -314,13 +344,14 @@ func (ss *SchedulerService) reactToAssigneeChange(
 		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "nil_mutation_generation")
 	}
 	queue(newAssigneeID, RunContext{
-		Reason:         RunReasonTaskAssigned,
-		TaskID:         task.ID,
-		WorkspaceID:    task.WorkspaceID,
-		ActorID:        change.ActorID,
-		ActorType:      change.ActorType,
-		CommentID:      commentID,
-		IdempotencyKey: key,
+		Reason:               RunReasonTaskAssigned,
+		TaskID:               task.ID,
+		WorkspaceID:          task.WorkspaceID,
+		ActorID:              change.ActorID,
+		ActorType:            change.ActorType,
+		AssignmentGeneration: change.AssignmentGeneration,
+		CommentID:            commentID,
+		IdempotencyKey:       key,
 	})
 }
 
@@ -728,7 +759,7 @@ func childrenCompletedIdempotencyKey(parentID, agentID string, children []sqlite
 }
 
 // allBlockersResolvedExcept returns true if every blocker on `taskID`
-// other than `excludeBlockerID` is in a terminal step, alongside the full
+// other than `excludeBlockerID` is satisfied, alongside the full
 // blocker-task-id set it read to decide — the caller digests that same
 // slice for the wake's dedup key rather than re-reading it (AC-001.9
 // applied to a set: a second read could observe a different set than the
@@ -744,11 +775,11 @@ func (ss *SchedulerService) allBlockersResolvedExcept(
 		if b.BlockerTaskID == excludeBlockerID {
 			continue
 		}
-		done, err := ss.repo.IsTaskInTerminalStep(ctx, b.BlockerTaskID)
+		status, err := ss.repo.GetBlockerStatus(ctx, b.BlockerTaskID)
 		if err != nil {
 			return false, nil, err
 		}
-		if !done {
+		if status != models.BlockerSatisfied {
 			return false, blockers, nil
 		}
 	}

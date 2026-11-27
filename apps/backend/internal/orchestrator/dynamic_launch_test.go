@@ -4,11 +4,17 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -65,6 +71,214 @@ func TestRelaunchDynamicTaskAfterFailure_DoesNotLaunchSuccessorWhenStopFails(t *
 		Force:       true,
 	}) {
 		t.Fatalf("unexpected stop call: %#v", agentManager.stopAgentWithReasonArgs[0])
+	}
+}
+
+func TestLaunchPreparedDynamicRelaunchDispatchesPromptToResumedCandidate(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-retry-prompt"
+		sessionID   = "session-dynamic-retry-prompt"
+		executionID = "execution-dynamic-retry-prompt"
+	)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "dynamic-profile"
+	session.ExecutionProfileID = "candidate-profile"
+	session.ErrorMessage = "previous provider failure"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunningFn:       func(context.Context, string) bool { return true },
+		isAgentReadyFn:         func(context.Context, string) bool { return true },
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.turnService = &repoTurnService{repo: repo}
+	prompt := capturedPrompt{text: "retry the accepted prompt"}
+	svc.lastTurnPrompt.Store(sessionID, prompt)
+	task, err := svc.scheduler.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		t.Fatalf("load scheduled task: task=%#v err=%v", task, err)
+	}
+	data := watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
+		AgentProfileID: "dynamic-profile",
+	}
+	preparedTask, preparedSession, preparedPrompt, launchMode, ok := svc.prepareDynamicRelaunchAfterFailure(
+		ctx, data, launchOriginManual,
+	)
+	if !ok {
+		t.Fatal("prepareDynamicRelaunchAfterFailure refused the current session")
+	}
+	releaseRouteAction := svc.acquireRouteActionOperationLock(sessionID)
+	defer releaseRouteAction()
+
+	outcome, launchErr := svc.launchPreparedDynamicRelaunch(
+		ctx,
+		data,
+		preparedTask,
+		preparedSession,
+		preparedPrompt,
+		"candidate-profile",
+		launchMode,
+		launchOriginManual,
+		nil,
+	)
+	if launchErr != nil {
+		t.Fatalf("dynamic relaunch failed: %v", launchErr)
+	}
+	if outcome != dynamicRelaunchSucceeded {
+		t.Fatalf("dynamic relaunch outcome = %v, want a successfully dispatched prompt", outcome)
+	}
+
+	agentManager.mu.Lock()
+	defer agentManager.mu.Unlock()
+	if len(agentManager.capturedPromptCalls) != 1 {
+		t.Fatalf("provider prompt calls = %#v, want exactly one retry prompt", agentManager.capturedPromptCalls)
+	}
+	call := agentManager.capturedPromptCalls[0]
+	if call.Prompt != "retry the accepted prompt" || !call.DispatchOnly {
+		t.Fatalf("provider retry prompt = %+v, want accepted content dispatched once", call)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload session after retry: %v", err)
+	}
+	if updated.State != models.TaskSessionStateRunning || updated.ErrorMessage != "" {
+		t.Fatalf("session after retry = state %q error %q, want running with cleared prior error", updated.State, updated.ErrorMessage)
+	}
+}
+
+func TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-dynamic-retry-attempt"
+		sessionID = "session-dynamic-retry-attempt"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "dynamic-profile"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	processStarted := make(chan struct{})
+	releaseProcessStart := make(chan struct{})
+	var releaseProcessOnce sync.Once
+	asyncCleanupDone := make(chan struct{})
+	var launchAttemptID string
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(lctx context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchAttemptID = executor.ResumeAttemptIDFromContext(lctx)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "dynamic-successor-execution"}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(processStarted)
+			<-releaseProcessStart
+			return nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
+	svc.executor.SetOnCancelledResumeExecutionCleanup(svc.cleanupCancelledResumeExecution)
+	startFailed := svc.handleAgentProcessStartFailed
+	svc.executor.SetOnAgentProcessStartFailed(func(ctx context.Context, callbackTaskID, callbackSessionID, executionID string, err error) {
+		startFailed(ctx, callbackTaskID, callbackSessionID, executionID, err)
+		close(asyncCleanupDone)
+	})
+	t.Cleanup(func() {
+		releaseProcessOnce.Do(func() { close(releaseProcessStart) })
+		select {
+		case <-asyncCleanupDone:
+		case <-time.After(5 * time.Second):
+			t.Error("asynchronous cancelled-start cleanup did not finish")
+		}
+	})
+	prior, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin prior resume attempt: owner=%v err=%v", owner, err)
+	}
+	prior.setExecutionID("prior-manual-retry-execution")
+	if !svc.resumeAttemptStore().accept(prior, "prior-manual-retry-execution") {
+		t.Fatal("accept prior manual retry attempt")
+	}
+	prior.finish(svc.resumeAttemptStore())
+
+	execution, err := svc.startDynamicRelaunchCreatedSession(
+		ctx, taskID, session, capturedPrompt{text: "retry the accepted prompt"},
+	)
+	if err != nil {
+		t.Fatalf("start dynamic successor: %v", err)
+	}
+	if execution == nil || execution.AgentExecutionID != "dynamic-successor-execution" {
+		t.Fatalf("dynamic successor execution = %+v, want mock successor execution", execution)
+	}
+	select {
+	case <-processStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("asynchronous process startup did not reach its barrier")
+	}
+	if launchAttemptID == "" {
+		t.Fatal("dynamic successor launch omitted its recovery attempt identity")
+	}
+	if !svc.resumeAttemptAllowsExecution(sessionID, execution.AgentExecutionID, launchAttemptID) {
+		t.Fatal("dynamic successor callback was rejected after a prior manual resume")
+	}
+	if svc.resumeAttemptAllowsExecution(sessionID, execution.AgentExecutionID) {
+		t.Fatal("untagged dynamic successor callback was accepted after recovery history")
+	}
+
+	agentManager.mu.Lock()
+	initialPromptAccepted := agentManager.initialPromptDispatchCallback
+	agentManager.mu.Unlock()
+	if initialPromptAccepted == nil {
+		t.Fatal("dynamic successor launch did not register its initial-prompt acceptance callback")
+	}
+	registry := svc.resumeAttemptStore()
+	registry.mu.Lock()
+	attempt := registry.attempts[sessionID]
+	registry.mu.Unlock()
+	if attempt == nil || attempt.execution() != execution.AgentExecutionID {
+		t.Fatalf("dynamic successor startup owner = %+v, want active owner for %q", attempt, execution.AgentExecutionID)
+	}
+	if err := registry.invalidate(sessionID); !err {
+		t.Fatal("cancel dynamic successor before initial prompt acceptance")
+	}
+	if attempt.ctx.Err() == nil {
+		t.Fatal("cancelling dynamic successor did not cancel its startup context")
+	}
+	svc.cleanupCancelledResumeAttempt(attempt)
+	initialPromptAccepted()
+	if registry.accept(attempt, execution.AgentExecutionID) {
+		t.Fatal("late initial-prompt acceptance transferred ownership after cancellation")
+	}
+	releaseProcessOnce.Do(func() { close(releaseProcessStart) })
+	select {
+	case <-asyncCleanupDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("asynchronous cancelled-start cleanup did not finish")
+	}
+	agentManager.mu.Lock()
+	defer agentManager.mu.Unlock()
+	if len(agentManager.stopAgentWithReasonArgs) != 1 ||
+		agentManager.stopAgentWithReasonArgs[0].ExecutionID != execution.AgentExecutionID {
+		t.Fatalf("cancelled successor cleanup = %+v, want stop of exact execution %q", agentManager.stopAgentWithReasonArgs, execution.AgentExecutionID)
 	}
 }
 
@@ -465,4 +679,106 @@ func TestLaunchDynamicSuccessorDetached_SkipsWhenServiceStopped(t *testing.T) {
 		t.Fatal("a restarted service refused to schedule the detached successor launch")
 	}
 	svc.stopDynamicSuccessorWorkers()
+}
+
+const (
+	materializedRouteTaskID         = "task-materialized-route"
+	materializedRouteSessionID      = "session-materialized-route"
+	materializedRouteLogicalProfile = "profile-dynamic-a"
+	materializedRouteConcrete       = "profile-concrete-a"
+)
+
+func newMaterializedRouteService(t *testing.T) (*Service, *sqliterepo.Repository, *atomic.Int32) {
+	t.Helper()
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, materializedRouteTaskID, materializedRouteSessionID, models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, err)
+	session.AgentProfileID = materializedRouteLogicalProfile
+	session.ExecutionProfileID = materializedRouteConcrete
+	session.RouteGeneration = 1
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.SaveRouteState(ctx, dynamicruntime.RouteState{
+		SessionID: materializedRouteSessionID, LogicalProfileID: materializedRouteLogicalProfile,
+		ExecutionProfileID: materializedRouteConcrete, Generation: 1, ProfileVersion: 1,
+		Status: "active", UpdatedAt: time.Now().UTC(),
+	}))
+
+	var launches atomic.Int32
+	agentManager := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launches.Add(1)
+			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-materialized-route"}, nil
+		},
+	}
+	schedulerRepo := newMockTaskRepo()
+	schedulerRepo.tasks[materializedRouteTaskID] = &v1.Task{ID: materializedRouteTaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), schedulerRepo, agentManager)
+	return svc, repo, &launches
+}
+
+// Selecting a different logical profile on a session whose dynamic route is
+// already materialized for another family is a session handoff, not a resume.
+// Relabelling in place would show the new profile while the authoritative route
+// keeps launching the previous family's concrete candidate.
+func TestStartCreatedSession_RefusesProfileChangeOnMaterializedDynamicRoute(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, launches := newMaterializedRouteService(t)
+
+	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
+		"profile-dynamic-b", "continue", false, false, true, nil, nil)
+
+	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, getErr)
+	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
+		"the session label must keep the route's logical profile")
+	require.Equal(t, materializedRouteConcrete, session.ExecutionProfileID)
+	require.Zero(t, launches.Load(), "no agent may launch under the mismatched label")
+	require.ErrorIs(t, err, ErrMaterializedRouteProfileChange)
+	state, stateErr := repo.LoadRouteState(ctx, materializedRouteSessionID)
+	require.NoError(t, stateErr)
+	require.Equal(t, materializedRouteLogicalProfile, state.LogicalProfileID)
+	require.EqualValues(t, 1, state.Generation)
+}
+
+// The same logical profile resumes its route, and a session without a
+// materialized route keeps its first profile selection. Both run through the
+// real StartCreatedSession entrypoint and are asserted to succeed and launch
+// exactly once, so the guard's positive wiring is covered and not only the
+// refusal branch.
+func TestStartCreatedSession_MaterializedRouteGuardKeepsSameProfileAndFirstSelection(t *testing.T) {
+	ctx := context.Background()
+
+	// Same logical profile resumes its route and launches once.
+	svc, repo, launches := newMaterializedRouteService(t)
+	_, err := svc.StartCreatedSession(ctx, materializedRouteTaskID, materializedRouteSessionID,
+		materializedRouteLogicalProfile, "continue", false, false, true, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, launches.Load(), "a route for the requested profile must resume and launch once")
+	session, getErr := repo.GetTaskSession(ctx, materializedRouteSessionID)
+	require.NoError(t, getErr)
+	require.Equal(t, materializedRouteLogicalProfile, session.AgentProfileID,
+		"a route for the requested profile must resume under the same label")
+
+	// A session without a materialized route keeps its first profile selection.
+	unrouted := setupTestRepo(t)
+	seedTaskAndSession(t, unrouted, "task-unrouted", "session-unrouted", models.TaskSessionStateCreated)
+	var unroutedLaunches atomic.Int32
+	unroutedAgent := &mockAgentManager{launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		unroutedLaunches.Add(1)
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-unrouted"}, nil
+	}}
+	unroutedTaskRepo := newMockTaskRepo()
+	unroutedTaskRepo.tasks["task-unrouted"] = &v1.Task{ID: "task-unrouted", WorkspaceID: "ws1", Title: "Test Task"}
+	unroutedSvc := createTestServiceWithScheduler(unrouted, newMockStepGetter(), unroutedTaskRepo, unroutedAgent)
+	_, err = unroutedSvc.StartCreatedSession(ctx, "task-unrouted", "session-unrouted",
+		"profile-first", "go", false, false, true, nil, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, unroutedLaunches.Load(), "an unrouted session must keep its first profile selection and launch once")
+	unroutedSession, getErr := unrouted.GetTaskSession(ctx, "session-unrouted")
+	require.NoError(t, getErr)
+	require.Equal(t, "profile-first", unroutedSession.AgentProfileID,
+		"an unrouted session must keep its first profile selection")
 }

@@ -13,15 +13,16 @@ legacy_specs: []
 ## Overview
 
 Limit commit-time Go lint to the packages represented by pre-commit's selected
-files. One work order owns hook wiring, the wrapper, regression coverage, and
-the linked documentation. This record includes the implementation and PR
-remediation; external CI and merge evidence remain in the PR task record.
+files. Task 01 owns hook wiring and package selection; task 02 adds resource
+defaults and consistent local-check guidance. This record includes local
+implementation evidence; external CI and merge evidence remain in the PR task record.
 
 ## Scope
 
 - Select and deduplicate complete containing packages, with serial execution.
 - Preserve comparison-base policy, error propagation, and pre-commit staging.
 - Isolate Git repository context from inherited location and storage overrides.
+- Supply resource defaults and align local-check harness guidance with package selection.
 - Exclude changes to application behavior, other hooks, and full-backend CI.
 
 ## Technical approach
@@ -42,10 +43,13 @@ All named tests are in `scripts/lint-go-changed.test.py`.
 | `AC-PLATFORM-GO-PRE-COMMIT-LINT-001.5` | `test_ignores_inherited_repository_environment` |
 | `AC-PLATFORM-GO-PRE-COMMIT-LINT-001.6` | `test_lints_each_staged_package_once` preserves unstaged edits |
 | `AC-PLATFORM-GO-PRE-COMMIT-LINT-001.7` | Inspection confirms the CI and Makefile lint commands retain `./...`; neither file is modified |
+| `AC-PLATFORM-GO-PRE-COMMIT-LINT-001.8` | `test_lints_each_staged_package_once`, `test_preserves_explicit_resource_overrides`, `test_bounds_build_workers_without_dropping_other_go_flags` |
+| `AC-PLATFORM-GO-PRE-COMMIT-LINT-001.9` | Harness lint and inspection of backend, PR-fixup, runtime-flag, and verification guidance |
 
 ## Work orders
 
 - [x] [Task 01: Scope Go commit lint to selected packages](task-01-scope-go-lint.md)
+- [x] [Task 02: Bound local lint resources and align harness guidance](task-02-bound-local-resources.md)
 
 ## Verification results
 
@@ -65,6 +69,10 @@ before the additional Git variables were cleared.
 
 Remote CI, automated review disposition, and merge status are tracked externally
 on PR #3860; these local results do not claim those gates are complete.
+
+Resource-default and harness-alignment validation is recorded in
+[task 02](task-02-bound-local-resources.md). Its local checks passed; this record
+does not claim the new PR's remote checks or merge are complete.
 
 ## Risks
 

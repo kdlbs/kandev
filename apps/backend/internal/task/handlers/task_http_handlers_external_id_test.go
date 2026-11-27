@@ -19,6 +19,8 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -92,6 +94,34 @@ type idempotentCreateTaskRepo struct {
 
 func newIdempotentCreateTaskRepo() *idempotentCreateTaskRepo {
 	return &idempotentCreateTaskRepo{tasks: map[string]*models.Task{}}
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskFieldsWithParentAdmission(_ context.Context, id string, update models.TaskFieldUpdate, _ repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current := r.tasks[id]
+	if current == nil {
+		return nil, errors.New("task not found")
+	}
+	if update.Description != nil || update.Priority != nil || update.State != nil || update.WorkflowStepID != nil || update.Position != nil || update.ParentID != nil || update.AssigneeUserID != nil || update.Metadata != nil {
+		return nil, errors.New("only title updates are supported by this idempotency test repository")
+	}
+	task := *current
+	if update.Title != nil {
+		task.Title = *update.Title
+	}
+	r.tasks[id] = &task
+	return &models.TaskFieldUpdateResult{Task: &task, PriorState: current.State, PriorWorkflowStepID: current.WorkflowStepID}, nil
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return r.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
 }
 
 func (r *idempotentCreateTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
@@ -311,16 +341,10 @@ func TestHTTPCreateTask_FoundSettledSkipsPostCreateWork(t *testing.T) {
 	assert.Equal(t, 1, count, "no duplicate task should exist")
 }
 
-// TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry pins
-// the spec's documented answer to "what happens when a Found-outcome retry
-// names a repository that no longer exists": convertCreateTaskRepositories
-// (the handler-level pre-service conversion) only checks that an
-// identifying field is present, never that the repository actually exists —
-// existence validation lives in Service.createTaskRepositories, which a
-// Found outcome's early return never reaches. So the retry payload's
-// repositories are never even looked at; the existing task is returned as
-// normal, not a validation failure.
-func TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry(t *testing.T) {
+// TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry pins the
+// create-idempotency contract: an existing external_id returns its task
+// before handler-level repository conversion or service validation runs.
+func TestHTTPCreateTask_FoundOutcomeSkipsRepositoryValidationInRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newIdempotentCreateTaskRepo()
 	h := newIdempotencyTestHandlers(t, repo)
@@ -342,6 +366,14 @@ func TestHTTPCreateTask_FoundOutcomeIgnoresNonexistentRepositoryInRetry(t *testi
 	assert.Equal(t, firstID, retryResp["id"])
 	assert.Equal(t, true, retryResp["deduplicated"])
 	assert.Equal(t, true, retryResp["creation_complete"])
+
+	invalidIDRetry := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Retry with invalid repository ID","external_id":"ext-1","repository_ids":[""]}`)
+	require.Equal(t, http.StatusOK, invalidIDRetry.Code, "body: %s", invalidIDRetry.Body.String())
+	var invalidIDResp map[string]interface{}
+	require.NoError(t, json.Unmarshal(invalidIDRetry.Body.Bytes(), &invalidIDResp))
+	assert.Equal(t, firstID, invalidIDResp["id"])
+	assert.Equal(t, true, invalidIDResp["deduplicated"])
+	assert.Equal(t, true, invalidIDResp["creation_complete"])
 }
 
 // TestHTTPCreateTask_FoundUnsettledReportsIncomplete covers the diagnostic

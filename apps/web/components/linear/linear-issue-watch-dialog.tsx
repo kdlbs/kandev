@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Label } from "@kandev/ui/label";
@@ -26,7 +26,6 @@ import { FilterFields, SelectField } from "./linear-issue-watch-filter-fields";
 import { linearIssueWatchPlaceholders } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
-import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import {
   type FormState,
@@ -34,6 +33,7 @@ import {
   formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
+  switchWatchWorkspace,
 } from "./linear-issue-watch-form";
 import type {
   CreateLinearIssueWatchInput,
@@ -234,33 +234,82 @@ function savingLabel(t: TFunction, saving: boolean, isEdit: boolean): string {
   return isEdit ? t("linear:update") : t("linear:create");
 }
 
-export function LinearIssueWatchDialog({
+export function LinearIssueWatchDialog(props: Props) {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  if (!props.open) return null;
+  return (
+    <WatchDialogOpening
+      key={JSON.stringify([props.workspaceId, props.watch?.id, props.watch?.workspaceId])}
+      {...props}
+      defaultWorkspaceId={activeWorkspaceId ?? ""}
+    />
+  );
+}
+
+function useWatchOpening({
+  watch,
+  workspaceId,
+  defaultWorkspaceId,
+  onOpenChange,
+}: Pick<Props, "watch" | "workspaceId" | "onOpenChange"> & { defaultWorkspaceId: string }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<FormState>(() =>
+    watch ? formStateFromWatch(watch) : makeEmptyForm(workspaceId ?? defaultWorkspaceId),
+  );
+  const live = useRef(false);
+  const submission = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!watch && !workspaceId && defaultWorkspaceId) {
+      setForm((prev) => (prev.workspaceId ? prev : switchWatchWorkspace(prev, defaultWorkspaceId)));
+    }
+  }, [watch, workspaceId, defaultWorkspaceId]);
+  const changeOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) live.current = false;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
+  const changeWorkspace = useCallback(
+    (nextWorkspace: string) => {
+      if (nextWorkspace === form.workspaceId) return;
+      submission.current = null;
+      setSaving(false);
+      setForm((prev) => switchWatchWorkspace(prev, nextWorkspace));
+    },
+    [form.workspaceId],
+  );
+
+  return { form, setForm, saving, setSaving, live, submission, changeOpen, changeWorkspace };
+}
+
+function WatchDialogOpening({
   open,
   onOpenChange,
   watch,
   workspaceId,
   onCreate,
   onUpdate,
-}: Props) {
+  defaultWorkspaceId,
+}: Props & { defaultWorkspaceId: string }) {
   const { t } = useTranslation();
-  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
-
-  useEffect(() => {
-    if (watch) {
-      setForm(formStateFromWatch(watch));
-    } else {
-      setForm(makeEmptyForm(workspaceId ?? activeWorkspaceId ?? ""));
-    }
-  }, [watch, open, workspaceId, activeWorkspaceId]);
+  const { form, setForm, saving, setSaving, live, submission, changeOpen, changeWorkspace } =
+    useWatchOpening({ watch, workspaceId, defaultWorkspaceId, onOpenChange });
 
   const workspaceLocked = !!watch || !!workspaceId;
   const canSave = isWatchFormReady(form);
 
   const handleSave = useCallback(async () => {
     const payload = buildWatchPayload(form);
-    if (!payload) return; // re-checks the cap input — see canSave gate
+    if (!payload || !live.current || submission.current) return;
+    const owner = Symbol();
+    submission.current = owner;
     setSaving(true);
     try {
       if (watch) {
@@ -268,16 +317,19 @@ export function LinearIssueWatchDialog({
       } else {
         await onCreate({ ...payload, workspaceId: form.workspaceId });
       }
-      onOpenChange(false);
+      if (live.current && submission.current === owner) changeOpen(false);
     } catch {
       // Error surfaced by caller's toast.
     } finally {
-      setSaving(false);
+      if (live.current && submission.current === owner) {
+        submission.current = null;
+        setSaving(false);
+      }
     }
-  }, [form, watch, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, changeOpen]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="w-full max-w-full sm:w-[800px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -288,7 +340,7 @@ export function LinearIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
+            onChange={changeWorkspace}
             disabled={workspaceLocked}
           />
           {/* Hairlines separate the five conceptual blocks (Destination /
@@ -308,7 +360,7 @@ export function LinearIssueWatchDialog({
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button variant="outline" onClick={() => changeOpen(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">

@@ -1,0 +1,617 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
+)
+
+const (
+	deliveryUnknownPromptReason  = "unknown_prompt_outcome"
+	deliveryUnresolvedWorkReason = "unresolved_durable_work"
+)
+
+type nativeResumeResolutionStep string
+
+const (
+	nativeResumeResolutionSnapshot      nativeResumeResolutionStep = "snapshot"
+	nativeResumeResolutionIncidentBlock nativeResumeResolutionStep = "incident_blocks"
+	nativeResumeResolutionAttempt       nativeResumeResolutionStep = "prepared_attempt"
+	nativeResumeResolutionNotice        nativeResumeResolutionStep = "notice"
+	nativeResumeResolutionBlockUpdate   nativeResumeResolutionStep = "block_update"
+)
+
+// ResolveSessionRecoveryBlockWithNativeEvidence commits only after authenticated
+// native retirement. All incident fences are verified before any becomes usable.
+func (r *Repository) ResolveSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
+	if !validNativeResumeProof(proof) {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionSnapshot)
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockNativeResumeProofTx(ctx, tx, proof); err != nil {
+		return false, err
+	}
+	valid, err := r.verifyNativeResumeSnapshotTx(ctx, tx, proof)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionSnapshot)
+		return false, nil
+	}
+	blocks, err := r.nativeResumeIncidentBlocksTx(ctx, tx, id, proof)
+	if err != nil {
+		return false, err
+	}
+	if len(blocks) == 0 {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionIncidentBlock)
+		return false, nil
+	}
+	valid, err = r.finishPreparedNativeAttemptTx(ctx, tx, proof, blocks, completedAt)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionAttempt)
+		return false, nil
+	}
+	valid, err = r.restoreAuthenticatedNativePresentationTx(ctx, tx, proof, blocks, completedAt)
+	if err != nil {
+		return false, err
+	}
+	if !valid {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionNotice)
+		return false, nil
+	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, proof.SessionID); err != nil {
+		return false, err
+	}
+	changed, err := r.resolveNativeIncidentBlocksTx(ctx, tx, blocks, proof, completedAt)
+	if err != nil {
+		return false, err
+	}
+	if !changed {
+		r.logNativeResumeResolutionRefusal(proof, id, nativeResumeResolutionBlockUpdate)
+		return false, nil
+	}
+	if err := r.restoreFailedNativeSessionStateTx(ctx, tx, proof, completedAt); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func (r *Repository) logNativeResumeResolutionRefusal(proof *models.NativeResumeDeliveryEvidence, blockID string, step nativeResumeResolutionStep) {
+	if r.log == nil {
+		return
+	}
+	sessionID := ""
+	if proof != nil {
+		sessionID = proof.SessionID
+	}
+	r.log.Warn("native resume recovery block resolution refused",
+		zap.String("session_id", sessionID),
+		zap.String("block_id", blockID),
+		zap.String("step", string(step)),
+	)
+}
+
+func (r *Repository) restoreFailedNativeSessionStateTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+	completedAt time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_sessions
+		SET state = CASE WHEN state = ? THEN ? ELSE state END,
+		    error_message = CASE WHEN state = ? THEN '' ELSE error_message END,
+		    updated_at = ?
+		WHERE id = ? AND queue_incarnation_id = ? AND state IN (?, ?, ?, ?)
+		AND EXISTS (SELECT 1 FROM executors_running WHERE session_id = task_sessions.id AND agent_execution_id = ?)
+		AND EXISTS (SELECT 1 FROM harness_session_generations WHERE session_id = task_sessions.id
+			AND incarnation_id = task_sessions.queue_incarnation_id AND generation = ? AND native_session_id = ?)`),
+		models.TaskSessionStateFailed, models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateFailed, completedAt, proof.SessionID, proof.IncarnationID,
+		models.TaskSessionStateFailed, models.TaskSessionStateStarting, models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput, proof.ExecutionID, proof.HarnessGeneration, proof.NativeSessionID)
+	return err
+}
+
+// VerifyResolvedSessionRecoveryBlockWithNativeEvidence confirms completed recovery
+// without changing metadata or releasing parked work again.
+func (r *Repository) VerifyResolvedSessionRecoveryBlockWithNativeEvidence(ctx context.Context, id string, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	if !validNativeResumeProof(proof) {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockNativeResumeProofTx(ctx, tx, proof); err != nil {
+		return false, err
+	}
+	valid, err := r.verifyNativeResumeSnapshotTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
+	resolved, err := r.nativeResumeIncidentAlreadyResolvedTx(ctx, tx, id, proof)
+	if err != nil || !resolved {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func (r *Repository) nativeResumeIncidentAlreadyResolvedTx(ctx context.Context, tx *sqlx.Tx, id string, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	var resolved bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+ SELECT 1 FROM session_recovery_blocks b
+ WHERE b.id = ? AND b.session_id = ? AND b.incarnation_id = ? AND b.expected_generation = ?
+ AND b.consumer_reference = 'agent_delivery' AND b.state = 'resolved' AND b.authorized_action = 'resume'
+ AND NOT EXISTS (SELECT 1 FROM session_recovery_blocks open_block WHERE open_block.session_id = b.session_id AND open_block.state = 'open')
+ )`), id, proof.SessionID, proof.IncarnationID, proof.HarnessGeneration).Scan(&resolved)
+	return resolved, err
+}
+
+func (r *Repository) verifyNativeResumeSnapshotTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	var valid bool
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+ SELECT 1 FROM task_sessions ts JOIN harness_session_generations g ON g.session_id = ts.id AND g.incarnation_id = ts.queue_incarnation_id
+ JOIN executors_running e ON e.session_id = ts.id
+ WHERE ts.id = ? AND ts.queue_incarnation_id = ? AND ts.state <> 'CANCELLED'
+ AND g.generation = ? AND g.native_session_id = ? AND e.agent_execution_id = ?
+ AND NOT EXISTS (SELECT 1 FROM harness_session_generations newer WHERE newer.session_id = ts.id AND newer.incarnation_id = g.incarnation_id AND newer.generation > g.generation)
+ AND NOT EXISTS (SELECT 1 FROM agent_delivery_cursors WHERE session_id = ts.id AND incarnation_id = g.incarnation_id AND harness_generation = g.generation AND received_sequence <> projected_sequence)
+ )`), proof.SessionID, proof.IncarnationID, proof.HarnessGeneration, proof.NativeSessionID, proof.ExecutionID).Scan(&valid)
+	if err != nil || !valid {
+		return false, err
+	}
+	valid, err = r.verifyNativeResumeInventoryTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
+	valid, err = r.verifyNativeResumeCursorTx(ctx, tx, proof)
+	return valid, err
+}
+
+func (r *Repository) verifyNativeResumeInventoryTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	retired, valid := nativeResumeSubmissionMap(proof)
+	if !valid {
+		return false, nil
+	}
+	terminalCount, unprovenCount, valid, err := r.verifyNativeResumeTerminalsTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
+	continued, err := r.contextContinuedSubmissionIDsTx(ctx, tx.Tx, proof.SessionID, proof.IncarnationID, proof.NativeSessionID, proof.HarnessGeneration)
+	if err != nil {
+		return false, err
+	}
+	historical := make(map[string]bool, len(continued))
+	for _, id := range continued {
+		historical[id] = true
+	}
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id, incarnation_id, harness_generation, payload_hash, state, terminal_stream_id, terminal_sequence FROM agent_delivery_submissions WHERE session_id = ? AND state IN ('prepared', 'accepted', 'dispatching', 'interrupted_unknown')`), proof.SessionID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var submission models.AgentDeliverySubmission
+		if err := rows.Scan(&submission.ID, &submission.IncarnationID, &submission.HarnessGeneration, &submission.PayloadHash,
+			&submission.State, &submission.TerminalStreamID, &submission.TerminalSequence); err != nil {
+			return false, err
+		}
+		row, found := retired[submission.ID]
+		if !found && historical[submission.ID] {
+			continue
+		}
+		if !found || !nativeResumeInventoryRowMatches(proof, row, &submission) {
+			return false, nil
+		}
+		count++
+	}
+	return count+terminalCount+unprovenCount == len(retired), rows.Err()
+}
+
+func nativeResumeInventoryRowMatches(proof *models.NativeResumeDeliveryEvidence, row models.NativeResumeSubmissionEvidence, submission *models.AgentDeliverySubmission) bool {
+	return submission.State == models.DeliverySubmissionInterruptedUnknown && (row.State == "" || row.State == submission.State) &&
+		submission.IncarnationID == proof.IncarnationID && submission.HarnessGeneration == row.HarnessGeneration &&
+		submission.PayloadHash == row.PayloadHash && submission.TerminalSequence == row.TerminalSequence && submission.TerminalStreamID == row.TerminalStreamID
+}
+
+func (r *Repository) verifyNativeResumeCursorTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
+	var cursor models.AgentDeliveryCursor
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT session_id, incarnation_id, harness_generation, received_sequence, projected_sequence, retired_sequence FROM agent_delivery_cursors WHERE stream_id = ?`), proof.StreamID).Scan(
+		&cursor.SessionID, &cursor.IncarnationID, &cursor.HarnessGeneration, &cursor.ReceivedSequence, &cursor.ProjectedSequence, &cursor.RetiredSequence)
+	if errors.Is(err, sql.ErrNoRows) {
+		return proof.Cursor == nil, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	pinned := proof.Cursor
+	return pinned != nil && pinned.StreamID == proof.StreamID && cursor.SessionID == proof.SessionID && cursor.IncarnationID == proof.IncarnationID &&
+		cursor.HarnessGeneration == proof.HarnessGeneration && cursor.SessionID == pinned.SessionID && cursor.IncarnationID == pinned.IncarnationID &&
+		cursor.HarnessGeneration == pinned.HarnessGeneration && cursor.ReceivedSequence == pinned.ReceivedSequence &&
+		cursor.ProjectedSequence == pinned.ProjectedSequence && cursor.RetiredSequence == pinned.RetiredSequence, nil
+}
+
+func (r *Repository) nativeResumeIncidentBlocksTx(ctx context.Context, tx *sqlx.Tx, id string, proof *models.NativeResumeDeliveryEvidence) ([]models.SessionRecoveryBlock, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id, incarnation_id, expected_generation, reason, consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence, delivery_turn_id, delivery_outcome FROM session_recovery_blocks WHERE session_id = ? AND state = 'open'`), proof.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	found := false
+	var blocks []models.SessionRecoveryBlock
+	for rows.Next() {
+		var block models.SessionRecoveryBlock
+		if err := rows.Scan(&block.ID, &block.IncarnationID, &block.ExpectedGeneration, &block.Reason, &block.ConsumerReference, &block.DeliverySubmissionID,
+			&block.DeliveryStreamID, &block.DeliverySequence, &block.DeliveryTurnID, &block.DeliveryOutcome); err != nil {
+			return nil, err
+		}
+		if !nativeResumeIncidentBlockMatches(block, proof) {
+			return nil, nil
+		}
+		found = found || block.ID == id
+		blocks = append(blocks, block)
+	}
+	if !found || rows.Err() != nil {
+		return nil, rows.Err()
+	}
+	if !bindGenericNativeIncident(blocks, proof) {
+		// Fully authenticated legacy history can retire without a notice.
+		// A saved recovery snapshot still requires an exact incident binding.
+		record, _, valid, err := r.readAuthenticatedNativeNoticeTx(ctx, tx, proof)
+		if err != nil || !valid || record != nil {
+			return nil, err
+		}
+	}
+	return blocks, nil
+}
+
+func nativeResumeIncidentBlockMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
+	if !nativeResumeIncidentOwnerMatches(block, proof) {
+		return false
+	}
+	if block.DeliverySubmissionID == "" {
+		return block.Reason == deliveryUnresolvedWorkReason && block.DeliveryStreamID == ""
+	}
+	if block.DeliveryStreamID != "" && block.DeliveryStreamID != proof.StreamID {
+		return false
+	}
+	for _, row := range proof.Submissions {
+		if row.ID == block.DeliverySubmissionID && row.HarnessGeneration == proof.HarnessGeneration && row.StreamID == proof.StreamID {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence, blocks []models.SessionRecoveryBlock, completedAt time.Time) (bool, error) {
+	record, metadataRaw, valid, err := r.readAuthenticatedNativeNoticeTx(ctx, tx, proof)
+	if err != nil || !valid {
+		return false, err
+	}
+	if record == nil {
+		return r.restoreMissingNativeNoticeTx(ctx, tx, proof, blocks, metadataRaw, completedAt)
+	}
+	if record.current.Phase == models.AgentDeliveryRecoverySettled {
+		return r.restoreHistoricalTerminalNoticeTx(ctx, tx, record, metadataRaw, proof, blocks, completedAt)
+	}
+	if record.current.HarnessGeneration < proof.HarnessGeneration {
+		return r.restoreEarlierNativeNoticeTx(ctx, tx, proof, blocks, record, metadataRaw, completedAt)
+	}
+	if record.current.Phase == models.AgentDeliveryRecoveryRestored {
+		return r.restorePreviouslyRestoredNativeNoticeTx(ctx, tx, proof, blocks, record, metadataRaw, completedAt)
+	}
+	if !nativeResumeNoticeMatches(proof, record.current) {
+		return false, nil
+	}
+	record.current.StreamID = proof.StreamID
+	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, record, metadataRaw, completedAt, "")
+}
+
+func (r *Repository) restoreMissingNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	metadataRaw sql.NullString,
+	completedAt time.Time,
+) (bool, error) {
+	incident, found := nativeResumeLaterInterruptedIncident(proof, "", blocks)
+	if !found {
+		return true, nil
+	}
+	metadata, err := decodeAgentDeliveryMetadata(metadataRaw)
+	if err != nil {
+		return false, err
+	}
+	source := models.AgentDeliveryRecovery{
+		SessionID: proof.SessionID, IncarnationID: proof.IncarnationID,
+		HarnessGeneration: incident.HarnessGeneration, SubmissionID: incident.ID, StreamID: incident.StreamID,
+	}
+	return true, r.markRecoveryNoticePendingTx(ctx, tx, metadata, metadataRaw, source, completedAt)
+}
+
+func (r *Repository) restorePreviouslyRestoredNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	record *silentRestoreSessionRow,
+	metadataRaw sql.NullString,
+	completedAt time.Time,
+) (bool, error) {
+	resolved, err := r.hasResolvedNativeResumeRecoveryTx(ctx, tx, record.current)
+	if err != nil {
+		return false, err
+	}
+	if !resolved && !nativeResumeProofCoversNotice(proof, record.current) {
+		return false, nil
+	}
+	if _, found := nativeResumeLaterInterruptedIncident(proof, record.current.SubmissionID, blocks); found {
+		return true, r.markLaterNativeIncidentNoticePendingTx(
+			ctx, tx, record, metadataRaw, proof, blocks, completedAt,
+		)
+	}
+	if err := r.markRecoveryNoticePendingTx(ctx, tx, record.metadata, metadataRaw, record.current, completedAt); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) restoreHistoricalTerminalNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	record *silentRestoreSessionRow,
+	metadataRaw sql.NullString,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	completedAt time.Time,
+) (bool, error) {
+	valid, err := r.historicalTerminalNoticeMatchesTx(ctx, tx, record.current, proof, blocks)
+	if err != nil || !valid {
+		return false, err
+	}
+	current, found := nativeResumeLaterInterruptedIncident(proof, record.current.SubmissionID, blocks)
+	if !found {
+		return false, nil
+	}
+	record.current.HarnessGeneration = current.HarnessGeneration
+	record.current.SubmissionID = current.ID
+	record.current.StreamID = current.StreamID
+	return writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, record, metadataRaw, completedAt, "")
+}
+
+func (r *Repository) readAuthenticatedNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+) (*silentRestoreSessionRow, sql.NullString, bool, error) {
+	var taskID string
+	var state models.TaskSessionState
+	var metadataRaw sql.NullString
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT task_id, state, metadata FROM task_sessions WHERE id = ?`), proof.SessionID).Scan(&taskID, &state, &metadataRaw); err != nil {
+		return nil, metadataRaw, false, err
+	}
+	metadata, err := decodeAgentDeliveryMetadata(metadataRaw)
+	if err != nil {
+		return nil, metadataRaw, false, err
+	}
+	var acp struct {
+		SessionID string `json:"session_id"`
+	}
+	if raw := metadata["acp"]; len(raw) != 0 && (json.Unmarshal(raw, &acp) != nil || acp.SessionID != proof.NativeSessionID) {
+		return nil, metadataRaw, false, nil
+	}
+	recovery, exists, err := agentDeliveryRecoveryFromMetadata(metadata)
+	if err != nil || !exists {
+		return nil, metadataRaw, !exists, err
+	}
+	if recovery.HistoryGap != nil || recovery.SessionID != proof.SessionID || recovery.IncarnationID != proof.IncarnationID {
+		return nil, metadataRaw, false, nil
+	}
+	return &silentRestoreSessionRow{taskID: taskID, state: state, metadata: metadata, current: recovery}, metadataRaw, true, nil
+}
+
+func (r *Repository) restoreEarlierNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	record *silentRestoreSessionRow,
+	metadataRaw sql.NullString,
+	completedAt time.Time,
+) (bool, error) {
+	if record.current.Phase == models.AgentDeliveryRecoveryRestored {
+		resolved, err := r.hasResolvedHistoricalNativeNoticeTx(ctx, tx, record.current, proof)
+		if err != nil || !resolved {
+			return false, err
+		}
+		if nativeResumeHasLaterInterruptedIncident(proof, record.current.SubmissionID, blocks) {
+			return true, r.markLaterNativeIncidentNoticePendingTx(
+				ctx, tx, record, metadataRaw, proof, blocks, completedAt,
+			)
+		}
+		return true, nil
+	}
+	resolved, err := r.hasResolvedContextContinuationNoticeTx(ctx, tx.Tx, record.current, proof)
+	if err != nil || !resolved {
+		return false, err
+	}
+	return true, r.writeContinuedRecoveryNoticeTx(ctx, tx.Tx, record.metadata, metadataRaw, record.current, completedAt)
+}
+
+func (r *Repository) markLaterNativeIncidentNoticePendingTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	record *silentRestoreSessionRow,
+	metadataRaw sql.NullString,
+	proof *models.NativeResumeDeliveryEvidence,
+	blocks []models.SessionRecoveryBlock,
+	completedAt time.Time,
+) error {
+	incident, found := nativeResumeLaterInterruptedIncident(proof, record.current.SubmissionID, blocks)
+	if !found {
+		return errors.New("later native recovery incident is missing from authenticated proof")
+	}
+	source := models.AgentDeliveryRecovery{
+		SessionID: proof.SessionID, IncarnationID: proof.IncarnationID,
+		HarnessGeneration: incident.HarnessGeneration, SubmissionID: incident.ID,
+	}
+	return r.markRecoveryNoticePendingTx(ctx, tx, record.metadata, metadataRaw, source, completedAt)
+}
+
+func (r *Repository) hasResolvedHistoricalNativeNoticeTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	recovery models.AgentDeliveryRecovery,
+	proof *models.NativeResumeDeliveryEvidence,
+) (bool, error) {
+	if proof.SessionID != recovery.SessionID || proof.IncarnationID != recovery.IncarnationID ||
+		proof.HarnessGeneration <= recovery.HarnessGeneration {
+		return false, nil
+	}
+	if !nativeResumeProofAdmitsHistoricalNotice(proof, recovery) {
+		return false, nil
+	}
+	resolved, err := r.hasResolvedNativeResumeRecoveryTx(ctx, tx, recovery)
+	if err != nil || !resolved {
+		return false, err
+	}
+	var current bool
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM harness_session_generations g WHERE g.session_id = ? AND g.incarnation_id = ?
+		AND g.generation = ? AND g.native_session_id = ? AND NOT EXISTS (
+			SELECT 1 FROM harness_session_generations newer WHERE newer.session_id = g.session_id
+			AND newer.incarnation_id = g.incarnation_id AND newer.generation > g.generation
+		))`), proof.SessionID, proof.IncarnationID, proof.HarnessGeneration, proof.NativeSessionID).Scan(&current)
+	return current, err
+}
+
+func nativeResumeProofCoversNotice(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
+	for _, row := range proof.Submissions {
+		if row.ID == recovery.SubmissionID && row.HarnessGeneration == recovery.HarnessGeneration && row.StreamID != "" && row.StreamID == recovery.StreamID {
+			return true
+		}
+	}
+	return false
+}
+
+func validNativeResumeProof(proof *models.NativeResumeDeliveryEvidence) bool {
+	return proof != nil && proof.SessionID != "" && proof.IncarnationID != "" && proof.HarnessGeneration > 0 && proof.NativeSessionID != "" && proof.StreamID != "" && proof.ExecutionID != ""
+}
+
+// A sole generic fence can attest to a notice only when the authenticated
+// inventory identifies one interrupted submission in its generation. Set its ID
+// on blocks[0] for the transaction that persists the binding and pending notice.
+func bindGenericNativeIncident(blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
+	if len(blocks) != 1 || blocks[0].DeliverySubmissionID != "" {
+		return true
+	}
+	block := &blocks[0]
+	var submissionID string
+	for _, row := range proof.Submissions {
+		if row.HarnessGeneration != block.ExpectedGeneration || !validLaterInterruptedIncidentRow(proof, "", row) {
+			continue
+		}
+		if submissionID != "" {
+			return false
+		}
+		submissionID = row.ID
+	}
+	block.DeliverySubmissionID = submissionID
+	return true
+}
+
+func (r *Repository) resolveNativeIncidentBlocksTx(ctx context.Context, tx *sqlx.Tx, blocks []models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence, completedAt time.Time) (bool, error) {
+	for _, block := range blocks {
+		stream := block.DeliveryStreamID
+		if block.DeliverySubmissionID != "" && stream == "" {
+			stream = proof.StreamID
+		}
+		result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks SET delivery_submission_id = ?, delivery_stream_id = ?, state = ?, authorized_action = ?, updated_at = ?, resolved_at = ? WHERE id = ? AND state = ?`),
+			block.DeliverySubmissionID, stream, models.RecoveryBlockResolved, nativeResumeRecoveryAction, completedAt, completedAt, block.ID, models.RecoveryBlockOpen)
+		if err != nil {
+			return false, err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if count != 1 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func nativeResumeSubmissionMap(proof *models.NativeResumeDeliveryEvidence) (map[string]models.NativeResumeSubmissionEvidence, bool) {
+	retired := make(map[string]models.NativeResumeSubmissionEvidence, len(proof.Submissions))
+	for _, row := range proof.Submissions {
+		if row.ID == "" || row.PayloadHash == "" || row.StreamID == "" || row.HarnessGeneration <= 0 || row.HarnessGeneration > proof.HarnessGeneration ||
+			(row.HarnessGeneration == proof.HarnessGeneration && row.StreamID != proof.StreamID) {
+			return nil, false
+		}
+		if row.UnprovenCompletion && (row.State != models.DeliverySubmissionCompleted || row.TerminalSequence != 0 ||
+			row.TerminalStreamID != "" || row.Cursor == nil || row.Cursor.StreamID != row.StreamID ||
+			row.Cursor.SessionID != proof.SessionID || row.Cursor.IncarnationID != proof.IncarnationID ||
+			row.Cursor.HarnessGeneration != row.HarnessGeneration ||
+			row.Cursor.ReceivedSequence < row.Cursor.RemoteHighWater) {
+			return nil, false
+		}
+		if _, duplicate := retired[row.ID]; duplicate {
+			return nil, false
+		}
+		retired[row.ID] = row
+	}
+	return retired, true
+}
+
+func nativeResumeIncidentOwnerMatches(block models.SessionRecoveryBlock, proof *models.NativeResumeDeliveryEvidence) bool {
+	if block.IncarnationID != proof.IncarnationID || block.ExpectedGeneration != proof.HarnessGeneration || block.ConsumerReference != reconstructionDeliveryConsumer ||
+		(block.Reason != deliveryUnknownPromptReason && block.Reason != deliveryUnresolvedWorkReason) ||
+		block.DeliverySequence != 0 || block.DeliveryTurnID != "" || (block.DeliveryOutcome != "" && block.DeliveryOutcome != reconstructionUnknownOutcome) {
+		return false
+	}
+	return true
+}
+
+// A recovered notice can outlive its execution after a later readiness
+// failure; authenticated native retirement restores it with its historical owner.
+func nativeResumeNoticeMatches(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
+	if recovery.HarnessGeneration != proof.HarnessGeneration || (recovery.StreamID != "" && recovery.StreamID != proof.StreamID) ||
+		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting &&
+			recovery.Phase != models.AgentDeliveryRecoveryRecovered) {
+		return false
+	}
+	found := false
+	for _, row := range proof.Submissions {
+		found = found || row.ID == recovery.SubmissionID && row.HarnessGeneration == recovery.HarnessGeneration
+	}
+	return found
+}
+
+func (r *Repository) lockNativeResumeProofTx(ctx context.Context, tx *sqlx.Tx, proof *models.NativeResumeDeliveryEvidence) error {
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), proof.SessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{proof.SessionID}, []string{proof.StreamID}); err != nil {
+		return err
+	}
+	return nil
+}

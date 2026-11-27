@@ -27,7 +27,58 @@ function toolCall(rawName: string, field: "tool_name" | "title" | "content" = "t
   };
 }
 
+describe("historical Kandev provider fallback", () => {
+  it.each([
+    "kandev",
+    "kandev-configuration",
+    "kandev-rich-output",
+    "kandev-walkthroughs",
+    "kandev-diagnostics",
+    "kandev-rich-output-extra",
+    "foreign",
+    null,
+  ])(
+    "checks the explicit historical provider %s before package-title fallback",
+    (providerIdentifier) => {
+      const message = toolCall("kandev-rich-output: show_rich_output_kandev");
+      const metadata = message.metadata as ToolCallMetadata;
+      metadata.normalized!.generic!.input = { raw_input: { providerIdentifier, args: {} } };
+      expect(kandevToolStemOf(message)).toBe(
+        providerIdentifier === "kandev" ? "show_rich_output" : null,
+      );
+    },
+  );
+
+  it.each(["kandev", "kandev-rich-output", "foreign", null])(
+    "checks the explicit historical Codex server %s before package-title fallback",
+    (server) => {
+      const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+      const metadata = message.metadata as ToolCallMetadata;
+      metadata.normalized!.generic!.input = {
+        raw_input: { server, tool: "show_rich_output_kandev", arguments: {} },
+      };
+      expect(kandevToolStemOf(message)).toBe(server === "kandev" ? "show_rich_output" : null);
+    },
+  );
+});
+
 describe("kandevToolStemOf", () => {
+  // @covers AC-AGENTS-AGENT-RICH-OUTPUT-002.9
+  it("uses the persisted built-in package identity", () => {
+    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "kandev-rich-output/show_rich_output_kandev";
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+    expect(isRichOutputMessage(message)).toBe(true);
+  });
+
+  it("does not let a package title override a normalized foreign identity", () => {
+    const message = toolCall("mcp.kandev-rich-output.show_rich_output_kandev");
+    (message.metadata as ToolCallMetadata).normalized!.generic!.name =
+      "foreign/show_rich_output_kandev";
+    expect(kandevToolStemOf(message)).toBeNull();
+  });
+
   it.each(["tool_name", "title", "content"] as const)("reads the %s field", (field) => {
     expect(kandevToolStemOf(toolCall("mcp__kandev__show_rich_output_kandev", field))).toBe(
       "show_rich_output",
@@ -47,13 +98,63 @@ describe("kandevToolStemOf", () => {
 
     expect(kandevToolStemOf(message)).toBe("show_rich_output");
   });
+
+  it("reads the persisted Cursor title when the generic name is only a category", () => {
+    expect(kandevToolStemOf(toolCall("kandev: show_rich_output_kandev"))).toBe("show_rich_output");
+  });
+
+  it("recognizes the Copilot title and content", () => {
+    const copilotTitle = "kandev-show_rich_output_kandev";
+    const message = toolCall(copilotTitle);
+    message.content = copilotTitle;
+
+    expect(kandevToolStemOf(message)).toBe("show_rich_output");
+    expect(isRichOutputMessage(message)).toBe(true);
+  });
+
+  it("rejects a Kandev title for a foreign persisted provider", () => {
+    const message = toolCall("kandev: show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.input = {
+      raw_input: {
+        providerIdentifier: "github",
+        toolName: "show_rich_output_kandev",
+        args: {},
+      },
+    };
+
+    expect(kandevToolStemOf(message)).toBeNull();
+  });
+
+  it("rejects a Copilot title when normalized identity is foreign", () => {
+    const message = toolCall("kandev-show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.name = "github/show_rich_output_kandev";
+
+    expect(kandevToolStemOf(message)).toBeNull();
+    expect(isRichOutputMessage(message)).toBe(false);
+  });
+
+  it("rejects a Copilot title when raw_input names a foreign provider", () => {
+    const message = toolCall("kandev-show_rich_output_kandev");
+    const metadata = message.metadata as ToolCallMetadata;
+    metadata.normalized!.generic!.input = {
+      kind: "other",
+      raw_input: { providerIdentifier: "github" },
+    };
+
+    expect(kandevToolStemOf(message)).toBeNull();
+    expect(isRichOutputMessage(message)).toBe(false);
+  });
 });
 
 describe("isRichOutputMessage", () => {
   it("matches only the exact Kandev rich-output tool call", () => {
     expect(isRichOutputMessage(toolCall("mcp__kandev__show_rich_output_kandev"))).toBe(true);
     expect(isRichOutputMessage(toolCall("kandev/show_rich_output_kandev"))).toBe(true);
+    expect(isRichOutputMessage(toolCall("kandev: show_rich_output_kandev"))).toBe(true);
     expect(isRichOutputMessage(toolCall("mcp__kandev__show_walkthrough_kandev"))).toBe(false);
+    expect(isRichOutputMessage(toolCall("kandev: Edit"))).toBe(false);
     expect(isRichOutputMessage(toolCall("other/show_rich_output_kandev"))).toBe(false);
     expect(isRichOutputMessage(toolCall("mcp__other__show_rich_output"))).toBe(false);
   });

@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-001` | [Migrated source detail](#migrated-source-detail), [User installation access](#user-access-to-an-app-installation) |
 | `REQ-INTEGRATIONS-GITHUB-AUTHENTICATION-002` | [Executor host CLI bridge](#executor-host-cli-bridge) |
 
 ## Migrated source detail
@@ -74,7 +74,7 @@ post-signature processing failures produce `failing`; a later valid successful d
   repository set is shared by task configuration and credential-snapshot construction rather than
   triggering repeated materialization or origin mutation.
 - Executor-inherited Local and Worktree preparation resolves the clone protocol while it constructs
-  the desired `github.com` origin. It queries host-specific `gh` configuration before global
+  the desired origin for the repository's validated GitHub host. It queries host-specific `gh` configuration before global
   configuration and defaults to SSH when neither query returns a supported protocol. The resolver
   is called again for every launch and resume. Backend startup stores no protocol result.
 - The prepared-workspace path resolves the same repository set before it returns or starts an
@@ -86,6 +86,37 @@ post-signature processing failures produce `failing`; a later valid successful d
   is absent. Kandev does not rewrite repository provider identity from partial legacy metadata.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
+
+## User access to an App installation
+
+This section implements criteria `AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.16`
+through `001.18`. The [repair package](../../../plans/github-installation-access-check/plan.md)
+records implementation status.
+
+`GitHubOAuthClient.UserCanAccessInstallation` uses the registration's existing
+REST base URL and the supplied user access token.
+It requests `GET /user/installations?per_page=100&page=N`, starting at page 1.
+GitHub documents the [list endpoint](https://docs.github.com/en/rest/apps/installations#list-app-installations-accessible-to-the-user-access-token).
+There is no singular user-installation lookup for this purpose.
+
+Each page must return HTTP 200 and decode `total_count` and `installations[].id`.
+Access requires at least one exact numeric ID match across the fetched pages.
+Other IDs never establish access. A match returns immediately.
+Without a match, an empty page or the cumulative `total_count` ends the search
+with `(false, nil)`. Non-positive requested IDs return `(false, nil)` without I/O.
+Non-200 responses return `GitHubAPIError`, including 401, 403, and 404.
+Transport, cancellation, and JSON decoding errors remain errors.
+Every page uses `apiRequest`, the existing HTTP transport, and the response size limit.
+Its body closes before the next request. Tokens and response bodies stay out of errors.
+
+The callback services keep their state, registration, user, and generation checks.
+`AppInstallationService.userCanAccessInstallation` retries only confirmed absence
+through its existing cancellable schedule. An error never commits a connection.
+`PersonalAuthService` retains atomic rotation and its current failure classifier.
+That classifier treats HTTP 401 as definitive. HTTP 403, including rate limiting,
+404, transport errors, and decoding errors do not invalidate stored personal auth.
+A successful inventory without the selected ID still invalidates on refresh.
+This corrects provider verification within ADR 0047's existing association boundary.
 
 ## Permissions And Security
 
@@ -276,8 +307,8 @@ Invalid or ambiguous optional bridge identities are skipped without weakening ma
 A local-source repository qualifies only when its recorded metadata establishes a GitHub identity.
 Deduplicate hosts within each preparation operation.
 
-For `github.com`, a non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses probing and bridge injection for that host.
-For a non-public host, only a non-empty `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` bypasses probing and bridge injection for that host.
+For `github.com` and canonical `*.ghe.com` tenant hosts, a non-empty explicit `GH_TOKEN` or `GITHUB_TOKEN` in the request bypasses probing and bridge injection for that host.
+For a GHES host, only a non-empty `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` bypasses probing and bridge injection for that host.
 Mixed-host launches evaluate these token variables independently for each attached host.
 Later profile merges must preserve the same effective token precedence.
 The helper invokes ordinary `gh`, which selects explicit environment tokens before stored login credentials.
@@ -333,10 +364,25 @@ It must apply the refreshed environment before `SetExecutionEnv` and agent start
 Reuse the repository set already resolved for preparation instead of cloning or reconciling it a second time.
 An environment delivery failure must prevent a claim that the refreshed environment is active.
 
+When a workspace read creates an execution before a launch arrives,
+`promoteWorkspaceExecution` composes the launch's managed credential environment
+with the workspace environment and its per-run values. The current launch owns
+the broker values and generated Git helpers. Promotion stores the result in the
+in-memory execution environment and consumes the overlay before startup. The
+recomposed environment invalidates the workspace's installer digest. A
+required lease with no available broker, an incomplete lease environment, or a
+composition error prevents the new agent process from starting.
+
 The agentctl configure boundary has two explicit modes. The existing API mode composes a request-only
-overlay with the instance block, removing only marker-owned bridge entries first. Lifecycle launch and
+overlay with the instance block. It removes obsolete managed authorization and generated helper entries
+before it applies the incoming contract. Lifecycle launch and
 Kubernetes restart pass a composed runtime snapshot through this overlay mode; the indexed merge recognizes
-an already-forwarded snapshot and does not append it to itself. Complete-environment mode remains available
+an already-forwarded snapshot and does not append it to itself. The lifecycle side composes that snapshot
+with a `SetExecutionEnv` overlay only when one has been delivered. Without an overlay the snapshot is the
+newest environment the launch composed, and `configureAndStartAgent` forwards it unchanged: composing it
+with an empty overlay removes the managed helper path, broker URL, and lease as obsolete while keeping the
+generated helper entry that expands them, which leaves Git with an empty helper command and a failed HTTPS
+push. Complete-environment mode remains available
 to callers that supply the complete indexed block, including an intentional empty block. Both modes update
 the agent environment, one-shot adapter, workspace tracker, task shells, and task-scoped processes from the
 same canonical slice.
@@ -344,6 +390,67 @@ A reused executor must replace obsolete generated entries when a policy, token, 
 including when a later preparation supplies no bridge at all.
 A login-shell test covers executable paths with spaces and a replaced `PATH`.
 No global Git file, repository configuration file, token cache, or workspace connection is modified.
+
+### Managed tools at the configure boundary
+
+The integration system owns this contract under
+`AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.15`.
+The [Docker handoff package](../../../plans/docker-managed-git-credential-handoff/plan.md)
+records its repair.
+
+Authorization and installed tools have different lifetimes.
+Each configure request owns the current broker URL, lease, reissue capability,
+task/session identity, repository identity, and scope list.
+`process.Manager` removes the previous authorization before it composes the request.
+A nil, empty, or partial request without a managed broker contract cannot retain
+previous authorization or generated managed Git entries.
+
+The control process installs the tool directory through `prepareGitHubCLIShim`.
+`config.CollectAgentEnvWithError` includes its helper path, shim directory,
+and Bash startup path in the initial instance environment.
+The process manager captures these three non-secret tool paths at construction.
+This private runtime snapshot contains no broker URL, lease, token, scope,
+or task/repository identity. It survives credential removal for the instance lifetime.
+Configuration does not read ambient authorization or restore credentials from PID 1.
+
+After indexed Git composition succeeds, an incoming managed broker contract
+activates the installed tools in the effective environment.
+An explicit worker helper path from the current lifecycle request takes precedence
+over the snapshot fallback. The installed shim directory and startup path remain
+local to this agentctl process.
+Tool activation uses the same path and Bash rules as initial instance construction.
+It prepends the installed shim directory once and composes the parent `BASH_ENV`.
+Parameterized parent hooks use the effective environment and cannot source the shim hook itself.
+A changed request `PATH` or parent hook must work after repeated configuration.
+
+Without the incoming managed contract, the effective environment contains no active
+managed tool metadata. Deactivation removes only Kandev's installed PATH entry.
+If `BASH_ENV` points at the installed shim hook, deactivation restores its parent hook.
+An unrelated PATH entry or explicit user hook remains intact.
+A later managed request can activate the installed tools again without a new instance.
+Shell startup files contain no credential values.
+
+The canonical slice reaches the agent, one-shot adapter, workspace tracker,
+task shells, and task-scoped commands through the existing configure commit.
+A malformed Git block leaves the command and environment unchanged.
+A configure delivery failure prevents agent start.
+
+### Docker worker helper binding
+
+`configureAndStartAgent` binds managed helper paths for explicit Docker runtimes
+before it saves and sends the effective execution environment.
+Both `agentruntime.RuntimeDocker` and `RuntimeRemoteDocker` use
+`remoteAgentctlExecutablePath`, currently `/usr/local/bin/agentctl`.
+`RuntimeKubernetes` retains `kubernetesAgentctlPath` and its restart binding.
+The lifecycle helper generalizes the existing Kubernetes normalizer only for
+these explicit runtime values.
+An unknown, standalone, SSH, Sprites, or plugin runtime does not receive a guessed path.
+
+This binding applies after fresh-snapshot selection or per-run overlay composition.
+It never synthesizes authorization when the effective broker contract is absent.
+Container bootstrap keeps its existing binding for preparation and clone operations.
+The configure path also needs the binding because bootstrap environment values
+are not the authoritative per-run overlay.
 
 ### Compatibility and evidence
 

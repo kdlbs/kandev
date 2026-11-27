@@ -4,6 +4,7 @@ system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
   - REQ-PLUGINS-MARKETPLACE-002
+  - REQ-PLUGINS-MARKETPLACE-004
 created: 2026-07-18
 owners:
   - jcfs
@@ -24,7 +25,9 @@ installer described here. Native plugin behavior remains owned by this document.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-PLUGINS-MARKETPLACE-002` | [Registry preview images](#registry-preview-images) |
+| `REQ-PLUGINS-MARKETPLACE-002` | [Curated release propagation](#curated-release-propagation) |
+| `REQ-PLUGINS-MARKETPLACE-003` | [Registry preview images](#registry-preview-images) |
+| `REQ-PLUGINS-MARKETPLACE-004` | [Auto-update (opt-in)](#auto-update-opt-in) |
 
 ## Registry preview images
 
@@ -93,13 +96,10 @@ while keeping install-by-URL and sideloading as escape hatches.
   or actively-maintained plugins are not buried under older high-star incumbents.
 - Each catalog entry shows: display name, description, author, categories, the source
   repository link, the latest published version, and its star count.
-- Release authors and registry reviewers SHALL apply the attribution convention:
-  first-party `kdlbs/kandev-plugin-*` releases declare `author: "kandev"`,
-  community releases declare the contributor's stable identity, and a plugin is
-  not labeled `kandev` only because a maintainer curated it into the official
-  source. This is a release and curation check, not an index-builder ownership
-  validation rule. The builder preserves a declared manifest author and falls
-  back to the repository owner for legacy releases without one.
+- Native-plugin catalog attribution and installed manifest labels follow the
+  [native-plugin attribution design](native-plugin-attribution.md). The curated
+  repository supplies the catalog identity. Canvas author metadata remains
+  governed by its distribution contract.
 - The catalog source repository link SHALL identify the repository named by the
   registry entry. The index builder derives this value from the registry pointer.
   A release manifest's `repo_url`, when present, SHOULD identify the same
@@ -153,6 +153,31 @@ source list, enriches it, emits a static JSON API, and serves it from GitHub Pag
 - kandev fetches `index.json` — the official one plus any operator-added source URLs
   pointing at the same-shaped document.
 
+### Curated release propagation
+
+The official repository owns a three-hour, off-boundary poll. It reads repository identities only
+from the checked-out `plugins.yaml`, compares their latest exact package releases with the published
+official index, and calls the reusable index workflow only when a curated candidate changed. The
+detector has read-only contents permission; plugin repositories receive no Kandev credential and
+cannot provide a repository selector or deployment payload. See
+`ADR-2026-08-30-central-curated-plugin-release-polling`.
+
+The builder downloads the exact `<id>-<version>.tar.gz`, verifies the archive through the same
+`pkgtar` checksum/manifest authority used by installation, checks manifest identity and version, and
+publishes the computed package SHA-256. An optional release-level `checksums.txt` is compared when
+present. If one latest release fails, the builder retains only that still-curated repository's prior
+record and reports the failure; other valid releases may advance. A provider-wide failure or missing
+trusted prior aborts before Pages upload, leaving the published site unchanged.
+
+The verifier command stays in the backend Go module so it can import the shared
+`internal/plugins/pkgtar` package. GitHub Actions and E2E fixtures build this command; the running
+Kandev backend does not invoke it.
+
+The release poll, source-triggered builds, manual rebuilds, and the daily 06:00 UTC fallback share
+the static `plugin-registry-pages` concurrency group. Active deployment finishes and pending work
+coalesces. The three-hour poll targets a four-hour propagation SLO under normal GitHub Actions
+scheduling; GitHub schedules may be delayed or dropped, so this is not a deterministic guarantee.
+
 The per-repo publishing convention and the two Actions are an operational contract,
 not a user-facing API; their normative shape is the `schema.json` and the
 `index.json` document format defined under "Data model".
@@ -162,15 +187,15 @@ not a user-facing API; their normative shape is the `schema.json` and the
 ### `plugins.yaml` (registry list — the curated, human-edited source of truth)
 
 Lives at `plugin-registry/plugins.yaml` in the main kandev repo. A list of entries,
-each pointing at one plugin repository. Deliberately minimal — descriptive metadata
-is read from the plugin's own release manifest at build time so it can never drift
-from what actually ships.
+each pointing at one plugin repository. Display metadata comes from the tagged
+release manifest. Maintainers can add free-form category labels in the registry.
+The index combines manifest and registry categories and removes duplicate values.
 
 ```yaml
 plugins:
   - id: agent-stats            # MUST equal the plugin manifest `id`
     repo: kdlbs/kandev-plugin-agent-stats   # owner/name; the release source
-    # optional overrides / curation-only fields:
+    categories: [productivity]  # optional tags added to manifest categories
     featured: false            # maintainer may pin an entry above star order
 ```
 
@@ -198,8 +223,8 @@ This is the fetch contract between a marketplace source and kandev. Additional
       "id": "agent-stats",
       "name": "Agent Stats",              // from manifest display_name
       "description": "Per-session token & LOC dashboard",
-      "author": "kandev",                 // from the release manifest
-      "categories": ["analytics"],
+      "author": "kdlbs",                  // curated repository owner (native plugin)
+      "categories": ["analytics", "productivity"], // manifest, then registry tags
       "icon_url": "https://raw.githubusercontent.com/kdlbs/kandev-plugin-agent-stats/v1.4.0/icon.svg",
       "repo_url": "https://github.com/kdlbs/kandev-plugin-agent-stats",
       "version": "1.4.0",                 // latest release
@@ -410,7 +435,7 @@ response but stays `enabled`.
   schema/consistency check fails and the PR is blocked.
 - **GIVEN** the latest release of the first-party Bitbucket plugin declares
   `author: "kandev"` and its `repo_url` points to `kdlbs/kandev-plugin-bitbucket`,
-  **WHEN** the official index is built, **THEN** the catalog shows **by kandev** and
+  **WHEN** the official index is built, **THEN** the catalog shows **by kdlbs** and
   links to the `kdlbs` Bitbucket repository.
 - **GIVEN** the latest release of the community YouTrack plugin is owned by
   `ahmedbally` and declares `author: "ahmedbally"` with its matching repository URL,
@@ -457,6 +482,16 @@ API: `GET/PUT /api/plugins/settings` (`{auto_update_default}`) for the
 instance-wide default and `PUT /api/plugins/:id/auto-update` (`{auto_update:
 true|false|null}`) for the per-plugin override. Both require the same operator
 authority as the rest of plugin management.
+
+`useAutoUpdateSettings` serializes accepted PUTs within its mounted page, using
+a promise tail and synchronous intent counter. Only the latest intent publishes
+its receipt or rollback; every successful receipt updates the accepted baseline.
+The baseline starts unknown: failed GET uses the off fallback, not confirmed
+data. Late initial GET cannot replace an admitted edit. Accepted writes drain
+after unmount, without publishing state or toasts; disposed callbacks admit
+nothing. This is local orchestration, without cross-mount ordering or transport
+exactly-once claims. Both switch consumers share this state; row overrides use
+their separate endpoint.
 
 ## Out of scope
 

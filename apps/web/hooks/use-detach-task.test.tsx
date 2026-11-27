@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "@/lib/types/http";
-import { useDetachTask } from "./use-detach-task";
+import { createAppStore } from "@/lib/state/store";
+import { useDetachTask, useTaskDetachDialog } from "./use-detach-task";
 
 const detachTaskMock = vi.hoisted(() => vi.fn());
 
@@ -65,4 +66,23 @@ describe("useDetachTask", () => {
     expect(firstHook.result.current.detachingTaskId).toBeNull();
     expect(secondHook.result.current.detachingTaskId).toBeNull();
   });
+});
+
+it("confirms detachment from a bounded page without loading a workflow snapshot", () => {
+  const store = createAppStore();
+  const child = {
+    id: "page-child",
+    title: "Child",
+    parentTaskId: "parent",
+    workspaceMode: "inherit_parent" as const,
+  };
+  const { result } = renderHook(() => useTaskDetachDialog(store, [child]));
+  act(() => result.current.handleDetachTask(child.id));
+  expect(result.current.detachingTask).toEqual({
+    id: child.id,
+    title: child.title,
+    workspaceMode: "inherit_parent",
+  });
+  expect(store.getState().kanban.tasks).toEqual([]);
+  expect(store.getState().kanbanMulti.snapshots).toEqual({});
 });

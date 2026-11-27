@@ -7,12 +7,23 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/common/logger"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+type streamContextMCPHandler struct {
+	observed chan error
+}
+
+func (h streamContextMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	h.observed <- ctx.Err()
+	return &ws.Message{ID: msg.ID, Type: ws.MessageTypeResponse, Action: msg.Action}, nil
+}
 
 // closeBarrierMockServer is a minimal agentctl mock that exposes the two
 // WebSocket endpoints needed for Close/drain regression coverage. Handlers
@@ -122,6 +133,158 @@ func TestClientClose_DrainsWorkspaceStream(t *testing.T) {
 	// doesn't strand a new dial past the barrier.
 	if _, err := client.StreamWorkspace(context.Background(), WorkspaceStreamCallbacks{}); err == nil {
 		t.Error("StreamWorkspace after Close should return error, got nil")
+	}
+}
+
+func TestCloseCancelsPendingUpdatesDialAndAllowsReconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		close func(*Client)
+	}{
+		{name: "close updates stream", close: func(client *Client) { client.CloseUpdatesStream() }},
+		{name: "close client", close: func(client *Client) { client.Close() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dialStarted := make(chan struct{})
+			requestCanceled := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			upgraded := make(chan struct{}, 1)
+			mcpContextErr := make(chan error, 1)
+			var releaseOnce sync.Once
+			var requests atomic.Int32
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if requests.Add(1) == 1 {
+					close(dialStarted)
+					select {
+					case <-r.Context().Done():
+						close(requestCanceled)
+					case <-releaseFirst:
+					}
+					return
+				}
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				upgraded <- struct{}{}
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"id":"live-context","type":"request","action":"mcp.context","payload":{}}`))
+				for {
+					if _, _, err := conn.ReadMessage(); err != nil {
+						_ = conn.Close()
+						return
+					}
+				}
+			}))
+			t.Cleanup(func() {
+				releaseOnce.Do(func() { close(releaseFirst) })
+				server.Close()
+			})
+			client := newCloseBarrierTestClient(t, server.URL)
+			t.Cleanup(client.Close)
+			mcpHandler := streamContextMCPHandler{observed: mcpContextErr}
+
+			streamResult := make(chan error, 1)
+			go func() {
+				streamResult <- client.StreamUpdates(context.Background(), func(AgentEvent) {}, mcpHandler, nil)
+			}()
+			select {
+			case <-dialStarted:
+			case <-time.After(2 * time.Second):
+				t.Fatal("server did not receive the pending updates-stream dial")
+			}
+
+			tc.close(client)
+			select {
+			case <-requestCanceled:
+			case <-time.After(2 * time.Second):
+				t.Fatal("closing the updates stream did not cancel the pending HTTP upgrade")
+			}
+			select {
+			case err := <-streamResult:
+				if err == nil {
+					t.Fatal("StreamUpdates succeeded after its pending dial was closed")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("pending StreamUpdates dial did not stop after close")
+			}
+
+			if err := client.StreamUpdates(context.Background(), func(AgentEvent) {}, mcpHandler, nil); err != nil {
+				t.Fatalf("StreamUpdates should reconnect after close: %v", err)
+			}
+			select {
+			case <-upgraded:
+			case <-time.After(2 * time.Second):
+				t.Fatal("fresh updates-stream dial did not upgrade")
+			}
+			if !client.HasAgentStream() {
+				t.Fatal("fresh updates stream was not registered")
+			}
+			select {
+			case err := <-mcpContextErr:
+				if err != nil {
+					t.Fatalf("MCP handler received canceled stream context after reconnect: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("fresh updates stream did not dispatch MCP request")
+			}
+			client.CloseUpdatesStream()
+		})
+	}
+}
+
+func TestStaleUpdatesDialCompletionCannotReplaceSuccessor(t *testing.T) {
+	server := newWSTestServer(t, func(msg ws.Message) *ws.Message {
+		response, err := ws.NewResponse(msg.ID, msg.Action, map[string]bool{"ok": true})
+		if err != nil {
+			t.Errorf("build response: %v", err)
+			return nil
+		}
+		return response
+	})
+	defer server.Close()
+	client := newCloseBarrierTestClient(t, server.server.URL)
+	t.Cleanup(client.Close)
+
+	staleAttempt, _, err := client.beginUpdatesStreamDial(context.Background())
+	if err != nil {
+		t.Fatalf("begin stale dial: %v", err)
+	}
+	if err := client.StreamUpdates(context.Background(), func(AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("install successor updates stream: %v", err)
+	}
+	client.mu.RLock()
+	successor := client.agentStreamConn
+	client.mu.RUnlock()
+	if successor == nil {
+		t.Fatal("successor updates stream was not installed")
+	}
+
+	lateConn, _, err := client.dialWebSocket(context.Background(), "/api/v1/agent/stream", nil)
+	if err != nil {
+		t.Fatalf("open simulated late handshake result: %v", err)
+	}
+	if _, err := client.completeUpdatesStreamDial(staleAttempt, lateConn); err == nil {
+		t.Fatal("stale dial completion unexpectedly succeeded")
+	}
+	if _, _, err := lateConn.ReadMessage(); err == nil {
+		t.Fatal("stale dial completion left its late socket open")
+	}
+	client.mu.RLock()
+	stillCurrent := client.agentStreamConn == successor
+	client.mu.RUnlock()
+	if !stillCurrent {
+		t.Fatal("stale dial completion replaced the successor stream")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	response, err := client.sendStreamRequest(ctx, "test.successor", nil)
+	if err != nil {
+		t.Fatalf("successor stream stopped serving requests after stale completion: %v", err)
+	}
+	if response.Type != ws.MessageTypeResponse {
+		t.Fatalf("successor response type = %q, want response", response.Type)
 	}
 }
 

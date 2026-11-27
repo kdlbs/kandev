@@ -154,3 +154,28 @@ func TestRouteActionClaimBlocksPromptAdmission(t *testing.T) {
 		t.Fatalf("prompt admission error = %v, want route-action busy error", err)
 	}
 }
+
+func TestRouteActionPromptDispatchOwnershipAllowsOwnRouteLock(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task1", "session1"
+	seedExecutorRunning(t, repo, sessionID, taskID, "execution-route-action-prompt")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	releaseRouteAction := svc.acquireSerializedSessionRouteOperationLock(sessionID, true)
+	defer releaseRouteAction()
+	if err := svc.validatePromptDispatchOwnership(
+		ctx, taskID, sessionID, session, promptClaimRollback{},
+		promptTaskOptions{allowRouteActionPrompt: true}, nil,
+	); err != nil {
+		t.Fatalf("route action's own prompt admission = %v, want success", err)
+	}
+	if err := svc.validatePromptDispatchOwnership(
+		ctx, taskID, sessionID, session, promptClaimRollback{}, promptTaskOptions{}, nil,
+	); !errors.Is(err, ErrSessionResetInProgress) {
+		t.Fatalf("unrelated prompt admission = %v, want route-action rejection", err)
+	}
+}

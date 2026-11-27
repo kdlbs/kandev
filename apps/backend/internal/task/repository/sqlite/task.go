@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,11 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/admission"
+	"github.com/kandev/kandev/internal/task/repository/completion"
+	"github.com/kandev/kandev/internal/task/repository/hierarchy"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -61,13 +67,16 @@ const (
 var taskScanColumns = []taskScanColumn{
 	{name: "id"},
 	{name: "workspace_id"},
+	{name: "initial_workspace_layout"},
 	{name: "workflow_id"},
 	{name: "workflow_step_id"},
 	{name: "workflow_agent_overrides"},
 	{name: "title"},
 	{name: "description"},
+	{name: "flag_note"},
 	{name: "state"},
 	{name: "priority"},
+	{name: "execution_grade"},
 	{name: "position"},
 	{name: "wip_admitted"},
 	{name: "queued_for_step_id"},
@@ -131,9 +140,9 @@ func taskScanColumnSQL(alias string, useExpressions bool) string {
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
 // when the task is owned by office: either it has a non-empty project_id
-// (explicit office task) or its workflow matches the workspace's
-// office_workflow_id (the canonical "office workflow"). Kanban tasks live
-// in any other workflow and have no project.
+// (explicit office task), its workflow matches the canonical office_workflow_id,
+// or it belongs to that Office workspace's system-owned builtin Routine workflow.
+// Ordinary Kanban and user-owned routine-template workflows remain distinct.
 func isFromOfficeProjection(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
@@ -145,6 +154,15 @@ func isFromOfficeProjection(alias string) string {
 			WHERE w.id = ` + alias + `.workspace_id
 			  AND COALESCE(w.office_workflow_id, '') != ''
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
+		)
+		OR EXISTS (
+			SELECT 1 FROM workspaces w
+			JOIN workflows wf ON wf.workspace_id = w.id
+			WHERE w.id = ` + alias + `.workspace_id
+			  AND COALESCE(w.office_workflow_id, '') != ''
+			  AND wf.id = ` + alias + `.workflow_id
+			  AND wf.is_system = 1
+			  AND wf.workflow_template_id = 'routine'
 		)
 	)`
 }
@@ -236,11 +254,17 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID, feederStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{task.WorkspaceID}, []string{task.ParentID}); err != nil {
+		return err
+	}
+	if err := r.validateCreationParentTx(ctx, tx, task); err != nil {
+		return err
+	}
 
 	// Same order as createTask and the workspace cascade: workspace row
 	// first, then workflow-step locks. Without it an admission holding a step
@@ -334,11 +358,17 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		defer unlock()
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{task.WorkspaceID}, []string{task.ParentID}); err != nil {
+		return err
+	}
+	if err := r.validateCreationParentTx(ctx, tx, task); err != nil {
+		return err
+	}
 
 	// Serialize with the workspace delete cascade: the cascade locks the
 	// workspace row before inventorying its tasks, so a task created here
@@ -401,6 +431,9 @@ func (r *Repository) prepareTaskForCreate(task *models.Task) error {
 }
 
 func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) (entryID string, err error) {
+	if err := r.validateProjectWorkspaceTx(ctx, tx, task); err != nil {
+		return "", err
+	}
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -418,9 +451,9 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		workflowAgentOverridesValue = workflowAgentOverrides
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (executor_actor_user_id, id, workspace_id, initial_workspace_layout, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, flag_note, state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflowCreator(ctx), task.ID, task.WorkspaceID, task.InitialWorkspaceLayout, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.FlagNote, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -456,7 +489,36 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 			return "", err
 		}
 	}
+	if err := r.claimCreationAttachmentsTx(ctx, tx, task); err != nil {
+		return "", err
+	}
 	return entryID, nil
+}
+
+func (r *Repository) validateProjectWorkspaceTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	expectation, ok := admission.ProjectWorkspaceValidation(ctx)
+	if !ok {
+		return nil
+	}
+	if task.ProjectID != expectation.ProjectID || task.WorkspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	query := `SELECT workspace_id FROM office_projects WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR SHARE`
+	}
+	var workspaceID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), expectation.ProjectID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	if err != nil {
+		return err
+	}
+	if workspaceID != expectation.WorkspaceID {
+		return repoerrors.ErrProjectMembershipChanged
+	}
+	return nil
 }
 
 func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {
@@ -1014,36 +1076,45 @@ func (r *Repository) UpdateTaskPriority(ctx context.Context, taskID, priority st
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
 func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", true, false)
+	return r.updateTaskCommit(ctx, task, "", true, false, nil)
+}
+
+func (r *Repository) UpdateTaskWithCompletionAdmission(ctx context.Context, task *models.Task, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, "", true, false, admission)
 }
 
 // UpdateTaskPreservingDeferredLaunch is UpdateTask for callers that hold a
 // task snapshot old enough to have missed a concurrent write to
-// deferred_launch — the service layer's request-driven UpdateTask, which
-// reads the task once at the start of a request and can commit after the
-// session ceiling's own compare-and-set writers (SetTaskDeferredLaunchIfUnchanged)
-// have moved that key on. It performs the same write as UpdateTask, except
+// deferred_launch. Internal snapshot callers can commit after the session
+// ceiling's compare-and-set writers (SetTaskDeferredLaunchIfUnchanged) have
+// moved that key on. It performs the same write as UpdateTask, except
 // deferred_launch in the write payload is replaced by the row's own current
 // value at write time, so a stale in-memory snapshot can never resurrect or
 // clobber whatever those writers did to it in the meantime. Every other key
 // keeps ordinary replace semantics, including deletion by omission.
 func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", true, true)
+	return r.updateTaskCommit(ctx, task, "", true, true, nil)
 }
 
-func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) error {
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
+func (r *Repository) UpdateTaskPreservingDeferredLaunchWithCompletionAdmission(ctx context.Context, task *models.Task, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, "", true, true, admission)
+}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool, admission *completion.Admission) error {
+
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return err
+	}
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil, admission)
 	if err != nil {
 		return err
 	}
@@ -1053,6 +1124,126 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 	}
 	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, markerEntryID)
 	return nil
+}
+
+// UpdateTaskExactOperation commits a full task-row update and its durable
+// operation identity in one transaction. The identity check precedes version
+// validation so a retry after a lost receipt acknowledgement can recover the
+// already-committed result even though the task version has advanced.
+//
+//nolint:cyclop,funlen,gocognit // The exact update transaction binds all field writes to one observed task version.
+func (r *Repository) UpdateTaskExactOperation(
+	ctx context.Context,
+	task *models.Task,
+	workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+	claimFence ...models.TaskManagementClaimFence,
+) (bool, error) {
+	if task == nil || task.ID == "" || workspaceID == "" || expectedResourceVersion == "" ||
+		operationID == "" || payloadDigest == "" {
+		return false, errors.New("exact task operation identity is incomplete")
+	}
+	expectedVersion, err := time.Parse(time.RFC3339Nano, expectedResourceVersion)
+	if err != nil {
+		return false, fmt.Errorf("invalid expected task resource version: %w", err)
+	}
+	if task.WorkspaceID != workspaceID {
+		return false, repoerrors.ErrTaskVersionConflict
+	}
+	if len(claimFence) > 1 {
+		return false, errors.New("exact task operation accepts one management claim fence")
+	}
+	fence := models.TaskManagementClaimFence{}
+	if len(claimFence) == 1 {
+		fence = claimFence[0]
+	}
+
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, err
+	}
+
+	var storedWorkspaceID, storedTaskID, storedDigest, resultVersion string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT workspace_id, task_id, payload_digest, result_resource_version
+		FROM exact_task_command_operations WHERE operation_id = ?
+	`), operationID).Scan(&storedWorkspaceID, &storedTaskID, &storedDigest, &resultVersion)
+	if err == nil {
+		if storedWorkspaceID != workspaceID || storedTaskID != task.ID || storedDigest != payloadDigest {
+			return false, repoerrors.ErrTaskOperationConflict
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		task.UpdatedAt, err = time.Parse(time.RFC3339Nano, resultVersion)
+		if err != nil {
+			return false, fmt.Errorf("stored exact task operation version is invalid: %w", err)
+		}
+		return true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return false, err
+	}
+	query := `SELECT workspace_id, updated_at FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var currentWorkspaceID string
+	var currentVersion time.Time
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), task.ID).Scan(&currentWorkspaceID, &currentVersion); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		}
+		return false, err
+	}
+	if currentWorkspaceID != workspaceID || !currentVersion.Equal(expectedVersion) {
+		return false, repoerrors.ErrTaskVersionConflict
+	}
+	// SQLite does not support row-level locks. Acquire its writer lock before
+	// reading the manager so a claim transfer cannot commit between the fence
+	// check and this exact task update.
+	lockResult, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at
+		WHERE id = ? AND workspace_id = ? AND updated_at = ?
+	`), task.ID, workspaceID, currentVersion)
+	if err != nil {
+		return false, err
+	}
+	if affected, err := lockResult.RowsAffected(); err != nil || affected != 1 {
+		if err != nil {
+			return false, err
+		}
+		return false, repoerrors.ErrTaskVersionConflict
+	}
+	if err := r.checkTaskManagementClaimFence(ctx, tx, task.ID, fence); err != nil {
+		return false, err
+	}
+
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	resultVersion = task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO exact_task_command_operations (
+			operation_id, workspace_id, task_id, payload_digest,
+			result_resource_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`), operationID, workspaceID, task.ID, payloadDigest, resultVersion, task.UpdatedAt); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, markerEntryID)
+	return false, nil
 }
 
 // UpdateTaskIfWorkflowMatches is the same-step counterpart of the
@@ -1067,7 +1258,11 @@ func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, ex
 // write. A mismatch returns repoerrors.ErrWorkflowResolutionConflict and the
 // transaction rolls back untouched.
 func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *models.Task, expectedWorkflowID string) error {
-	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false)
+	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false, nil)
+}
+
+func (r *Repository) UpdateTaskIfWorkflowMatchesWithCompletionAdmission(ctx context.Context, task *models.Task, expectedWorkflowID string, admission *completion.Admission) error {
+	return r.updateTaskCommit(ctx, task, expectedWorkflowID, true, false, admission)
 }
 
 // UpdateTaskWithExplicitPosition performs the same write as UpdateTask
@@ -1077,7 +1272,7 @@ func (r *Repository) UpdateTaskIfWorkflowMatches(ctx context.Context, task *mode
 // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/.31): the generic task-update
 // API's explicit position field, which predates that contract.
 func (r *Repository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
-	return r.updateTaskCommit(ctx, task, "", false, false)
+	return r.updateTaskCommit(ctx, task, "", false, false, nil)
 }
 
 // readTaskPositionInTx reads a task's currently-persisted position inside
@@ -1100,6 +1295,40 @@ func (r *Repository) readTaskPositionInTx(ctx context.Context, tx *sql.Tx, taskI
 		return 0, false, err
 	}
 	return position, true, nil
+}
+
+func (r *Repository) readTaskUpdatedAtInTx(ctx context.Context, tx *sql.Tx, taskID string) (time.Time, error) {
+	query := `SELECT updated_at FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var updatedAt time.Time
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&updatedAt); err != nil {
+		return time.Time{}, err
+	}
+	return updatedAt, nil
+}
+
+func (r *Repository) validateWorkflowChangeSourceInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskID, workflowID, stepID string,
+	source *models.WorkflowChangeSource,
+) error {
+	if source == nil || workflowID != source.WorkflowID || stepID != source.StepID {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	updatedAt, err := r.readTaskUpdatedAtInTx(ctx, tx, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return err
+	}
+	if !updatedAt.Equal(source.UpdatedAt) {
+		return repoerrors.ErrWorkflowChangeConflict
+	}
+	return nil
 }
 
 // applyPreservedPositionInTx overwrites task.Position with the value read
@@ -1131,7 +1360,7 @@ func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx,
 // whatever the session ceiling's own CAS writers did to that key in the
 // meantime.
 func (r *Repository) buildTaskUpdateQuery(
-	task *models.Task, metadata []byte, protectDeferredLaunch bool,
+	task *models.Task, metadata []byte, protectDeferredLaunch, preserveLockedMetadata bool,
 ) (query string, finalMetadata []byte, workflowAgentOverrides interface{}, err error) {
 	encodedWorkflowAgentOverrides, err := models.EncodeWorkflowAgentOverrides(task.WorkflowAgentOverrides)
 	if err != nil {
@@ -1143,7 +1372,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		workflowAgentOverrides = encodedWorkflowAgentOverrides
 	}
 	metadataExpr := "?"
-	if protectDeferredLaunch {
+	if protectDeferredLaunch && !preserveLockedMetadata {
 		stripped, marshalErr := stripProtectedTaskMetadata(metadata)
 		if marshalErr != nil {
 			return "", nil, nil, marshalErr
@@ -1154,16 +1383,21 @@ func (r *Repository) buildTaskUpdateQuery(
 		}
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
 		pending := agentTitlePendingPredicate(r.db.DriverName())
 		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
+		if preserveLockedMetadata {
+			// Omitted metadata comes from this transaction's locked row. Merge
+			// patch null deletion applies only to supplied metadata maps.
+			metadataMerge = "?"
+		}
 		updateQuery = fmt.Sprintf(`
 			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
 				title = CASE WHEN %s THEN ? ELSE title END,
-				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				description = ?, state = ?, priority = ?, execution_grade = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
 				metadata = %s,
 				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -1195,33 +1429,42 @@ func encodeWorkflowAgentOverridesValue(overrides *models.WorkflowAgentOverrides)
 // set only by UpdateTaskPreservingDeferredLaunch, re-merges the row's own
 // current deferred_launch value into the write so a stale in-memory snapshot
 // can never resurrect or clobber a concurrent session-ceiling CAS write.
-func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) (entryID string, markerEntryID int64, err error) {
-	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+func (r *Repository) updateTaskTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	expectedWorkflowID string,
+	preservePosition, protectDeferredLaunch bool,
+	workflowChangeSource *models.WorkflowChangeSource,
+	admission *completion.Admission,
+) (entryID string, markerEntryID int64, err error) {
+	if err := r.managedDeletionBarrierTx(ctx, tx, task.ID); err != nil {
+		return "", 0, err
+	}
+	fromWorkflowID, fromStepID, err := r.readAndValidateTaskUpdateSourceInTx(
+		ctx, tx, task, expectedWorkflowID, preservePosition, workflowChangeSource,
+	)
 	if err != nil {
 		return "", 0, err
 	}
-	if !found {
-		// A concurrently deleted task must surface as ErrTaskNotFound, not
-		// fall through to the CAS comparison below: with fromWorkflowID=""
-		// (never equal to a non-empty expectedWorkflowID) that branch would
-		// misreport the deletion as a workflow-resolution conflict. NotFound
-		// is reserved for the addressed resource and wins the precedence
-		// ladder over every other case (design's error-mapping table).
-		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
-	}
-	if err := r.applyPreservedPositionInTx(ctx, tx, task, preservePosition); err != nil {
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
 		return "", 0, err
 	}
-	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
-		// Checked here, immediately before the UPDATE below and using the
-		// same in-transaction, lock-protected read the ledger's "from" value
-		// already comes from — this is the narrowest possible point to close
-		// the race a caller-side pre-read (GetTask, well before this write)
-		// cannot rule out on its own. See ErrWorkflowResolutionConflict (errors.go).
-		return "", 0, fmt.Errorf("%w: expected %q, task is now in %q",
-			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
+	if err := r.admitCompletionTx(ctx, tx, admission, task); err != nil {
+		return "", 0, err
 	}
-	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	if supplied, _ := ctx.Value(taskFieldExecutionGradeSuppliedKey{}).(bool); !supplied {
+		task.ExecutionGrade = current.ExecutionGrade
+	}
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
+		return "", 0, err
+	}
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
+	if err != nil {
+		return "", 0, err
+	}
+	metadata, err = r.preserveProtectedLiveMetadata(ctx, tx, task.ID, metadata)
 	if err != nil {
 		return "", 0, err
 	}
@@ -1235,16 +1478,25 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	// was invisible until exercised against Postgres with real concurrency.
 	task.UpdatedAt = r.nowUTC()
 
-	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
+	preserveLockedMetadata, _ := ctx.Value(taskFieldMetadataOmittedKey{}).(bool)
+	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch, preserveLockedMetadata)
 	if err != nil {
 		return "", 0, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
+	args := []interface{}{task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.ExecutionGrade, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID}
+	if workflowChangeSource != nil {
+		updateQuery += ` AND workflow_id = ? AND workflow_step_id = ? AND updated_at = ?`
+		args = append(args, workflowChangeSource.WorkflowID, workflowChangeSource.StepID, workflowChangeSource.UpdatedAt)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
 	if err != nil {
 		return "", 0, err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if workflowChangeSource != nil {
+			return "", 0, repoerrors.ErrWorkflowChangeConflict
+		}
 		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 
@@ -1286,6 +1538,36 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	return entryID, markerEntryID, nil
 }
 
+func (r *Repository) readAndValidateTaskUpdateSourceInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	expectedWorkflowID string,
+	preservePosition bool,
+	workflowChangeSource *models.WorkflowChangeSource,
+) (string, string, error) {
+	fromWorkflowID, fromStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if !found {
+		return "", "", fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if err := r.applyPreservedPositionInTx(ctx, tx, task, preservePosition); err != nil {
+		return "", "", err
+	}
+	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
+		return "", "", fmt.Errorf("%w: expected %q, task is now in %q",
+			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
+	}
+	if workflowChangeSource != nil {
+		if err := r.validateWorkflowChangeSourceInTx(ctx, tx, task.ID, fromWorkflowID, fromStepID, workflowChangeSource); err != nil {
+			return "", "", err
+		}
+	}
+	return fromWorkflowID, fromStepID, nil
+}
+
 // UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
 // step. A limited full target stores the task in that destination as queued;
 // it never rejects the move for WIP capacity. sourceStepID is the step the
@@ -1298,8 +1580,49 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, false, nil)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionReportingApplied is the automatic-
+// transition variant of UpdateTaskWithWorkflowStepAdmission. It reports the
+// transition's applied state so the orchestrator can stop destination effects
+// when admission refused the write, and it guards the commit with the state
+// observed on the caller's snapshot.
+//
+// A later business-state write owns the row: when the locked current state is
+// BLOCKED, or no longer matches the caller's observed state, admission returns
+// admitted=false, applied=false and leaves the task row untouched.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionReportingApplied(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+) (admitted, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil, true, nil)
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
+// workflow step and records the durable delivery effect key. A repeated effect
+// returns admitted=false, applied=false without rewriting the task row.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (admitted, applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect, true, nil,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
@@ -1323,7 +1646,129 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil, false, nil,
+	)
+	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission applies
+// one trusted human admission to a manually initiated cross-step move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateWithCompletionAdmission(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+	admission *completion.Admission,
+) (bool, error) {
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
+		"", expectedWorkflowID, nil, nil, nil, false, admission,
+	)
+	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep is the compare-and-swap
+// form of a cross-step move: the transition commits only while the task's
+// persisted workflow_step_id still equals expectedStepID inside the write
+// transaction. applied=false means the task left that step first and the task
+// row is untouched. The optional admission carries a trusted human completion.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedStepID string,
+	expectedWorkflowID string,
+	admission *completion.Admission,
+) (admitted bool, applied bool, err error) {
+	// The caller-built task carries this move's own lifecycle fields, so the
+	// strict source check must not rebase it from the stored row the way the
+	// expectedStepID transition path does.
+	return r.updateTaskWithWorkflowStepAdmissionExactInner(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending,
+		"", expectedWorkflowID, nil, nil, nil, nil, nil, false, admission, true,
+	)
+}
+
+// UpdateTaskWithWorkflowStepAdmissionExact couples exact operation identity,
+// resource-version fencing, WIP admission, and the workflow transition commit.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID, targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedWorkflowID string,
+	workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+	claimFences ...models.TaskManagementClaimFence,
+) (admitted, alreadyApplied bool, err error) {
+	if task == nil || task.ID == "" || workspaceID == "" || expectedResourceVersion == "" || operationID == "" || payloadDigest == "" {
+		return false, false, errors.New("exact task move identity is incomplete")
+	}
+	if task.WorkspaceID != workspaceID {
+		return false, false, repoerrors.ErrTaskVersionConflict
+	}
+	if _, err := time.Parse(time.RFC3339Nano, expectedResourceVersion); err != nil {
+		return false, false, fmt.Errorf("invalid expected task resource version: %w", err)
+	}
+	if len(claimFences) > 1 {
+		return false, false, errors.New("exact task move accepts one management claim fence")
+	}
+	fence := models.TaskManagementClaimFence{}
+	if len(claimFences) == 1 {
+		fence = claimFences[0]
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	alreadyApplied = false
+	currentSourceStepID := sourceStepID
+	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
+		attemptCtx, unlock := r.withStepArrivalLocks(ctx, targetStepID, currentSourceStepID)
+		admitted, _, err = r.updateTaskWithWorkflowStepAdmissionAttempt(
+			attemptCtx, task, currentSourceStepID, targetStepID, limit, admittedState,
+			queueExitPending, "", expectedWorkflowID, nil, nil,
+			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
+			&alreadyApplied,
+			nil,
+			false,
+			nil,
+		)
+		unlock()
+		var changed *admissionSourceChangedError
+		if !errors.As(err, &changed) {
+			return admitted, alreadyApplied, err
+		}
+		currentSourceStepID = changed.stepID
+	}
+	return false, false, fmt.Errorf("task source step kept changing after %d attempts", admissionSourceRetryLimit)
+}
+
+// UpdateTaskWithWorkflowChangeAdmissionAndState writes a change-workflow
+// transition only while the persisted source identity and version still match.
+func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	source *models.WorkflowChangeSource,
+	admission *completion.Admission,
+) (bool, error) {
+	if source == nil {
+		return false, fmt.Errorf("workflow change source guard is required")
+	}
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil, false, admission,
 	)
 	return admitted, err
 }
@@ -1346,7 +1791,29 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil, true, nil)
+	return applied, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect is the guarded
+// transition variant that records a durable delivery effect in the same
+// transaction as the compare-and-swap task move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect, true, nil,
+	)
 	return applied, err
 }
 
@@ -1360,7 +1827,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil, false, nil,
 	)
 }
 
@@ -1369,11 +1836,17 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	taskID, moveID string,
 	record messagequeue.PendingMoveRecord,
 ) (bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, &models.Task{ID: taskID}); err != nil {
+		return false, err
+	}
 	if err := r.validateDeferredMoveGuardTx(ctx, tx, record); err != nil {
 		return false, err
 	}
@@ -1400,11 +1873,11 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	applied[moveID] = true
 	task.Metadata[models.MetaKeyAppliedDeferredMoves] = applied
 	task.UpdatedAt = time.Now().UTC()
-	metadata, err := json.Marshal(task.Metadata)
+	_, err = json.Marshal(task.Metadata)
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, false); err != nil {
+	if _, _, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil, nil); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -1503,7 +1976,8 @@ func (r *Repository) deleteDeferredMoveGuardTx(
 // metadata keys) to land in between. Writing that stale snapshot would
 // silently clobber the concurrent edit. Only the fields this operation owns
 // (workflow id, the deferred-moves metadata sub-map) are carried forward
-// from the caller's request; everything else comes from the fresh row.
+// from the caller's request. Completion guards also preserve their owned handoff
+// carry update or removal; everything else comes from the fresh row.
 //
 // The unconditional (expectedStepID == "") callers — manual/bulk/feeder
 // moves — must NOT call this: their caller-built `task` already carries
@@ -1538,6 +2012,9 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if currentStepID != expectedStepID {
 		return false, nil
 	}
+	if matches, err := r.taskStepTransitionGuardMatches(ctx, tx, task.ID, expectedStepID); !matches {
+		return false, err
+	}
 	currentTask, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
 		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), task.ID))
 	if err != nil {
@@ -1546,6 +2023,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if requestedWorkflowID == "" {
 		requestedWorkflowID = currentTask.WorkflowID
 	}
+	rebaseCompletionHandoff(ctx, task, currentTask, expectedStepID)
 	*task = *currentTask
 	if requestedWorkflowID != "" {
 		task.WorkflowID = requestedWorkflowID
@@ -1567,6 +2045,19 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	}
 	task.UpdatedAt = now
 	return true, nil
+}
+
+// The task row lock remains held while checking its immutable arrival identity.
+func (r *Repository) taskStepTransitionGuardMatches(ctx context.Context, tx *sql.Tx, taskID, stepID string) (bool, error) {
+	expected, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, taskID, stepID)
+	if !guarded {
+		return true, nil
+	}
+	latest, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("read task arrival for admission CAS check: %w", err)
+	}
+	return latest == expected, nil
 }
 
 // Inner descriptor keys for the one-shot MetaKeyWorkflowMovePending marker.
@@ -1600,6 +2091,41 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	expectedStepID string,
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
+	workflowChangeSource *models.WorkflowChangeSource,
+	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
+	admission *completion.Admission,
+) (admitted bool, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect, guardBusinessState, admission, false)
+}
+
+type exactTaskMoveOperation struct {
+	workspaceID     string
+	expectedVersion string
+	operationID     string
+	payloadDigest   string
+	claimFence      models.TaskManagementClaimFence
+}
+
+func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedStepID string,
+	expectedWorkflowID string,
+	deferredMove *messagequeue.PendingMoveRecord,
+	workflowChangeSource *models.WorkflowChangeSource,
+	exactOperation *exactTaskMoveOperation,
+	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
+	admission *completion.Admission,
+	strictSource bool,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -1615,6 +2141,12 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			expectedStepID,
 			expectedWorkflowID,
 			deferredMove,
+			workflowChangeSource,
+			exactOperation,
+			alreadyApplied,
+			effect,
+			guardBusinessState,
+			admission,
 		)
 		unlock()
 
@@ -1622,7 +2154,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		if !errors.As(err, &changed) {
 			return admitted, applied, err
 		}
-		if expectedStepID != "" {
+		if workflowChangeSource != nil {
+			return false, false, repoerrors.ErrWorkflowChangeConflict
+		}
+		if expectedStepID != "" || strictSource {
 			// CAS callers preserve their existing applied=false contract when
 			// the task has left the expected step. They must not retry against
 			// the new step and turn a stale transition into a new one.
@@ -1633,7 +2168,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	return false, false, fmt.Errorf("task source step kept changing after %d attempts", admissionSourceRetryLimit)
 }
 
-//nolint:cyclop,gocognit,funlen // Admission owns one transaction for locks, WIP state, and deferred moves.
+//nolint:cyclop,funlen,gocognit,nestif // Admission and rollback remain inside the task update transaction.
 func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	ctx context.Context,
 	task *models.Task,
@@ -1645,6 +2180,12 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	expectedStepID string,
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
+	workflowChangeSource *models.WorkflowChangeSource,
+	exactOperation *exactTaskMoveOperation,
+	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
+	guardBusinessState bool,
+	admission *completion.Admission,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -1652,11 +2193,41 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.Metadata = map[string]interface{}{}
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, false, err
+	}
+
+	if exactOperation != nil {
+		var storedWorkspaceID, storedTaskID, storedDigest, resultVersion string
+		replayErr := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT workspace_id, task_id, payload_digest, result_resource_version
+			FROM exact_task_command_operations WHERE operation_id = ?
+		`), exactOperation.operationID).Scan(&storedWorkspaceID, &storedTaskID, &storedDigest, &resultVersion)
+		if replayErr == nil {
+			if storedWorkspaceID != exactOperation.workspaceID || storedTaskID != task.ID || storedDigest != exactOperation.payloadDigest {
+				return false, false, repoerrors.ErrTaskOperationConflict
+			}
+			task.UpdatedAt, replayErr = time.Parse(time.RFC3339Nano, resultVersion)
+			if replayErr != nil {
+				return false, false, fmt.Errorf("stored exact task move version is invalid: %w", replayErr)
+			}
+			if err := tx.Commit(); err != nil {
+				return false, false, err
+			}
+			if alreadyApplied != nil {
+				*alreadyApplied = true
+			}
+			return false, true, nil
+		}
+		if !errors.Is(replayErr, sql.ErrNoRows) {
+			return false, false, replayErr
+		}
+	}
 
 	// Workspace row before workflow-step lock, matching createTask and the
 	// workspace cascade: the update path must not hold a step lock while the
@@ -1691,7 +2262,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	// source so it acquires the complete sorted lock set before assigning an
 	// arrival position. This closes the single-move TOCTOU window without
 	// acquiring a newly discovered source beneath an already-held lock.
-	_, actualSourceStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	actualWorkflowID, actualSourceStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
 		return false, false, err
 	}
@@ -1699,7 +2270,84 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 	if actualSourceStepID != sourceStepID {
+		if workflowChangeSource != nil {
+			return false, false, repoerrors.ErrWorkflowChangeConflict
+		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+	}
+	// A completion-owned move may commit only while the accepted signal still
+	// owns the pending bag for this exact entry. The bag is read under the task
+	// lock that also serializes signal replacement.
+	if matches, err := r.stepCompletionSignalMatchesGuardTx(ctx, tx, task.ID, actualSourceStepID); err != nil {
+		return false, false, err
+	} else if !matches {
+		return false, false, nil
+	}
+	// A later move may have left and returned to the same source step: the step
+	// id still matches, but the transition ledger advanced. Compare the ledger id
+	// the deferred move captured when it was requested, so a move superseded by a
+	// later move is not applied against the returned-to step. A legacy row
+	// (FromTransitionID 0) skips this guard and keeps its behavior.
+	if deferredMove != nil && deferredMove.Move.FromTransitionID != 0 {
+		latestTransitionID, ledgerErr := r.getLatestTaskStepTransitionIDTx(ctx, tx, task.ID)
+		if ledgerErr != nil {
+			return false, false, ledgerErr
+		}
+		if latestTransitionID != deferredMove.Move.FromTransitionID {
+			return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+		}
+	}
+	// The automatic transition's business precondition is the locked current
+	// state. A BLOCKED task is owned by the decision that set it, and a state
+	// that no longer matches the caller's snapshot means another writer
+	// committed a newer outcome after this transition was decided. Either way
+	// the move is not applied: report it as a lost comparison, not an error,
+	// and leave the row, any delivery effect, and the destination untouched.
+	if guardBusinessState {
+		currentState, err := r.readTaskStateInTx(ctx, tx, task.ID)
+		if err != nil {
+			return false, false, err
+		}
+		if currentState == v1.TaskStateBlocked {
+			return false, false, nil
+		}
+		if task.State != "" && currentState != task.State {
+			return false, false, nil
+		}
+	}
+	if exactOperation != nil {
+		currentVersion, err := r.readTaskUpdatedAtInTx(ctx, tx, task.ID)
+		if err != nil {
+			return false, false, err
+		}
+		expectedVersion, err := time.Parse(time.RFC3339Nano, exactOperation.expectedVersion)
+		if err != nil {
+			return false, false, fmt.Errorf("invalid expected task move version: %w", err)
+		}
+		if workspaceID != exactOperation.workspaceID || !currentVersion.Equal(expectedVersion) {
+			return false, false, repoerrors.ErrTaskVersionConflict
+		}
+		lockResult, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE tasks SET updated_at = updated_at
+			WHERE id = ? AND workspace_id = ? AND updated_at = ?
+		`), task.ID, exactOperation.workspaceID, currentVersion)
+		if err != nil {
+			return false, false, err
+		}
+		if affected, err := lockResult.RowsAffected(); err != nil || affected != 1 {
+			if err != nil {
+				return false, false, err
+			}
+			return false, false, repoerrors.ErrTaskVersionConflict
+		}
+		if err := r.checkTaskManagementClaimFence(ctx, tx, task.ID, exactOperation.claimFence); err != nil {
+			return false, false, err
+		}
+	}
+	if workflowChangeSource != nil {
+		if err := r.validateWorkflowChangeSourceInTx(ctx, tx, task.ID, actualWorkflowID, actualSourceStepID, workflowChangeSource); err != nil {
+			return false, false, err
+		}
 	}
 
 	// AC-46/48 compare-and-swap precondition, only for CAS callers (see
@@ -1716,6 +2364,40 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, nil
 		}
 	}
+	if effect != nil {
+		if effect.WorkflowStepID != "" || effect.WorkflowPolicyUpdatedAt != nil {
+			policyMatches, err := r.workflowPolicyMatchesTx(ctx, tx, actualWorkflowID, actualSourceStepID, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !policyMatches {
+				return false, false, nil
+			}
+		}
+		if effect.TaskID != "" && effect.SessionID != "" && effect.IncarnationID != "" &&
+			effect.HarnessGeneration > 0 && effect.SubmissionID != "" && effect.StreamID != "" && effect.Sequence > 0 {
+			if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+				return false, false, err
+			}
+			if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+				return false, false, err
+			}
+			terminalMatches, err := r.agentDeliveryWorkflowTerminalMatchesTx(ctx, tx, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !terminalMatches {
+				return false, false, nil
+			}
+		}
+		inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
+		if err != nil {
+			return false, false, err
+		}
+		if !inserted {
+			return false, false, nil
+		}
+	}
 
 	// updateTaskWithWorkflowStepAdmission is always an arrival: every caller
 	// (manual cross-step move, CAS-guarded plugin/engine transitions, and
@@ -1725,6 +2407,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	// plain UpdateTask instead. So the caller-supplied task.Position is
 	// always overwritten here (REQ-TASKS-KANBAN-TASK-REORDERING-001.28).
 	if err := r.assignArrivalPosition(ctx, tx, task, targetStepID); err != nil {
+		return false, false, err
+	}
+	limit, err = r.refreshHumanAdmissionLimitTx(ctx, tx, task, limit, admission)
+	if err != nil {
 		return false, false, err
 	}
 	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
@@ -1739,6 +2425,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.QueuedAt = nil
 		if admittedState != nil {
 			task.State = *admittedState
+		} else if guardBusinessState && (actualWorkflowID != task.WorkflowID || actualSourceStepID != targetStepID) {
+			if err := r.completeAutomaticStepEntryTx(ctx, tx, task); err != nil {
+				return false, false, err
+			}
 		}
 	} else {
 		task.WIPAdmitted = false
@@ -1769,13 +2459,36 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			pendingMoveOptionsKey:    string(encoded),
 		}
 	}
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
+	if exactOperation != nil && !admitted {
+		task.Metadata[models.MetaKeyTaskManagementDeferredFence] = map[string]interface{}{
+			"installation_id": exactOperation.claimFence.InstallationID,
+			"instance_key":    exactOperation.claimFence.InstanceKey,
+			"generation":      exactOperation.claimFence.Generation,
+		}
+	} else {
+		delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
 	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, false, false)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource, admission)
 	if err != nil {
 		return false, false, err
+	}
+	// Commit proof for the exact accepted signal with the move. A missing
+	// receipt rolls the move back so the signal stays retryable instead of
+	// leaving an untraceable transition.
+	if err := r.recordStepCompletionProofTx(ctx, tx, task.ID, actualSourceStepID, task, admitted); err != nil {
+		return false, false, err
+	}
+	if exactOperation != nil {
+		resultVersion := task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO exact_task_command_operations (
+				operation_id, workspace_id, task_id, payload_digest,
+				result_resource_version, created_at
+			) VALUES (?, ?, ?, ?, ?, ?)
+		`), exactOperation.operationID, exactOperation.workspaceID, task.ID,
+			exactOperation.payloadDigest, resultVersion, task.UpdatedAt); err != nil {
+			return false, false, err
+		}
 	}
 	if deferredMove != nil {
 		result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1821,6 +2534,17 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 	if strings.TrimSpace(expectedValue) == "" {
 		return false, nil
 	}
+	return r.removeTaskMetadataKeyIfValueWithExecutor(ctx, r.db, taskID, key, expectedValue)
+}
+
+// removeTaskMetadataKeyIfValueWithExecutor is the transaction-capable form of
+// RemoveTaskMetadataKeyIfValue, so a conditional removal can share one task
+// transaction with another metadata write.
+func (r *Repository) removeTaskMetadataKeyIfValueWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key, expectedValue string,
+) (bool, error) {
 	var query string
 	var args []interface{}
 	if dialect.IsPostgres(r.db.DriverName()) {
@@ -1839,7 +2563,7 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 		`
 		args = []interface{}{path, time.Now().UTC(), taskID, path, expectedValue}
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -1848,11 +2572,12 @@ func (r *Repository) RemoveTaskMetadataKeyIfValue(
 }
 
 // ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
-// and completed markers for a manual move only while the completed marker and
-// task update generation still match the recovery snapshot. A new move clears
-// the old completed marker in the same task write that creates its pending
-// marker, and a later completion reuses the boolean marker value, so the
-// generation predicate prevents either newer move from being erased.
+// and completed markers for a manual move without advancing tasks.updated_at,
+// and only while the completed marker and task update generation still match
+// the recovery snapshot. A new move clears the old completed marker in the
+// same task write that creates its pending marker, and a later completion
+// reuses the boolean marker value, so the generation predicate prevents either
+// newer move from being erased.
 func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Context, taskID string, completedAt time.Time) (bool, error) {
 	var query string
 	var args []interface{}
@@ -1862,7 +2587,7 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 			SET metadata = (
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
 				#- ARRAY[?]::text[] #- ARRAY[?]::text[]
-			)::text, updated_at = ?
+			)::text
 			WHERE id = ?
 			  AND jsonb_extract_path(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
@@ -1873,7 +2598,6 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 		args = []interface{}{
 			models.MetaKeyManualMoveLifecyclePending,
 			models.MetaKeyManualMoveLifecycleCompleted,
-			r.nowUTC(),
 			taskID,
 			models.MetaKeyManualMoveLifecycleCompleted,
 			completedAt,
@@ -1884,7 +2608,7 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 			SET metadata = json_remove(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
 				?, ?
-			), updated_at = ?
+			)
 			WHERE id = ?
 			  AND json_type(
 				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
@@ -1895,7 +2619,6 @@ func (r *Repository) ClearManualMoveLifecycleMarkersIfCompleted(ctx context.Cont
 		args = []interface{}{
 			jsonPath(models.MetaKeyManualMoveLifecyclePending),
 			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
-			r.nowUTC(),
 			taskID,
 			jsonPath(models.MetaKeyManualMoveLifecycleCompleted),
 			completedAt,
@@ -2435,14 +3158,14 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // writers did to the key in between.
 //
 // It must operate on the metadata bytes updateTaskTx passes in — already
-// merged by preserveLiveHandoffProvenance with the row's live handoffs/
+// merged by preserveProtectedLiveMetadata with the row's live handoffs/
 // handoff_source — rather than re-deriving from task.Metadata: re-deriving
 // would rebuild the payload from the caller's pre-transaction snapshot and
 // silently discard that merge, reverting a concurrently committed handoff
 // provenance write. Decoding into map[string]json.RawMessage rather than
 // map[string]interface{} avoids a float64 round-trip that would corrupt an
 // unrelated large or high-precision numeric field elsewhere in the document
-// (AC-27), matching preserveLiveHandoffProvenance's own approach.
+// (AC-27), matching preserveProtectedLiveMetadata's own approach.
 //
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
@@ -2499,11 +3222,14 @@ func protectedTaskMetadataMergeExpression(driver string) string {
 // this as a targeted update prevents concurrent task edits from being replaced
 // by a stale full-row write.
 func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
 
 	parentID, groupID, err := r.loadDetachmentState(ctx, tx, taskID)
 	if err != nil {
@@ -2802,10 +3528,6 @@ func detachTaskQuery(driver string) string {
 // UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
 // transaction that checks a WIP-limited target step's current occupancy.
 func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
 	workflowAgentOverrides, err := encodeWorkflowAgentOverridesValue(task.WorkflowAgentOverrides)
 	if err != nil {
 		return err
@@ -2815,11 +3537,26 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return err
+	}
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
+		return err
+	}
+	task.ExecutionGrade = current.ExecutionGrade
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -2843,7 +3580,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
-	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
+		return err
+	}
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
 	if err != nil {
 		return err
 	}
@@ -2903,10 +3643,6 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	destinationStepID string,
 	limit int,
 ) (bool, error) {
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
 	workflowAgentOverrides, err := encodeWorkflowAgentOverridesValue(task.WorkflowAgentOverrides)
 	if err != nil {
 		return false, err
@@ -2916,11 +3652,14 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	ctx, unlock = r.withStepArrivalLocks(ctx, destinationStepID, fromStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, err
+	}
 
 	// A promotion also leaves fromStepID's queued/admitted band, not only
 	// destinationStepID's, so a concurrent reorder of fromStepID must see
@@ -2929,6 +3668,21 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	// updateTaskWithWorkflowStepAdmission's target+source pair.
 	if err := r.lockWorkflowStepsForAdmission(ctx, tx, destinationStepID, fromStepID); err != nil {
 		return false, err
+	}
+	if err := r.lockTaskAndLoadPromotionMetadata(ctx, tx, task); err != nil {
+		return false, err
+	}
+	blocked, err := r.deferredTaskManagementFenceBlocksPromotion(ctx, tx, task)
+	if err != nil {
+		return false, err
+	}
+	if blocked {
+		return false, nil
+	}
+	if fromStepID == destinationStepID {
+		if err := r.pinSameStepPromotionEntry(ctx, tx, task); err != nil {
+			return false, err
+		}
 	}
 
 	// This is always an arrival — a promotion enters destinationStepID from a
@@ -2953,6 +3707,11 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			return false, nil
 		}
 	}
+	delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
+	if err != nil {
+		return false, err
+	}
 	queuePredicate := `
 		  AND workflow_step_id = ?
 		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)`
@@ -2968,8 +3727,16 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		  AND queued_for_step_id = ?`
 	}
 
-	fromWorkflowID, _, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
 	if err != nil {
+		return false, err
+	}
+	current, err := r.readTaskCompletionMoveSourceTx(ctx, tx, task.ID, fromWorkflowID, fromStepID)
+	if err != nil {
+		return false, err
+	}
+	task.ExecutionGrade = current.ExecutionGrade
+	if err := r.guardTaskCompletionTransitionTx(ctx, tx, &current, task); err != nil {
 		return false, err
 	}
 	// See updateTaskTx's comment: stamped after the transactional lock, not
@@ -3005,6 +3772,9 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	task.WorkflowStepTransitionID = transitionID
+	if err := r.pinCrossStepPromotionEntry(ctx, tx, task, fromStepID, destinationStepID, transitionID); err != nil {
+		return false, err
+	}
 	entryID := formatEntryID(transitionID)
 	if transitionID != 0 {
 		task.FromWorkflowID = fromWorkflowID
@@ -3023,6 +3793,160 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	return true, nil
 }
 
+// pinSameStepPromotionEntry records, on the promotion marker the caller set,
+// the ledger row of the entry a same-step promotion admits. The task entered
+// the step when it was queued, so the promotion itself records no transition.
+// Reading the latest row inside the promotion transaction, after the task row
+// is locked, pins that queued entry before any later move can add a newer row.
+func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	marker, ok := task.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var entryID int64
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), task.ID).Scan(&entryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if entryID > 0 {
+		marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(entryID, 10)
+	}
+	return nil
+}
+
+func (r *Repository) pinCrossStepPromotionEntry(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	fromStepID string,
+	destinationStepID string,
+	transitionID int64,
+) error {
+	if fromStepID == destinationStepID || transitionID <= 0 {
+		return nil
+	}
+	marker, ok := task.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(transitionID, 10)
+	encodedMetadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET metadata = ? WHERE id = ?`), string(encodedMetadata), task.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrTaskNotFound
+	}
+	return nil
+}
+
+func (r *Repository) lockTaskAndLoadPromotionMetadata(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	if task == nil || task.ID == "" {
+		return ErrTaskNotFound
+	}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var metadata sql.NullString
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT metadata FROM tasks WHERE id = ? FOR UPDATE`), task.ID).Scan(&metadata); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrTaskNotFound
+			}
+			return err
+		}
+		mergeCurrentTaskManagementFence(task, decodeTaskMetadata(metadata))
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET updated_at = updated_at WHERE id = ?`), task.ID)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrTaskNotFound
+	}
+	var metadata sql.NullString
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), task.ID).Scan(&metadata); err != nil {
+		return err
+	}
+	mergeCurrentTaskManagementFence(task, decodeTaskMetadata(metadata))
+	return nil
+}
+
+func mergeCurrentTaskManagementFence(task *models.Task, currentMetadata map[string]interface{}) {
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	if current, exists := currentMetadata[models.MetaKeyTaskManagementDeferredFence]; exists {
+		task.Metadata[models.MetaKeyTaskManagementDeferredFence] = current
+	} else {
+		delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
+	}
+}
+
+func decodeTaskMetadata(metadata sql.NullString) map[string]interface{} {
+	if !metadata.Valid || metadata.String == "" || metadata.String == "null" {
+		return map[string]interface{}{}
+	}
+	decoded := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(metadata.String), &decoded); err != nil || decoded == nil {
+		return map[string]interface{}{}
+	}
+	return decoded
+}
+
+func (r *Repository) deferredTaskManagementFenceBlocksPromotion(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+) (bool, error) {
+	if task.Metadata == nil {
+		return false, nil
+	}
+	value, exists := task.Metadata[models.MetaKeyTaskManagementDeferredFence]
+	if !exists {
+		return false, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return true, nil
+	}
+	var stored struct {
+		InstallationID string `json:"installation_id"`
+		InstanceKey    string `json:"instance_key"`
+		Generation     int64  `json:"generation"`
+	}
+	if err := json.Unmarshal(encoded, &stored); err != nil || stored.Generation < 0 {
+		return true, nil
+	}
+	err = r.checkTaskManagementClaimFence(ctx, tx, task.ID, models.TaskManagementClaimFence{
+		InstallationID: stored.InstallationID,
+		InstanceKey:    stored.InstanceKey,
+		Generation:     stored.Generation,
+	})
+	if errors.Is(err, repoerrors.ErrTaskManagementClaimConflict) {
+		return true, nil
+	}
+	return false, err
+}
+
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	_, err := r.DeleteTaskWithVacatedStep(ctx, id)
@@ -3032,11 +3956,18 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 // DeleteTaskWithVacatedStep deletes a task and returns the workflow step read
 // under the same task-row lock as the deletion.
 func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	return r.deleteTaskWithVacatedStep(ctx, id, nil)
+}
+
+func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, claim *managed.DeleteClaim) (string, error) {
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return "", err
+	}
 	// Lock the task's step first, so a concurrent ReorderStepTasks of that
 	// step cannot straddle this delete (see lockTaskStepForWrite): either the
 	// reorder's whole read-then-write runs first and sees this task still
@@ -3059,11 +3990,20 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, id); err != nil {
+	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
+		return "", err
+	}
+	if err := r.purgeTaskPromptSequenceTx(ctx, tx, id, sessions); err != nil {
+		return "", err
+	}
+	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
+		return "", err
+	}
+	if err := r.StageTurnHistoryCleanupForTask(ctx, tx, id); err != nil {
 		return "", err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
@@ -3390,11 +4330,22 @@ func (r *Repository) ReparentDirectChildren(ctx context.Context, oldParentID, ne
 	if oldParentID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{oldParentID, newParentID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET parent_id = ?, updated_at = ?
 		WHERE parent_id = ?
 	`), newParentID, time.Now().UTC(), oldParentID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ReparentDirectChildrenInWorkspace limits no-cascade reparenting to the
@@ -3409,11 +4360,22 @@ func (r *Repository) ReparentDirectChildrenInWorkspace(
 	if workspaceID == "" {
 		return errors.New("workspace id is required")
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{oldParentID, newParentID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET parent_id = ?, updated_at = ?
 		WHERE parent_id = ? AND workspace_id = ?
 	`), newParentID, time.Now().UTC(), oldParentID, workspaceID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListSiblings returns non-archived, non-ephemeral sibling tasks. A task
@@ -3475,6 +4437,29 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 	}
 	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
+}
+
+// ListSchedulingTasks returns non-archived, non-ephemeral tasks whose durable
+// state is SCHEDULING. It is used by startup reconciliation: a task left in
+// SCHEDULING by a restart during an automatic start has no deferred_launch
+// record, no queue destination, and no lifecycle token, so no other startup
+// pass lists it. Oldest update first, so recovery order is deterministic.
+func (r *Repository) ListSchedulingTasks(ctx context.Context) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`, COALESCE((
+			SELECT id FROM task_step_transitions
+			WHERE task_id = t.id ORDER BY id DESC LIMIT 1
+		), 0)
+		FROM tasks t
+		WHERE t.state = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
+	`), string(v1.TaskStateScheduling))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	// Entry identity and task revision belong to the same statement snapshot.
+	return r.scanTaskRows(rows, true)
 }
 
 // ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
@@ -3541,6 +4526,32 @@ func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*model
 	return r.scanTasks(rows)
 }
 
+// ListTasksWithAutomationStartOwned returns every task whose metadata reserves
+// its initial start for an automation dispatch. The marker is stamped on
+// automation-origin tasks, so unlike ListTasksWithMetadataKey this includes
+// automation-origin, ephemeral and archived tasks.
+func (r *Repository) ListTasksWithAutomationStartOwned(ctx context.Context) ([]*models.Task, error) {
+	var predicate, path string
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
+		path = models.MetaKeyAutomationStartOwned
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		path = jsonPath(models.MetaKeyAutomationStartOwned)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		ORDER BY t.id ASC
+	`), path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded. If onlyArchived
@@ -3581,6 +4592,17 @@ func (r *Repository) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*mo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+func (r *Repository) ListTasksByWorkspaceForCommandPanel(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	if workflowID == "" || query != "" {
+		return nil, 0, fmt.Errorf("command panel listing requires a workflow and empty query")
+	}
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+func (r *Repository) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, commandPanelVisible bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -3588,7 +4610,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	if offset < 0 {
 		offset = 0
 	}
-	sort = usermodels.NormalizeTasksListSort(sort)
+	sort = usermodels.TasksListApiSort(sort)
 
 	// Build filter conditions
 	filter := ""
@@ -3620,7 +4642,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort, commandPanelVisible)
 	} else {
 		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort)
 	}
@@ -3655,7 +4677,7 @@ func (r *Repository) ListTasksForDeletion(
 	if pageSize <= 0 {
 		pageSize = 1
 	}
-	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "")
+	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "", false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3675,12 +4697,26 @@ func (r *Repository) RestoreTaskParentIfUnchanged(
 	taskID, expectedParentID, restoredParentID string,
 	restoredWorkspaceMode string,
 ) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID, restoredParentID}); err != nil {
+		return err
+	}
 
+	reader := taskHierarchyReader{r, tx.Tx}
+	current, err := reader.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if current.ParentID != expectedParentID {
+		return fmt.Errorf("task %s parent changed during compensation", taskID)
+	}
+	if err := hierarchy.ValidateParent(ctx, reader, current, restoredParentID); err != nil {
+		return err
+	}
 	query := `SELECT parent_id, metadata FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
@@ -3720,7 +4756,7 @@ func (r *Repository) RestoreTaskParentIfUnchanged(
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string, commandPanelVisible bool) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -3731,17 +4767,26 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		args = append(args, repositoryID)
 	}
 	var total int
-	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+taskFilter), args...).Scan(&total); err != nil {
+	countFilter, selectFilter := taskFilter, rewriteFilterForAlias(taskFilter, "t")
+	if commandPanelVisible {
+		countFilter += commandPanelStepPredicate("tasks")
+		selectFilter += commandPanelStepPredicate("t")
+	}
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`+countFilter), args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
+		WHERE t.workspace_id = ?`+selectFilter+`
 		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func commandPanelStepPredicate(alias string) string {
+	return ` AND EXISTS (SELECT 1 FROM workflow_steps panel_step WHERE panel_step.id = ` + alias + `.workflow_step_id AND panel_step.workflow_id = ` + alias + `.workflow_id AND panel_step.show_in_command_panel = 1)`
 }
 
 func taskListOrderBy(driver, alias, sort string) string {
@@ -3839,7 +4884,8 @@ func isWordByte(b byte) bool {
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
 func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
-	searchPattern := "%" + query + "%"
+	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	searchPattern := "%" + escaper.Replace(query) + "%"
 	like := dialect.Like(r.ro.DriverName())
 
 	// Reuse the same archive, ephemeral, and config predicates as the
@@ -3863,10 +4909,10 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		LEFT JOIN repositories r ON tr.repository_id = r.id
 		WHERE t.workspace_id = ?%s
 		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
+			t.title %s ? ESCAPE '\' OR
+			t.description %s ? ESCAPE '\' OR
+			r.name %s ? ESCAPE '\' OR
+			r.local_path %s ? ESCAPE '\'
 		)
 	`, tFilter, like, like, like, like)
 	countArgs := append(append([]interface{}{workspaceID}, extraArgs...), searchPattern, searchPattern, searchPattern, searchPattern)
@@ -3891,10 +4937,10 @@ func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
 			LEFT JOIN repositories r ON tr.repository_id = r.id
 			WHERE t.workspace_id = ?%s
 			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
+				t.title %s ? ESCAPE '\' OR
+				t.description %s ? ESCAPE '\' OR
+				r.name %s ? ESCAPE '\' OR
+				r.local_path %s ? ESCAPE '\'
 			)
 		) task_search
 		ORDER BY %s
@@ -3913,8 +4959,8 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	var externalID sql.NullString
 	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
-		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+		&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
+		&task.Title, &task.Description, &task.FlagNote, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
@@ -3951,6 +4997,10 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 
 // scanTasks is a helper to scan task rows
 func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
+	return r.scanTaskRows(rows, false)
+}
+
+func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]*models.Task, error) {
 	var result []*models.Task
 	for rows.Next() {
 		task := &models.Task{}
@@ -3961,15 +5011,19 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		var identifier sql.NullString
 		var externalID sql.NullString
 		var externalIDSettledAt sql.NullTime
-		err := rows.Scan(
-			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
-			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+		destinations := []interface{}{
+			&task.ID, &task.WorkspaceID, &task.InitialWorkspaceLayout, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
+			&task.Title, &task.Description, &task.FlagNote, &task.State, &task.Priority, &task.ExecutionGrade, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
-		)
+		}
+		if includeEntryIdentity {
+			destinations = append(destinations, &task.WorkflowStepTransitionID)
+		}
+		err := rows.Scan(destinations...)
 		if err != nil {
 			return nil, err
 		}
@@ -4029,11 +5083,14 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return err
+	}
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return err
 	}
@@ -4057,6 +5114,151 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	}
 	r.notifyTaskQueuePurged(ctx, id)
 	return nil
+}
+
+// ArchiveTaskExact fences an archive against the observed task version and
+// commits its operation identity with the archive marker and queue purge.
+//
+//nolint:cyclop,funlen // The archive transaction persists task, child, relation, and receipt effects together.
+func (r *Repository) ArchiveTaskExact(
+	ctx context.Context,
+	taskID, workspaceID, expectedResourceVersion, operationID, payloadDigest string,
+	claimFences ...models.TaskManagementClaimFence,
+) (bool, error) {
+	if taskID == "" || workspaceID == "" || expectedResourceVersion == "" || operationID == "" || payloadDigest == "" {
+		return false, errors.New("exact task archive identity is incomplete")
+	}
+	expectedVersion, err := time.Parse(time.RFC3339Nano, expectedResourceVersion)
+	if err != nil {
+		return false, fmt.Errorf("invalid expected task archive version: %w", err)
+	}
+	if len(claimFences) > 1 {
+		return false, errors.New("exact task archive accepts one management claim fence")
+	}
+	fence := models.TaskManagementClaimFence{}
+	if len(claimFences) == 1 {
+		fence = claimFences[0]
+	}
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
+	if found, err := exactTaskCommandOperationInTx(ctx, tx, r.db.Rebind, workspaceID, taskID, operationID, payloadDigest); err != nil {
+		return false, err
+	} else if found {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err := r.lockTaskStepForWrite(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	var currentWorkspaceID string
+	var currentVersion time.Time
+	var archivedAt sql.NullTime
+	query := `SELECT workspace_id, updated_at, archived_at FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&currentWorkspaceID, &currentVersion, &archivedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	if currentWorkspaceID != workspaceID || !currentVersion.Equal(expectedVersion) || archivedAt.Valid {
+		return false, repoerrors.ErrTaskVersionConflict
+	}
+	lockResult, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at
+		WHERE id = ? AND workspace_id = ? AND updated_at = ?
+	`), taskID, workspaceID, currentVersion)
+	if err != nil {
+		return false, err
+	}
+	if affected, err := lockResult.RowsAffected(); err != nil || affected != 1 {
+		if err != nil {
+			return false, err
+		}
+		return false, repoerrors.ErrTaskVersionConflict
+	}
+	if err := r.checkTaskManagementClaimFence(ctx, tx, taskID, fence); err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, taskID); err != nil {
+		return false, err
+	}
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, taskID, sessions, false); err != nil {
+		return false, err
+	}
+	resultVersion := now.UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO exact_task_command_operations (
+			operation_id, workspace_id, task_id, payload_digest,
+			result_resource_version, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`), operationID, workspaceID, taskID, payloadDigest, resultVersion, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.notifyTaskQueuePurged(ctx, taskID)
+	return false, nil
+}
+
+func (r *Repository) GetTaskCommandOperation(
+	ctx context.Context,
+	workspaceID, taskID, operationID, payloadDigest string,
+) (string, bool, error) {
+	var storedWorkspaceID, storedTaskID, storedDigest, resultVersion string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT workspace_id, task_id, payload_digest, result_resource_version
+		FROM exact_task_command_operations WHERE operation_id = ?
+	`), operationID).Scan(&storedWorkspaceID, &storedTaskID, &storedDigest, &resultVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if storedWorkspaceID != workspaceID || storedTaskID != taskID || storedDigest != payloadDigest {
+		return "", false, repoerrors.ErrTaskOperationConflict
+	}
+	return resultVersion, true, nil
+}
+
+func exactTaskCommandOperationInTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	rebind func(string) string,
+	workspaceID, taskID, operationID, payloadDigest string,
+) (bool, error) {
+	var storedWorkspaceID, storedTaskID, storedDigest string
+	err := tx.QueryRowContext(ctx, rebind(`
+		SELECT workspace_id, task_id, payload_digest
+		FROM exact_task_command_operations WHERE operation_id = ?
+	`), operationID).Scan(&storedWorkspaceID, &storedTaskID, &storedDigest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if storedWorkspaceID != workspaceID || storedTaskID != taskID || storedDigest != payloadDigest {
+		return false, repoerrors.ErrTaskOperationConflict
+	}
+	return true, nil
 }
 
 // ArchiveTaskIfActive is the CAS variant used by office task-handoffs
@@ -4084,11 +5286,14 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 	expectedUpdatedAt time.Time,
 	cascadeID string,
 ) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
 	query := fmt.Sprintf(`
 		UPDATE tasks AS t
@@ -4134,11 +5339,14 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 	id string,
 	cascadeID string,
 ) (string, bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return "", false, err
+	}
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return "", false, err
 	}
@@ -4329,12 +5537,25 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	if cascadeID == "" {
 		return false, fmt.Errorf("cascadeID is required")
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
+	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -4358,12 +5579,25 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 // rows are only restored via UnarchiveTaskByCascade. Returns whether a
 // row was actually updated.
 func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
+	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if err := r.ensureArchiveCleanupAbsentInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -4379,6 +5613,51 @@ func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error)
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+// lockTaskArchiveLifecycleForWrite orders archive state changes and reclaim
+// insertion on the task row. lockTaskStepForWrite preserves the workflow-step
+// lock order on Postgres; the no-op task update also reserves SQLite's writer
+// before the archive-job check, matching recoveryclaim's cleanup insertion
+// lock on both drivers.
+func (r *Repository) lockTaskArchiveLifecycleForWrite(ctx context.Context, tx *sqlx.Tx, taskID string) (bool, error) {
+	if err := r.lockTaskStepForWrite(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at WHERE id = ?
+	`), taskID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+func (r *Repository) ensureArchiveCleanupAbsentInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	var operationID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT operation_id FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger IN (?, ?, ?)
+			AND state IN (?, ?, ?, ?, ?)
+		LIMIT 1
+	`), taskID,
+		models.TaskResourceCleanupTriggerArchive,
+		models.TaskResourceCleanupTriggerCascadeArchive,
+		models.TaskResourceCleanupTriggerArchiveReclaim,
+		models.TaskResourceCleanupStatePrepared,
+		models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRunning,
+		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
+	).Scan(&operationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check archive cleanup before unarchive: %w", err)
+	}
+	return fmt.Errorf("%w: task %s cleanup %s appeared during unarchive", repoerrors.ErrArchiveCleanupInProgress, taskID, operationID)
 }
 
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings
@@ -4450,100 +5729,27 @@ func (r *Repository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([
 	return ids, nil
 }
 
-// ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
-// activity is older than cutoff. Active sessions are excluded so in-use chats
-// are never deleted by the idle sweeper.
-func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
-	drv := r.ro.DriverName()
-	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
-	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
-	query := fmt.Sprintf(`
-		WITH candidates AS (
-			SELECT t.id, %s AS last_activity
-			FROM tasks t
-			LEFT JOIN task_sessions ts ON ts.task_id = t.id
-			WHERE t.is_ephemeral = 1
-				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
-				AND %s
-				AND t.archived_at IS NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM task_sessions active
-					WHERE active.task_id = t.id
-						AND active.state IN (?, ?)
-				)
-			GROUP BY t.id, t.updated_at
-			HAVING %s < ?
-		)
-		SELECT %s
-		FROM tasks t
-		JOIN candidates c ON c.id = t.id
-		ORDER BY c.last_activity ASC
-	`,
-		lastActivity,
-		excludeConfigModePredicate(drv, "t.metadata"),
-		lastActivity,
-		taskSelectColumns("t"),
-	)
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
-		models.TaskOriginAutomationRun,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateIdle,
-		cutoff,
-	)
+// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+// (all workspaces when workspaceID is empty), ordered by id
+// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+// Archived and unarchived tasks are both included: the coordinator deletion
+// and startup cleanup callers both need to see and act on archived rows too.
+// coordinator_id is read from the returned Metadata in Go, so this query has
+// no dialect-specific JSON extraction.
+func (r *Repository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.origin = ?`, taskSelectColumns("t"))
+	args := []interface{}{models.TaskOriginCoordinator}
+	if workspaceID != "" {
+		query += " AND t.workspace_id = ?"
+		args = append(args, workspaceID)
+	}
+	query += " ORDER BY t.id"
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
-}
-
-// DeleteExpiredQuickChatTask deletes id only when it still matches the expired
-// quick-chat predicate at delete time.
-func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	drv := r.db.DriverName()
-	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
-	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
-	query := fmt.Sprintf(`
-		WITH candidate AS (
-			SELECT t.id, %s AS last_activity
-			FROM tasks t
-			LEFT JOIN task_sessions ts ON ts.task_id = t.id
-			WHERE t.id = ?
-				AND t.is_ephemeral = 1
-				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
-				AND %s
-				AND t.archived_at IS NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM task_sessions active
-					WHERE active.task_id = t.id
-						AND active.state IN (?, ?)
-				)
-			GROUP BY t.id, t.updated_at
-			HAVING %s < ?
-		)
-		DELETE FROM tasks
-		WHERE id = ?
-			AND EXISTS (SELECT 1 FROM candidate)
-	`,
-		lastActivity,
-		excludeConfigModePredicate(drv, "t.metadata"),
-		lastActivity,
-	)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
-		id,
-		models.TaskOriginAutomationRun,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateIdle,
-		cutoff,
-		id,
-	)
-	if err != nil {
-		return false, err
-	}
-	rows, _ := result.RowsAffected()
-	return rows > 0, nil
 }
 
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice
@@ -4602,16 +5808,111 @@ func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, metadataK
 
 // UpdateTaskState updates the state of a task
 func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, time.Now().UTC(), id)
+	return r.updateTaskState(ctx, id, state, nil)
+}
+
+func (r *Repository) UpdateTaskStateWithCompletionAdmission(ctx context.Context, id string, state v1.TaskState, admission *completion.Admission) error {
+	return r.updateTaskState(ctx, id, state, admission)
+}
+
+func (r *Repository) updateTaskState(ctx context.Context, id string, state v1.TaskState, admission *completion.Admission) error {
+	if admission != nil {
+		_, _, _, err := r.updateHumanTaskState(ctx, id, state, admission)
+		return err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	defer func() { _ = tx.Rollback() }()
+	var currentState v1.TaskState
+	var workflowID, stepID string
+	query := `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
 	}
-	return nil
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), id).Scan(&currentState, &workflowID, &stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return err
+	}
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, r.nowUTC(), id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateTaskStateIfWorkflowStep atomically checks the current workflow step,
+// applies completion guards, and writes the new state.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string, state v1.TaskState,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, nil, state)
+}
+
+// UpdateTaskStateIfWorkflowStepAndState atomically checks the observed task
+// state and workflow step before applying a state transition.
+func (r *Repository) UpdateTaskStateIfWorkflowStepAndState(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState, state v1.TaskState,
+) (bool, error) {
+	return r.updateTaskStateIfWorkflowStep(ctx, taskID, expectedStepID, &expectedState, state)
+}
+
+func (r *Repository) updateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID string,
+	expectedState *v1.TaskState, state v1.TaskState,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
+	}
+	var currentState v1.TaskState
+	var workflowID, stepID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&currentState, &workflowID, &stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	if stepID != expectedStepID || (expectedState != nil && currentState != *expectedState) {
+		return false, nil
+	}
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, currentState, state, workflowID, stepID); err != nil {
+		return false, err
+	}
+	updateQuery := `UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?`
+	args := []any{state, r.nowUTC(), taskID, expectedStepID}
+	if expectedState != nil {
+		updateQuery += ` AND state = ?`
+		args = append(args, *expectedState)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskStateIfSessionState atomically ties a task-state write to the
@@ -4685,12 +5986,14 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	var archivedAt sql.NullTime
 	var currentSessionState models.TaskSessionState
 	var currentSessionIsPrimary bool
+	var workflowID, stepID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT tasks.state, tasks.archived_at, task_sessions.state, task_sessions.is_primary
+		SELECT tasks.state, tasks.archived_at, task_sessions.state, task_sessions.is_primary,
+			tasks.workflow_id, tasks.workflow_step_id
 		FROM tasks
 		JOIN task_sessions ON task_sessions.task_id = tasks.id
 		WHERE tasks.id = ? AND task_sessions.id = ?
-	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState, &currentSessionIsPrimary)
+	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState, &currentSessionIsPrimary, &workflowID, &stepID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, false, nil
 	}
@@ -4703,6 +6006,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	if archivedAt.Valid || currentSessionState != expectedSessionState ||
 		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil
+	}
+	if err := r.guardTaskCompletionStateTx(ctx, tx, taskID, oldState, state, workflowID, stepID); err != nil {
+		return oldState, false, false, err
 	}
 	requirePrimaryValue := 0
 	if requirePrimary {
@@ -4745,14 +6051,15 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 
 // RestoreTaskMessageRollbackIfSessionState atomically restores the two task
 // fields changed by message_task's on-turn-start preparation, but only while
-// the owning session remains in the state restored by the same rollback. A
-// coordinator cancellation therefore prevents a late dispatch-failure
-// rollback from moving the task out of REVIEW or rewinding its workflow step.
+// both the owning session and prepared task state still match the rollback's
+// observed state. A later independent task update therefore cannot be rewound.
 func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	ctx context.Context,
 	task *models.Task,
 	sessionID string,
 	expectedSessionState models.TaskSessionState,
+	expectedTaskState v1.TaskState,
+	expectedWorkflowStepID string,
 ) (bool, error) {
 	if task == nil {
 		return false, errors.New("restore task message rollback: task is nil")
@@ -4776,6 +6083,8 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 		UPDATE tasks
 		SET state = ?, workflow_step_id = ?, updated_at = ?
 		WHERE id = ?
+		  AND state = ?
+		  AND workflow_step_id = ?
 		  AND EXISTS (
 			SELECT 1
 			FROM task_sessions
@@ -4783,7 +6092,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
 		  )
-	`), task.State, task.WorkflowStepID, updatedAt, task.ID, sessionID, expectedSessionState)
+	`), task.State, task.WorkflowStepID, updatedAt, task.ID, expectedTaskState, expectedWorkflowStepID, sessionID, expectedSessionState)
 	if err != nil {
 		return false, err
 	}
@@ -4848,7 +6157,8 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	defer func() { _ = tx.Rollback() }()
 
 	var currentState v1.TaskState
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), id).Scan(&currentState)
+	var workflowID, stepID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, workflow_id, workflow_step_id FROM tasks WHERE id = ?`), id).Scan(&currentState, &workflowID, &stepID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
@@ -4857,6 +6167,9 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	}
 	if !taskStateInSet(currentState, allowed) {
 		return currentState, false, nil
+	}
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
+		return currentState, false, err
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -4948,8 +6261,9 @@ func (r *Repository) tryUpdateTaskStateIfNotArchived(
 	defer func() { _ = tx.Rollback() }()
 
 	var archivedAt sql.NullTime
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, archived_at FROM tasks WHERE id = ?`), id).
-		Scan(&currentState, &archivedAt)
+	var workflowID, stepID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, archived_at, workflow_id, workflow_step_id FROM tasks WHERE id = ?`), id).
+		Scan(&currentState, &archivedAt, &workflowID, &stepID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
@@ -4958,6 +6272,9 @@ func (r *Repository) tryUpdateTaskStateIfNotArchived(
 	}
 	if archivedAt.Valid {
 		return currentState, false, false, nil
+	}
+	if err := r.guardTaskCompletionStateTx(ctx, tx, id, currentState, state, workflowID, stepID); err != nil {
+		return currentState, false, false, err
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`

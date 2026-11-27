@@ -4,7 +4,14 @@ import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { consumeSessionTabUserActivationIntent } from "./session-tab-activation-intent";
+import {
+  clearHiddenSessionPanel,
+  hiddenSessionIdsFor,
+  onDidHideSessionPanel,
+} from "./dockview-hidden-session-panels";
 import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { hasTaskRouteFocus } from "@/lib/state/task-navigation-focus";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -13,11 +20,47 @@ function restoreActiveSessionPanel(
   activeSessionId: string | null,
 ): void {
   if (!activeSessionId) return;
+  if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
   api.getPanel(`session:${activeSessionId}`)?.api.setActive();
 }
 
 function isDifferentSessionPanel(panelId: string, activeSessionId: string | null): boolean {
   return panelId.startsWith("session:") && panelId !== `session:${activeSessionId}`;
+}
+
+function adoptVisibleSuccessorForHiddenActiveSession(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+  hiddenSessionId: string,
+  previous: AppState,
+): void {
+  const state = appStore.getState();
+  const activeTaskId = state.tasks.activeTaskId;
+  if (
+    !activeTaskId ||
+    state.tasks.activeTaskId !== previous.tasks.activeTaskId ||
+    state.taskRemoval.navigationRevision !== previous.taskRemoval.navigationRevision ||
+    state.tasks.activeSessionId !== hiddenSessionId ||
+    getProvenRemovalPredecessor(appStore, activeTaskId, hiddenSessionId) !== null ||
+    !state.tasks.activeSessionId ||
+    !hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)
+  ) {
+    return;
+  }
+
+  const successorId = api.panels
+    .map((panel) => panel.id)
+    .find((panelId) => {
+      const sessionId = panelId.startsWith("session:") ? panelId.slice("session:".length) : null;
+      return (
+        !!sessionId &&
+        sessionId !== state.tasks.activeSessionId &&
+        state.taskSessions.items[sessionId]?.task_id === activeTaskId
+      );
+    });
+  if (successorId) {
+    state.setActiveSessionAuto(activeTaskId, successorId.slice("session:".length));
+  }
 }
 
 function adoptRestoredSessionTabSelection(
@@ -28,6 +71,9 @@ function adoptRestoredSessionTabSelection(
   const activeTaskId = state.tasks.activeTaskId;
   const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
   if (!activeTaskId || !currentEnvironmentId) return;
+  if (getProvenRemovalPredecessor(appStore, activeTaskId, state.tasks.activeSessionId)) return;
+  if (state.workflowSessionFocus.request?.taskId === activeTaskId) return;
+  if (hasTaskRouteFocus(appStore, activeTaskId, state.tasks.activeSessionId)) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),
@@ -96,6 +142,15 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
+    if (
+      state.tasks.activeSessionId &&
+      hiddenSessionIdsFor(api).has(state.tasks.activeSessionId) &&
+      !hasTaskRouteFocus(appStore, state.tasks.activeTaskId, state.tasks.activeSessionId) &&
+      !getProvenRemovalPredecessor(appStore, target.taskId, state.tasks.activeSessionId)
+    ) {
+      state.setActiveSessionAuto(target.taskId, target.sessionId);
+      return;
+    }
     if (!consumeSessionTabUserActivationIntent(target.sessionId)) {
       if (isDebug()) {
         debug("setupSessionTabSync: skip (no user activation intent)", {
@@ -112,12 +167,21 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
         newSessionId: target.sessionId,
       });
     }
+    clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
+  });
+  const hiddenPanelDisposable = onDidHideSessionPanel(api, (sessionId) => {
+    const state = appStore.getState();
+    if (state.tasks.activeSessionId !== sessionId) return;
+    queueMicrotask(() => {
+      adoptVisibleSuccessorForHiddenActiveSession(api, appStore, sessionId, state);
+    });
   });
   return {
     dispose: () => {
       unsubscribeLayoutRestore();
       activePanelDisposable.dispose();
+      hiddenPanelDisposable.dispose();
     },
   };
 }

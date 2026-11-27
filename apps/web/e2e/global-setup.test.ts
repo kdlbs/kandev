@@ -66,6 +66,28 @@ function writeBuildIdentity(sourceRevision: string, artifacts: string[]): string
 }
 
 describe("assertBackendBinaryFresh", () => {
+  it("checks test-only sources compiled into a fixture artifact", () => {
+    const fixtureSource = path.join(backendDir, "internal", "task", "capacity_test.go");
+    fs.writeFileSync(fixtureSource, "package task\n");
+    touch(path.join(backendDir, "internal", "task", "service.go"), new Date("2025-01-01"));
+    touch(binPath, new Date("2026-01-01"));
+    touch(fixtureSource, new Date("2026-01-02"));
+
+    expect(() =>
+      assertBackendArtifactsFresh(
+        backendDir,
+        [
+          {
+            path: binPath,
+            rebuildTarget: "build-e2e-delivery-fixture",
+            sourceFiles: [fixtureSource],
+          },
+        ],
+        {},
+      ),
+    ).toThrow(/capacity_test\.go.*build-e2e-delivery-fixture/s);
+  });
+
   it("passes when the binary is newer than every backend source file", () => {
     touch(
       path.join(backendDir, "internal", "task", "service.go"),

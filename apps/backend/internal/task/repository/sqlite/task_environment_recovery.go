@@ -25,3 +25,12 @@ func (r *Repository) ReleaseTaskEnvironmentRecoveryClaim(
 ) error {
 	return recoveryclaim.Release(ctx, r.db, claim)
 }
+
+// GetTaskEnvironmentRecoveryClaim reads the current environment authority
+// without changing it.
+func (r *Repository) GetTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	environmentID string,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	return recoveryclaim.Get(ctx, r.db, environmentID)
+}

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -35,7 +36,7 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 		return
 	}
 	pr := feedback.PR
-	rows, err := s.store.ListTaskPRsByPRNumber(ctx, workspaceID, pr.RepoOwner, pr.RepoName, pr.Number)
+	rows, err := s.store.ListTaskPRsByPRNumberForHost(ctx, workspaceID, historicalGitHubURLHost(pr.HTMLURL), pr.RepoOwner, pr.RepoName, pr.Number)
 	if err != nil {
 		s.logger.Debug("list task PRs for feedback persist failed",
 			zap.String("workspace_id", workspaceID), zap.String("owner", pr.RepoOwner),
@@ -45,7 +46,10 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 	if len(rows) == 0 {
 		return
 	}
-	status := newPRStatusWithWorkflow(pr, feedback.Reviews, feedback.Checks, feedback.WorkflowAttention)
+	status := newPRStatusWithCheckState(
+		pr, feedback.Reviews, feedback.Checks, feedback.WorkflowAttention, feedback.ChecksState,
+	)
+	status.feedbackOnly = true
 	// Several tasks in a workspace can link the same PR; each owns its own row.
 	// SyncTaskPR re-narrows by (task, owner, repo, number) internally.
 	seen := make(map[string]struct{}, len(rows))
@@ -63,4 +67,15 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 				zap.String("task_id", effectiveTaskID), zap.Int("pr_number", pr.Number), zap.Error(syncErr))
 		}
 	}
+}
+
+func taskPRStatusSyncTimestamp(tp *TaskPR, status *PRStatus, headSHA, baseBranch string) *time.Time {
+	if status.feedbackOnly {
+		if tp.HeadSHA != headSHA || tp.BaseBranch != baseBranch {
+			return nil
+		}
+		return tp.LastSyncedAt
+	}
+	now := time.Now().UTC()
+	return &now
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { UpdateAvailableNotification } from "@/lib/state/slices/ui/types";
 import type { useUpdateAvailableToast as UseUpdateAvailableToastHook } from "./use-update-available-toast";
@@ -17,6 +17,48 @@ function updateNotification(): UpdateAvailableNotification {
     title: UPDATE_TITLE,
     body: `Kandev ${UPDATE_VERSION} is available.`,
     occurrence_id: UPDATE_VERSION,
+  };
+}
+
+function runtimeNotification(): UpdateAvailableNotification {
+  return {
+    ...updateNotification(),
+    agent_name: "gemini",
+    runtime_id: "npm:@google/gemini-cli",
+    display_name: "Gemini",
+    previous_version: "1.0.0",
+    version: "2.0.0",
+    occurrence_id: "runtime-gemini-2",
+    runtime_update_status: "available",
+  };
+}
+
+function summaryNotification(): UpdateAvailableNotification {
+  return {
+    occurrence_id: "summary-codex-gemini",
+    notification_kind: "agent_runtime_summary",
+    runtime_updates: [
+      {
+        occurrence_id: "codex-3",
+        agent_name: "codex-app-server",
+        runtime_id: "npm:@openai/codex",
+        display_name: "Codex",
+        previous_version: "1.0.0",
+        version: "3.0.0",
+      },
+      {
+        occurrence_id: "gemini-2",
+        agent_name: "gemini",
+        runtime_id: "npm:@google/gemini-cli",
+        display_name: "Gemini",
+        previous_version: "1.0.0",
+        version: "2.0.0",
+      },
+    ],
+    url: "/settings/agents#runtime-updates",
+    title: "2 agent runtime updates available",
+    body: "Review runtime versions in Settings > Agents.",
+    version: "",
   };
 }
 
@@ -41,14 +83,16 @@ vi.mock("@/lib/desktop/native-notification-client", () => ({
 
 let useUpdateAvailableToast: typeof UseUpdateAvailableToastHook;
 
-describe("useUpdateAvailableToast", () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    mockNativeIsAvailable.mockReturnValue(false);
-    mockNotification = null;
-    ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
-  });
+async function resetUpdateToastHook() {
+  vi.clearAllMocks();
+  vi.resetModules();
+  mockNativeIsAvailable.mockReturnValue(false);
+  mockNotification = null;
+  ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
+}
+
+describe("useUpdateAvailableToast delivery", () => {
+  beforeEach(resetUpdateToastHook);
 
   it("does nothing when there is no notification", () => {
     renderHook(() => useUpdateAvailableToast());
@@ -64,10 +108,24 @@ describe("useUpdateAvailableToast", () => {
       expect.objectContaining({
         title: UPDATE_TITLE,
         description: expect.stringContaining(UPDATE_VERSION),
+        placement: "top",
       }),
     );
     expect(mockNativeShow).not.toHaveBeenCalled();
     expect(mockClearNotification).toHaveBeenCalledWith(null);
+  });
+
+  it("retains legacy notification copy when no release version is available", () => {
+    mockNotification = {
+      ...updateNotification(),
+      version: undefined,
+      title: "Legacy title",
+      body: "Legacy body",
+    };
+    renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Legacy title", description: "Legacy body" }),
+    );
   });
 
   it("also attempts native delivery without replacing the toast", () => {
@@ -83,6 +141,28 @@ describe("useUpdateAvailableToast", () => {
     );
   });
 
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.8
+  it("shows one localized summary with direct Settings navigation on browser and native paths", () => {
+    mockNotification = summaryNotification();
+    mockNativeIsAvailable.mockReturnValue(true);
+
+    renderHook(() => useUpdateAvailableToast());
+
+    const toast = mockToast.mock.calls[0]?.[0];
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(toast).toMatchObject({
+      title: "2 agent runtime updates available",
+      action: { href: "/settings/agents#runtime-updates", label: "Review updates" },
+    });
+    expect(mockNativeShow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "system.update_available:summary-codex-gemini",
+        title: toast.title,
+        body: toast.description,
+      }),
+    );
+  });
+
   it("retains the toast when native delivery is denied", () => {
     mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);
@@ -91,6 +171,40 @@ describe("useUpdateAvailableToast", () => {
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockNativeShow).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("useUpdateAvailableToast application locale", () => {
+  beforeEach(resetUpdateToastHook);
+
+  // @covers AC-PLATFORM-I18N-001.1, AC-PLATFORM-NOTIFICATIONS-001.16
+  it("localizes application release copy for toast and native delivery in Portuguese", async () => {
+    const { activateLocale } = await import("@/lib/i18n");
+    await activateLocale("pt-pt");
+    mockNotification = {
+      ...updateNotification(),
+      body: "Kandev v1.2.3 is available. Open Settings > System > Updates to review it.",
+    };
+    mockNativeIsAvailable.mockReturnValue(true);
+    const { unmount } = renderHook(() => useUpdateAvailableToast());
+    const title = "Atualização do Kandev disponível";
+    const body =
+      "O Kandev v1.2.3 está disponível. Abra Definições > Sistema > Atualizações para o rever.";
+    try {
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title, description: body, placement: "top" }),
+      );
+      expect(mockNativeShow).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: "system.update_available:v1.2.3", title, body }),
+      );
+    } finally {
+      unmount();
+      await activateLocale("en");
+    }
+  });
+});
+
+describe("useUpdateAvailableToast occurrence behavior", () => {
+  beforeEach(resetUpdateToastHook);
 
   it("deduplicates repeated notifications for the same version", () => {
     mockNotification = updateNotification();
@@ -104,4 +218,82 @@ describe("useUpdateAvailableToast", () => {
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });
+
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-001.3
+  it("names each runtime, links to its controls, and does not collapse equal versions across agents", async () => {
+    ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
+    mockNotification = runtimeNotification();
+    const { rerender } = renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("Gemini"),
+        action: { href: "/settings/agents#runtime-update-gemini", label: expect.any(String) },
+      }),
+    );
+    mockNotification = {
+      ...mockNotification,
+      agent_name: "codex-app-server",
+      display_name: "Codex",
+      occurrence_id: "runtime-codex-2",
+    };
+    rerender();
+    expect(mockToast).toHaveBeenCalledTimes(2);
+  });
+
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-002.6
+  it("does not claim an interrupted activation failed or succeeded", () => {
+    mockNotification = {
+      ...runtimeNotification(),
+      occurrence_id: "interrupted-attempt",
+      runtime_update_status: "interrupted",
+    };
+    renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: expect.stringContaining("could not be confirmed") }),
+    );
+  });
+});
+
+describe("useUpdateAvailableToast release localization", () => {
+  beforeEach(resetUpdateToastHook);
+
+  afterEach(async () => {
+    const { activateLocale } = await import("@/lib/i18n");
+    await activateLocale("en");
+    vi.unstubAllGlobals();
+  });
+
+  // @covers AC-PLATFORM-NOTIFICATIONS-001.16
+  it.each(["browser", "native"])(
+    "uses the delivery-time locale for the toast and %s notification with populated server copy",
+    async (transport) => {
+      const browserNotification = vi.fn();
+      vi.stubGlobal("Notification", Object.assign(browserNotification, { permission: "granted" }));
+      mockNativeIsAvailable.mockReturnValue(transport === "native");
+      const { rerender } = renderHook(() => useUpdateAvailableToast());
+      const { activateLocale, t } = await import("@/lib/i18n");
+      await activateLocale("pseudo");
+      mockNotification = updateNotification();
+
+      rerender();
+
+      const title = t("task:kandevUpdateAvailable");
+      const body = t("task:updateAvailableToast", { version: UPDATE_VERSION });
+      expect(title).not.toBe(UPDATE_TITLE);
+      expect(body).toContain(UPDATE_VERSION);
+      expect(mockToast).toHaveBeenCalledWith({ title, description: body, placement: "top" });
+      if (transport === "native") {
+        expect(mockNativeShow).toHaveBeenCalledWith({
+          eventId: `system.update_available:${UPDATE_VERSION}`,
+          title,
+          body,
+        });
+        expect(browserNotification).not.toHaveBeenCalled();
+      } else {
+        expect(browserNotification).toHaveBeenCalledWith(title, { body });
+        expect(mockNativeShow).not.toHaveBeenCalled();
+      }
+      expect(mockClearNotification).toHaveBeenCalledWith(null);
+    },
+  );
 });

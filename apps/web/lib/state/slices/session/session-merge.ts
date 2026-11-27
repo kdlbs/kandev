@@ -1,7 +1,19 @@
-import type { TaskSession } from "@/lib/types/http";
+import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
+import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
+import {
+  readAgentDeliveryRecovery,
+  type AgentDeliveryRecovery,
+} from "@/lib/session-agent-delivery-recovery";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { parseTurnTimestamp } from "./turn-actions";
+
+// i18n-exempt: stable backend failure code, not user-facing copy.
+const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
 
 function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -90,6 +102,79 @@ function hasIncomingGoalClear(session: TaskSession): boolean {
   return meta?.goal === null && Object.prototype.hasOwnProperty.call(meta ?? {}, "goal");
 }
 
+function matchesDurableDeliveryUncertainty(
+  error: unknown,
+  recovery: AgentDeliveryRecovery,
+): boolean {
+  const record = asMetadataRecord(error);
+  if (record?.code === "delivery_history_gap" && recovery.historyGap) {
+    const gap = recovery.historyGap;
+    // i18n-exempt: exact persisted backend error identity, never rendered as copy.
+    const expected = `delivery_history_gap: stream ${recovery.streamId}, missing event range ${gap.firstSequence}..${gap.lastSequence}`;
+    return record.details === expected;
+  }
+  if (record?.code !== DURABLE_DELIVERY_UNCERTAIN) return false;
+  const agentExecutionID = readDeliveryErrorExecutionID(record);
+  const submissionID = readDeliveryErrorSubmissionID(record);
+  return agentExecutionID === recovery.agentExecutionId && submissionID === recovery.submissionId;
+}
+
+function readDeliveryErrorExecutionID(error: Record<string, unknown>): string {
+  if (typeof error.agent_execution_id === "string" && error.agent_execution_id.length > 0) {
+    return error.agent_execution_id;
+  }
+  if (typeof error.execution_id === "string" && error.execution_id.length > 0) {
+    return error.execution_id;
+  }
+  return "";
+}
+
+function readDeliveryErrorSubmissionID(error: Record<string, unknown>): string {
+  const hasStructuredSubmissionID =
+    Object.prototype.hasOwnProperty.call(error, "delivery_submission_id") ||
+    Object.prototype.hasOwnProperty.call(error, "deliverySubmissionId");
+  if (hasStructuredSubmissionID) {
+    const value = error.delivery_submission_id ?? error.deliverySubmissionId;
+    return typeof value === "string" ? value : "";
+  }
+  return typeof error.details === "string" ? error.details : "";
+}
+
+function mergeDeliveryRecoveryMetadata(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  next: Record<string, unknown>,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(incoming, "agent_delivery_recovery")) return;
+  const currentRecovery = readAgentDeliveryRecovery(current);
+  const incomingRecovery = readAgentDeliveryRecovery(incoming);
+  const incomingRecoveryIsCurrent =
+    incomingRecovery !== null &&
+    (!currentRecovery || incomingRecovery.revision >= currentRecovery.revision);
+  const incomingRecoveryIsNewer =
+    incomingRecovery !== null &&
+    (!currentRecovery || incomingRecovery.revision > currentRecovery.revision);
+
+  if (
+    incomingRecoveryIsNewer &&
+    incomingRecovery.phase === "restored" &&
+    !Object.prototype.hasOwnProperty.call(incoming, "last_agent_error") &&
+    matchesDurableDeliveryUncertainty(current.last_agent_error, incomingRecovery)
+  ) {
+    delete next.last_agent_error;
+  }
+
+  if (!currentRecovery || incomingRecoveryIsCurrent) return;
+
+  // Keep the legacy error paired with the revisioned recovery snapshot.
+  next.agent_delivery_recovery = current.agent_delivery_recovery;
+  if (Object.prototype.hasOwnProperty.call(current, "last_agent_error")) {
+    next.last_agent_error = current.last_agent_error;
+  } else {
+    delete next.last_agent_error;
+  }
+}
+
 function mergeSessionMetadata(
   existing: TaskSession,
   incoming: TaskSession,
@@ -97,6 +182,23 @@ function mergeSessionMetadata(
   if (incoming.metadata == null) return existing.metadata;
   const current = existing.metadata ?? {};
   const next = { ...current, ...incoming.metadata };
+  const compactionCount = mergeCompactionCountValue(
+    current.context_compaction_count,
+    incoming.metadata.context_compaction_count,
+  );
+  if (compactionCount !== undefined) next.context_compaction_count = compactionCount;
+  const compactionReporting = mergeCompactionReportingValue(
+    current.context_compaction_reporting,
+    incoming.metadata.context_compaction_reporting,
+  );
+  if (compactionReporting) next.context_compaction_reporting = compactionReporting;
+  const history = asMetadataRecord(current.agent_delivery_history_gaps);
+  if (history)
+    next.agent_delivery_history_gaps = {
+      ...asMetadataRecord(incoming.metadata.agent_delivery_history_gaps),
+      ...history,
+    };
+  mergeDeliveryRecoveryMetadata(current, incoming.metadata, next);
   const currentACP = asMetadataRecord(current.acp);
   const incomingACP = asMetadataRecord(incoming.metadata.acp);
   if (!currentACP && !incomingACP) return next;
@@ -209,6 +311,14 @@ function mergeParkedProjection(
   };
 }
 
+function mergeAgentWorkspacePath(
+  existing: TaskSession,
+  incoming: TaskSession,
+): TaskSession["agent_workspace_path"] {
+  if (incoming.agent_workspace_path === undefined) return existing.agent_workspace_path;
+  return incoming.agent_workspace_path;
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
@@ -221,6 +331,17 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
   const pendingAction = mergePendingActionProjection(existing, incoming);
   const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
+  const runtimeStorageHealth = mergeRuntimeStorageHealth(
+    existing.runtime_storage_health,
+    incoming.runtime_storage_health,
+  );
+  if (runtimeStorageHealth) merged.runtime_storage_health = runtimeStorageHealth;
+  else delete merged.runtime_storage_health;
+  merged.workspace_recovery = mergeWorkspaceRecoveryProjection(
+    existing.workspace_recovery,
+    incoming.workspace_recovery,
+    merged.task_environment_id,
+  );
   merged.metadata = mergeSessionMetadata(existing, incoming);
   const goalReconciliation = mergeGoalReconciliation(
     existing,
@@ -257,8 +378,79 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
     workspace_path: incoming.workspace_path ?? existing.workspace_path,
+    // Omission means "no update"; an authoritative null clears the base.
+    agent_workspace_path: mergeAgentWorkspacePath(existing, incoming),
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
+}
+
+function compareDecimalIdentity(left: string, right: string): number | undefined {
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return undefined;
+  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
+  const normalizedRight = right.replace(/^0+(?=\d)/, "");
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+function projectionForIdentityOrder(
+  existing: WorkspaceRecoveryProjection,
+  incoming: WorkspaceRecoveryProjection,
+  order: number | undefined,
+): WorkspaceRecoveryProjection | undefined {
+  if (order === undefined || order === 0) return undefined;
+  return order > 0 ? incoming : existing;
+}
+
+function sameRecoveryProjection(
+  left: WorkspaceRecoveryProjection,
+  right: WorkspaceRecoveryProjection,
+): boolean {
+  return (
+    Object.keys(left).length === Object.keys(right).length &&
+    Object.keys(left).every(
+      (key) =>
+        left[key as keyof WorkspaceRecoveryProjection] ===
+        right[key as keyof WorkspaceRecoveryProjection],
+    )
+  );
+}
+
+/** Merge an environment operation while preserving its generation and revision fences. */
+export function mergeWorkspaceRecoveryProjection(
+  existing: TaskSession["workspace_recovery"],
+  incoming: TaskSession["workspace_recovery"],
+  expectedEnvironmentId?: string,
+): TaskSession["workspace_recovery"] {
+  if (incoming === undefined) return existing;
+  if (incoming === null) return null;
+  if (expectedEnvironmentId && incoming.environment_id !== expectedEnvironmentId) {
+    return existing?.environment_id === expectedEnvironmentId ? existing : null;
+  }
+  if (!existing) return incoming;
+  if (existing.environment_id !== incoming.environment_id) return incoming;
+
+  const newerGeneration = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.ownership_generation, existing.ownership_generation),
+  );
+  if (newerGeneration) return newerGeneration;
+  const newerRevision = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.revision, existing.revision),
+  );
+  if (newerRevision) return newerRevision;
+  if (
+    existing.operation_id !== incoming.operation_id ||
+    existing.attempt_id !== incoming.attempt_id
+  ) {
+    return existing;
+  }
+  return sameRecoveryProjection(existing, incoming) ? existing : incoming;
 }

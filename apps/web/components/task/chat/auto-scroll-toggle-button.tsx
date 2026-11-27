@@ -6,12 +6,13 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import { useTranslation } from "react-i18next";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 
 // Matches the icon-only top-bar buttons (e.g. Share) so this control sits
 // flush with them.
 const TOP_BAR_BUTTON_CLASS =
-  "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+  "h-6 w-6 max-md:h-11 max-md:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
 
 type Props = {
   sessionId: string;
@@ -30,13 +31,14 @@ type Props = {
  * signal.
  */
 export function AutoScrollToggleButton({ sessionId }: Props) {
+  const { t } = useTranslation();
   const showControl = useAppStore((state) => state.userSettings.showTranscriptAutoScrollControl);
   const enabled = useTranscriptAutoScrollEnabled(sessionId);
   const setEnabled = useAppStore((state) => state.setTranscriptAutoScrollEnabled);
 
   if (!showControl) return null;
 
-  const label = enabled ? "Turn off transcript auto-scroll" : "Turn on transcript auto-scroll";
+  const label = t(enabled ? "task:turnOffTranscriptAutoScroll" : "task:turnOnTranscriptAutoScroll");
 
   return (
     <Tooltip>

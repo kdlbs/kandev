@@ -33,11 +33,14 @@ func Decide(context ExecutionContext, e *Error, now time.Time) RecoveryDecision 
 	if isShortRetryable(e, now) {
 		return DecisionShortRetry
 	}
+	if context == ContextKanban && e.Code == CodeRateLimited && e.Confidence == ConfHigh && e.ResetHint == nil {
+		return DecisionShortRetry
+	}
 
 	switch context {
 	case ContextOffice:
 		switch e.Code {
-		case CodeRateLimited, CodeQuotaLimited, CodeProviderUnavailable, CodeProviderOverloaded, CodeModelCapacity:
+		case CodeRateLimited, CodeQuotaLimited, CodeProviderUnavailable, CodeProviderOverloaded, CodeModelCapacity, CodeProviderResourceExhausted:
 			return DecisionLongRetry
 		case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
 			CodeModelUnavailable, CodeProviderNotConfigured:
@@ -52,7 +55,7 @@ func Decide(context ExecutionContext, e *Error, now time.Time) RecoveryDecision 
 
 func isShortRetryable(e *Error, now time.Time) bool {
 	switch e.Code {
-	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded, CodeModelCapacity, CodeAgentTransportLost:
+	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded, CodeModelCapacity, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return e.Confidence == ConfHigh || e.Confidence == ConfMedium
 	case CodeRateLimited:
 		if e.ResetHint == nil || e.ResetHint.IsZero() {

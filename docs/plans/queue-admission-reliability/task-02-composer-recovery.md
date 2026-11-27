@@ -130,3 +130,35 @@ Verification passed:
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
 
 Review remediation passed: unrecognized structured WebSocket conflicts preserve their original error identity, code, and details for plan-comment and primary-session recovery. Admission-only WebSocket mappings are scoped to queue submission, identified missing sessions use the typed unavailable code, and accepted queue submissions remain successful when the plan-comment refresh fails. Ordinary admission IDs are retained through queue merge and transcript recording so post-dispatch reconciliation can find them. The pseudo-locale retains the named `count` component tags, and unrelated generated catalog churn was removed.
+
+### PR #3598 runtime-loss investigation (2026-10-07)
+
+Hosted E2E shard 5 failed before queue assertions: the initial agent session
+reported `local agent runtime is unavailable`. Its retry passed. The shard's
+blob report confirms no intentional runtime-kill scenario ran in that worker.
+The cause is unconfirmed; this is not classified as runner allocation failure.
+
+The unchanged queue suite passed 12 local cases on their first attempts (three
+repetitions, no retries observed):
+`E2E_PORT_OFFSET=0 pnpm e2e:run tests/chat/queue-admission-reliability.spec.ts
+--project=chromium --retries=0 --repeat-each=3` from `apps/web`.
+The suite now attaches its isolated backend log on failure, following existing
+browser-test conventions. No runtime restart, prompt resend, admission policy,
+timeout, or retry change hides the failure. Fresh hosted validation is pending.
+
+After merging main's profile-enabled omission fix, the rebuilt combined desktop
+command passed all 17 cases on their first attempts:
+`E2E_PORT_OFFSET=0 pnpm e2e:run tests/task/create-task-remote-repo.spec.ts
+ tests/workflow/workflow-move-preview.spec.ts
+ tests/chat/queue-admission-reliability.spec.ts --project=chromium --retries=0`
+from `apps/web`. Profile-enabled race checks passed through backendapp,
+settings controller/store/handlers, MCP, and lifecycle. Focused ESLint, web
+typecheck, catalog/spec lint, and 74-work-order coverage passed.
+
+The matching mobile command then passed all 10 cases on their first attempts:
+`E2E_PORT_OFFSET=0 pnpm e2e:run --no-build
+ tests/task/mobile-create-task-remote-repo.spec.ts
+ tests/workflow/mobile-workflow-move-preview.spec.ts
+ tests/chat/mobile-queue-admission-reliability.spec.ts
+ --project=mobile-chrome --retries=0` from `apps/web`.
+Fresh hosted CI remains pending; these local passes do not establish its result.

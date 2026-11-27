@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"time"
 
 	agentdocker "github.com/kandev/kandev/internal/agent/docker"
@@ -156,6 +157,14 @@ func (p *Provider) availabilityWarning(ctx context.Context) string {
 }
 
 func (p *Provider) cleanupContainer(ctx context.Context, candidate agentdocker.ContainerInfo, result *Result) {
+	ctx, release, err := retention.AcquireMutation(ctx)
+	if err != nil {
+		result.Kept++
+		result.Warnings = append(result.Warnings, err.Error())
+		return
+	}
+	defer release()
+
 	if candidate.Labels["kandev.managed"] != "true" || !stoppedContainer(candidate.State) {
 		result.Kept++
 		return

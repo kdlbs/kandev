@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/common/wsinput"
+	"github.com/kandev/kandev/internal/common/wskeepalive"
 )
 
 // LoginCommandLookup returns the agent's LoginCommand or nil. Implemented by
@@ -44,6 +47,7 @@ type Handlers struct {
 	logger          *zap.Logger
 	upgrader        gorillaws.Upgrader
 	hostShellBinder HostShellSessionBinder
+	keepalive       wskeepalive.Timing
 }
 
 // NewHandlers constructs Handlers. If checkOrigin is nil, the upgrader uses
@@ -60,10 +64,11 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 		CheckOrigin:     checkOrigin,
 	}
 	return &Handlers{
-		mgr:      mgr,
-		registry: reg,
-		logger:   log,
-		upgrader: up,
+		mgr:       mgr,
+		registry:  reg,
+		logger:    log,
+		upgrader:  up,
+		keepalive: wskeepalive.DefaultTiming(),
 	}
 }
 
@@ -233,9 +238,10 @@ func detectShellForOS(goos string, getenv func(string) string, exists func(strin
 }
 
 type startRequest struct {
-	Cols     uint16          `json:"cols"`
-	Rows     uint16          `json:"rows"`
-	ClientID json.RawMessage `json:"client_id"`
+	CommandVariant string          `json:"command_variant,omitempty"`
+	Cols           uint16          `json:"cols"`
+	Rows           uint16          `json:"rows"`
+	ClientID       json.RawMessage `json:"client_id"`
 }
 
 func (h *Handlers) httpStart(c *gin.Context) {
@@ -249,19 +255,22 @@ func (h *Handlers) httpStart(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 		return
 	}
-	loginAg, ok := ag.(agents.LoginAgent)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no login command"})
-		return
-	}
-	lc := loginAg.LoginCommand()
-	if lc == nil || len(lc.Cmd) == 0 {
+	if _, ok := ag.(agents.LoginAgent); !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no login command"})
 		return
 	}
 
 	var req startRequest
 	_ = c.ShouldBindJSON(&req) // body is optional
+	lc, cmd, err := resolveLoginCommand(c.Request.Context(), ag, req.CommandVariant)
+	if errors.Is(err, agents.ErrLoginRuntimeChanged) {
+		c.JSON(http.StatusConflict, gin.H{"error": "login_runtime_changed", "error_code": "login_runtime_changed"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Wrap the agent's login command so that when the login process exits
 	// (Ctrl+C, /quit, success exit, anything) the PTY drops the user into
@@ -279,7 +288,7 @@ func (h *Handlers) httpStart(c *gin.Context) {
 	// - so the agent dies as expected and sh survives to exec the shell.
 	wrapped := append(
 		[]string{"sh", "-c", `trap 'true' INT; "$@"; exec "${SHELL:-/bin/sh}"`, "kandev-login-wrapper"},
-		lc.Cmd...,
+		cmd...,
 	)
 	sess, err := h.mgr.Start(name, wrapped, req.Cols, req.Rows)
 	if err != nil && err != ErrSessionAlreadyRunning {
@@ -290,7 +299,42 @@ func (h *Handlers) httpStart(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, sess.Status())
+	status := sess.Status()
+	if err == ErrSessionAlreadyRunning && len(lc.Variants) > 0 && !slices.Equal(status.Cmd, wrapped) {
+		c.JSON(http.StatusConflict, gin.H{"error": "login_command_conflict", "error_code": "login_command_conflict"})
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func resolveLoginCommand(
+	ctx context.Context,
+	ag agents.Agent,
+	variant string,
+) (*agents.LoginCommand, []string, error) {
+	if dynamic, ok := ag.(agents.ContextLoginAgent); ok {
+		command, err := dynamic.ResolveLoginCommand(ctx, variant)
+		if err != nil {
+			return nil, nil, err
+		}
+		if command == nil || len(command.Cmd) == 0 {
+			return nil, nil, errors.New("agent has no login command")
+		}
+		return command, command.Cmd, nil
+	}
+	loginAgent := ag.(agents.LoginAgent)
+	command := loginAgent.LoginCommand()
+	if command == nil || len(command.Cmd) == 0 {
+		return nil, nil, errors.New("agent has no login command")
+	}
+	if variant == "" {
+		return command, command.Cmd, nil
+	}
+	selected := command.Variants[variant]
+	if len(selected) == 0 {
+		return nil, nil, errors.New("invalid_login_variant")
+	}
+	return command, selected, nil
 }
 
 func (h *Handlers) httpStop(c *gin.Context) {
@@ -363,7 +407,16 @@ func (h *Handlers) handleStream(c *gin.Context) {
 		)
 		return
 	}
-	defer func() { _ = conn.Close() }()
+	stopKeepalive, err := wskeepalive.Start(conn, h.keepalive)
+	if err != nil {
+		h.logger.Warn("login pty ws keepalive setup failed", zap.String("session_id", id), zap.Error(err))
+		_ = conn.Close()
+		return
+	}
+	defer func() {
+		_ = conn.Close()
+		stopKeepalive()
+	}()
 
 	// Send buffered output up-front so a late-joining UI catches up.
 	if buf := sess.BufferedOutput(); len(buf) > 0 {
@@ -383,7 +436,10 @@ func (h *Handlers) handleStream(c *gin.Context) {
 
 	// Writer: forward PTY output → client.
 	go func() {
-		defer close(done)
+		defer func() {
+			_ = conn.Close()
+			close(done)
+		}()
 		for {
 			select {
 			case data, ok := <-out:
@@ -407,22 +463,25 @@ func (h *Handlers) handleStream(c *gin.Context) {
 		}
 	}()
 
-	// Reader: forward client → PTY (binary = input, text = JSON control).
-	for {
-		mt, data, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		switch mt {
+	// Keep the socket reader active while a PTY write waits for input capacity.
+	reader := wsinput.New(conn)
+	for message := range reader.Messages() {
+		reader.Consume(message)
+		switch message.Type {
 		case gorillaws.BinaryMessage:
-			if _, err := sess.Write(data); err != nil {
+			if _, err := sess.Write(message.Data); err != nil {
 				h.logger.Debug("pty write error", zap.Error(err))
 			}
 		case gorillaws.TextMessage:
-			h.handleControlMessage(sess, data)
+			h.handleControlMessage(sess, message.Data)
 		}
 	}
+	if err := reader.Err(); err != nil && !gorillaws.IsCloseError(err, gorillaws.CloseNormalClosure, gorillaws.CloseGoingAway) {
+		h.logger.Debug("login pty ws read error", zap.String("session_id", id), zap.Error(err))
+	}
 	close(disconnect)
+	_ = conn.Close()
+	stopKeepalive()
 	<-done
 }
 

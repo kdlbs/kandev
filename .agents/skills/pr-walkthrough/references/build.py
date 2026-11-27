@@ -602,37 +602,41 @@ def is_safe_repo_path(value):
 
 def validate_impact(impact, changed_paths=None):
     require(isinstance(impact, dict), "impact must be an object")
-    for key, (_, columns) in IMPACT_COLUMNS.items():
-        ctx = f"impact.{key}"
-        section = impact.get(key)
-        require(isinstance(section, dict), f"{ctx} must be an object")
-        status = section.get("status")
-        require(isinstance(status, str) and status in IMPACT_STATUS, f"{ctx}.status is invalid")
-        items = section.get("items")
-        require(isinstance(items, list), f"{ctx}.items must be a list")
-        require(bool(items) == (status == "changed"), f"{ctx}.items must match status")
-        if status == "unknown" or "note" in section:
-            require(isinstance(section.get("note"), str) and section["note"].strip(),
-                    f"{ctx}.note must be a non-empty string")
-        identities = set()
-        for i, item in enumerate(items):
-            row = f"{ctx}.items[{i}]"
-            require(isinstance(item, dict), f"{row} must be an object")
-            for field in [c[0] for c in columns] + ["file"]:
-                require(isinstance(item.get(field), str) and item[field].strip(),
-                        f"{row}.{field} must be a non-empty string")
-            require(is_safe_repo_path(item["file"]),
-                    f"{row}.file must be a repository-relative POSIX path")
-            if changed_paths is not None:
-                require(item["file"] in changed_paths,
-                        f"{row}.file must identify a changed file in the prepared manifest")
-            if key in ("plugins", "mcp"):
-                require(item["change"] in ("added", "changed", "removed"),
-                        f"{row}.change must be added, changed, or removed")
-            if key == "mcp":
-                identity = (item["context"], item["name"])
-                require(identity not in identities, f"{row} repeats a tool in the same context")
-                identities.add(identity)
+    for key in IMPACT_COLUMNS:
+        validate_impact_category(key, impact.get(key), changed_paths)
+
+
+def validate_impact_category(key, section, changed_paths=None, ctx=None):
+    ctx = ctx or f"impact.{key}"
+    columns = IMPACT_COLUMNS[key][1]
+    require(isinstance(section, dict), f"{ctx} must be an object")
+    status = section.get("status")
+    require(isinstance(status, str) and status in IMPACT_STATUS, f"{ctx}.status is invalid")
+    items = section.get("items")
+    require(isinstance(items, list), f"{ctx}.items must be a list")
+    require(bool(items) == (status == "changed"), f"{ctx}.items must match status")
+    if status == "unknown" or "note" in section:
+        require(isinstance(section.get("note"), str) and section["note"].strip(),
+                f"{ctx}.note must be a non-empty string")
+    identities = set()
+    for i, item in enumerate(items):
+        row = f"{ctx}.items[{i}]"
+        require(isinstance(item, dict), f"{row} must be an object")
+        for field in [c[0] for c in columns] + ["file"]:
+            require(isinstance(item.get(field), str) and item[field].strip(),
+                    f"{row}.{field} must be a non-empty string")
+        require(is_safe_repo_path(item["file"]),
+                f"{row}.file must be a repository-relative POSIX path")
+        if changed_paths is not None:
+            require(item["file"] in changed_paths,
+                    f"{row}.file must identify a changed file in the prepared manifest")
+        if key in ("plugins", "mcp"):
+            require(item["change"] in ("added", "changed", "removed"),
+                    f"{row}.change must be added, changed, or removed")
+        if key == "mcp":
+            identity = (item["context"], item["name"])
+            require(identity not in identities, f"{row} repeats a tool in the same context")
+            identities.add(identity)
 
 
 def impact_table(columns, items, pr):
@@ -684,11 +688,83 @@ def sec_impact(impact, pr):
             '<ul class="impact-summary">' + "".join(summary) + '</ul>' + "".join(details) + '</section>')
 
 
+FLAG_COVERAGE = {
+    "full": "All feature behavior is behind flags",
+    "partial": "Some feature behavior ships without flags",
+    "none": "Feature behavior ships without flags",
+    "not_applicable": "No feature behavior changes",
+    "unknown": "Flag coverage not verified",
+}
+FLAG_COLUMNS = (("key", "Flag"), ("change", "New / existing / changed / removed"),
+                ("default", "Defaults / activation"), ("enabled", "Flag on"),
+                ("disabled", "Flag off"))
+OFF_UX_STATUS = {"changed": "UX changes with flags off",
+                 "none": "No UX changes with flags off",
+                 "unknown": "Flag-off UX not verified"}
+
+
+def validate_feature_flags(section, changed_paths=None):
+    require(isinstance(section, dict), "feature_flags must be an object")
+    coverage = section.get("coverage")
+    require(isinstance(coverage, str) and coverage in FLAG_COVERAGE,
+            "feature_flags.coverage is invalid")
+    require(isinstance(section.get("summary"), str) and section["summary"].strip(),
+            "feature_flags.summary must be a non-empty string")
+    flags = section.get("flags")
+    require(isinstance(flags, list), "feature_flags.flags must be a list")
+    identities = set()
+    for i, flag in enumerate(flags):
+        ctx = f"feature_flags.flags[{i}]"
+        require(isinstance(flag, dict), f"{ctx} must be an object")
+        for field in [c[0] for c in FLAG_COLUMNS] + ["file"]:
+            require(isinstance(flag.get(field), str) and flag[field].strip(),
+                    f"{ctx}.{field} must be a non-empty string")
+        require(flag["change"] in ("new", "existing", "changed", "removed"),
+                f"{ctx}.change is invalid")
+        require(flag["key"] not in identities, f"{ctx} repeats a flag key")
+        identities.add(flag["key"])
+        require(is_safe_repo_path(flag["file"]),
+                f"{ctx}.file must be a repository-relative POSIX path")
+        if changed_paths is not None:
+            require(flag["file"] in changed_paths,
+                    f"{ctx}.file must identify a changed file in the prepared manifest")
+    active = any(flag["change"] != "removed" for flag in flags)
+    if coverage in ("full", "partial"):
+        require(active, "feature_flags.flags needs an active flag for full or partial coverage")
+    if coverage in ("none", "not_applicable"):
+        require(not active, "feature_flags.flags contradicts coverage")
+    off_ux = section.get("off_ux")
+    # Flag-off UX uses the same row and source contract as the impact UX table.
+    validate_impact_category("ux", off_ux, changed_paths, ctx="feature_flags.off_ux")
+    if off_ux["status"] == "none":
+        require(isinstance(off_ux.get("note"), str) and off_ux["note"].strip(),
+                "feature_flags.off_ux.note must explain the unchanged disabled path")
+
+
+def sec_feature_flags(section, pr):
+    off_ux = section["off_ux"]
+    flags = (impact_table(FLAG_COLUMNS, section["flags"], pr) if section["flags"] else "")
+    ux = (impact_table(IMPACT_COLUMNS["ux"][1], off_ux["items"], pr)
+          if off_ux["items"] else "")
+    return ('<section id="feature-flags" class="anchor-target mb-14">'
+            '<h2 class="text-xl font-semibold mb-3">Feature flags and rollout</h2>'
+            '<ul class="impact-summary">'
+            f'<li><strong>Coverage:</strong> {FLAG_COVERAGE[section["coverage"]]}</li>'
+            f'<li><strong>Flag-off UX:</strong> {OFF_UX_STATUS[off_ux["status"]]}</li></ul>'
+            f'<p class="mt-3 mb-4">{esc(section["summary"])}</p>{flags}'
+            '<div id="feature-flags-off-ux" class="impact-detail anchor-target">'
+            f'<h3>{OFF_UX_STATUS[off_ux["status"]]}</h3>'
+            + (f'<p class="mb-3">{esc(off_ux["note"])}</p>' if off_ux.get("note") else "")
+            + ux + '</div></section>')
+
+
 def render_content(data):
     pr = data["pr"]
     parts = [sec_tldr(pr), sec_why(data["why"])]
     if "impact" in data:
         parts.append(sec_impact(data["impact"], pr))
+    if "feature_flags" in data:
+        parts.append(sec_feature_flags(data["feature_flags"], pr))
     if data.get("data"):
         parts.append(sec_data(data["data"]))
     if data.get("architecture"):
@@ -713,7 +789,7 @@ def require_str_list(value, ctx):
                 f"{ctx}[{k}] must be a non-empty string")
 
 
-def validate(data, *, require_impact=False, changed_paths=None):
+def validate(data, *, require_impact=False, require_feature_flags=False, changed_paths=None):
     require("pr" in data, 'missing "pr"')
     pr = data["pr"]
     for k in ("number", "title", "url", "base", "head", "repo"):
@@ -727,6 +803,9 @@ def validate(data, *, require_impact=False, changed_paths=None):
     if require_impact or "impact" in data:
         require("impact" in data, 'impact is required for new walkthroughs')
         validate_impact(data["impact"], changed_paths=changed_paths)
+    if require_feature_flags or "feature_flags" in data:
+        require("feature_flags" in data, 'feature_flags is required for new walkthroughs')
+        validate_feature_flags(data["feature_flags"], changed_paths=changed_paths)
     changes = data.get("changes") or []
     require(len(changes) >= 1, "changes needs at least one entry")
     for i, c in enumerate(changes):
@@ -747,8 +826,9 @@ def validate(data, *, require_impact=False, changed_paths=None):
     require("review" in data, 'missing "review"')
 
 
-def build(data, *, require_impact=False, changed_paths=None):
-    validate(data, require_impact=require_impact, changed_paths=changed_paths)
+def build(data, *, require_impact=False, require_feature_flags=False, changed_paths=None):
+    validate(data, require_impact=require_impact, require_feature_flags=require_feature_flags,
+             changed_paths=changed_paths)
     pr = data["pr"]
     content = render_content(data)
     shell = SHELL.read_text(encoding="utf-8")

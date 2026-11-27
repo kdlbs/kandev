@@ -5,3 +5,7 @@ build
 coverage
 test-results
 playwright-report
+
+# Settings catalog snapshots use the Go generator's exact formatting.
+web/lib/settings-discovery/contract.generated.json
+web/lib/settings-discovery/profile-contract.generated.json

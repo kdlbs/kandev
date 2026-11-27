@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/agentprofile"
 	"sync"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -17,7 +18,7 @@ type EnsureSessionResponse struct {
 	SessionID             string `json:"session_id,omitempty"`
 	State                 string `json:"state"`
 	AgentProfileID        string `json:"agent_profile_id,omitempty"`
-	Source                string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr
+	Source                string `json:"source"`                   // existing_primary | existing_newest | created_prepare | created_start | skipped_terminal_pr | awaiting_manual_start
 	NewlyCreated          bool   `json:"newly_created"`            // true when a new session was created by this call
 	WorkspacePath         string `json:"workspace_path,omitempty"` // effective workspace path (for quick-chat sessions without worktrees)
 	ActivationDisposition string `json:"activation_disposition,omitempty"`
@@ -121,6 +122,20 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	if agentProfileID != "" && autoStart {
 		intent = IntentStart
 		source = "created_start"
+	}
+	passiveForkReviewOpen := o.ActivationSource == LaunchActivationSourceSessionOpen &&
+		(o.AutoStart == nil || !*o.AutoStart)
+	stepDerivedForkReviewStart := intent == IntentStart && o.AutoStart == nil
+	if taskRequiresManualForkPRStart(task) && (passiveForkReviewOpen || stepDerivedForkReviewStart) {
+		return &EnsureSessionResponse{
+			Success:               true,
+			TaskID:                taskID,
+			State:                 string(models.TaskSessionStateCreated),
+			AgentProfileID:        agentProfileID,
+			Source:                "awaiting_manual_start",
+			ActivationDisposition: activationDispositionSuppressed,
+			ActivationReason:      "fork_pr_manual_start",
+		}, nil
 	}
 
 	launchResp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
@@ -423,30 +438,41 @@ func (s *Service) tryEnsureExecutionWithBinding(
 	return err
 }
 
-// resolveTaskAgentProfile applies the 5-step resolution chain on the backend:
-// 1) workflow step override, 2) task.metadata.agent_profile_id,
-// 3) workflow default, 4) Office task assignee, 5) workspace default. Returns the resolved profile id
-// (or "" when none resolve) along with the workflow step it loaded (or nil).
-// Returning the step lets callers reuse it (e.g. to gate auto-start) without a
-// second DB lookup.
+// resolveTaskAgentProfile resolves the task's agent profile in the order owned
+// by agentprofile.Resolve: workflow step override, workflow default,
+// task.metadata.agent_profile_id, Office task assignee, workspace default.
+// Returns the resolved profile id (or "" when none resolve) along with the
+// workflow step it loaded (or nil). Returning the step lets callers reuse it
+// (e.g. to gate auto-start) without a second DB lookup.
 func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
 	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
+	in := agentprofile.Input{Assignee: task.AssigneeAgentProfileID}
+	if v, ok := task.Metadata["agent_profile_id"].(string); ok {
+		in.TaskMetadata = v
+	}
 	if step != nil {
-		if id := s.resolveStepAgentProfileForTask(ctx, task, step); id != "" {
-			return id, step
+		in.HasStep = true
+		in.StepSessionTarget = step.SessionTarget != nil
+		if !in.StepSessionTarget {
+			var replaced bool
+			in.StepReplacement, replaced, in.StepProfile = s.stepProfileInputs(task, step)
+			if replaced && in.StepReplacement == "" {
+				in.StepSessionTarget = true
+			}
+			if !in.StepSessionTarget && in.StepReplacement == "" && in.StepProfile == "" {
+				in.WorkflowDefault = s.workflowDefaultProfile(ctx, step)
+			}
 		}
 	}
-	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v, step
-	}
-	if task.AssigneeAgentProfileID != "" {
-		return task.AssigneeAgentProfileID, step
+	if id, src := agentprofile.Resolve(in); src != agentprofile.SourceNone {
+		return id, step
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
-	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {
-		return *ws.DefaultAgentProfileID, step
+	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil {
+		in.WorkspaceDefault = *ws.DefaultAgentProfileID
 	}
-	return "", step
+	id, _ := agentprofile.Resolve(in)
+	return id, step
 }
 
 // lookupWorkflowStep loads a workflow step by id, returning nil when the id
@@ -470,4 +496,40 @@ func stepAllowsAutoStart(step *wfmodels.WorkflowStep) bool {
 		return true
 	}
 	return step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
+}
+
+// OfficeLaunchProfilePreviewFunc returns the execution profile Office routing
+// would launch the agent with in the workspace, or "" when routing selects no
+// candidate. It must not record route attempts or change provider health.
+type OfficeLaunchProfilePreviewFunc func(ctx context.Context, workspaceID, agentID string) (string, error)
+
+// SetOfficeLaunchProfilePreview wires the Office routing preview used when a
+// UI-prepared Office session binds its execution profile.
+func (s *Service) SetOfficeLaunchProfilePreview(fn OfficeLaunchProfilePreviewFunc) {
+	s.officeLaunchProfilePreview = fn
+}
+
+// officeLaunchProfileForPrepare binds an assigned Office task's new session to
+// the execution profile Office routing would launch its agent with, so a later
+// run reuses the prepared runtime. Without a routed candidate the agent ID is
+// kept, matching the scheduler's non-routed launch.
+func (s *Service) officeLaunchProfileForPrepare(
+	ctx context.Context, task *models.Task, agentProfileID string,
+) (string, bool) {
+	if s.officeLaunchProfilePreview == nil || !task.IsOfficeOwnedAndAssigned() ||
+		agentProfileID != task.AssigneeAgentProfileID || codexForkSourceSessionFromContext(ctx) != "" {
+		return agentProfileID, false
+	}
+	routed, err := s.officeLaunchProfilePreview(ctx, task.WorkspaceID, agentProfileID)
+	if err != nil {
+		s.logger.Warn("office launch profile preview failed; preparing with the agent profile",
+			zap.String("task_id", task.ID),
+			zap.String("agent_profile_id", agentProfileID),
+			zap.Error(err))
+		return agentProfileID, false
+	}
+	if routed == "" {
+		return agentProfileID, false
+	}
+	return routed, true
 }

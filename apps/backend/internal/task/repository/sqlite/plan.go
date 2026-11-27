@@ -21,6 +21,8 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
+const authorKindUser = "user"
+
 const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, write_version, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
 
 // CreateTaskPlan creates a new task plan.
@@ -132,6 +134,9 @@ func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", taskID)
+	}
+	if err := releaseDetachedPlanCommentFiles(ctx, tx, taskID); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit task plan deletion: %w", err)

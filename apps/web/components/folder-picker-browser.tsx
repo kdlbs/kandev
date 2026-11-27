@@ -13,6 +13,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { ShowHiddenToggle } from "@/components/directory-browser/show-hidden-toggle";
 import { cn } from "@/lib/utils";
 import type { DirectoryListing } from "@/lib/api/domains/fs-api";
 import { useTranslation } from "react-i18next";
@@ -221,6 +222,9 @@ function appendPathSegments(
   }
 }
 
+/** The breadcrumb's scrolling region. The row that hosts it owns the
+ * overflow boundary, so a deep path scrolls without moving the reveal control
+ * out of reach. */
 function Breadcrumb({
   path,
   onNavigate,
@@ -233,7 +237,7 @@ function Breadcrumb({
   const { t } = useTranslation();
   const segs = pathSegments(path);
   return (
-    <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden py-1.5 pl-2">
       {segs.length === 0 && (
         <span className="text-[11px] text-muted-foreground italic">{t("common:loading")}</span>
       )}
@@ -292,7 +296,10 @@ export function DirectoryBrowserBody({
           touchRows={touchRows}
         />
       ) : null}
-      <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+      <div className="flex shrink-0 items-stretch border-b border-border bg-muted/30">
+        <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+        <ShowHiddenToggle touchRows={touchRows} />
+      </div>{" "}
       <Entries
         listing={listing}
         loading={loading}
@@ -370,6 +377,8 @@ function DirectoryBrowserToolbar({
   );
 }
 
+/** The inline "new folder" row, extracted to keep the toolbar under the
+ * max-lines-per-function cap. */
 function NewFolderForm({
   name,
   error,

@@ -1,0 +1,66 @@
+// Package mcpcontract holds the names the coordinator's MCP tool surface and
+// the coordinator service share. It imports nothing, so the MCP server that
+// agentctl embeds can use it without pulling in the coordinator service.
+package mcpcontract
+
+// ActionProposeTask is the MCP action the propose_task_kandev tool dispatches.
+const ActionProposeTask = "coordinator.propose_task"
+
+// ActionProposeResume, ActionProposeMessage and ActionProposeMove are the MCP
+// actions the propose_resume_kandev, propose_message_kandev and
+// propose_move_kandev tools dispatch
+// (docs/specs/coordinator/system-design/proposal-kinds.md).
+const (
+	ActionProposeResume  = "coordinator.propose_resume"
+	ActionProposeMessage = "coordinator.propose_message"
+	ActionProposeMove    = "coordinator.propose_move"
+)
+
+// ActionProposeImprovement is the MCP action the propose_improvement_kandev
+// tool dispatches (docs/specs/coordinator/system-design/improvements.md#tool).
+const ActionProposeImprovement = "coordinator.propose_improvement"
+
+// ActionGetItem is the MCP action the get_coordinator_item_kandev tool
+// dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
+const ActionGetItem = "coordinator.get_item"
+
+// ActionListActivity is the MCP action the list_coordinator_activity_kandev
+// tool dispatches (docs/specs/coordinator/system-design/activity-log.md#read-tool).
+const ActionListActivity = "coordinator.list_activity"
+
+// ActionListTurns is the MCP action the list_coordinator_turns_kandev tool
+// dispatches (docs/specs/coordinator/system-design/turn-ledger.md).
+const ActionListTurns = "coordinator.list_turns"
+
+// ActionApproveProposal and ActionRejectProposal are reserved MCP action
+// names (docs/specs/coordinator/system-design/proposals.md#security): approve
+// and reject are reachable only through the two REST routes, and no handler
+// is ever registered for either name. Reserving them here lets the
+// coordinator guard refuse a coordinator or unresolved principal by name,
+// before either could reach the dispatcher's own unknown-action answer.
+const (
+	ActionApproveProposal = "coordinator.approve_proposal"
+	ActionRejectProposal  = "coordinator.reject_proposal"
+	// ActionReplyProposal and ActionDeliverReply reserve the reply route and
+	// the deliver route the same way: REST only, no handler.
+	ActionReplyProposal = "coordinator.reply_proposal"
+	ActionDeliverReply  = "coordinator.deliver_reply"
+)
+
+// DecisionActions is the set of reserved decision action names the
+// coordinator guard checks first, ahead of the propose check and the
+// allowlist.
+var DecisionActions = map[string]struct{}{
+	ActionApproveProposal: {},
+	ActionRejectProposal:  {},
+	ActionReplyProposal:   {},
+	ActionDeliverReply:    {},
+}
+
+// Proposal spec field names, matching their JSON keys.
+const (
+	FieldWorkflowID = "workflow_id"
+	FieldStepID     = "step_id"
+	// FieldEvidence is the improvement tool's evidence array argument.
+	FieldEvidence = "evidence"
+)

@@ -1,6 +1,7 @@
 import { getBackendConfig } from "@/lib/config";
+import type { WorkflowsState } from "@/lib/state/slices/kanban/types";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import type { ListWorkspacesResponse, Workflow } from "@/lib/types/http";
 
 export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 export const LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
@@ -75,9 +76,36 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    acp_idle_suspension_enabled: ws.acp_idle_suspension_enabled ?? false,
+    acp_idle_timeout_minutes: ws.acp_idle_timeout_minutes ?? 120,
     office_workflow_id: ws.office_workflow_id ?? null,
+    task_prefix: ws.task_prefix,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
+  };
+}
+
+/**
+ * Maps a listed workflow to its store entry. Every route that hydrates the
+ * workflow store uses this, as does the Go boot payload's
+ * `mapWorkflowItemState`: the workflow settings page treats store entries as the
+ * server's current values and its Save sends every editable field, so a dropped
+ * description or prompt reads as a cleared value and the next save of any step
+ * persists it. The API omits an empty prompt, so an absent prompt maps to "".
+ */
+export function mapWorkflowItem(workflow: Workflow): WorkflowsState["items"][number] {
+  return {
+    id: workflow.id,
+    workspaceId: workflow.workspace_id,
+    name: workflow.name,
+    description: workflow.description ?? null,
+    prompt: workflow.prompt ?? "",
+    sortOrder: workflow.sort_order ?? 0,
+    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+    ...(workflow.source !== undefined ? { source: workflow.source } : {}),
+    ...(workflow.source_path !== undefined ? { source_path: workflow.source_path } : {}),
+    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
+    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
   };
 }
 
@@ -89,7 +117,12 @@ export function readCookie(name: string): string | null {
     .map((part) => part.trim())
     .filter((part) => part.startsWith(encodedName));
   const entry = entries[entries.length - 1];
-  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
+  if (!entry) return null;
+  try {
+    return decodeURIComponent(entry.slice(encodedName.length));
+  } catch {
+    return null;
+  }
 }
 
 export function readActiveWorkspaceCookie(): string | null {
@@ -164,8 +197,13 @@ type SettingsWorkspaceItem = {
 };
 
 /**
- * The active workspace for a settings boot: whatever the user last had active,
- * then their stored preference, then the first workspace that exists.
+ * The active workspace for a settings boot: the one this tab already has, then
+ * whatever the user last had active (cookie), then their stored preference,
+ * then the first workspace that exists.
+ *
+ * The current workspace leads because the cookie and stored preference are
+ * shared by every tab on the origin: another tab switching workspaces rewrites
+ * both, and opening Settings must not pull this tab onto that workspace.
  *
  * Deliberately not filtered to kanban workspaces. It used to prefer them, which
  * was invisible while Office-vs-kanban chrome came from the pathname — Settings
@@ -181,8 +219,10 @@ export function resolveSettingsActiveWorkspaceId(
   workspaceItems: SettingsWorkspaceItem[],
   activeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
+  currentWorkspaceId: string | null = null,
 ): string | null {
   return (
+    workspaceItems.find((workspace) => workspace.id === currentWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??

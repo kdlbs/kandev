@@ -42,24 +42,28 @@ test.describe("Desktop task-row menu grouping", () => {
       "Priority",
       "Edit",
       "Rename",
+      "Add flag",
       "Duplicate",
+      "Show in graph",
       "Create Subtask",
       "Nest under",
       "Link",
       "Move to",
-      "Send to workflow",
+      "Change workflow...",
       "Archive",
       "Delete",
     ]);
 
     const separators = menu.locator(":scope > [data-slot='context-menu-separator']");
     await expect(separators).toHaveCount(4);
-    await expect(menu.getByTestId("task-context-send-to-workflow")).toBeVisible();
+    await expect(menu.getByTestId("task-context-change-workflow")).toBeVisible();
     await prCapture.screenshot("desktop-task-row-menu-grouping", {
       caption: "Desktop task-row actions grouped by purpose",
     });
 
-    await menu.getByTestId("task-context-priority").hover();
+    const priorityMenu = menu.getByTestId("task-context-priority");
+    await expect(priorityMenu.locator(".tabler-icon-list-numbers")).toBeVisible();
+    await priorityMenu.hover();
     const lowOption = testPage.getByTestId("task-context-priority-low");
     await expect(lowOption).toBeVisible();
     await lowOption.click();

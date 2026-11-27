@@ -38,6 +38,7 @@ func seedOverdueStuckSignal(t *testing.T, repo *sqliterepo.Repository, sessionID
 		Summary:    "all done",
 		SignaledAt: time.Now().UTC().Add(-30 * time.Minute),
 	}
+	signal.WorkflowStepTransitionID = signalEntryForSession(t, repo, sessionID)
 	if err := repo.SetSessionMetadataKey(context.Background(), sessionID, models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

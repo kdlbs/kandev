@@ -17,6 +17,8 @@ export type PopupMenuProps = {
   children: ReactNode;
   emptyState?: ReactNode;
   hasItems?: boolean;
+  listId?: string;
+  inline?: boolean;
   /** 'above' (default) positions bottom edge above cursor; 'below' positions top edge below cursor. */
   placement?: "above" | "below";
 };
@@ -31,11 +33,13 @@ export function PopupMenu({
   children,
   emptyState,
   hasItems = true,
+  listId,
+  inline,
   placement = "above",
 }: PopupMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const hasAnchor = isOpen && Boolean(position || clientRectFn?.());
+  const hasAnchor = isOpen && Boolean(inline || position || clientRectFn?.());
 
   // Close on click outside
   useEffect(() => {
@@ -54,13 +58,13 @@ export function PopupMenu({
   // A virtual caret can move between result renders without an element resize.
   useLayoutEffect(() => {
     const menu = menuRef.current;
-    if (!hasAnchor || !menu) return;
+    if (inline || !hasAnchor || !menu) return;
     return positionPopupMenu(
       menu,
       () => (position ? new DOMRect(position.x, position.y) : (clientRectFn?.() ?? null)),
       placement,
     );
-  }, [hasAnchor, position, clientRectFn, placement, children, hasItems, emptyState]);
+  }, [inline, hasAnchor, position, clientRectFn, placement, children, hasItems, emptyState]);
 
   if (!hasAnchor) {
     return null;
@@ -75,14 +79,21 @@ export function PopupMenu({
     <div
       ref={menuRef}
       data-testid={testId}
-      style={{
-        ...POPUP_MENU_SIZE,
-        position: "fixed",
-        visibility: "hidden",
-        zIndex: 60,
-        pointerEvents: "auto",
-      }}
-      className="flex flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10"
+      style={
+        inline
+          ? undefined
+          : {
+              ...POPUP_MENU_SIZE,
+              position: "fixed",
+              visibility: "hidden",
+              zIndex: 60,
+              pointerEvents: "auto",
+            }
+      }
+      className={cn(
+        "flex min-w-0 flex-col overflow-hidden rounded-lg bg-popover text-popover-foreground",
+        inline ? "mt-1 border border-border" : "shadow-md ring-1 ring-foreground/10",
+      )}
     >
       {/* Header */}
       <div className="shrink-0 border-b border-border/50 px-2 py-1.5">
@@ -94,8 +105,9 @@ export function PopupMenu({
       {/* Content */}
       <div
         role="listbox"
+        id={listId}
         aria-labelledby={titleId}
-        className="min-h-0 overflow-y-auto py-1 scrollbar-thin"
+        className={cn("min-h-0 py-1", !inline && "overflow-y-auto scrollbar-thin")}
       >
         {hasItems ? children : emptyState}
       </div>
@@ -103,14 +115,19 @@ export function PopupMenu({
   );
 
   // Render via portal to escape any overflow containers
-  if (typeof document === "undefined") return null;
-  return createPortal(menu, document.body);
+  if (inline) return menu;
+  return typeof document === "undefined" ? null : createPortal(menu, document.body);
 }
 
 export type PopupMenuItemProps = {
   icon: ReactNode;
   label: string;
   description?: string;
+  badges?: ReactNode;
+  hint?: string;
+  accessibleLabel?: string;
+  id?: string;
+  compact?: boolean;
   isSelected: boolean;
   onClick: () => void;
   onMouseEnter: () => void;
@@ -121,6 +138,11 @@ export function PopupMenuItem({
   icon,
   label,
   description,
+  badges,
+  hint,
+  accessibleLabel,
+  id,
+  compact,
   isSelected,
   onClick,
   onMouseEnter,
@@ -131,9 +153,13 @@ export function PopupMenuItem({
       ref={itemRef}
       type="button"
       role="option"
+      id={id}
+      tabIndex={id ? -1 : undefined}
       aria-selected={isSelected}
+      aria-label={accessibleLabel}
       className={cn(
-        "mx-1 flex min-h-11 w-full cursor-pointer select-none items-center gap-3 rounded-[6px] px-2 py-1.5 text-left text-xs",
+        "mx-1 flex w-full cursor-pointer select-none items-center gap-3 rounded-[6px] px-2 py-1.5 text-left text-xs",
+        compact ? "min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" : "min-h-11",
         "hover:bg-muted/50",
         isSelected && "bg-muted/50",
       )}
@@ -145,11 +171,19 @@ export function PopupMenuItem({
       <div className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
         {icon}
       </div>
-      <div className="flex min-w-0 flex-1 items-baseline gap-2">
-        <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
-        {description && (
-          <span className="min-w-0 truncate whitespace-nowrap text-[11px] text-muted-foreground">
-            {description}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="max-w-[45%] shrink-0 truncate font-medium">{label}</span>
+          {badges}
+          {description && (
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] text-muted-foreground">
+              {description}
+            </span>
+          )}
+        </div>
+        {hint && (
+          <span className="min-w-0 truncate text-[10px] leading-tight text-muted-foreground">
+            {hint}
           </span>
         )}
       </div>

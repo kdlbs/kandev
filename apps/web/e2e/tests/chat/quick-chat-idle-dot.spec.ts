@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
-import { expectCompositorGridMotion } from "../../helpers/animation-assertions";
+import {
+  expectCompositorGridMotion,
+  expectReducedStatusMotion,
+} from "../../helpers/animation-assertions";
 import {
   openQuickChatWithAgent,
   sendQuickChatMessage,
@@ -18,7 +21,7 @@ test.describe("quick chat activity indicators", () => {
       (response) =>
         response.url().includes("/quick-chat") && response.request().method() === "POST",
     );
-    const dialog = await openQuickChatWithAgent(testPage);
+    const dialog = await openQuickChatWithAgent(testPage, true, created);
     const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
       session_id: string;
       task_id: string;
@@ -36,6 +39,8 @@ test.describe("quick chat activity indicators", () => {
     await sendQuickChatMessage(dialog, testPage, "/slow 8s");
     const gridStatus = tab.getByRole("status");
     await expect(gridStatus).toBeVisible();
+    await expectCompositorGridMotion(gridStatus);
+    await expectReducedStatusMotion(testPage);
     await expectCompositorGridMotion(gridStatus);
 
     await testPage.keyboard.press("Escape");
@@ -61,7 +66,7 @@ test.describe("quick chat activity indicators", () => {
       (response) =>
         response.url().includes("/quick-chat") && response.request().method() === "POST",
     );
-    const dialog = await openQuickChatWithAgent(tabletTestPage);
+    const dialog = await openQuickChatWithAgent(tabletTestPage, true, created);
     const { session_id: sessionId, task_id: taskId } = (await (await created).json()) as {
       session_id: string;
       task_id: string;

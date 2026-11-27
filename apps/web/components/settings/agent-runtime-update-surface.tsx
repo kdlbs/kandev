@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { IconArrowLeft, IconX } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -16,8 +18,67 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
+import { cn } from "@/lib/utils";
 
-const UPDATE_AGENT_KEY = "agents:updateAgent";
+export function RuntimeUpdateDetailHeader({
+  isMobile,
+  title,
+  description,
+  back,
+  onClose,
+}: {
+  isMobile: boolean;
+  title: string;
+  description: string;
+  back?: { label?: string; onClick: () => void; testId: string };
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  const Header = isMobile ? DrawerHeader : DialogHeader;
+  const Title = isMobile ? DrawerTitle : DialogTitle;
+  const Description = isMobile ? DrawerDescription : DialogDescription;
+  const backLabel = back?.label ?? t("agents:runtimeUpdateBackToAll");
+  const guidanceInsets = isMobile ? "px-4 py-3 text-left" : "px-4 pb-1 pt-3 pe-10";
+
+  return (
+    <Header
+      className={cn(
+        "shrink-0",
+        onClose ? "flex-row items-center gap-2 border-b px-4 py-2 md:px-5" : guidanceInsets,
+        back && !onClose && "flex-row items-center gap-2 border-b py-2 ps-2",
+      )}
+    >
+      {back && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground focus-visible:text-foreground active:bg-muted"
+          aria-label={backLabel}
+          title={backLabel}
+          onClick={back.onClick}
+          data-testid={back.testId}
+        >
+          <IconArrowLeft className="size-4" aria-hidden="true" />
+        </Button>
+      )}
+      <Title className={cn((back || onClose) && "text-start", onClose && "flex-1")}>{title}</Title>
+      <Description className="sr-only">{description}</Description>
+      {onClose && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground"
+          aria-label={t("common:close")}
+          onClick={onClose}
+        >
+          <IconX className="size-4" aria-hidden />
+        </Button>
+      )}
+    </Header>
+  );
+}
 
 export function AgentRuntimeUpdateSurface({
   agentName,
@@ -27,6 +88,9 @@ export function AgentRuntimeUpdateSurface({
   onOpenChange,
   body,
   footer,
+  managedFallback,
+  onBack,
+  backLabel,
 }: {
   agentName: string;
   displayName: string;
@@ -35,19 +99,35 @@ export function AgentRuntimeUpdateSurface({
   onOpenChange: (nextOpen: boolean) => void;
   body: ReactNode;
   footer: (mobile?: boolean) => ReactNode;
+  managedFallback?: boolean;
+  onBack?: () => void;
+  backLabel?: string;
 }) {
   const { t } = useTranslation();
+  const description = managedFallback
+    ? t("agents:runtimeFallbackReview")
+    : t("agents:runtimeUpdateSessionsNote");
+  const header = (
+    <RuntimeUpdateDetailHeader
+      isMobile={isMobile}
+      title={t("agents:updateAgent", { name: displayName })}
+      description={description}
+      onClose={() => onOpenChange(false)}
+      back={
+        onBack
+          ? { label: backLabel, onClick: onBack, testId: `agent-update-back-${agentName}` }
+          : undefined
+      }
+    />
+  );
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent
-          className="max-h-[92dvh] overflow-hidden data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
+          className="flex max-h-[92dvh] flex-col overflow-clip data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
           data-testid={`agent-update-drawer-${agentName}`}
         >
-          <DrawerHeader className="shrink-0 px-4 py-3 text-left">
-            <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
-            <DrawerDescription>{t("agents:reviewUpdateBeforeApplying")}</DrawerDescription>
-          </DrawerHeader>
+          {header}
           {body}
           {footer(true)}
         </DrawerContent>
@@ -57,13 +137,11 @@ export function AgentRuntimeUpdateSurface({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[92dvh] gap-0 overflow-hidden p-0 sm:min-w-[40rem] sm:max-w-2xl"
+        showCloseButton={false}
+        className="flex max-h-[92dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[34rem]"
         data-testid={`agent-update-dialog-${agentName}`}
       >
-        <DialogHeader className="px-4 pb-1 pt-3">
-          <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
-          <DialogDescription>{t("agents:reviewUpdateBeforeApplying")}</DialogDescription>
-        </DialogHeader>
+        {header}
         {body}
         {footer()}
       </DialogContent>

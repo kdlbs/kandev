@@ -102,9 +102,76 @@ An immediate probe runs before readiness. A background probe then runs every 15 
 
 Each probe pings the shared writer and reader. It also checks each descriptor's required tables through `internal/db` schema helpers.
 
-One probe error makes aggregate persistence unhealthy. A later successful probe restores runtime health without a restart.
+One recorded probe error makes aggregate persistence unhealthy. A later successful probe restores runtime health without a restart.
+
+### SQLite contention confirmation
+
+The [contention confirmation decision](../../../decisions/2026-11-25-confirm-contention-health-failures.md)
+owns AC-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.9.
+Split `Health.check` into a probe step that returns per-descriptor results and
+one diagnostic, and a record step that calls `RecordProbe` and logs transitions.
+Startup `Check` probes and records in one call, as before.
+
+The periodic SQLite loop records a failed probe immediately unless all of these hold:
+the aggregate state is healthy, and every failed result classifies as
+`deadline_exceeded`. In that case it logs one warning,
+`required persistence probe deadline unconfirmed`, with the existing sanitized
+diagnostic fields. It then waits three seconds, honoring loop cancellation, and
+runs one confirmation probe. That probe uses a fresh two-second context and the
+same maintenance `TryAcquire` path. The loop records its result unconditionally.
+A deferred confirmation records nothing, like any deferred probe.
+
+The confirmation does not reset the ticker. A confirmation never triggers another
+confirmation. Missing tables, driver errors, missing pools, cancellation, and
+mixed failure sets record immediately. PostgreSQL keeps its current path.
 
 Initialization errors remain fatal and cannot recover inside the same process. The process exits through the existing startup error path.
+
+### SQLite schema probe batching
+
+SQLite health checks fetch the existing names for all distinct required tables
+in one catalog query through the shared writer. The required-store catalog
+remains the only source of the requested names. `internal/db` owns the
+context-aware schema helper and its SQL. Bind table names as values and finish
+reading and closing the result before publishing probe outcomes.
+
+The probe still pings the shared writer and reader first. It retains the same
+two-second total deadline, periodic interval, maintenance lease, and startup
+rules. It does not create another pool, use a reader-only health path, or treat
+a timeout as success. Batching removes repeated writer checkout between table
+checks. It does not guarantee service when a single checkout exceeds the
+existing deadline.
+
+A successful inventory produces one result for every descriptor. Missing
+names affect exactly the descriptors that require them, including shared names
+and descriptors with several required tables. Never return early and skip a
+later descriptor. A failed inventory cannot establish any table's presence,
+so every descriptor in that inventory receives the query failure. Preserve the
+existing sanitized diagnostics, `table_probe` stage, and one failure diagnostic
+per sweep. A later successful inventory recovers runtime health normally.
+
+The PostgreSQL probe retains its existing path. Any portable schema helper must
+preserve current-schema selection and parameter rebinding. A dedicated reader,
+a longer timeout, altered maintenance priority, and retention scheduling are
+separate proposals outside this optimization.
+
+The [schema probe batching package](../../../plans/persistence-probe-batching/plan.md)
+records the isolated stress comparison and implementation verification. Performance
+measurements remain experimental evidence rather than CI timing thresholds.
+
+### SQLite writer transaction admission
+
+The [accepted writer-admission ADR](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md)
+selects supported immediate transaction entry in the existing SQLite writer
+factory. Database/sql and sqlx retain genuine transaction ownership; native
+current predicates and owner CAS remain inside the transaction. Dedicated
+read-only pools stay deferred for concurrent WAL snapshots, and PostgreSQL
+retains existing isolation/lock contracts. Read-only transactions on the writer
+also acquire the writer; aliased test pools do not prove reader concurrency.
+ROOT reviewed and released this boundary; actual factory wait,
+cancellation/rollback/reuse, snapshot progress and store/startup compatibility
+gates remain in the [single lifetime work order](../../../plans/managed-deletion-admission/task-01-guard-managed-deletion.md#sqlite-factory-extension).
+No additional product requirement or schema/provider framework is introduced.
 
 ### SQLite maintenance coordination
 
@@ -117,7 +184,8 @@ When admission fails, the periodic loop defers that check until its next tick.
 It does not call `RecordProbe`, change store states, or advance check timestamps.
 It emits a debug event with reason `maintenance_busy`, without database paths.
 An unhealthy store remains unhealthy, including alongside healthy stores.
-Ordinary writer contention without a maintenance lease retains current behavior.
+Ordinary writer contention without a maintenance lease uses
+[contention confirmation](#sqlite-contention-confirmation).
 
 Destructive SQLite restore and factory-reset operations notify required-store
 health before they quiesce workers or replace/drop data. The notifier records
@@ -180,6 +248,17 @@ SQL boolean columns use Go booleans, SQL boolean literals, and dialect-safe defa
 Portable conflict handling uses `ON CONFLICT`. Shared SQL does not use `INSERT OR IGNORE`.
 
 Shared execution helpers rebind source `?` placeholders at the final database or transaction boundary. `sqlx.In` expansion occurs before rebinding.
+
+The task repository's `SetSessionACPSessionID` mirrors the current executor
+resume token with one guarded UPDATE. SQLite merges the ACP sub-object with
+`json_patch`; PostgreSQL uses `jsonb_set` and merges the existing ACP object
+with the new session ID. Both preserve other metadata and ACP fields, normalize
+absent/null metadata, and replace a non-object ACP value with the ID object.
+The UPDATE requires a matching `executors_running.resume_token` and skips an
+already-current ID without changing `updated_at`. PostgreSQL uses
+`IS DISTINCT FROM` for the nullable ID comparison. Shared behavioral tests
+execute both statements against their actual engines.
+
 
 Schema inspection uses `internal/db.TableExists`, `TableColumns`, and related helpers. Store packages do not query SQLite catalogs directly.
 

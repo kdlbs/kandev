@@ -1,0 +1,56 @@
+name: Shared PTY compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/backend/internal/common/ptyexec/**
+      - apps/backend/go.mod
+      - apps/backend/go.sum
+      - .github/workflows/pty-compatibility.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/backend/internal/common/ptyexec/**
+      - apps/backend/go.mod
+      - apps/backend/go.sum
+      - .github/workflows/pty-compatibility.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Shared PTY compatibility (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Verify real PTY closure and resize
+        run: go test -trimpath -race ./internal/common/ptyexec -count=10
+
+      - name: Verify login and shell callers
+        run: go test -trimpath -race ./internal/agent/loginpty ./internal/agentctl/server/shell -count=1
+
+      - name: Verify interactive process callers
+        run: >-
+          go test -trimpath -race ./internal/agentctl/server/process
+          -run '^(TestInteractiveRunner_|TestWaitForFirstIdle_|TestEmitTurnComplete_|TestPTYDimension$)'
+          -count=1

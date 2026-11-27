@@ -58,3 +58,44 @@ func TestApplyTaskEnvironmentToWorkspaceInfoProjectsEnvironmentAttachmentHandles
 		})
 	}
 }
+
+func TestApplyTaskEnvironmentToWorkspaceInfoReplacesRelativeSessionPath(t *testing.T) {
+	canonicalWorkspacePath := t.TempDir()
+	info := &lifecycle.WorkspaceInfo{WorkspacePath: "."}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:            "environment-1",
+		WorkspacePath: canonicalWorkspacePath,
+	})
+	if info.WorkspacePath != canonicalWorkspacePath {
+		t.Fatalf("WorkspacePath = %q, want canonical environment path %q", info.WorkspacePath, canonicalWorkspacePath)
+	}
+
+	worktreePath := t.TempDir()
+	info.WorkspacePath = worktreePath
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:            "environment-1",
+		WorkspacePath: canonicalWorkspacePath,
+	})
+	if info.WorkspacePath != worktreePath {
+		t.Fatalf("WorkspacePath = %q, want selected absolute worktree path %q", info.WorkspacePath, worktreePath)
+	}
+}
+
+func TestApplyTaskEnvironmentToWorkspaceInfoUsesEffectiveParentWorkspaceRoot(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{WorkspacePath: "/tasks/task-1/repository"}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		WorkspacePath:   "/tasks/task-1",
+		WorkspaceLayout: "",
+		TaskDirName:     "task-1",
+		Repos: []*models.TaskEnvironmentRepo{{
+			WorktreePath: "/tasks/task-1/repository",
+		}},
+	})
+
+	if info.WorkspaceLayout != WorkspaceLayoutTaskRoot {
+		t.Fatalf("effective workspace layout = %q, want task_root", info.WorkspaceLayout)
+	}
+	if info.WorkspacePath != "/tasks/task-1" {
+		t.Fatalf("workspace path = %q, want parent task workspace", info.WorkspacePath)
+	}
+}

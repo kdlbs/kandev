@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -925,6 +926,25 @@ func TestCompleteTurnClosesUntrackedDBTurn(t *testing.T) {
 
 	if open := openTurnCount(t, repo, "session1"); open != 0 {
 		t.Fatalf("expected 0 open turns after complete, got %d", open)
+	}
+}
+
+func TestUncertainPromptErrorLeavesTurnOpenForReconciliation(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+		t.Fatalf("seed open turn: %v", err)
+	}
+
+	err := svc.handlePromptError(
+		ctx, "task1", "session1", models.TaskSessionStateWaitingForInput,
+		lifecycle.ErrUncertainPromptDelivery,
+	)
+	if !errors.Is(err, lifecycle.ErrUncertainPromptDelivery) {
+		t.Fatalf("handlePromptError() = %v, want uncertain delivery", err)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 1 {
+		t.Fatalf("open turn count = %d, want 1 until durable terminal settlement", open)
 	}
 }
 

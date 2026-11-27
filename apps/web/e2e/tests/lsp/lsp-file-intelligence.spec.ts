@@ -1,3 +1,4 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,6 +33,95 @@ const EDITORS_SETTINGS_PATH = "/settings/preferences/terminal-editors";
 const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
 const DEFINITION_PARENT_PATH = "nested/references";
 const DEFINITION_TARGET_PATH = `${DEFINITION_PARENT_PATH}/Definition Target # query? 100%.kt`;
+
+async function readMonacoModelText(page: Page, uri: string): Promise<string | null> {
+  return page.evaluate((modelUri) => {
+    const monaco = (
+      window as typeof window & {
+        monaco?: {
+          editor: {
+            getModels: () => Array<{
+              uri: { toString: () => string };
+              getValue: () => string;
+            }>;
+          };
+        };
+      }
+    ).monaco;
+    return (
+      monaco?.editor
+        .getModels()
+        .find((model) => model.uri.toString() === modelUri)
+        ?.getValue() ?? null
+    );
+  }, uri);
+}
+
+async function monacoTextPosition(page: Page, uri: string, text: string) {
+  return page.evaluate(
+    ({ modelUri, targetText }) => {
+      const monaco = (
+        window as typeof window & {
+          monaco?: {
+            editor: {
+              getEditors: () => Array<{
+                getModel: () => {
+                  uri: { toString: () => string };
+                  getValue: () => string;
+                } | null;
+                hasTextFocus: () => boolean;
+                getScrolledVisiblePosition: (position: {
+                  lineNumber: number;
+                  column: number;
+                }) => { left: number; top: number; height: number } | null;
+                getTargetAtClientPoint: (
+                  x: number,
+                  y: number,
+                ) => { position?: { lineNumber: number; column: number } } | null;
+                getDomNode: () => HTMLElement | null;
+              }>;
+            };
+          };
+        }
+      ).monaco;
+      const editor = monaco?.editor
+        .getEditors()
+        .find(
+          (candidate) =>
+            candidate.getModel()?.uri.toString() === modelUri && candidate.hasTextFocus(),
+        );
+      const model = editor?.getModel();
+      const domNode = editor?.getDomNode();
+      if (!editor || !model || !domNode) return null;
+
+      const lines = model.getValue().split("\n");
+      const lineIndex = lines.findIndex((line) => line.includes(targetText));
+      if (lineIndex === -1) return null;
+      const column = lines[lineIndex]!.indexOf(targetText) + 2;
+      const visiblePosition = editor.getScrolledVisiblePosition({
+        lineNumber: lineIndex + 1,
+        column,
+      });
+      if (!visiblePosition) return null;
+      const bounds = domNode.getBoundingClientRect();
+      const point = {
+        x: bounds.left + visiblePosition.left + 2,
+        y: bounds.top + visiblePosition.top + visiblePosition.height / 2,
+      };
+      const target = editor.getTargetAtClientPoint(point.x, point.y);
+      if (
+        !target?.position ||
+        target.position.lineNumber !== lineIndex + 1 ||
+        target.position.column < column ||
+        target.position.column > column + 2
+      ) {
+        return null;
+      }
+      return point;
+    },
+    { modelUri: uri, targetText: text },
+  );
+}
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -257,9 +347,11 @@ test.describe("LSP file intelligence", () => {
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
     const initialStatusBarEnabled = initial.settings.app_status_bar_enabled === true;
+    const initialMarkdownPreview = initial.settings.markdown_preview_by_default ?? true;
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       app_status_bar_enabled: true,
       lsp_status_location: "toolbar",
+      markdown_preview_by_default: false,
     });
 
     try {
@@ -355,6 +447,7 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         app_status_bar_enabled: initialStatusBarEnabled,
         lsp_status_location: initialLocation,
+        markdown_preview_by_default: initialMarkdownPreview,
       });
     }
   });
@@ -416,10 +509,14 @@ test.describe("LSP file intelligence", () => {
     });
     expect(lspSockets).toHaveLength(1);
     await expectFakeLspMarkerCount(testPage, 1);
+    const sourceModelUri = expectedMonacoModelUri(sourceUri, task.sessionId);
+    const originalSource = await readMonacoModelText(testPage, sourceModelUri);
+    expect(originalSource).toContain("fun greeting0(name: String): String");
 
+    await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
-    await testPage.keyboard.press("Control+Space");
+    await editor.locator(".native-edit-context").press("Control+Space");
     const manualCompletion = await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/completion",
@@ -443,13 +540,13 @@ test.describe("LSP file intelligence", () => {
     );
     await testPage.keyboard.press("Control+Z");
     await testPage.keyboard.press("Control+Z");
+    await expect.poll(() => readMonacoModelText(testPage, sourceModelUri)).toBe(originalSource);
 
-    await testPage
-      .locator(".monaco-editor:visible .view-line")
-      .nth(2)
-      .hover({
-        position: { x: 80, y: 8 },
-      });
+    const hoverPoint = () => monacoTextPosition(testPage, sourceModelUri, "greeting0");
+    await expect.poll(hoverPoint).not.toBeNull();
+    const point = await hoverPoint();
+    if (!point) throw new Error("Kotlin greeting is not visible in the focused Monaco editor");
+    await testPage.mouse.move(point.x, point.y);
     await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/hover",
@@ -953,37 +1050,43 @@ test.describe("LSP file intelligence", () => {
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });
 
-  test("disconnects the browser-owned server on reload when continuity is disabled", async ({
+  test("reattaches on reload with a retired false continuity override", async ({
     testPage,
     apiClient,
     seedData,
     backend,
   }) => {
-    const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
-    expect(featureResponse.ok).toBeTruthy();
-    expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
-    installFakeKotlinLsp(backend);
-    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Kotlin LSP Manual Persistence",
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "false",
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await performLspAction(testPage, "start");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
+    try {
+      const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
+      expect(featureResponse.ok).toBeTruthy();
+      expect(await featureResponse.json()).not.toHaveProperty("lspBrowserContinuity");
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Manual Persistence",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await performLspAction(testPage, "start");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
 
-    await testPage.reload();
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    await expect
-      .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
-      .toBeGreaterThanOrEqual(2);
+      await testPage.reload();
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const starts = readFakeLspEvents(backend).filter((event) => event.event === "started");
+      expect(starts).toHaveLength(1);
 
-    await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+      await performLspAction(testPage, "stop");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+    } finally {
+      await releaseFeature();
+    }
   });
 
   test("cleans up a crashed server and reconnects", async ({
@@ -1140,9 +1243,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const context = testPage.context();
 
     try {
@@ -1210,6 +1310,23 @@ test.describe("LSP file intelligence", () => {
       await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
       const reopenedStatus = reopenedPage.locator('[data-testid="lsp-status-button"]:visible');
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const continuityDidOpenCount = () =>
+        readFakeLspEvents(backend).filter(
+          (event) => event.event === "message" && event.method === "textDocument/didOpen",
+        ).length;
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(2);
+
+      // During a resumed lease, the server can publish diagnostics before the
+      // browser sends attachmentReady. Reopen the file after the barrier so the
+      // marker assertion observes a post-ready didOpen instead of packet timing.
+      const reopenedTab = reopenedPage.locator(".dv-default-tab", {
+        hasText: path.basename(task.filePaths[0]),
+      });
+      await reopenedTab.hover();
+      await reopenedTab.locator(".dv-default-tab-action").click();
+      await expect(reopenedTab).toHaveCount(0);
+      await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(3);
       await expectFakeLspMarkerMessages(reopenedPage, modelUri, ["Fake Kotlin diagnostic"]);
       const progress = (await openLspStatus(reopenedPage)).getByTestId("lsp-project-progress");
       await expect(progress).toHaveAttribute("data-lsp-progress-kind", "active");
@@ -1225,7 +1342,7 @@ test.describe("LSP file intelligence", () => {
         events.filter(
           (event) => event.event === "message" && event.method === "textDocument/didOpen",
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(3);
       await performLspAction(reopenedPage, "stop");
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "disabled");
       await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
@@ -1233,7 +1350,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 
@@ -1248,9 +1364,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const context = testPage.context();
     const secondPage = await context.newPage();
     const duplicatePage = await context.newPage();
@@ -1318,7 +1431,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 
@@ -1334,7 +1446,6 @@ test.describe("LSP file intelligence", () => {
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
     const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
       KANDEV_LSP_MAX_CONNECTIONS: "1",
     });
     const context = testPage.context();
@@ -1397,46 +1508,37 @@ test.describe("LSP file intelligence", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(210_000);
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
+    test.setTimeout(90_000);
+    await testPage.clock.install();
+
+    installFakeKotlinLsp(backend);
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Idle Kotlin LSP Release",
     });
+    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+    const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
+    await performLspAction(testPage, "start");
+    await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+    const started = await expectFakeLspEvent(
+      backend,
+      (event) => event.event === "started",
+      "idle-release task-host process",
+    );
 
-    try {
-      installFakeKotlinLsp(backend);
-      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-        title: "Idle Kotlin LSP Release",
-      });
-      await openDesktopFile(testPage, task.session, task.filePaths[0]);
-      const status = testPage.locator('[data-testid="lsp-status-button"]:visible');
-      await performLspAction(testPage, "start");
-      await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-      const started = await expectFakeLspEvent(
-        backend,
-        (event) => event.event === "started",
-        "idle-release task-host process",
-      );
-
-      const editorTab = testPage.getByTestId("preview-tab-file-editor");
-      await editorTab.click({ button: "right" });
-      await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
-      await expect(editorTab).toHaveCount(0);
-      await dwell(
-        125_000,
-        "product-timer",
-        "the LSP client intentionally releases its retained lease after two minutes with no open editor",
-      );
-      await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
-      await expectFakeLspEvent(
-        backend,
-        (event) =>
-          event.pid === started.pid &&
-          (event.event === "exit" || event.event === "signal" || event.event === "stdin ended"),
-        "idle-release process shutdown",
-      );
-    } finally {
-      await releaseFeature();
-    }
+    const editorTab = testPage.getByTestId("preview-tab-file-editor");
+    await editorTab.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
+    await expect(editorTab).toHaveCount(0);
+    // Advance the browser-owned idle deadline; transport and process shutdown stay real.
+    await testPage.clock.fastForward(125_000);
+    await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
+    await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.pid === started.pid &&
+        (event.event === "exit" || event.event === "signal" || event.event === "stdin ended"),
+      "idle-release process shutdown",
+    );
   });
 
   test("disconnects the old lease and starts fresh analysis after backend restart", async ({
@@ -1450,9 +1552,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
 
     try {
       installFakeKotlinLsp(backend);
@@ -1473,10 +1572,38 @@ test.describe("LSP file intelligence", () => {
 
       await backend.restart();
       await expect.poll(() => isProcessAlive(firstProcess.pid)).toBe(false);
+      const recoveryFile = "zz-RecoveryAfterRestart.kt";
       const nextTask = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Kotlin LSP After Backend Restart",
+        filePaths: [
+          ...Array.from({ length: 48 }, (_, index) => `a-recovery-padding-${index}.kt`),
+          recoveryFile,
+        ],
       });
-      await openDesktopFile(testPage, nextTask.session, nextTask.filePaths[0]);
+      await nextTask.session.clickTab("Files");
+      await expect(nextTask.session.fileTree.fileTreeScrollViewport()).toBeVisible();
+      await expect(nextTask.session.fileTreeNode(recoveryFile)).toHaveCount(0);
+      // A late panel activation must not lose the search used for a virtualized row.
+      await testPage.evaluate(() => {
+        const switchPanel = (event: MouseEvent) => {
+          if (!(event.target instanceof Element)) return;
+          if (!event.target.closest('button[aria-label="Search files"]')) return;
+          document.removeEventListener("click", switchPanel);
+          queueMicrotask(() => {
+            const changes = [...document.querySelectorAll<HTMLElement>(".dv-default-tab")].find(
+              (tab) => /^Changes(?: \(\d+\))?$/.test(tab.textContent?.trim() ?? ""),
+            );
+            if (!changes) throw new Error("Changes tab missing from restart fixture");
+            changes.dispatchEvent(
+              new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }),
+            );
+            document.documentElement.dataset.lspLatePanelSwitch = "done";
+          });
+        };
+        document.addEventListener("click", switchPanel);
+      });
+      await openDesktopFile(testPage, nextTask.session, recoveryFile);
+      await expect(testPage.locator("html")).toHaveAttribute("data-lsp-late-panel-switch", "done");
       await expect(status).toHaveAttribute("data-lsp-state", "ready", { timeout: 20_000 });
       const secondProcess = await expectFakeLspEvent(
         backend,
@@ -1498,7 +1625,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 

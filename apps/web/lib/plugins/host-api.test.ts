@@ -31,6 +31,8 @@ const EXPECTED_UI_PRIMITIVES = [
   "Alert",
   "Badge",
   "Button",
+  "Action",
+  "ActionGroup",
   "Card",
   "ChartContainer",
   "ChartLegend",
@@ -90,6 +92,9 @@ const EXPECTED_UI_PRIMITIVES = [
   "Textarea",
   "Tooltip",
   "TooltipProvider",
+  "WorkspaceAgentChat",
+  "WorkspaceTaskStatus",
+  "WorkspaceTaskUsage",
 ];
 
 const originalFetch = global.fetch;
@@ -140,6 +145,27 @@ describe("buildHostApi — API", () => {
 });
 
 describe("buildHostApi", () => {
+  it("forwards the notification provider selector through the authenticated action envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const host = buildHostApi("formatter", createAppStore());
+    const notificationFormatter = {
+      installationId: "installation",
+      formatterKey: "text",
+      expectedBindingRevision: "binding",
+      mode: "candidate" as const,
+    };
+    await host.api.invokeAction("templates.prepare", {
+      notificationProviderId: "owned-mail",
+      notificationFormatter,
+      body: { configuration: {} },
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      notificationProviderId: "owned-mail",
+      notificationFormatter,
+      body: { configuration: {} },
+    });
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -188,6 +214,17 @@ describe("buildHostApi — host contract", () => {
     const host = buildHostApi("jira", createAppStore());
 
     expect(host.i18n).toBeDefined();
+  });
+
+  it("exposes canonical task queries and Host-issued human response receipts", () => {
+    const host = buildHostApi("managed-coordinator", createAppStore());
+
+    expect(host.queries?.useTaskStatus).toBeTypeOf("function");
+    expect(host.queries?.useTaskUsage).toBeTypeOf("function");
+    expect(host.interactions?.issueResponseReceipt).toBeTypeOf("function");
+    expect(host.ui.WorkspaceAgentChat).toBeTypeOf("function");
+    expect(host.ui.WorkspaceTaskStatus).toBeTypeOf("function");
+    expect(host.ui.WorkspaceTaskUsage).toBeTypeOf("function");
   });
 
   it("translates plugin messages through both imperative and reactive APIs", () => {

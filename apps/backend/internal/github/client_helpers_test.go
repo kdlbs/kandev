@@ -523,6 +523,38 @@ func TestConvertRawStatusContextsAndMergeChecks(t *testing.T) {
 	}
 }
 
+func TestConvertRawCheckRunsPreservesProviderIdentity(t *testing.T) {
+	conclusion := checkConclusionSuccess
+	checks := convertRawCheckRuns([]ghCheckRun{{
+		ID: 41, Name: "Preview / package", Status: checkStatusCompleted, Conclusion: &conclusion,
+		App: &struct {
+			ID   int64  `json:"id"`
+			Slug string `json:"slug"`
+		}{ID: 17, Slug: "github-actions"},
+		CheckSuite: struct {
+			ID int64 `json:"id"`
+		}{ID: 101},
+	}})
+	if len(checks) != 1 {
+		t.Fatalf("converted checks = %d, want one", len(checks))
+	}
+	if got := checks[0]; got.ID != 41 || got.AppID != 17 || got.AppSlug != "github-actions" || got.CheckSuiteID != 101 {
+		t.Fatalf("provider identity = %+v", got)
+	}
+}
+
+func TestMergeChecksPreservesDistinctProviderIdentity(t *testing.T) {
+	checks := []CheckRun{
+		{ID: 11, AppID: 1, AppSlug: "buildkite", Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionFail},
+		{ID: 12, AppID: 2, AppSlug: "github-actions", Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionSuccess},
+		{ID: 13, AppID: 2, AppSlug: "github-actions", CheckSuiteID: 22, Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionSuccess},
+	}
+	merged := mergeChecks(checks, nil)
+	if len(merged) != len(checks) {
+		t.Fatalf("merged checks = %#v, want all distinct applications and suites", merged)
+	}
+}
+
 func TestMergeChecksDuplicateCheckRunsByName(t *testing.T) {
 	t1 := time.Date(2025, 6, 1, 10, 0, 0, 0, time.UTC)
 	t2 := time.Date(2025, 6, 1, 11, 0, 0, 0, time.UTC)
@@ -671,6 +703,15 @@ func TestHasFailingChecks(t *testing.T) {
 			{Status: "completed", Conclusion: "success"},
 			{Status: "completed", Conclusion: "failure"},
 		}, true},
+		{"cancelled only is not an issue", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionCancelled},
+		}, false},
+		{"timed out", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionTimedOut},
+		}, true},
+		{"action required", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionActionRequired},
+		}, true},
 		{"in progress", []CheckRun{
 			{Status: "in_progress", Conclusion: ""},
 		}, false},
@@ -715,6 +756,13 @@ func TestCountCheckResults(t *testing.T) {
 			wantTotal: 1, wantPass: 1,
 		},
 		{
+			name: "cancelled is excluded",
+			checks: []CheckRun{
+				{Status: checkStatusCompleted, Conclusion: checkConclusionCancelled},
+			},
+			wantTotal: 0, wantPass: 0,
+		},
+		{
 			name: "failures count toward total but not passing",
 			checks: []CheckRun{
 				{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess},
@@ -732,6 +780,31 @@ func TestCountCheckResults(t *testing.T) {
 					total, passing, tt.wantTotal, tt.wantPass)
 			}
 		})
+	}
+}
+
+func TestCancelledCheckPolicy(t *testing.T) {
+	cancelled := CheckRun{Status: checkStatusCompleted, Conclusion: checkConclusionCancelled}
+	failure := CheckRun{Status: checkStatusCompleted, Conclusion: checkConclusionFail}
+	running := CheckRun{Status: "in_progress"}
+
+	if got := computeOverallCheckStatus([]CheckRun{cancelled}); got != "" {
+		t.Fatalf("cancelled-only status = %q, want empty non-success state", got)
+	}
+	if total, passing := countCheckResults([]CheckRun{cancelled}); total != 0 || passing != 0 {
+		t.Fatalf("cancelled-only counts = (%d, %d), want (0, 0)", total, passing)
+	}
+	if hasFailingChecks([]CheckRun{cancelled}) {
+		t.Fatal("cancelled-only feedback was classified as an issue")
+	}
+	if got := computeOverallCheckStatus([]CheckRun{cancelled, running}); got != checkStatusPending {
+		t.Fatalf("cancelled plus running state = %q, want pending", got)
+	}
+	if got := computeOverallCheckStatus([]CheckRun{cancelled, failure}); got != checkConclusionFail {
+		t.Fatalf("cancelled plus failure state = %q, want failure", got)
+	}
+	if !hasFailingChecks([]CheckRun{{Status: checkStatusCompleted, Conclusion: checkConclusionTimedOut}}) {
+		t.Fatal("timed-out check was not classified as a failure issue")
 	}
 }
 

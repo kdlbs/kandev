@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionMobileTopBar } from "./session-mobile-top-bar";
+import { MobileRemoteExecutorIndicator, SessionMobileTopBar } from "./session-mobile-top-bar";
 
 const mocks = vi.hoisted(() => ({ pluginActions: undefined as unknown }));
 
@@ -13,6 +13,12 @@ vi.mock("@/hooks/domains/session/use-session-commits", () => ({
 }));
 vi.mock("@/components/gitlab/mr-topbar-button", () => ({ MRTopbarButton: () => null }));
 vi.mock("@/components/task/port-forward-dialog", () => ({ PortForwardButton: () => null }));
+vi.mock("@/components/task/executor-settings-button", () => ({
+  ExecutorSettingsButton: () => <button data-testid="executor-settings-button" />,
+}));
+vi.mock("@/components/task/remote-cloud-tooltip", () => ({
+  RemoteCloudTooltip: () => <div data-testid="remote-cloud-tooltip" />,
+}));
 vi.mock("@/components/task/task-top-bar-plugin-actions", () => ({
   TaskTopBarPluginActions: ({ presentation }: { presentation?: string }) => (
     <div data-presentation={presentation} data-testid="task-top-bar-plugin-actions" />
@@ -31,6 +37,19 @@ afterEach(() => {
 });
 
 describe("phone task navigation controls", () => {
+  it("uses the environment drawer for plugin remote executors", () => {
+    render(
+      <MobileRemoteExecutorIndicator
+        taskId="task-1"
+        sessionId="session-1"
+        remoteExecutorType="plugin_remote"
+      />,
+    );
+
+    expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
+    expect(screen.queryByTestId("remote-cloud-tooltip")).toBeNull();
+  });
+
   // @covers AC-UI-MOBILE-MENU-002.1, AC-UI-MOBILE-MENU-002.3
   it("opens task switching from the title and exposes its expanded state", () => {
     const onTaskPickerClick = vi.fn();

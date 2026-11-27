@@ -97,7 +97,7 @@ func newTunnelRaceBackend(t *testing.T, log *logger.Logger, sessionIDs ...string
 // suite: Shutdown takes m.mu, so a leaked lock would block teardown forever.
 func newBoundedTunnelManager(t *testing.T, lifecycleMgr *lifecycle.Manager, log *logger.Logger) *TunnelManager {
 	t.Helper()
-	manager := NewTunnelManager(lifecycleMgr, log)
+	manager := newTestTunnelManager(lifecycleMgr, log)
 	t.Cleanup(func() { mustNotBlock(t, "Shutdown", manager.Shutdown) })
 	return manager
 }

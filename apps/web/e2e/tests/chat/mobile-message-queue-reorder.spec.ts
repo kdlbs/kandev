@@ -143,8 +143,6 @@ async function touchDragTo(
   });
 }
 
-test.describe.configure({ retries: 1 });
-
 test("mobile touch drag reorders queued messages with an always-visible handle", async ({
   testPage,
   apiClient,

@@ -12,24 +12,34 @@ export type WorkspacePauseRecord = {
 };
 
 /**
- * `unknown` is a rendered state, not a hidden one (design "Frontend state"):
- * while `unknown` with no record, the caller shows a "pause state
- * unavailable" affordance instead of a banner; while `unknown` with a record
- * already read, the banner stays and is marked stale.
+ * `unknown` means no read has been issued yet for the selected workspace.
+ * `loading` means a read is in flight. `known` means the last read for the
+ * selected workspace succeeded. `error` means the last read failed. Both
+ * `unknown` and `loading` with no record render a reading indicator, never
+ * the failure warning; only `error` with no record renders the unavailable
+ * affordance, so a remount re-read cannot flash a warning. While `error`
+ * or `loading` with a record already read, the banner stays; it is marked
+ * stale only on `error`.
  */
-export type WorkspacePauseStatus = "unknown" | "known";
+export type WorkspacePauseStatus = "unknown" | "loading" | "known" | "error";
 
 /**
- * The three things the slice holds per the design's "Frontend state"
- * section: the record or `null`, a status, and one monotonic counter plus
- * the sequence of the last update applied. `requestSeq` is bumped by
- * `beginPauseRequest` on every issued GET or POST; `appliedSeq` is the tag of
- * whichever response last passed both supersession guards.
+ * The four things the slice holds per the design's "Frontend state"
+ * section: the record or `null`, a status, the workspace the record and
+ * status were read for, and one monotonic counter plus the sequence of
+ * the last update applied. `requestSeq` is bumped by
+ * `beginPauseRequest` on every issued GET or POST; `readSeq` tracks the latest
+ * GET, and `appliedSeq` is the tag of the last accepted success or read failure.
+ * A failed mutation does not supersede an outstanding read. `workspaceId`
+ * lets a remount tell a same-workspace re-read (keep the record) from a
+ * workspace change (clear it) without relying on hook-instance memory.
  */
 export type WorkspacePauseSliceState = {
   record: WorkspacePauseRecord | null;
   status: WorkspacePauseStatus;
+  workspaceId: string | null;
   requestSeq: number;
+  readSeq: number;
   appliedSeq: number;
 };
 

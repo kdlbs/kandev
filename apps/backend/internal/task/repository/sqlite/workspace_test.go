@@ -13,6 +13,30 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+func TestWorkspaceIdlePolicyMigrationDefaultsExistingRows(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-idle-migration", Name: "Legacy workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if _, err := repo.db.Exec(`ALTER TABLE workspaces DROP COLUMN acp_idle_suspension_enabled`); err != nil {
+		t.Fatalf("simulate legacy enabled column absence: %v", err)
+	}
+	if _, err := repo.db.Exec(`ALTER TABLE workspaces DROP COLUMN acp_idle_timeout_minutes`); err != nil {
+		t.Fatalf("simulate legacy timeout column absence: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	workspace, err := repo.GetWorkspace(ctx, "workspace-idle-migration")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if workspace.ACPIdleSuspensionEnabled || workspace.ACPIdleTimeoutMinutes != 120 {
+		t.Fatalf("migrated policy = enabled:%v timeout:%d, want disabled/120", workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes)
+	}
+}
+
 func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)

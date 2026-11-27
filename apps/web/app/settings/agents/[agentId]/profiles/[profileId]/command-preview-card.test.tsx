@@ -116,3 +116,87 @@ describe("CommandPreviewCard", () => {
     expect(screen.queryByText(/will be replaced with your task description/)).toBeNull();
   });
 });
+
+describe("CommandPreviewCard flag destination", () => {
+  // AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-001.2, .4
+  // Over ACP the flags land on the bridge process, not the agent CLI it wraps.
+  // Without this line the preview showed an argv that looks like the agent's.
+  it("names the launched process when flags go to the ACP bridge", async () => {
+    previewAgentCommandActionMock.mockResolvedValue({
+      ...response("npx --yes @agentclientprotocol/claude-agent-acp --verbose"),
+      flag_destination: "acp_bridge",
+    });
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough={false}
+        cliFlags={[{ description: "", flag: "--verbose", enabled: true }]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("command-preview-flag-destination")).toBeTruthy();
+    });
+  });
+
+  it("omits the destination note for a passthrough profile", async () => {
+    previewAgentCommandActionMock.mockResolvedValue({
+      ...response("npx -y @anthropic-ai/claude-code --verbose"),
+      flag_destination: "agent_cli",
+    });
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough
+        cliFlags={[{ description: "", flag: "--verbose", enabled: true }]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("command-preview-flag-destination")).toBeNull();
+    });
+  });
+});
+
+describe("CommandPreviewCard deferred Copilot mounts", () => {
+  it("shows deferred plugin identities without a resolved directory", async () => {
+    previewAgentCommandActionMock.mockImplementation(async () => ({
+      ...response("npx @github/copilot@1.0.88"),
+      deferred_plugin_ids: ["installed:copilot-plugins/spark"],
+      deferred_plugin_count: 1,
+      command_incomplete: true,
+    }));
+
+    render(
+      <CommandPreviewCard
+        agentName="copilot-acp"
+        model="auto"
+        permissionSettings={{}}
+        cliPassthrough
+        cliFlags={[]}
+        commandPrefix=""
+        copilotSelectedPlugins={["installed:copilot-plugins/spark"]}
+      />,
+    );
+
+    expect(await screen.findByTestId("command-preview-deferred-plugins")).toBeTruthy();
+    expect(screen.getByText(/Selected plugin mounts resolve/)).toBeTruthy();
+    expect(screen.getByText(/installed:copilot-plugins\/spark/)).toBeTruthy();
+    expect(screen.getByText(/Base command is incomplete/)).toBeTruthy();
+    expect(screen.queryByText(/--plugin-dir/)).toBeNull();
+    expect(previewAgentCommandActionMock).toHaveBeenCalledWith(
+      "copilot-acp",
+      expect.objectContaining({
+        copilot_selected_plugins: ["installed:copilot-plugins/spark"],
+      }),
+    );
+  });
+});

@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,12 +35,20 @@ func TestIsProductionDb(t *testing.T) {
 }
 
 func TestBackupProductionDbSkipsMissingSource(t *testing.T) {
-	path, err := backupProductionDb(filepath.Join(t.TempDir(), "missing.db"), t.TempDir(), time.Now())
+	source := filepath.Join(t.TempDir(), "missing.db")
+	home := t.TempDir()
+	path, err := backupProductionDb(context.Background(), source, home, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path != "" {
 		t.Fatalf("backupProductionDb(missing) = %q, want empty path", path)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("missing source was created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev")); !os.IsNotExist(err) {
+		t.Fatalf("missing source produced backup artifacts: %v", err)
 	}
 }
 
@@ -51,7 +60,7 @@ func TestBackupProductionDbPropagatesSourceErrors(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	path, err := backupProductionDb(filepath.Join(file, "kandev.db"), t.TempDir(), time.Now())
+	path, err := backupProductionDb(context.Background(), filepath.Join(file, "kandev.db"), t.TempDir(), time.Now())
 	if err == nil {
 		t.Fatal("backupProductionDb() = nil error for an unreadable source")
 	}
@@ -66,12 +75,10 @@ func TestBackupProductionDbCreatesStampedSnapshot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dbPath, []byte("original-db-content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	createBackupFixture(t, dbPath, false)
 
 	stamp := time.Date(2026, 8, 7, 12, 30, 45, 123_000_000, time.UTC)
-	created, err := backupProductionDb(dbPath, home, stamp)
+	created, err := backupProductionDb(context.Background(), dbPath, home, stamp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,19 +88,16 @@ func TestBackupProductionDbCreatesStampedSnapshot(t *testing.T) {
 	if created != wantPath {
 		t.Fatalf("backup path = %q, want %q", created, wantPath)
 	}
-	data, err := os.ReadFile(created)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "original-db-content" {
-		t.Fatalf("backup content = %q", data)
-	}
+	assertBackupRecords(t, created)
 	info, err := os.Stat(created)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !info.ModTime().Equal(stamp) {
 		t.Fatalf("backup mtime = %v, want %v", info.ModTime(), stamp)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("backup mode = %#o, want 0600", got)
 	}
 	backupDir := filepath.Dir(created)
 	dirInfo, err := os.Stat(backupDir)
@@ -108,13 +112,11 @@ func TestBackupProductionDbCreatesStampedSnapshot(t *testing.T) {
 func TestBackupProductionDbPrunesToFiveNewest(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "kandev.db")
-	if err := os.WriteFile(dbPath, []byte("db"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	createBackupFixture(t, dbPath, false)
 
 	base := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 6; i++ {
-		if _, err := backupProductionDb(dbPath, home, base.Add(time.Duration(i)*time.Second)); err != nil {
+		if _, err := backupProductionDb(context.Background(), dbPath, home, base.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -144,9 +146,7 @@ func TestBackupProductionDbPrunesToFiveNewest(t *testing.T) {
 func TestBackupProductionDbPruneLeavesOtherFamilies(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "kandev.db")
-	if err := os.WriteFile(dbPath, []byte("db"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	createBackupFixture(t, dbPath, false)
 
 	backupDir := filepath.Join(home, ".kandev", "data", "backups")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -166,7 +166,7 @@ func TestBackupProductionDbPruneLeavesOtherFamilies(t *testing.T) {
 
 	base := time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 6; i++ {
-		if _, err := backupProductionDb(dbPath, home, base.Add(time.Duration(i)*time.Second)); err != nil {
+		if _, err := backupProductionDb(context.Background(), dbPath, home, base.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatal(err)
 		}
 	}

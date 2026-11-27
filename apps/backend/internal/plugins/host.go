@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -14,7 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 // pluginHost implements pluginsdk.Host (the kandev.plugin.v1 Host RPCs, §3
@@ -38,8 +39,14 @@ type pluginHost struct {
 	// host_data.go; this embed only remains as defense-in-depth.
 	pluginsdk.UnimplementedHostData
 
-	pluginID     string
-	capabilities manifest.Capabilities
+	service             *Service
+	pluginID            string
+	installationID      string
+	commandStore        *state.CommandStore
+	capabilities        manifest.Capabilities
+	hasSidebarGroupings bool
+	exactSnapshotMu     sync.Mutex
+	exactSnapshots      *exactReadSnapshotStore
 	// repositoryProviders is the manifest-declared set of provider IDs this
 	// plugin owns. Only these IDs may use the trusted remote-descriptor path
 	// when creating a task; a plugin cannot claim another provider merely by
@@ -72,12 +79,17 @@ type pluginHost struct {
 	// taskPRsDep resolves the source at read time so a host created before
 	// SetTaskPRSource still observes the late wiring.
 	taskPRsDep func() taskPRSource
+	// pendingTaskTransitions resolves the orchestrator queue at read time for
+	// hosts created before its late backend wiring.
+	pendingTaskTransitions func() pendingTaskTransitionSource
 
 	// taskWriter backs the CreateTask/UpdateTask write RPCs (ADR 0043
 	// phase 2, capability api_write:tasks). Wired via SetDataSources like the
 	// readers — the task service is available at data-source wiring time. See
 	// host_write.go.
-	taskWriter taskWriter
+	taskWriter            taskWriter
+	workspaceAdminWriter  WorkspaceAdminWriter
+	sourceIssueController SourceIssueController
 
 	// writeDeps returns the live task messenger and task starter behind the
 	// SendMessage RPC (api_write:messages) and CreateTask's start_agent. Read
@@ -93,7 +105,8 @@ type pluginHost struct {
 	// plugins spawn, so a snapshot would strand those hosts with a nil
 	// responder for their whole lifetime. nil on a bare test host.
 	// See host_interactions.go.
-	interactionDeps func() interactionResponder
+	interactionDeps        func() interactionResponder
+	executionControllerDep func() exactExecutionController
 
 	// utilityDeps returns the live utility invocation dependencies at call time
 	// rather than a spawn-time snapshot. The runner is constructed late in boot,
@@ -107,7 +120,10 @@ type pluginHost struct {
 	// DeleteAgentConversation. Wired by backendapp via SetAgentConversations
 	// and read through agentConversationsDeps (live, not snapshotted at
 	// hostForPlugin time, for the same late-wiring reason as writeDeps).
-	agentConversations func() AgentConversationService
+	agentConversations         func() AgentConversationService
+	managedConversations       func() ManagedAgentConversationService
+	managedAutomationSchedules func() ManagedConversationScheduleService
+	automationHistoryDataDep   func() AutomationHistoryDataSource
 
 	// log receives the dependency-derivation-failure diagnostic emitted by
 	// attachDependencies (see host_data_dependencies.go). nil on a bare test
@@ -176,14 +192,22 @@ func (h *pluginHost) SetState(ctx context.Context, scope, scopeID, key string, v
 	if err != nil {
 		return fmt.Errorf("plugins: marshal state value: %w", err)
 	}
-	return h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw)
+	if err := h.state.Set(ctx, h.pluginID, scope, scopeID, key, raw); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) DeleteState(ctx context.Context, scope, scopeID, key string) error {
 	if !h.capabilities.State {
 		return permissionDenied("state")
 	}
-	return h.state.Delete(ctx, h.pluginID, scope, scopeID, key)
+	if err := h.state.Delete(ctx, h.pluginID, scope, scopeID, key); err != nil {
+		return err
+	}
+	h.notifySidebarGroupingState(ctx, scope, scopeID)
+	return nil
 }
 
 func (h *pluginHost) ListState(ctx context.Context, scope, scopeID string) ([]pluginsdk.StateEntry, error) {
@@ -339,6 +363,9 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	}
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
+	if h.HostCallContextEnabled() {
+		event.PluginOrigin = &bus.PluginEventOrigin{PluginID: h.pluginID, Reference: pluginsdk.HostCallReference(ctx)}
+	}
 	return h.bus.Publish(ctx, subject, event)
 }
 

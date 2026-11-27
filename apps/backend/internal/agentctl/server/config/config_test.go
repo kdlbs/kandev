@@ -80,6 +80,51 @@ func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
 	}
 }
 
+// TestLoadWithStartupPropagatesAgentBackgroundWork pins that the effective
+// shared background-work value is copied from the managed contract in both
+// directions, so a disabled launch keeps provider-neutral behavior.
+func TestLoadWithStartupPropagatesAgentBackgroundWork(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentBackgroundWorkEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = false, want true when the startup contract enables it")
+	}
+	instance, err := cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if !instance.AgentBackgroundWorkEnabled {
+		t.Fatal("instance config did not inherit AgentBackgroundWorkEnabled")
+	}
+
+	disabled := base
+	disabled.AgentBackgroundWorkEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentBackgroundWorkEnabled {
+		t.Fatal("AgentBackgroundWorkEnabled = true, want false when the startup contract disables it")
+	}
+	instance, err = cfg.NewInstanceConfig(0, nil)
+	if err != nil {
+		t.Fatalf("NewInstanceConfig: %v", err)
+	}
+	if instance.AgentBackgroundWorkEnabled {
+		t.Fatal("instance config enabled background work for a disabled launch")
+	}
+}
+
 // TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
 // (unmanaged) launch -- Load(), no startup contract -- never engages the
 // capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
@@ -99,9 +144,12 @@ func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
 }
 
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
-	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+	cfg, err := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	want := []string{"github", "gitlab"}
 	if !reflect.DeepEqual(cfg.McpProviders, want) {
@@ -112,9 +160,12 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 // TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
 // AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
 func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
-	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+	cfg, err := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		NamespacesMCPToolsByServer: true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.NamespacesMCPToolsByServer {
 		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
 	}
@@ -132,20 +183,23 @@ func TestInjectedKandevMCPProvenance(t *testing.T) {
 		{Name: "third-party", Type: "http", URL: "https://mcp.example.test/mcp"},
 	}
 
-	cfg := base.NewInstanceConfig(43210, &InstanceOverrides{
+	cfg, err := base.NewInstanceConfig(43210, &InstanceOverrides{
 		Env:        []string{},
 		McpServers: input,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cfg.InjectedKandevMCP {
 		t.Fatal("positive-port instance must retain injected Kandev provenance")
 	}
 	if len(cfg.McpServers) != 3 {
 		t.Fatalf("McpServers = %+v, want injected HTTP/SSE plus third-party", cfg.McpServers)
 	}
-	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://localhost:43210/mcp" {
+	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://127.0.0.1:43210/mcp" {
 		t.Fatalf("HTTP injection = %+v", cfg.McpServers[0])
 	}
-	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://localhost:43210/sse" {
+	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://127.0.0.1:43210/sse" {
 		t.Fatalf("SSE injection = %+v", cfg.McpServers[1])
 	}
 	if cfg.McpServers[2].Name != "third-party" {
@@ -164,10 +218,13 @@ func TestInjectedKandevMCPProvenance(t *testing.T) {
 		t.Fatalf("provenance marker leaked into serialized config: %s", encoded)
 	}
 
-	withoutPort := base.NewInstanceConfig(0, &InstanceOverrides{
+	withoutPort, err := base.NewInstanceConfig(0, &InstanceOverrides{
 		Env:        []string{},
 		McpServers: input,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if withoutPort.InjectedKandevMCP {
 		t.Fatal("zero-port instance must not claim injected Kandev provenance")
 	}
@@ -461,10 +518,10 @@ exit 2
 	env, err := CollectAgentEnvWithError(map[string]string{
 		"GH_TOKEN":            "late-profile-token",
 		"HOME":                filepath.Join(t.TempDir(), "home"),
-		"PATH":                "/usr/bin:/bin",
+		"PATH":                os.Getenv(pathEnvKey),
 		"GIT_CONFIG_COUNT":    "1",
 		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_VALUE_0":  "!'" + filepath.ToSlash(ghPath) + "' auth git-credential",
 		"GIT_CONFIG_NOSYSTEM": "1",
 	})
 	if err != nil {

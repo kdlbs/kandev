@@ -19,14 +19,17 @@ Long-running local tasks can be interrupted when the computer hosting Kandev ent
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.1:** Settings > General > Task Actions exposes an install-wide **Prevent host sleep while tasks run** setting to administrators.
+- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.1:** Settings > Preferences > Task Behavior > Runtime exposes an install-wide **Prevent host sleep while tasks run** setting to administrators.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.2:** The setting is disabled by default. Missing or older persisted settings resolve to disabled.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.3:** When enabled, Kandev requests that the operating system prevent idle system sleep while at least one task session is `STARTING` or `RUNNING`.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.4:** Kandev releases the request after the last session leaves `STARTING` or `RUNNING`, when the setting is disabled, and during graceful backend shutdown.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.5:** `WAITING_FOR_INPUT`, `IDLE`, `CREATED`, and terminal session states do not keep the host awake.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.6:** The request keeps the host system available for task execution but does not keep the display awake and does not override an explicit user sleep action, lid close, shutdown, low-power emergency, or platform policy.
 - **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.7:** The setting affects only the machine running the Kandev backend. It does not inhibit a Kubernetes node, container host, SSH executor, Docker executor, Sprites runtime, or another remote machine from inside an isolated Kandev deployment.
-- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.8:** The Task Actions card explains the host boundary, the power/battery tradeoff, the disabled default, and that containerized/server deployments should normally leave the setting off.
+- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.8:** The sleep-inhibition card in Task Behavior > Runtime explains the host boundary, the power/battery tradeoff, the disabled default, and that containerized/server deployments should normally leave the setting off.
+- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.9:** When a save is acknowledged successfully, any status refresh started before that acknowledgement shall no longer replace the acknowledged saved preference or introduce a load error. This applies to refreshes already running when saving begins and refreshes started while the save is pending, including another view sharing the same local settings state.
+- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.10:** Status refreshes started after a successful acknowledgement shall continue to update runtime status and report current load failures with retry. An unsuccessful save shall retain its failure outcome and unsaved edits, without discarding a still-current useful status refresh. Editing during a save shall retain the existing draft and shared-save revision behavior.
+- **AC-PLATFORM-TASK-SLEEP-INHIBITION-001.11:** Leaving or replacing a settings view shall prevent its retired status refreshes and retained actions from changing a newer view's response, error, or pending state. Independent local settings stores shall remain isolated. A save admitted before leaving shall retain its actual backend result; reopening the same local store shall not allow an older refresh to undo its successful acknowledgement.
 
 ## Migrated source detail
 
@@ -36,14 +39,14 @@ Long-running local tasks can be interrupted when the computer hosting Kandev ent
 
 ## What
 
-- Settings > General > Task Actions exposes an install-wide **Prevent host sleep while tasks run** setting to administrators.
+- Settings > Preferences > Task Behavior > Runtime exposes an install-wide **Prevent host sleep while tasks run** setting to administrators.
 - The setting is disabled by default. Missing or older persisted settings resolve to disabled.
 - When enabled, Kandev requests that the operating system prevent idle system sleep while at least one task session is `STARTING` or `RUNNING`.
 - Kandev releases the request after the last session leaves `STARTING` or `RUNNING`, when the setting is disabled, and during graceful backend shutdown.
 - `WAITING_FOR_INPUT`, `IDLE`, `CREATED`, and terminal session states do not keep the host awake.
 - The request keeps the host system available for task execution but does not keep the display awake and does not override an explicit user sleep action, lid close, shutdown, low-power emergency, or platform policy.
 - The setting affects only the machine running the Kandev backend. It does not inhibit a Kubernetes node, container host, SSH executor, Docker executor, Sprites runtime, or another remote machine from inside an isolated Kandev deployment.
-- The Task Actions card explains the host boundary, the power/battery tradeoff, the disabled default, and that containerized/server deployments should normally leave the setting off.
+- The sleep-inhibition card in Task Behavior > Runtime explains the host boundary, the power/battery tradeoff, the disabled default, and that containerized/server deployments should normally leave the setting off.
 - The same card reports whether the current backend platform can provide the request and whether a request is currently active. Unsupported or failed inhibition never blocks task execution.
 
 ## Data model
@@ -109,7 +112,7 @@ The enabled value survives backend restarts in the install-wide settings store. 
 
 ## Scenarios
 
-- **GIVEN** a new or upgraded installation, **WHEN** an administrator opens Task Actions, **THEN** sleep prevention is off and no native request is held.
+- **GIVEN** a new or upgraded installation, **WHEN** an administrator opens Task Behavior > Runtime, **THEN** sleep prevention is off and no native request is held.
 - **GIVEN** sleep prevention is off, **WHEN** a task session enters `STARTING` and then `RUNNING`, **THEN** no native request is held.
 - **GIVEN** sleep prevention is on with no working sessions, **WHEN** the first session enters `STARTING`, **THEN** Kandev acquires one native request.
 - **GIVEN** one native request and two working sessions, **WHEN** one session settles, **THEN** the request remains active for the other session.
@@ -130,3 +133,7 @@ The enabled value survives backend restarts in the install-wide settings store. 
 ## Implementation plan
 
 [Task sleep inhibition plan](../../../plans/task-sleep-inhibition/plan.md)
+
+[Saved settings refresh ordering plan](../../../plans/sleep-inhibition-save-refresh/plan.md)
+
+[Task sleep inhibition system design](../system-design/task-sleep-inhibition.md)

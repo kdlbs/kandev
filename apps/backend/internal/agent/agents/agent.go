@@ -7,8 +7,10 @@ package agents
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -70,6 +72,44 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// LocalInstallAgent is an agent whose runtime can be installed explicitly
+// through the server-owned install job path. The implementation owns the
+// trusted artifact table; requests never supply a URL or version.
+type LocalInstallAgent interface {
+	SupportsLocalInstall() bool
+	LocalInstall(ctx context.Context, progress func(string)) error
+}
+
+// LocalRuntimeSelection contains the command, environment, and trusted
+// identity resolved for one host-local operation.
+type LocalRuntimeSelection struct {
+	Command                            Command
+	Env                                map[string]string
+	Variant                            string
+	Version                            string
+	AdapterVersion                     string
+	SupportsDangerouslySkipPermissions bool
+}
+
+// LocalRuntimeAgent resolves a complete local runtime selection. It is only
+// consulted for host-local executions.
+type LocalRuntimeAgent interface {
+	ResolveLocalRuntime(ctx context.Context) (LocalRuntimeSelection, error)
+}
+
+// SavedLocalRuntimeAgent resolves the runtime variant recorded with a native
+// conversation. It is optional so other local agents keep their current
+// runtime selection contract.
+type SavedLocalRuntimeAgent interface {
+	ResolveSavedLocalRuntime(ctx context.Context, adapterVersion string) (LocalRuntimeSelection, error)
+}
+
+// StoredProfilePreserver marks a disabled optional agent whose saved profiles
+// remain valid historical configuration and must not be orphan-cleaned.
+type StoredProfilePreserver interface {
+	PreserveStoredProfilesWhenDisabled() bool
+}
+
 // IsVirtualAgent reports whether an agent is a non-launchable virtual family.
 // Keeping this as an optional capability lets existing concrete agents remain
 // unchanged while callers can fail closed at launch and discovery boundaries.
@@ -95,11 +135,28 @@ type HostUtilityInferenceAgent interface {
 	HostUtilityInferenceConfig() *InferenceConfig
 }
 
+// HostCLIAgent is an optional capability for agent types whose vendor ships a
+// command-line tool that Kandev detects on the host (for example `claude` or
+// `codex`). The spec is compiled metadata used to show the installed version
+// and discover models where the vendor documents a listing. Sessions keep
+// using BuildCommand; installing or updating the CLI stays the existing
+// agent install action.
+type HostCLIAgent interface {
+	HostCLI() hostcli.Spec
+}
+
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
 // ACP runtime is resolved through npm. Package names and ACP arguments are
 // defined by the agent implementation rather than caller-provided input.
 type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
+}
+
+// SelectedRuntimeInstallCommandProvider builds the Settings install command
+// for an install-wide runtime selection. Managed installs should prepare the
+// selected cache entry; native installs may update their standalone package.
+type SelectedRuntimeInstallCommandProvider interface {
+	SettingsInstallCommand(managedruntime.OpenCodeSelection) (Command, error)
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
@@ -126,6 +183,8 @@ type NativeBinaryAgent interface {
 type LoginCommand struct {
 	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
+	// Variants are server-owned command choices selected by opaque identifiers.
+	Variants map[string][]string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
 	Description string
@@ -138,6 +197,17 @@ type LoginCommand struct {
 type LoginAgent interface {
 	LoginCommand() *LoginCommand
 }
+
+// ContextLoginAgent resolves an interactive login command against the current
+// host runtime. The variant is supplied by the client and must be checked
+// again before the PTY starts.
+type ContextLoginAgent interface {
+	ResolveLoginCommand(ctx context.Context, variant string) (*LoginCommand, error)
+}
+
+// ErrLoginRuntimeChanged means the selected login action no longer matches
+// the host runtime. The caller must refresh agent discovery before retrying.
+var ErrLoginRuntimeChanged = errors.New("login runtime changed")
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
 // (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —
@@ -225,10 +295,17 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
+	// install-wide OpenCode choice into command construction.
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	// NativeRuntimeVersion is the observed version of a native OpenCode binary.
+	NativeRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
 type PassthroughOptions struct {
+	Runtime          agentruntime.Runtime
 	Model            string
 	SessionID        string          // ACP session ID; resumes a specific session via --resume <id>
 	Prompt           string          // initial prompt for new sessions
@@ -244,27 +321,43 @@ type PassthroughOptions struct {
 	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
 	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
+	// BaseCommand overrides the agent's default interactive CLI when the
+	// install-wide runtime selection resolves to a managed distribution.
+	BaseCommand Command
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
-	Image           string
-	Tag             string
-	Cmd             Command
-	Entrypoint      Command
-	WorkingDir      string
-	Env             map[string]string
-	RequiredEnv     []string
-	Mounts          []MountTemplate
-	ResourceLimits  ResourceLimits
-	SessionConfig   SessionConfig
-	Protocol        agent.Protocol
-	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
-	WorkspaceFlag   string // e.g. "--workspace-root"
-	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
-	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
-	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
-	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// ToolTimeoutEnvKey names the environment variable that bounds one MCP
+	// tool call in this harness, and ToolTimeoutUnit is its unit. Empty means
+	// the harness has no such variable and no floor is applied.
+	ToolTimeoutEnvKey string
+	ToolTimeoutUnit   time.Duration
+
+	// ContainerEnv provides agent-specific environment required only when the
+	// process runs inside a container runtime. These values are independent of
+	// session mode and never reach host or SSH processes.
+	Image          string
+	Tag            string
+	Cmd            Command
+	Entrypoint     Command
+	WorkingDir     string
+	Env            map[string]string
+	ContainerEnv   map[string]string
+	RequiredEnv    []string
+	Mounts         []MountTemplate
+	ResourceLimits ResourceLimits
+	SessionConfig  SessionConfig
+	Protocol       agent.Protocol
+	ModelFlag      Param  // e.g. NewParam("--model", "{model}")
+	WorkspaceFlag  string // e.g. "--workspace-root"
+	AssumeMcpSse   bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp  bool   // Override: assume agent supports HTTP MCP servers even if not advertised
+	// SupportsManagedToolPolicy is true only when this adapter can disable all
+	// native and ambient tool paths for managed conversations.
+	SupportsManagedToolPolicy bool
+	ProjectSkillDir           string // CWD-relative path for project-level skills (e.g. ".claude/skills")
+	UserSkillDir              string // home-relative path for user-level skills (e.g. ".claude/skills")
 	// ProjectMCPStrategy materializes resolved MCP servers into a project-local
 	// config file before a protocol-mode agent subprocess starts. Use this for
 	// agents whose ACP adapter does not wire session/new mcpServers through to
@@ -349,6 +442,10 @@ const PermissionKeyAutoApprove = "auto_approve"
 // run-everything). Separate from PermissionKeyAutoApprove (agentctl ACP approval).
 const PermissionKeyCursorForce = "cursor_force"
 
+// PermissionKeyAntigravitySkipPermissions is the Antigravity CLI's opt-in
+// all-tool approval flag. It stays separate from the legacy profile boolean.
+const PermissionKeyAntigravitySkipPermissions = "antigravity_skip_permissions"
+
 // PermissionKeyDangerouslySkipPermissions is wired to the profile's
 // DangerouslySkipPermissions column (a dedicated bool, not the cli_flags list).
 // Agents whose CLI accepts --dangerously-skip-permissions (or equivalent)
@@ -367,6 +464,18 @@ type PermissionSetting struct {
 	ApplyMethod  string `json:"apply_method,omitempty"`
 	CLIFlag      string `json:"cli_flag,omitempty"`
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+
+	// PassthroughOnly marks a CLI flag that only reaches the agent in CLI
+	// passthrough mode. Over ACP the launched process is the bridge, which
+	// forwards no unrecognized argument to the CLI it wraps, so the flag is
+	// appended to a process that ignores it while the UI reports it as
+	// enabled.
+	PassthroughOnly bool `json:"passthrough_only,omitempty"`
+
+	// ACPEquivalent names the control that achieves the same thing over ACP.
+	// It is the actionable half of refusing a passthrough-only flag: a message
+	// that only says "not available here" leaves the user with no next step.
+	ACPEquivalent string `json:"acp_equivalent,omitempty"`
 }
 
 // PassthroughConfig defines configuration for CLI passthrough mode.
@@ -450,7 +559,10 @@ func UserSkillDirFromRuntime(a Agent) string {
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the agentctl one-shot inference transport. Empty keeps
+	// the historical ACP transport.
+	Protocol agent.Protocol
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
@@ -504,6 +616,9 @@ type RemoteAuthMethod struct {
 	// FileConflictPolicy controls how an existing target file is handled. It is
 	// an internal transfer contract and is not part of the remote-auth API.
 	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
+	// ProvisionAtLaunch keeps the credential selection available when the agent
+	// uses its CLI instead of copying a local credential file.
+	ProvisionAtLaunch bool `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

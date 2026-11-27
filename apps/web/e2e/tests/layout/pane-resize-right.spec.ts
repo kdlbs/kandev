@@ -10,7 +10,6 @@ import {
   resizeColumnViaSplitview,
   waitForDockviewViewportResize,
 } from "../../helpers/dockview-resize";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Right pane resize — container-proportional cap", () => {
@@ -224,7 +223,7 @@ test.describe("Right pane width — per-task isolation", () => {
 
     // Two tasks, same default layout. Each gets its own env id and its own
     // persisted dockview layout in sessionStorage.
-    await apiClient.createTaskWithAgent(
+    const taskA = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Right Width Task A",
       seedData.agentProfileId,
@@ -247,10 +246,9 @@ test.describe("Right pane width — per-task isolation", () => {
       },
     );
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Right Width Task A").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The card is continuously updated while the agent starts, so navigate by
+    // the created task ID instead of clicking a card that can detach mid-click.
+    await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForDockviewReady();

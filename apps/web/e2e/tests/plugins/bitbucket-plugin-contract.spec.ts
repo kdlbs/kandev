@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
@@ -110,6 +111,18 @@ test.describe("Bitbucket plugin contract", () => {
       },
     );
     if (!task.session_id) throw new Error("fixture contract task has no session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "Waiting for the fixture task's initial turn",
+      30_000,
+    );
+    const reviewStep = seedData.steps.find((step) => step.name === "Review");
+    if (!reviewStep) throw new Error("fixture workflow has no Review step");
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(reviewStep.id);
 
     // Native Link submenu action invokes the declared task-scoped action.
     await kanban.goto();
@@ -145,7 +158,9 @@ test.describe("Bitbucket plugin contract", () => {
     await linkDialog.getByRole("button", { name: "Save" }).click();
     await expect(linkDialog).toBeHidden();
     await expect(
-      testPage.getByText("Bitbucket pull request linked", { exact: true }),
+      testPage
+        .getByTestId("toast-message")
+        .getByText("Bitbucket pull request linked", { exact: true }),
     ).toBeVisible();
 
     // Desktop sessions expose provider reviews as Dockview panels. The mobile

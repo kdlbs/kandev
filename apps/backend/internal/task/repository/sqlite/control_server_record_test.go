@@ -3,9 +3,13 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -37,6 +41,7 @@ func TestUpsertControlServerRecordThenGetRoundTrips(t *testing.T) {
 		CredentialSecretID: "secret-ref-1",
 		Capabilities:       []string{"resume", "diagnostics"},
 		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
+		ProcessIdentity:    processidentity.Identity{PID: 4312, GroupID: 4312, SessionID: 4312, BirthToken: "linux:boot-id:8765"},
 	}
 	if err := repo.UpsertControlServerRecord(ctx, record); err != nil {
 		t.Fatalf("UpsertControlServerRecord: %v", err)
@@ -61,8 +66,90 @@ func TestUpsertControlServerRecordThenGetRoundTrips(t *testing.T) {
 	if got.DiagnosticLogPath != record.DiagnosticLogPath {
 		t.Errorf("DiagnosticLogPath = %q, want %q", got.DiagnosticLogPath, record.DiagnosticLogPath)
 	}
+	if got.ProcessIdentity != record.ProcessIdentity {
+		t.Errorf("ProcessIdentity = %#v, want %#v", got.ProcessIdentity, record.ProcessIdentity)
+	}
 	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 		t.Errorf("CreatedAt/UpdatedAt not set: %#v", got)
+	}
+}
+
+func TestControlServerRecordProcessIdentitySurvivesReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control-server.db")
+	firstDB, err := db.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("open first database: %v", err)
+	}
+	firstConn := sqlx.NewDb(firstDB, "sqlite3")
+	firstRepo, err := NewWithDB(firstConn, firstConn, nil)
+	if err != nil {
+		_ = firstConn.Close()
+		t.Fatalf("initialize first repository: %v", err)
+	}
+	identity := processidentity.Identity{PID: 4312, GroupID: 4312, SessionID: 4312, BirthToken: "linux:boot-id:8765"}
+	if err := firstRepo.UpsertControlServerRecord(context.Background(), &models.ControlServerRecord{
+		Endpoint: "127.0.0.1:41123", ServerIdentity: "server-identity", CredentialSecretID: "secret",
+		DiagnosticLogPath: "/home/kandev/logs/agentctl.log", ProcessIdentity: identity,
+	}); err != nil {
+		_ = firstConn.Close()
+		t.Fatalf("write control server record: %v", err)
+	}
+	if err := firstConn.Close(); err != nil {
+		t.Fatalf("close first database: %v", err)
+	}
+
+	secondDB, err := db.OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	secondConn := sqlx.NewDb(secondDB, "sqlite3")
+	t.Cleanup(func() { _ = secondConn.Close() })
+	secondRepo, err := NewWithDB(secondConn, secondConn, nil)
+	if err != nil {
+		t.Fatalf("initialize reopened repository: %v", err)
+	}
+	got, err := secondRepo.GetControlServerRecord(context.Background())
+	if err != nil {
+		t.Fatalf("read control server record after reopen: %v", err)
+	}
+	if got.ProcessIdentity != identity {
+		t.Fatalf("ProcessIdentity after reopen = %#v, want %#v", got.ProcessIdentity, identity)
+	}
+}
+
+func TestControlServerRecordProcessIdentityMigrationResumesPartialUpgrade(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	legacy := &models.ControlServerRecord{
+		Endpoint: "127.0.0.1:41001", ServerIdentity: "legacy", CredentialSecretID: "secret",
+		DiagnosticLogPath: "/tmp/agentctl.log",
+	}
+	if err := repo.UpsertControlServerRecord(ctx, legacy); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+	for _, column := range []string{"process_birth_token", "process_session_id", "process_group_id", "process_id"} {
+		if _, err := repo.db.ExecContext(ctx, "ALTER TABLE control_server_records DROP COLUMN "+column); err != nil {
+			t.Fatalf("drop %s to model prior schema: %v", column, err)
+		}
+	}
+	if _, err := repo.db.ExecContext(ctx, `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("simulate interrupted process identity migration: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("simulate partially applied process identity migration: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("upgrade prior control server schema: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("replay control server schema upgrade: %v", err)
+	}
+	got, err := repo.GetControlServerRecord(ctx)
+	if err != nil {
+		t.Fatalf("read migrated record: %v", err)
+	}
+	if got.Endpoint != legacy.Endpoint || got.ProcessIdentity != (processidentity.Identity{}) {
+		t.Fatalf("migrated record = %#v, want preserved endpoint and unknown identity", got)
 	}
 }
 

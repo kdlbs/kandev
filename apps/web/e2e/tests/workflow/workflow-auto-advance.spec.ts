@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -12,6 +15,7 @@ test.describe("Workflow auto-advance", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
@@ -21,9 +25,10 @@ test.describe("Workflow auto-advance", () => {
     const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
     const inProgressStep = await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
     const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+    const releaseMarker = join(backend.tmpDir, `workflow-turn-${randomUUID()}.release`);
 
     await apiClient.updateWorkflowStep(inProgressStep.id, {
-      prompt: 'e2e:delay(3000)\ne2e:message("delayed step response")\n{{task_prompt}}',
+      prompt: `e2e:await_file(${JSON.stringify(releaseMarker)})\ne2e:message("delayed step response")\n{{task_prompt}}`,
       events: {
         on_enter: [{ type: "auto_start_agent" }],
         on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
@@ -43,13 +48,16 @@ test.describe("Workflow auto-advance", () => {
       repository_ids: [seedData.repositoryId],
     });
 
-    await apiClient.moveTask(task.id, workflow.id, inProgressStep.id);
-
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    try {
+      await apiClient.moveTask(task.id, workflow.id, inProgressStep.id);
+      await kanban.goto();
 
-    const cardInProgress = kanban.taskCardInColumn("Auto Agent Workflow Task", inProgressStep.id);
-    await expect(cardInProgress).toBeVisible({ timeout: 15_000 });
+      const cardInProgress = kanban.taskCardInColumn("Auto Agent Workflow Task", inProgressStep.id);
+      await expect(cardInProgress).toBeVisible({ timeout: 15_000 });
+    } finally {
+      await writeFile(releaseMarker, "release");
+    }
 
     const cardInDone = kanban.taskCardInColumn("Auto Agent Workflow Task", doneStep.id);
     await expect(cardInDone).toBeVisible({ timeout: 30_000 });

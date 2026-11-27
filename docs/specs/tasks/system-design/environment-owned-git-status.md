@@ -26,10 +26,10 @@ Git polling inside agentctl or workspace materialization.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                                         | Design sections                                                                                                               |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.5` | [Persistence ownership](#persistence-ownership), [Delivery identity](#delivery-identity), [Workspace views](#workspace-views) |
-| `AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.9` | [Persistence ownership](#persistence-ownership), [Source precedence](#source-precedence), [Workspace views](#workspace-views) |
+| `AC-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001.9`    | [Persistence ownership](#persistence-ownership), [Source precedence](#source-precedence), [Workspace views](#workspace-views) |
 
 ## Persistence ownership
 
@@ -97,11 +97,19 @@ session cannot create a second throttle scope for the same workspace state.
 Boot hydration and explicit refresh first resolve the requested session to its
 task environment. They then inspect all live executions for that environment.
 
-If any execution is live, a fresh agentctl result is authoritative. If the
-live query fails, the backend sends no persisted replacement for that request.
+Boot hydration can read persisted rows only when no eligible execution is live.
+If a live source exists, its per-repository fresh result is authoritative,
+including named failures beside healthy repositories. An accepted tracker
+snapshot publishes complete file membership and its quality to the cache and
+subscribers independently of its caller's wait. Diff enrichment can remain
+pending after membership is ready, so a visible file with pending details is
+not evidence of a clean workspace. A failed live read never falls back to a
+persisted row.
 
-If no execution is live, the backend reads the authoritative persisted rows
-for the environment. It emits one status update for each repository.
+Explicit `session.git.refresh` is live-only. Its `fresh` mode has a two-second
+probe budget, `recover` has one 60-second budget, and `replay` reads only the
+latest accepted live tracker state without starting work. A missed or failed
+live source returns unavailable state; it does not substitute persisted data.
 
 The requested session remains the WebSocket route. It does not select the
 snapshot and does not define the frontend storage key.
@@ -110,6 +118,13 @@ snapshot and does not define the frontend storage key.
 
 Every `status_update` payload carries `task_environment_id`. The nested status
 object carries `repository_name` for non-root repositories.
+
+Foreground refresh returns a correlated response containing the same scoped
+status messages as the compatibility notifications. It includes the requested
+session ID, environment ID, mode, and environment or repository quality. The
+backend revalidates the requested session binding, source execution, startup
+stream generation, and agentctl endpoint generation after the asynchronous
+read and before it returns the response.
 
 The lifecycle publisher copies the environment ID from `AgentExecution`. The
 orchestrator resolves the ID from the session when an older recovered execution
@@ -132,17 +147,26 @@ It does not derive this key from `environmentIdBySessionId`.
 The handler ignores a status payload that has no environment ID. This rule
 prevents a session ID from becoming an accidental environment key.
 
-Timestamp ordering remains a response-order safeguard. An older payload cannot
-replace a newer payload for the same environment and repository.
+Tracker epoch and snapshot revision order accepted live snapshots within one
+source lifetime. Legacy snapshots without those fields retain timestamp
+ordering. Tracker epochs from sibling sources are never sorted numerically.
 
-A sparse live snapshot normalizes `files` to an empty object. It clears stale
-file details while it preserves current totals and file-name lists.
+A fresh basic observation has complete file membership even while diff details
+are pending. It can replace the prior membership, but it cannot claim line
+totals or divergence counts as zero until details are ready. A compact
+`live_monitor` database row has `files_complete: false`; its missing file map
+does not establish an empty workspace or remove previously accepted files.
 
 ## Task summaries and direct consumers
 
 Task-card and status-summary rebuilds collect unique environment IDs from task
 sessions. They load one authoritative observation for each environment and
 repository pair.
+
+Completion, archive, launch-base, Review, log, and cumulative-diff consumers
+that need full values use `details=wait`. They do not persist a pending status
+as a completed snapshot. The live-monitor cache writes its compact summary
+only after enrichment has completed, and labels its file membership incomplete.
 
 The loaders do not count one shared environment once for every sibling
 session. Shared and inherited tasks can read the same environment observation.
@@ -200,7 +224,11 @@ A status write without a resolvable environment stops and records a bounded
 log entry. The log does not contain a workspace path.
 
 A live-query error does not permit a persisted fallback while any environment
-execution is live. A later poll, focus refresh, or reconnect can retry.
+execution is live. Foreground refresh first uses `fresh`, then runs `recover`
+once if complete membership is still missing. If detail-completion delivery is
+missed, it uses `replay` once. A later focus or activation can start a new
+attempt. Failed reads use Platform's [delayed recovery](../../platform/system-design/changes-refresh-recovery.md)
+while Changes is active. That policy retains the environment authority described here.
 
 A migrated row without session provenance remains valid until its environment
 is removed. Provenance loss does not change current-status authority.

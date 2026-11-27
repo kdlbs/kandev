@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateReviewFindingStatus } from "@/lib/api/domains/review-api";
+import { beginFindingAction } from "@/lib/review/finding-action-publication";
 import type { ReviewFindingStatus, TaskReviewFinding } from "@/lib/types/review";
 
 /**
  * Resolve / dismiss / reopen actions for a review finding.
  *
- * Updates optimistically so the card responds immediately, and rolls back on
- * failure — a finding that silently stays open after the user resolved it would
- * misrepresent the review's state.
+ * Overlapping local actions share publication ownership and an acknowledged
+ * rollback baseline across all consumers of the same store and finding.
  */
 export function useFindingActions(taskId: string | null | undefined) {
   const storeApi = useAppStoreApi();
@@ -22,13 +22,13 @@ export function useFindingActions(taskId: string | null | undefined) {
   const setStatus = useCallback(
     async (finding: TaskReviewFinding, status: ReviewFindingStatus) => {
       if (!taskId) return;
-      const previous = finding;
-      storeApi.getState().updateReviewFinding(taskId, { ...finding, status });
+      const settle = beginFindingAction(storeApi, taskId, finding.id, status);
+      if (!settle) return;
       try {
         const updated = await updateReviewFindingStatus(finding.id, status);
-        storeApi.getState().updateReviewFinding(taskId, updated);
+        settle(updated);
       } catch (error) {
-        storeApi.getState().updateReviewFinding(taskId, previous);
+        settle();
         toast({
           title: t("review:couldNotUpdateFinding"),
           description: error instanceof Error ? error.message : t("common:anErrorOccurred"),

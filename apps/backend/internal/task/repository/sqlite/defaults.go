@@ -65,11 +65,11 @@ func (r *Repository) hideBuiltinWorkflows() error {
 }
 
 // healBuiltinWorkflowStepFlags reconciles workflow_steps.auto_advance_requires_signal
-// on system-workflow rows whose steps were materialized before their embedded
+// on Office Default system-workflow rows materialized before their embedded
 // template started requiring the ADR-0015 completion signal (WO-32:
 // office-default's "work" step). Steps are matched by name within their
 // workflow's template id, scoped to is_system = 1 so user-created and
-// user-customised workflows are never touched.
+// user-customised workflows are never touched. Routine settings are retained.
 func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	templates, err := workflowcfg.LoadTemplates()
 	if err != nil {
@@ -77,6 +77,9 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	}
 	now := time.Now().UTC()
 	for _, tmpl := range templates {
+		if tmpl.ID != templateIDOfficeDefault {
+			continue
+		}
 		for _, step := range tmpl.Steps {
 			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
 			if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
@@ -475,15 +478,15 @@ func (r *Repository) insertTemplateStep(
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color, prompt, events,
 			allow_manual_move, is_start_step, show_in_command_panel,
-			auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, session_target,
+			auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, disable_unclassified_fallback, stage_type, session_target,
 			auto_advance_requires_signal, cancel_triggers_turn_complete,
 			complete_task_on_enter, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		idMap[def.ID], workflowID, def.Name, def.Position, def.Color, def.Prompt,
 		string(eventsJSON), dialect.BoolToInt(def.AllowManualMove),
 		dialect.BoolToInt(def.IsStartStep), dialect.BoolToInt(def.ShowInCommandPanel),
-		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), string(stage), string(sessionTargetJSON),
+		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), dialect.BoolToInt(def.DisableUnclassifiedFallback), string(stage), string(sessionTargetJSON),
 		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete), dialect.BoolToInt(def.CompleteTaskOnEnter),
 		now, now,
 	)

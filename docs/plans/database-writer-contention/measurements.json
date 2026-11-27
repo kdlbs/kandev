@@ -1,0 +1,5220 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "checkout": "b8b740f128993b804745704591374f5a9fc7b0ab",
+  "incident_build": "1769b9abafea5c45c0798409e33dbaa6236d0f3b",
+  "go_version": "go1.26.0",
+  "measurement_notes": "Synthetic local workloads. Calibration runs excluded. Entry combines pool checkout and BEGIN. Span observes admission to settlement. See evidence.md for limitations.",
+  "runs": [
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.075677896,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 4.330278,
+          "max_ms": 4.330278,
+          "p50_ms": 4.330278,
+          "p95_ms": 4.330278,
+          "p99_ms": 4.330278
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 433.55729399999984,
+          "max_ms": 19.397452,
+          "p50_ms": 0.418799,
+          "p95_ms": 1.046045,
+          "p99_ms": 11.463496
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 3.4752180000000013,
+          "max_ms": 0.027542,
+          "p50_ms": 0.005951,
+          "p95_ms": 0.012243,
+          "p99_ms": 0.017041
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 392.778408,
+          "max_ms": 19.238046,
+          "p50_ms": 0.348528,
+          "p95_ms": 0.899942,
+          "p99_ms": 11.275827
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 105.12126100000002,
+          "max_ms": 12.900307,
+          "p50_ms": 0.144689,
+          "p95_ms": 0.260975,
+          "p99_ms": 0.762818
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 8.123675000000002,
+          "max_ms": 0.07558,
+          "p50_ms": 0.006522,
+          "p95_ms": 0.014567,
+          "p99_ms": 0.035336
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 171.53475799999998,
+          "max_ms": 16.229484,
+          "p50_ms": 0.074768,
+          "p95_ms": 0.144007,
+          "p99_ms": 0.289438
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 126.36981500000003,
+          "max_ms": 13.529176,
+          "p50_ms": 0.137586,
+          "p95_ms": 0.303795,
+          "p99_ms": 0.931711
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 3.744851999999998,
+          "max_ms": 0.109273,
+          "p50_ms": 0.005951,
+          "p95_ms": 0.013004,
+          "p99_ms": 0.020579
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 121.78454700000007,
+          "max_ms": 13.514989,
+          "p50_ms": 0.130854,
+          "p95_ms": 0.284258,
+          "p99_ms": 0.923106
+        },
+        "sidebar.call.ok": {
+          "count": 11,
+          "total_ms": 109.413285,
+          "max_ms": 15.952088,
+          "p50_ms": 9.660986,
+          "p95_ms": 13.959545,
+          "p99_ms": 13.959545
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 531.3956399999994,
+          "max_ms": 24.987803,
+          "p50_ms": 0.500911,
+          "p95_ms": 2.090776,
+          "p99_ms": 15.009366
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 5,
+      "writer_wait_ms": 4.178736,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 475.9789170195982
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.1460756970000001,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 12.647106,
+          "max_ms": 12.647106,
+          "p50_ms": 12.647106,
+          "p95_ms": 12.647106,
+          "p99_ms": 12.647106
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 465.0724650000006,
+          "max_ms": 20.763952,
+          "p50_ms": 0.443304,
+          "p95_ms": 1.141291,
+          "p99_ms": 15.644927
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 4.024632999999999,
+          "max_ms": 0.088494,
+          "p50_ms": 0.006081,
+          "p95_ms": 0.016069,
+          "p99_ms": 0.026529
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 420.6621810000005,
+          "max_ms": 20.614494,
+          "p50_ms": 0.370939,
+          "p95_ms": 0.976375,
+          "p99_ms": 15.535294
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 158.06485600000008,
+          "max_ms": 14.951599,
+          "p50_ms": 0.149117,
+          "p95_ms": 0.349139,
+          "p99_ms": 1.279669
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 8.599019999999996,
+          "max_ms": 0.054441,
+          "p50_ms": 0.006683,
+          "p95_ms": 0.01586,
+          "p99_ms": 0.033011
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 217.12765999999993,
+          "max_ms": 15.588513,
+          "p50_ms": 0.078807,
+          "p95_ms": 0.172822,
+          "p99_ms": 4.249378
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 113.88236100000002,
+          "max_ms": 17.68034,
+          "p50_ms": 0.14556,
+          "p95_ms": 0.368605,
+          "p99_ms": 0.650969
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 4.0147710000000005,
+          "max_ms": 0.066915,
+          "p50_ms": 0.006262,
+          "p95_ms": 0.014858,
+          "p99_ms": 0.026028
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 108.875659,
+          "max_ms": 17.666625,
+          "p50_ms": 0.137716,
+          "p95_ms": 0.345132,
+          "p99_ms": 0.606156
+        },
+        "sidebar.call.ok": {
+          "count": 12,
+          "total_ms": 84.712648,
+          "max_ms": 9.253198,
+          "p50_ms": 6.793627,
+          "p95_ms": 8.665456,
+          "p99_ms": 8.665456
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 516.2350780000003,
+          "max_ms": 25.730463,
+          "p50_ms": 0.517542,
+          "p95_ms": 1.72739,
+          "p99_ms": 14.769551
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3,
+      "writer_wait_ms": 12.418171,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 446.7418699656799
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.124374183,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 9.261634,
+          "max_ms": 9.261634,
+          "p50_ms": 9.261634,
+          "p95_ms": 9.261634,
+          "p99_ms": 9.261634
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 471.1683770000003,
+          "max_ms": 22.411645,
+          "p50_ms": 0.423076,
+          "p95_ms": 1.116565,
+          "p99_ms": 14.11778
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 5.463468999999999,
+          "max_ms": 1.883861,
+          "p50_ms": 0.005641,
+          "p95_ms": 0.013755,
+          "p99_ms": 0.023294
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 423.1328120000006,
+          "max_ms": 22.12398,
+          "p50_ms": 0.348227,
+          "p95_ms": 0.875988,
+          "p99_ms": 14.020389
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 150.84427400000015,
+          "max_ms": 18.043255,
+          "p50_ms": 0.142976,
+          "p95_ms": 0.271194,
+          "p99_ms": 2.264219
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 8.062232000000007,
+          "max_ms": 0.068858,
+          "p50_ms": 0.006362,
+          "p95_ms": 0.014346,
+          "p99_ms": 0.036237
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 194.56682700000002,
+          "max_ms": 17.79851,
+          "p50_ms": 0.071693,
+          "p95_ms": 0.158665,
+          "p99_ms": 1.629118
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 109.26597399999994,
+          "max_ms": 10.497871,
+          "p50_ms": 0.132586,
+          "p95_ms": 0.311158,
+          "p99_ms": 0.528923
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 3.6419399999999977,
+          "max_ms": 0.044663,
+          "p50_ms": 0.005731,
+          "p95_ms": 0.013425,
+          "p99_ms": 0.024656
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 104.80515899999995,
+          "max_ms": 10.485729,
+          "p50_ms": 0.125634,
+          "p95_ms": 0.305277,
+          "p99_ms": 0.483058
+        },
+        "sidebar.call.ok": {
+          "count": 12,
+          "total_ms": 75.818116,
+          "max_ms": 9.368482,
+          "p50_ms": 6.118972,
+          "p95_ms": 6.877813,
+          "p99_ms": 6.877813
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 497.0523489999995,
+          "max_ms": 26.844904,
+          "p50_ms": 0.487717,
+          "p95_ms": 1.231248,
+          "p99_ms": 15.312339
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 2,
+      "writer_wait_ms": 3.876154,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 455.364422041341
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276758528,
+      "elapsed_seconds": 6.139041866,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 6,
+          "total_ms": 34.874987,
+          "max_ms": 13.98382,
+          "p50_ms": 2.161777,
+          "p95_ms": 11.05123,
+          "p99_ms": 11.05123
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 2293.530387999999,
+          "max_ms": 21.26305,
+          "p50_ms": 3.876696,
+          "p95_ms": 10.003914,
+          "p99_ms": 14.732602
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 4.017345000000001,
+          "max_ms": 0.102851,
+          "p50_ms": 0.006151,
+          "p95_ms": 0.01617,
+          "p99_ms": 0.025087
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 2217.3416800000005,
+          "max_ms": 21.135442,
+          "p50_ms": 3.751803,
+          "p95_ms": 9.845448,
+          "p99_ms": 14.6077
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 3161.632199999996,
+          "max_ms": 20.679575,
+          "p50_ms": 0.168744,
+          "p95_ms": 0.401266,
+          "p99_ms": 8.672108
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 71.05529499999976,
+          "max_ms": 0.736359,
+          "p50_ms": 0.006392,
+          "p95_ms": 0.015759,
+          "p99_ms": 0.027782
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 2565.545612999981,
+          "max_ms": 20.527141,
+          "p50_ms": 0.091189,
+          "p95_ms": 0.230619,
+          "p99_ms": 8.40933
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 261.18321799999995,
+          "max_ms": 18.90116,
+          "p50_ms": 0.388261,
+          "p95_ms": 0.773207,
+          "p99_ms": 2.706901
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 3.9608969999999966,
+          "max_ms": 0.071102,
+          "p50_ms": 0.006352,
+          "p95_ms": 0.014146,
+          "p99_ms": 0.018975
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 256.09601900000007,
+          "max_ms": 18.887314,
+          "p50_ms": 0.380337,
+          "p95_ms": 0.759702,
+          "p99_ms": 2.685442
+        },
+        "sidebar.call.ok": {
+          "count": 62,
+          "total_ms": 421.24892500000004,
+          "max_ms": 15.278577,
+          "p50_ms": 6.304808,
+          "p95_ms": 9.84051,
+          "p99_ms": 13.15518
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 657.4074780000003,
+          "max_ms": 19.55262,
+          "p50_ms": 0.87183,
+          "p95_ms": 3.063594,
+          "p99_ms": 11.859292
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 22,
+      "writer_wait_ms": 29.667318,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 1334.410186281665
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276762624,
+      "elapsed_seconds": 9.154018363,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 9,
+          "total_ms": 71.126584,
+          "max_ms": 23.22191,
+          "p50_ms": 8.592419,
+          "p95_ms": 12.156504,
+          "p99_ms": 12.156504
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 3439.0783559999977,
+          "max_ms": 68.080624,
+          "p50_ms": 4.844624,
+          "p95_ms": 16.21632,
+          "p99_ms": 27.37539
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 7.920433999999994,
+          "max_ms": 1.484138,
+          "p50_ms": 0.008696,
+          "p95_ms": 0.029255,
+          "p99_ms": 0.100166
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 3334.1427419999986,
+          "max_ms": 67.78774,
+          "p50_ms": 4.685499,
+          "p95_ms": 15.583633,
+          "p99_ms": 27.07411
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 4554.87137300001,
+          "max_ms": 82.25009,
+          "p50_ms": 0.212996,
+          "p95_ms": 1.503184,
+          "p99_ms": 9.818709
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 167.9140800000004,
+          "max_ms": 6.061686,
+          "p50_ms": 0.008836,
+          "p95_ms": 0.030617,
+          "p99_ms": 0.116036
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 3561.5226310000007,
+          "max_ms": 37.366981,
+          "p50_ms": 0.122577,
+          "p95_ms": 0.832798,
+          "p99_ms": 9.423925
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 373.50554499999987,
+          "max_ms": 10.10412,
+          "p50_ms": 0.496082,
+          "p95_ms": 2.051453,
+          "p99_ms": 5.36934
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 7.1707080000000065,
+          "max_ms": 0.776003,
+          "p50_ms": 0.008395,
+          "p95_ms": 0.026499,
+          "p99_ms": 0.061715
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 364.71507800000006,
+          "max_ms": 10.085154,
+          "p50_ms": 0.486504,
+          "p95_ms": 2.029553,
+          "p99_ms": 5.351126
+        },
+        "sidebar.call.ok": {
+          "count": 92,
+          "total_ms": 1569.2994120000005,
+          "max_ms": 56.540977,
+          "p50_ms": 12.56852,
+          "p95_ms": 43.081561,
+          "p99_ms": 54.301695
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 1099.8460260000004,
+          "max_ms": 27.440101,
+          "p50_ms": 1.142765,
+          "p95_ms": 8.590216,
+          "p99_ms": 15.541225
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 34,
+      "writer_wait_ms": 66.350062,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 894.9075340630272
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276758528,
+      "elapsed_seconds": 9.527396614,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 9,
+          "total_ms": 50.51842400000001,
+          "max_ms": 17.360326,
+          "p50_ms": 4.202481,
+          "p95_ms": 11.227818,
+          "p99_ms": 11.227818
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 3293.171568,
+          "max_ms": 52.670082,
+          "p50_ms": 4.468325,
+          "p95_ms": 16.892136,
+          "p99_ms": 26.707198
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 5.0997410000000025,
+          "max_ms": 0.061795,
+          "p50_ms": 0.007654,
+          "p95_ms": 0.024385,
+          "p99_ms": 0.028884
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 3208.9506339999966,
+          "max_ms": 52.39985,
+          "p50_ms": 4.297738,
+          "p95_ms": 16.623447,
+          "p99_ms": 26.357368
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 5142.165816999989,
+          "max_ms": 80.39958,
+          "p50_ms": 0.199821,
+          "p95_ms": 0.733493,
+          "p99_ms": 14.423477
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 102.65557900000037,
+          "max_ms": 2.925998,
+          "p50_ms": 0.007844,
+          "p95_ms": 0.024716,
+          "p99_ms": 0.044213
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 4403.318023000002,
+          "max_ms": 80.032639,
+          "p50_ms": 0.109804,
+          "p95_ms": 0.366531,
+          "p99_ms": 13.97803
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 359.7494989999996,
+          "max_ms": 16.261323,
+          "p50_ms": 0.479551,
+          "p95_ms": 1.118229,
+          "p99_ms": 5.436545
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 5.319920000000005,
+          "max_ms": 0.414551,
+          "p50_ms": 0.007484,
+          "p95_ms": 0.022542,
+          "p99_ms": 0.036347
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 352.88640900000007,
+          "max_ms": 16.247167,
+          "p50_ms": 0.46791,
+          "p95_ms": 1.093723,
+          "p99_ms": 5.402391
+        },
+        "sidebar.call.ok": {
+          "count": 96,
+          "total_ms": 1280.730004,
+          "max_ms": 37.800646,
+          "p50_ms": 9.951896,
+          "p95_ms": 31.126342,
+          "p99_ms": 34.204693
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 1059.4325760000004,
+          "max_ms": 31.417994,
+          "p50_ms": 1.04926,
+          "p95_ms": 8.125843,
+          "p99_ms": 20.738415
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 43,
+      "writer_wait_ms": 44.293193,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 859.8361474699493
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2547712,
+      "elapsed_seconds": 1.727153811,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 3.437509,
+          "max_ms": 3.437509,
+          "p50_ms": 3.437509,
+          "p95_ms": 3.437509,
+          "p99_ms": 3.437509
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1679.6878419999996,
+          "max_ms": 89.149123,
+          "p50_ms": 0.88823,
+          "p95_ms": 12.961069,
+          "p99_ms": 57.433015
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 907.1847010000004,
+          "max_ms": 88.491781,
+          "p50_ms": 0.372783,
+          "p95_ms": 2.015757,
+          "p99_ms": 44.360218
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 719.6596860000002,
+          "max_ms": 57.827418,
+          "p50_ms": 0.392038,
+          "p95_ms": 0.982957,
+          "p99_ms": 34.309668
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1022.2631820000007,
+          "max_ms": 92.033003,
+          "p50_ms": 0.53242,
+          "p95_ms": 2.11456,
+          "p99_ms": 48.712007
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 1504.2588420000018,
+          "max_ms": 91.82147,
+          "p50_ms": 0.386017,
+          "p95_ms": 1.848997,
+          "p99_ms": 34.813595
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 314.71681400000017,
+          "max_ms": 64.241389,
+          "p50_ms": 0.091309,
+          "p95_ms": 0.178742,
+          "p99_ms": 0.484881
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1047.7175109999996,
+          "max_ms": 79.449064,
+          "p50_ms": 0.58117,
+          "p95_ms": 2.860858,
+          "p99_ms": 49.465497
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 811.512259,
+          "max_ms": 71.405474,
+          "p50_ms": 0.403229,
+          "p95_ms": 2.35128,
+          "p99_ms": 41.967381
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 235.3365080000003,
+          "max_ms": 78.155811,
+          "p50_ms": 0.154758,
+          "p95_ms": 0.327609,
+          "p99_ms": 0.527159
+        },
+        "sidebar.call.ok": {
+          "count": 18,
+          "total_ms": 132.142221,
+          "max_ms": 16.980751,
+          "p50_ms": 6.513235,
+          "p95_ms": 11.565656,
+          "p99_ms": 11.565656
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4197.703565999999,
+          "max_ms": 94.464602,
+          "p50_ms": 2.725425,
+          "p95_ms": 53.210167,
+          "p99_ms": 87.601897
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3075,
+      "writer_wait_ms": 5038.947282,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 296.44146151844956
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.57704119,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 6.50512,
+          "max_ms": 6.50512,
+          "p50_ms": 6.50512,
+          "p95_ms": 6.50512,
+          "p99_ms": 6.50512
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1841.4277220000008,
+          "max_ms": 77.185767,
+          "p50_ms": 0.889113,
+          "p95_ms": 19.788849,
+          "p99_ms": 61.025683
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 1043.5063600000003,
+          "max_ms": 76.691128,
+          "p50_ms": 0.378373,
+          "p95_ms": 2.563875,
+          "p99_ms": 51.672188
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 756.1893839999992,
+          "max_ms": 61.302517,
+          "p50_ms": 0.358857,
+          "p95_ms": 0.94699,
+          "p99_ms": 39.437438
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 870.5192960000011,
+          "max_ms": 65.791801,
+          "p50_ms": 0.533491,
+          "p95_ms": 2.100494,
+          "p99_ms": 39.019602
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 1326.901655999999,
+          "max_ms": 65.982035,
+          "p50_ms": 0.374146,
+          "p95_ms": 1.761655,
+          "p99_ms": 31.406021
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 402.21808900000076,
+          "max_ms": 62.746411,
+          "p50_ms": 0.086601,
+          "p95_ms": 0.189122,
+          "p99_ms": 5.976989
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 606.6039309999995,
+          "max_ms": 82.383097,
+          "p50_ms": 0.495321,
+          "p95_ms": 1.683298,
+          "p99_ms": 2.898437
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 491.8475440000002,
+          "max_ms": 82.244339,
+          "p50_ms": 0.342106,
+          "p95_ms": 1.454683,
+          "p99_ms": 2.279607
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 114.00318900000002,
+          "max_ms": 21.513545,
+          "p50_ms": 0.136634,
+          "p95_ms": 0.300238,
+          "p99_ms": 0.587151
+        },
+        "sidebar.call.ok": {
+          "count": 16,
+          "total_ms": 145.109026,
+          "max_ms": 17.61562,
+          "p50_ms": 8.158303,
+          "p95_ms": 14.579257,
+          "p99_ms": 14.579257
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 3589.4183220000027,
+          "max_ms": 84.50441,
+          "p50_ms": 2.499826,
+          "p95_ms": 34.387553,
+          "p99_ms": 75.629576
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 4.675199,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3074,
+      "writer_wait_ms": 4598.07991,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 324.6586095826704
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2543616,
+      "elapsed_seconds": 1.679002434,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 4.82127,
+          "max_ms": 4.82127,
+          "p50_ms": 4.82127,
+          "p95_ms": 4.82127,
+          "p99_ms": 4.82127
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1321.0105469999994,
+          "max_ms": 79.866991,
+          "p50_ms": 0.960185,
+          "p95_ms": 6.119755,
+          "p99_ms": 37.199549
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 650.7442739999995,
+          "max_ms": 71.514107,
+          "p50_ms": 0.430561,
+          "p95_ms": 2.036054,
+          "p99_ms": 25.450382
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 612.6787650000003,
+          "max_ms": 43.109062,
+          "p50_ms": 0.394183,
+          "p95_ms": 0.948983,
+          "p99_ms": 26.056308
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1195.354691000001,
+          "max_ms": 82.308579,
+          "p50_ms": 0.58114,
+          "p95_ms": 2.540342,
+          "p99_ms": 43.983848
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 1579.2852090000022,
+          "max_ms": 80.995349,
+          "p50_ms": 0.388492,
+          "p95_ms": 1.85062,
+          "p99_ms": 43.459163
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 485.70412399999924,
+          "max_ms": 71.434328,
+          "p50_ms": 0.093284,
+          "p95_ms": 0.196535,
+          "p99_ms": 13.543522
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 918.9850850000004,
+          "max_ms": 84.201627,
+          "p50_ms": 0.556154,
+          "p95_ms": 2.242137,
+          "p99_ms": 39.840869
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 745.56647,
+          "max_ms": 84.053512,
+          "p50_ms": 0.372763,
+          "p95_ms": 1.885775,
+          "p99_ms": 28.010881
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 172.504434,
+          "max_ms": 18.041442,
+          "p50_ms": 0.159256,
+          "p95_ms": 0.382311,
+          "p99_ms": 1.621474
+        },
+        "sidebar.call.ok": {
+          "count": 17,
+          "total_ms": 144.028368,
+          "max_ms": 14.854258,
+          "p50_ms": 6.805458,
+          "p95_ms": 14.785069,
+          "p99_ms": 14.785069
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4190.079685000001,
+          "max_ms": 86.563257,
+          "p50_ms": 2.751073,
+          "p95_ms": 45.08219,
+          "p99_ms": 73.617676
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3072,
+      "writer_wait_ms": 4886.729019,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 304.94297663418394
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276647936,
+      "elapsed_seconds": 8.620465191,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 8,
+          "total_ms": 133.851416,
+          "max_ms": 36.912195,
+          "p50_ms": 8.611295,
+          "p95_ms": 31.058796,
+          "p99_ms": 31.058796
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 5378.47308,
+          "max_ms": 67.427812,
+          "p50_ms": 5.216165,
+          "p95_ms": 31.999655,
+          "p99_ms": 51.143465
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 1475.689290999998,
+          "max_ms": 61.99293,
+          "p50_ms": 0.377692,
+          "p95_ms": 19.132821,
+          "p99_ms": 31.132723
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 3825.011255999997,
+          "max_ms": 54.172956,
+          "p50_ms": 4.293239,
+          "p95_ms": 23.015446,
+          "p99_ms": 33.111461
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 22443.223640999917,
+          "max_ms": 70.825496,
+          "p50_ms": 0.580269,
+          "p95_ms": 18.511195,
+          "p99_ms": 34.647045
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 19510.155867000034,
+          "max_ms": 69.011374,
+          "p50_ms": 0.365259,
+          "p95_ms": 11.11029,
+          "p99_ms": 31.821323
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 3594.544572000013,
+          "max_ms": 38.398056,
+          "p50_ms": 0.118981,
+          "p95_ms": 0.255776,
+          "p99_ms": 10.78749
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1622.379551999999,
+          "max_ms": 53.546883,
+          "p50_ms": 0.940658,
+          "p95_ms": 19.796173,
+          "p99_ms": 35.934037
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 1241.1528429999996,
+          "max_ms": 53.385422,
+          "p50_ms": 0.381228,
+          "p95_ms": 10.673738,
+          "p99_ms": 32.730163
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 379.92776700000013,
+          "max_ms": 20.90261,
+          "p50_ms": 0.432825,
+          "p95_ms": 1.06522,
+          "p99_ms": 7.856312
+        },
+        "sidebar.call.ok": {
+          "count": 87,
+          "total_ms": 776.9819260000002,
+          "max_ms": 16.962978,
+          "p50_ms": 7.901816,
+          "p95_ms": 14.83863,
+          "p99_ms": 16.644356
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 6585.369355000012,
+          "max_ms": 73.018142,
+          "p50_ms": 6.990783,
+          "p95_ms": 40.85901,
+          "p99_ms": 58.859276
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 3.796567,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10770,
+      "writer_wait_ms": 25225.3649,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 950.2967436783657
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276676608,
+      "elapsed_seconds": 6.335630365,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 6,
+          "total_ms": 52.521477,
+          "max_ms": 15.390745,
+          "p50_ms": 7.415102,
+          "p95_ms": 10.576177,
+          "p99_ms": 10.576177
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 4008.308234,
+          "max_ms": 36.715249,
+          "p50_ms": 5.232415,
+          "p95_ms": 18.436045,
+          "p99_ms": 24.164392
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 768.3187100000005,
+          "max_ms": 23.465453,
+          "p50_ms": 0.371901,
+          "p95_ms": 9.049139,
+          "p99_ms": 19.266198
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 3151.0017990000015,
+          "max_ms": 36.22613,
+          "p50_ms": 4.329136,
+          "p95_ms": 14.517773,
+          "p99_ms": 18.996066
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 17154.021696999942,
+          "max_ms": 37.534611,
+          "p50_ms": 0.608972,
+          "p95_ms": 11.8101,
+          "p99_ms": 19.575453
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 15035.335314000065,
+          "max_ms": 37.365247,
+          "p50_ms": 0.390786,
+          "p95_ms": 9.373121,
+          "p99_ms": 18.623062
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 2270.6414969999823,
+          "max_ms": 23.088653,
+          "p50_ms": 0.121405,
+          "p95_ms": 0.255004,
+          "p99_ms": 4.420395
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1068.8231930000004,
+          "max_ms": 21.855471,
+          "p50_ms": 0.835172,
+          "p95_ms": 9.418735,
+          "p99_ms": 19.398303
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 813.3912850000003,
+          "max_ms": 21.501192,
+          "p50_ms": 0.364197,
+          "p95_ms": 7.685664,
+          "p99_ms": 18.041131
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 254.27954300000007,
+          "max_ms": 6.468994,
+          "p50_ms": 0.427495,
+          "p95_ms": 0.845752,
+          "p99_ms": 2.674621
+        },
+        "sidebar.call.ok": {
+          "count": 64,
+          "total_ms": 638.448075,
+          "max_ms": 33.483953,
+          "p50_ms": 8.389142,
+          "p95_ms": 17.669671,
+          "p99_ms": 26.745289
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4088.247978999998,
+          "max_ms": 28.230068,
+          "p50_ms": 5.457414,
+          "p95_ms": 21.750466,
+          "p99_ms": 26.228498
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10762,
+      "writer_wait_ms": 18251.809316,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 1293.0047253474831
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276668416,
+      "elapsed_seconds": 6.58039752,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 6,
+          "total_ms": 81.56811299999998,
+          "max_ms": 32.910387,
+          "p50_ms": 6.014599,
+          "p95_ms": 24.097748,
+          "p99_ms": 24.097748
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 3912.398312,
+          "max_ms": 47.280516,
+          "p50_ms": 4.743696,
+          "p95_ms": 20.220001,
+          "p99_ms": 28.627537
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 899.0538280000002,
+          "max_ms": 42.891148,
+          "p50_ms": 0.368625,
+          "p95_ms": 5.895527,
+          "p99_ms": 22.816757
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 2946.7940210000024,
+          "max_ms": 27.988479,
+          "p50_ms": 3.968406,
+          "p95_ms": 17.714114,
+          "p99_ms": 21.207957
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 17687.708681000015,
+          "max_ms": 52.524372,
+          "p50_ms": 0.556515,
+          "p95_ms": 11.891912,
+          "p99_ms": 24.998092
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 15339.634685999994,
+          "max_ms": 52.319741,
+          "p50_ms": 0.350001,
+          "p95_ms": 9.081228,
+          "p99_ms": 22.825994
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 2635.303152000005,
+          "max_ms": 19.100119,
+          "p50_ms": 0.111587,
+          "p95_ms": 0.245216,
+          "p99_ms": 8.001882
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1221.8867690000004,
+          "max_ms": 29.057296,
+          "p50_ms": 0.832306,
+          "p95_ms": 11.01932,
+          "p99_ms": 25.493693
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 877.9752640000006,
+          "max_ms": 28.060193,
+          "p50_ms": 0.351023,
+          "p95_ms": 6.998527,
+          "p99_ms": 20.376092
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 342.84497600000003,
+          "max_ms": 18.404647,
+          "p50_ms": 0.416083,
+          "p95_ms": 1.004818,
+          "p99_ms": 6.906567
+        },
+        "sidebar.call.ok": {
+          "count": 66,
+          "total_ms": 465.49088399999994,
+          "max_ms": 23.151599,
+          "p50_ms": 6.345634,
+          "p95_ms": 11.333003,
+          "p99_ms": 16.279447
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4670.323831000003,
+          "max_ms": 48.88061,
+          "p50_ms": 6.119624,
+          "p95_ms": 28.316629,
+          "p99_ms": 38.184059
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10766,
+      "writer_wait_ms": 19084.182418,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 1244.9095932429323
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2543616,
+      "elapsed_seconds": 1.072897929,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 17.95984,
+          "max_ms": 17.95984,
+          "p50_ms": 17.95984,
+          "p95_ms": 17.95984,
+          "p99_ms": 17.95984
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1516.4818700000005,
+          "max_ms": 37.3184,
+          "p50_ms": 1.418196,
+          "p95_ms": 15.917765,
+          "p99_ms": 25.030973
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 1084.8651090000003,
+          "max_ms": 36.851772,
+          "p50_ms": 0.861731,
+          "p95_ms": 6.770453,
+          "p99_ms": 24.235634
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 383.13483,
+          "max_ms": 21.274731,
+          "p50_ms": 0.401055,
+          "p95_ms": 0.953012,
+          "p99_ms": 12.967771
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1375.1802590000002,
+          "max_ms": 38.053546,
+          "p50_ms": 1.08172,
+          "p95_ms": 15.864265,
+          "p99_ms": 24.477954
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 2290.8642270000005,
+          "max_ms": 37.834139,
+          "p50_ms": 0.933605,
+          "p95_ms": 8.586228,
+          "p99_ms": 23.281852
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 213.55828600000015,
+          "max_ms": 16.631842,
+          "p50_ms": 0.093503,
+          "p95_ms": 0.183822,
+          "p99_ms": 4.034508
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1486.2594019999997,
+          "max_ms": 35.745066,
+          "p50_ms": 1.126364,
+          "p95_ms": 17.745532,
+          "p99_ms": 25.601653
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 1314.9028500000006,
+          "max_ms": 35.51586,
+          "p50_ms": 0.948503,
+          "p95_ms": 16.260152,
+          "p99_ms": 25.16955
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 170.41253499999985,
+          "max_ms": 15.94739,
+          "p50_ms": 0.162562,
+          "p95_ms": 0.351974,
+          "p99_ms": 4.357749
+        },
+        "sidebar.call.ok": {
+          "count": 11,
+          "total_ms": 89.98132900000002,
+          "max_ms": 10.580274,
+          "p50_ms": 7.528964,
+          "p95_ms": 10.373379,
+          "p99_ms": 10.373379
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 5663.369609000006,
+          "max_ms": 51.484469,
+          "p50_ms": 6.430912,
+          "p95_ms": 30.784726,
+          "p99_ms": 38.333397
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3075,
+      "writer_wait_ms": 7375.243744,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 477.21221764050955
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2539520,
+      "elapsed_seconds": 1.081527788,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 5.087526,
+          "max_ms": 5.087526,
+          "p50_ms": 5.087526,
+          "p95_ms": 5.087526,
+          "p99_ms": 5.087526
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1706.5495740000003,
+          "max_ms": 53.960511,
+          "p50_ms": 1.504796,
+          "p95_ms": 16.793773,
+          "p99_ms": 24.973636
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 1218.6932009999996,
+          "max_ms": 36.850601,
+          "p50_ms": 0.920081,
+          "p95_ms": 11.303649,
+          "p99_ms": 24.504885
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 438.66002600000013,
+          "max_ms": 19.372115,
+          "p50_ms": 0.416203,
+          "p95_ms": 0.921503,
+          "p99_ms": 14.887079
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1178.6602150000006,
+          "max_ms": 33.241983,
+          "p50_ms": 1.078785,
+          "p95_ms": 6.488559,
+          "p99_ms": 23.692826
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 2538.2684820000004,
+          "max_ms": 55.092665,
+          "p50_ms": 0.942281,
+          "p95_ms": 14.001253,
+          "p99_ms": 26.20774
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 211.67397400000027,
+          "max_ms": 13.81124,
+          "p50_ms": 0.096429,
+          "p95_ms": 0.184172,
+          "p99_ms": 4.018458
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1350.8214489999993,
+          "max_ms": 29.788435,
+          "p50_ms": 1.1081,
+          "p95_ms": 13.109806,
+          "p99_ms": 24.885121
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 1215.197919,
+          "max_ms": 29.564488,
+          "p50_ms": 0.925259,
+          "p95_ms": 11.030481,
+          "p99_ms": 24.597708
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 134.46416299999987,
+          "max_ms": 11.320139,
+          "p50_ms": 0.164907,
+          "p95_ms": 0.37109,
+          "p99_ms": 1.098141
+        },
+        "sidebar.call.ok": {
+          "count": 11,
+          "total_ms": 80.33255400000002,
+          "max_ms": 10.21228,
+          "p50_ms": 7.288105,
+          "p95_ms": 8.711852,
+          "p99_ms": 8.711852
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 5747.411364999997,
+          "max_ms": 75.253707,
+          "p50_ms": 6.238164,
+          "p95_ms": 30.339449,
+          "p99_ms": 35.105066
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3074,
+      "writer_wait_ms": 7430.032693,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 473.40438746082407
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2564096,
+      "elapsed_seconds": 1.043713797,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 7.215942,
+          "max_ms": 7.215942,
+          "p50_ms": 7.215942,
+          "p95_ms": 7.215942,
+          "p99_ms": 7.215942
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1596.1813789999992,
+          "max_ms": 28.384696,
+          "p50_ms": 1.63009,
+          "p95_ms": 16.570628,
+          "p99_ms": 22.913858
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 1134.692726000001,
+          "max_ms": 27.680938,
+          "p50_ms": 0.985652,
+          "p95_ms": 7.321478,
+          "p99_ms": 22.173962
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 403.15962600000023,
+          "max_ms": 16.323789,
+          "p50_ms": 0.421093,
+          "p95_ms": 0.963311,
+          "p99_ms": 13.966218
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1383.072976,
+          "max_ms": 28.135302,
+          "p50_ms": 1.254452,
+          "p95_ms": 16.283574,
+          "p99_ms": 24.584343
+        },
+        "receive.entry.ok": {
+          "count": 1024,
+          "total_ms": 2191.6847140000004,
+          "max_ms": 29.417586,
+          "p50_ms": 0.982957,
+          "p95_ms": 6.296373,
+          "p99_ms": 23.495449
+        },
+        "receive.span.commit.ok": {
+          "count": 1024,
+          "total_ms": 192.03228000000007,
+          "max_ms": 13.173765,
+          "p50_ms": 0.100247,
+          "p95_ms": 0.184604,
+          "p99_ms": 0.628137
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1214.9670129999981,
+          "max_ms": 31.580666,
+          "p50_ms": 1.071731,
+          "p95_ms": 7.654928,
+          "p99_ms": 23.949232
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 1075.4872539999994,
+          "max_ms": 31.451877,
+          "p50_ms": 0.866922,
+          "p95_ms": 6.475135,
+          "p99_ms": 19.747853
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 138.56439900000007,
+          "max_ms": 14.451069,
+          "p50_ms": 0.168162,
+          "p95_ms": 0.307993,
+          "p99_ms": 4.186841
+        },
+        "sidebar.call.ok": {
+          "count": 11,
+          "total_ms": 108.49726099999998,
+          "max_ms": 26.472662,
+          "p50_ms": 7.897739,
+          "p95_ms": 14.240257,
+          "p99_ms": 14.240257
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 5347.480983999997,
+          "max_ms": 39.655965,
+          "p50_ms": 6.750266,
+          "p95_ms": 29.368514,
+          "p99_ms": 32.937708
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 5,
+      "reader_wait_ms": 20.89764,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3070,
+      "writer_wait_ms": 7130.000835,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 490.5559373380593
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276643840,
+      "elapsed_seconds": 12.163419638,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 12,
+          "total_ms": 589.0299419999999,
+          "max_ms": 123.901974,
+          "p50_ms": 48.399546,
+          "p95_ms": 96.144344,
+          "p99_ms": 96.144344
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 9188.423175999995,
+          "max_ms": 136.171859,
+          "p50_ms": 7.814735,
+          "p95_ms": 67.720465,
+          "p99_ms": 104.795513
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 3894.5040460000027,
+          "max_ms": 131.750111,
+          "p50_ms": 1.168542,
+          "p95_ms": 39.941855,
+          "p99_ms": 84.677202
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 5185.258064000001,
+          "max_ms": 106.416876,
+          "p50_ms": 4.827473,
+          "p95_ms": 34.306702,
+          "p99_ms": 67.317867
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 70655.11607800018,
+          "max_ms": 188.301287,
+          "p50_ms": 1.551604,
+          "p95_ms": 44.153384,
+          "p99_ms": 98.624593
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 68221.72915699997,
+          "max_ms": 183.765126,
+          "p50_ms": 1.274649,
+          "p95_ms": 41.986536,
+          "p99_ms": 94.427764
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 5681.476064000039,
+          "max_ms": 124.687655,
+          "p50_ms": 0.136473,
+          "p95_ms": 0.307712,
+          "p99_ms": 15.568967
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 3970.2448149999996,
+          "max_ms": 137.061403,
+          "p50_ms": 2.028991,
+          "p95_ms": 35.274631,
+          "p99_ms": 95.099372
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 3541.1316740000034,
+          "max_ms": 136.095006,
+          "p50_ms": 1.412986,
+          "p95_ms": 33.905207,
+          "p99_ms": 94.642894
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 427.5423910000005,
+          "max_ms": 30.197785,
+          "p50_ms": 0.524124,
+          "p95_ms": 1.437852,
+          "p99_ms": 4.679207
+        },
+        "sidebar.call.ok": {
+          "count": 122,
+          "total_ms": 1275.0305480000009,
+          "max_ms": 97.792306,
+          "p50_ms": 8.344159,
+          "p95_ms": 18.415006,
+          "p99_ms": 26.326891
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 17105.187822999993,
+          "max_ms": 184.984302,
+          "p50_ms": 22.619661,
+          "p95_ms": 96.307918,
+          "p99_ms": 145.680382
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 4.110129,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10796,
+      "writer_wait_ms": 84624.972235,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 673.4948101607213
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276656128,
+      "elapsed_seconds": 7.457586404,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 7,
+          "total_ms": 161.57485,
+          "max_ms": 71.124641,
+          "p50_ms": 14.398068,
+          "p95_ms": 37.433544,
+          "p99_ms": 37.433544
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 5975.001185999998,
+          "max_ms": 59.096106,
+          "p50_ms": 7.168782,
+          "p95_ms": 30.71118,
+          "p99_ms": 39.697211
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 2417.0928400000003,
+          "max_ms": 48.701917,
+          "p50_ms": 1.076009,
+          "p95_ms": 23.308784,
+          "p99_ms": 32.708208
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 3465.5009969999983,
+          "max_ms": 42.379146,
+          "p50_ms": 4.707008,
+          "p95_ms": 19.395279,
+          "p99_ms": 26.205686
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 42112.2279749999,
+          "max_ms": 61.494223,
+          "p50_ms": 1.492117,
+          "p95_ms": 23.53268,
+          "p99_ms": 36.573963
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 40959.15684499993,
+          "max_ms": 61.310472,
+          "p50_ms": 1.2142,
+          "p95_ms": 22.662891,
+          "p99_ms": 36.344856
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 2872.316035999999,
+          "max_ms": 24.576718,
+          "p50_ms": 0.133068,
+          "p95_ms": 0.281003,
+          "p99_ms": 8.141614
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 2933.105249,
+          "max_ms": 49.498147,
+          "p50_ms": 1.9127,
+          "p95_ms": 23.976697,
+          "p99_ms": 36.642271
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 2612.5686040000014,
+          "max_ms": 49.293748,
+          "p50_ms": 1.388624,
+          "p95_ms": 22.170324,
+          "p99_ms": 36.338645
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 319.1349989999999,
+          "max_ms": 10.353841,
+          "p50_ms": 0.481887,
+          "p95_ms": 1.07994,
+          "p99_ms": 3.161083
+        },
+        "sidebar.call.ok": {
+          "count": 75,
+          "total_ms": 728.0639909999999,
+          "max_ms": 25.679288,
+          "p50_ms": 8.531908,
+          "p95_ms": 16.24878,
+          "p99_ms": 18.561117
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 11371.926244000017,
+          "max_ms": 81.307809,
+          "p50_ms": 18.512036,
+          "p95_ms": 51.56732,
+          "p99_ms": 61.80471
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10774,
+      "writer_wait_ms": 51419.557376,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 1098.4787243773783
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276647936,
+      "elapsed_seconds": 10.737653924,
+      "growing": false,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 10,
+          "total_ms": 418.71605299999993,
+          "max_ms": 138.755739,
+          "p50_ms": 25.724069,
+          "p95_ms": 60.473936,
+          "p99_ms": 60.473936
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 8248.863334999998,
+          "max_ms": 233.093663,
+          "p50_ms": 9.232534,
+          "p95_ms": 46.944225,
+          "p99_ms": 81.341706
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 2649.463421000001,
+          "max_ms": 206.575366,
+          "p50_ms": 1.121808,
+          "p95_ms": 22.811808,
+          "p99_ms": 46.520987
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 5410.998502,
+          "max_ms": 148.885714,
+          "p50_ms": 5.124337,
+          "p95_ms": 31.904201,
+          "p99_ms": 57.688343
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 62104.96522499995,
+          "max_ms": 308.734672,
+          "p50_ms": 1.829385,
+          "p95_ms": 31.321107,
+          "p99_ms": 65.360201
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 60817.43370100003,
+          "max_ms": 308.527045,
+          "p50_ms": 1.441222,
+          "p95_ms": 30.382169,
+          "p99_ms": 63.258991
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 3994.5548330000042,
+          "max_ms": 217.935161,
+          "p50_ms": 0.138818,
+          "p95_ms": 0.450388,
+          "p99_ms": 9.653748
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 3617.5179860000026,
+          "max_ms": 301.229573,
+          "p50_ms": 2.022665,
+          "p95_ms": 30.740044,
+          "p99_ms": 50.264164
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 3229.5035310000003,
+          "max_ms": 300.342122,
+          "p50_ms": 1.399485,
+          "p95_ms": 28.095332,
+          "p99_ms": 49.889907
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 386.5065549999999,
+          "max_ms": 24.374848,
+          "p50_ms": 0.536509,
+          "p95_ms": 1.663566,
+          "p99_ms": 5.171205
+        },
+        "sidebar.call.ok": {
+          "count": 108,
+          "total_ms": 1990.8025399999995,
+          "max_ms": 120.848069,
+          "p50_ms": 9.953366,
+          "p95_ms": 50.209101,
+          "p99_ms": 62.467157
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 15114.26875999999,
+          "max_ms": 311.588494,
+          "p50_ms": 21.151348,
+          "p95_ms": 78.924788,
+          "p99_ms": 145.099064
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10786,
+      "writer_wait_ms": 73904.530612,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 762.9227071371573
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 293011456,
+      "elapsed_seconds": 49.097325997,
+      "growing": true,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 49,
+          "total_ms": 10544.502896000002,
+          "max_ms": 1027.789923,
+          "p50_ms": 167.008785,
+          "p95_ms": 416.383143,
+          "p99_ms": 998.893399
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 56051.006923999994,
+          "max_ms": 1125.752275,
+          "p50_ms": 94.388831,
+          "p95_ms": 262.851342,
+          "p99_ms": 349.931279
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 15404.909578000008,
+          "max_ms": 857.000822,
+          "p50_ms": 1.105307,
+          "p95_ms": 144.215752,
+          "p99_ms": 239.830584
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 40490.65306700004,
+          "max_ms": 547.619356,
+          "p50_ms": 75.651726,
+          "p95_ms": 137.534115,
+          "p99_ms": 201.67627
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 263050.15220300027,
+          "max_ms": 1145.538342,
+          "p50_ms": 1.30064,
+          "p95_ms": 150.330662,
+          "p99_ms": 290.566195
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 271878.4081560008,
+          "max_ms": 1145.297303,
+          "p50_ms": 1.104446,
+          "p95_ms": 149.01816,
+          "p99_ms": 288.759784
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 6810.669829999997,
+          "max_ms": 306.526572,
+          "p50_ms": 0.131806,
+          "p95_ms": 0.67682,
+          "p99_ms": 18.986117
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 17247.404974999987,
+          "max_ms": 466.738607,
+          "p50_ms": 1.699734,
+          "p95_ms": 156.536404,
+          "p99_ms": 274.305952
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 16603.68230199999,
+          "max_ms": 466.403403,
+          "p50_ms": 1.155571,
+          "p95_ms": 155.756021,
+          "p99_ms": 273.926796
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 642.3585930000005,
+          "max_ms": 77.645568,
+          "p50_ms": 0.470425,
+          "p95_ms": 3.031963,
+          "p99_ms": 17.406408
+        },
+        "sidebar.call.ok": {
+          "count": 491,
+          "total_ms": 3606.062031000001,
+          "max_ms": 33.122279,
+          "p50_ms": 6.246396,
+          "p95_ms": 13.561842,
+          "p99_ms": 20.884852
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 71077.98414599996,
+          "max_ms": 1084.773443,
+          "p50_ms": 115.350236,
+          "p95_ms": 388.143342,
+          "p99_ms": 625.626367
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 5,
+      "reader_wait_ms": 19.342372,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10945,
+      "writer_wait_ms": 351017.597496,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 166.8522640214776
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 293289984,
+      "elapsed_seconds": 47.678715033,
+      "growing": true,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 47,
+          "total_ms": 10042.191706000001,
+          "max_ms": 695.986143,
+          "p50_ms": 160.481917,
+          "p95_ms": 484.692183,
+          "p99_ms": 645.869924
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 55074.39348499994,
+          "max_ms": 904.679804,
+          "p50_ms": 84.268494,
+          "p95_ms": 266.93344,
+          "p99_ms": 430.124889
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 13713.628856000018,
+          "max_ms": 568.707446,
+          "p50_ms": 1.122779,
+          "p95_ms": 138.225141,
+          "p99_ms": 261.354406
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 41252.064378999996,
+          "max_ms": 662.896305,
+          "p50_ms": 66.982421,
+          "p95_ms": 167.675677,
+          "p99_ms": 306.490355
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 255410.6256509996,
+          "max_ms": 1025.591,
+          "p50_ms": 1.442504,
+          "p95_ms": 152.922496,
+          "p99_ms": 307.643601
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 265171.50358599925,
+          "max_ms": 1025.244305,
+          "p50_ms": 1.229719,
+          "p95_ms": 151.275661,
+          "p99_ms": 303.649097
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 4844.569858999979,
+          "max_ms": 103.142924,
+          "p50_ms": 0.137656,
+          "p95_ms": 2.001445,
+          "p99_ms": 9.829185
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 17534.76549700001,
+          "max_ms": 908.853463,
+          "p50_ms": 1.951472,
+          "p95_ms": 150.010787,
+          "p99_ms": 266.913262
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 17029.562908999993,
+          "max_ms": 907.597234,
+          "p50_ms": 1.304117,
+          "p95_ms": 149.049117,
+          "p99_ms": 260.451515
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 503.2317900000001,
+          "max_ms": 29.96906,
+          "p50_ms": 0.54778,
+          "p95_ms": 2.701057,
+          "p99_ms": 11.080804
+        },
+        "sidebar.call.ok": {
+          "count": 477,
+          "total_ms": 7120.705289999996,
+          "max_ms": 62.142102,
+          "p50_ms": 12.572651,
+          "p95_ms": 33.846036,
+          "p99_ms": 48.194022
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 68415.62238200003,
+          "max_ms": 1520.274519,
+          "p50_ms": 88.208688,
+          "p95_ms": 396.656025,
+          "p99_ms": 589.027908
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10936,
+      "writer_wait_ms": 340634.276185,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 171.8167109648414
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 293294080,
+      "elapsed_seconds": 41.305462225,
+      "growing": true,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 41,
+          "total_ms": 8532.08755,
+          "max_ms": 686.740495,
+          "p50_ms": 152.392951,
+          "p95_ms": 553.675297,
+          "p99_ms": 635.683605
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 48041.056694000035,
+          "max_ms": 600.174925,
+          "p50_ms": 73.020319,
+          "p95_ms": 242.065654,
+          "p99_ms": 368.526339
+        },
+        "project.entry.ok": {
+          "count": 512,
+          "total_ms": 12676.85370299999,
+          "max_ms": 398.349758,
+          "p50_ms": 1.088326,
+          "p95_ms": 121.618022,
+          "p99_ms": 255.862063
+        },
+        "project.span.commit.ok": {
+          "count": 512,
+          "total_ms": 35272.832507,
+          "max_ms": 326.0393,
+          "p50_ms": 59.17532,
+          "p95_ms": 138.570715,
+          "p99_ms": 241.182601
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 221755.2060470001,
+          "max_ms": 1104.602339,
+          "p50_ms": 1.313174,
+          "p95_ms": 135.708878,
+          "p99_ms": 298.754547
+        },
+        "receive.entry.ok": {
+          "count": 8704,
+          "total_ms": 230397.96402699986,
+          "max_ms": 1104.384584,
+          "p50_ms": 1.123351,
+          "p95_ms": 134.179021,
+          "p99_ms": 290.76152
+        },
+        "receive.span.commit.ok": {
+          "count": 8704,
+          "total_ms": 4601.909603000007,
+          "max_ms": 116.366397,
+          "p50_ms": 0.130383,
+          "p95_ms": 1.680328,
+          "p99_ms": 10.062529
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 13338.424759,
+          "max_ms": 768.270162,
+          "p50_ms": 1.508568,
+          "p95_ms": 131.5461,
+          "p99_ms": 256.699291
+        },
+        "settle.entry.ok": {
+          "count": 512,
+          "total_ms": 12911.874040000004,
+          "max_ms": 757.756703,
+          "p50_ms": 1.027342,
+          "p95_ms": 127.327178,
+          "p99_ms": 255.967519
+        },
+        "settle.span.commit.ok": {
+          "count": 512,
+          "total_ms": 425.3116349999998,
+          "max_ms": 25.01039,
+          "p50_ms": 0.454105,
+          "p95_ms": 1.524358,
+          "p99_ms": 9.246831
+        },
+        "sidebar.call.ok": {
+          "count": 414,
+          "total_ms": 3398.014916000003,
+          "max_ms": 34.650754,
+          "p50_ms": 7.173542,
+          "p95_ms": 14.510157,
+          "p99_ms": 20.048656
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 57532.61712400006,
+          "max_ms": 1109.854074,
+          "p50_ms": 73.942816,
+          "p95_ms": 365.680041,
+          "p99_ms": 586.931095
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 5,
+      "reader_wait_ms": 19.77159,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10910,
+      "writer_wait_ms": 294055.112001,
+      "experiment": "delivery_observed",
+      "chunks_per_second": 198.32728067238085
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.252423579,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 11.096583,
+          "max_ms": 11.096583,
+          "p50_ms": 11.096583,
+          "p95_ms": 11.096583,
+          "p99_ms": 11.096583
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 557.0631409999995,
+          "max_ms": 30.062838,
+          "p50_ms": 0.38731,
+          "p95_ms": 1.059129,
+          "p99_ms": 18.750094
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 172.39980899999992,
+          "max_ms": 20.164503,
+          "p50_ms": 0.135412,
+          "p95_ms": 0.304586,
+          "p99_ms": 0.691726
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 98.43247299999997,
+          "max_ms": 17.366581,
+          "p50_ms": 0.119582,
+          "p95_ms": 0.30097,
+          "p99_ms": 0.400445
+        },
+        "sidebar.call.ok": {
+          "count": 13,
+          "total_ms": 112.60578299999999,
+          "max_ms": 14.503156,
+          "p50_ms": 8.057652,
+          "p95_ms": 14.2629,
+          "p99_ms": 14.2629
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 518.4746440000002,
+          "max_ms": 32.679493,
+          "p50_ms": 0.454685,
+          "p95_ms": 1.156911,
+          "p99_ms": 13.102803
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 7,
+      "writer_wait_ms": 11.025441,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 408.8073784180967
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2551808,
+      "elapsed_seconds": 1.276256263,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 7.816845,
+          "max_ms": 7.816845,
+          "p50_ms": 7.816845,
+          "p95_ms": 7.816845,
+          "p99_ms": 7.816845
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 499.0230339999993,
+          "max_ms": 28.001675,
+          "p50_ms": 0.427355,
+          "p95_ms": 0.90386,
+          "p99_ms": 19.514335
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 86.43382199999999,
+          "max_ms": 7.415879,
+          "p50_ms": 0.145771,
+          "p95_ms": 0.242571,
+          "p99_ms": 0.347265
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 145.14567300000004,
+          "max_ms": 19.252026,
+          "p50_ms": 0.137546,
+          "p95_ms": 0.28504,
+          "p99_ms": 7.470771
+        },
+        "sidebar.call.ok": {
+          "count": 13,
+          "total_ms": 100.958391,
+          "max_ms": 13.362035,
+          "p50_ms": 6.85667,
+          "p95_ms": 11.767711,
+          "p99_ms": 11.767711
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 685.5803359999995,
+          "max_ms": 36.706461,
+          "p50_ms": 0.504619,
+          "p95_ms": 1.160237,
+          "p99_ms": 30.105988
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 2,
+      "writer_wait_ms": 3.735836,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 401.173349619049
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2547712,
+      "elapsed_seconds": 1.524970535,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 1,
+          "total_ms": 1.287203,
+          "max_ms": 1.287203,
+          "p50_ms": 1.287203,
+          "p95_ms": 1.287203,
+          "p99_ms": 1.287203
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 553.103128,
+          "max_ms": 35.109822,
+          "p50_ms": 0.417977,
+          "p95_ms": 4.196673,
+          "p99_ms": 13.633249
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 181.34315399999988,
+          "max_ms": 21.955463,
+          "p50_ms": 0.132857,
+          "p95_ms": 0.416274,
+          "p99_ms": 5.408316
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 182.962752,
+          "max_ms": 28.065294,
+          "p50_ms": 0.121476,
+          "p95_ms": 0.476506,
+          "p99_ms": 3.735686
+        },
+        "sidebar.call.ok": {
+          "count": 16,
+          "total_ms": 216.97338300000004,
+          "max_ms": 37.514092,
+          "p50_ms": 9.595321,
+          "p95_ms": 24.140606,
+          "p99_ms": 24.140606
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 783.3886259999999,
+          "max_ms": 87.689497,
+          "p50_ms": 0.455537,
+          "p95_ms": 4.232059,
+          "p99_ms": 21.701592
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 8,
+      "writer_wait_ms": 1.313944,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 335.74419193614125
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276758528,
+      "elapsed_seconds": 8.806288281,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 8,
+          "total_ms": 118.714694,
+          "max_ms": 67.406313,
+          "p50_ms": 6.121031,
+          "p95_ms": 22.855968,
+          "p99_ms": 22.855968
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 2675.347460999999,
+          "max_ms": 48.40901,
+          "p50_ms": 3.677437,
+          "p95_ms": 14.527682,
+          "p99_ms": 31.569059
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 5215.289414999986,
+          "max_ms": 101.381215,
+          "p50_ms": 0.158575,
+          "p95_ms": 0.391307,
+          "p99_ms": 17.384053
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 252.55531200000016,
+          "max_ms": 14.037901,
+          "p50_ms": 0.357755,
+          "p95_ms": 0.715831,
+          "p99_ms": 4.437351
+        },
+        "sidebar.call.ok": {
+          "count": 89,
+          "total_ms": 712.7729290000001,
+          "max_ms": 33.434647,
+          "p50_ms": 6.471764,
+          "p95_ms": 15.68778,
+          "p99_ms": 25.625587
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 885.3460780000001,
+          "max_ms": 42.10546,
+          "p50_ms": 0.806249,
+          "p95_ms": 5.719154,
+          "p99_ms": 20.510256
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 27,
+      "writer_wait_ms": 113.462704,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 930.244359326124
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276758528,
+      "elapsed_seconds": 5.641443983,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 20.822888000000003,
+          "max_ms": 7.656376,
+          "p50_ms": 4.397597,
+          "p95_ms": 6.549128,
+          "p99_ms": 6.549128
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1980.5774509999994,
+          "max_ms": 28.394596,
+          "p50_ms": 3.392097,
+          "p95_ms": 5.654033,
+          "p99_ms": 14.002306
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 3044.9517740000197,
+          "max_ms": 37.767003,
+          "p50_ms": 0.149919,
+          "p95_ms": 0.372042,
+          "p99_ms": 8.770177
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 208.593,
+          "max_ms": 8.923943,
+          "p50_ms": 0.345122,
+          "p95_ms": 0.667321,
+          "p99_ms": 2.632806
+        },
+        "sidebar.call.ok": {
+          "count": 57,
+          "total_ms": 377.27949599999977,
+          "max_ms": 23.578041,
+          "p50_ms": 5.696371,
+          "p95_ms": 11.326521,
+          "p99_ms": 15.332489
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 592.9162510000003,
+          "max_ms": 16.178171,
+          "p50_ms": 0.756527,
+          "p95_ms": 2.926181,
+          "p99_ms": 12.055355
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 24,
+      "writer_wait_ms": 16.264481,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 1452.1104923997966
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276758528,
+      "elapsed_seconds": 5.192486134,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 11.730471,
+          "max_ms": 8.178126,
+          "p50_ms": 0.616357,
+          "p95_ms": 2.166358,
+          "p99_ms": 2.166358
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1876.9761850000002,
+          "max_ms": 13.862666,
+          "p50_ms": 3.261735,
+          "p95_ms": 5.826503,
+          "p99_ms": 12.733426
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 2756.4904670000014,
+          "max_ms": 21.253779,
+          "p50_ms": 0.144308,
+          "p95_ms": 0.363847,
+          "p99_ms": 8.340969
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 197.09043700000012,
+          "max_ms": 8.80927,
+          "p50_ms": 0.313834,
+          "p95_ms": 0.618029,
+          "p99_ms": 0.933716
+        },
+        "sidebar.call.ok": {
+          "count": 52,
+          "total_ms": 306.7939489999999,
+          "max_ms": 11.110138,
+          "p50_ms": 5.511928,
+          "p95_ms": 7.585825,
+          "p99_ms": 9.851858
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 537.5539139999996,
+          "max_ms": 15.852756,
+          "p50_ms": 0.717604,
+          "p95_ms": 2.367011,
+          "p99_ms": 10.737004
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 1,
+      "unsettled_observations": 0,
+      "writer_wait_count": 19,
+      "writer_wait_ms": 7.858172,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 1577.6642996424032
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2539520,
+      "elapsed_seconds": 0.663444319,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 637.5329879999999,
+          "max_ms": 15.626706,
+          "p50_ms": 0.714018,
+          "p95_ms": 5.957978,
+          "p99_ms": 8.872146
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 441.4994819999993,
+          "max_ms": 10.793569,
+          "p50_ms": 0.485794,
+          "p95_ms": 1.841213,
+          "p99_ms": 9.139344
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 349.2684659999999,
+          "max_ms": 10.394717,
+          "p50_ms": 0.468762,
+          "p95_ms": 1.415562,
+          "p99_ms": 8.025222
+        },
+        "sidebar.call.ok": {
+          "count": 7,
+          "total_ms": 46.299258,
+          "max_ms": 10.160111,
+          "p50_ms": 6.250602,
+          "p95_ms": 7.286288,
+          "p99_ms": 7.286288
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 1568.9596710000028,
+          "max_ms": 19.503865,
+          "p50_ms": 2.125062,
+          "p95_ms": 10.732346,
+          "p99_ms": 13.734157
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 3.984319,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3070,
+      "writer_wait_ms": 1862.05843,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 771.7301743901133
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2539520,
+      "elapsed_seconds": 0.693574041,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 624.3466440000004,
+          "max_ms": 13.118031,
+          "p50_ms": 0.767517,
+          "p95_ms": 3.751736,
+          "p99_ms": 9.737926
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 466.79898000000003,
+          "max_ms": 12.381812,
+          "p50_ms": 0.537058,
+          "p95_ms": 2.358345,
+          "p99_ms": 8.09379
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 408.95862,
+          "max_ms": 9.012458,
+          "p50_ms": 0.447152,
+          "p95_ms": 1.920881,
+          "p99_ms": 7.745522
+        },
+        "sidebar.call.ok": {
+          "count": 7,
+          "total_ms": 40.100972999999996,
+          "max_ms": 7.325852,
+          "p50_ms": 5.517629,
+          "p95_ms": 5.93224,
+          "p99_ms": 5.93224
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 1675.6584429999994,
+          "max_ms": 14.224609,
+          "p50_ms": 2.311678,
+          "p95_ms": 10.853921,
+          "p99_ms": 12.586423
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3071,
+      "writer_wait_ms": 1952.769801,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 738.2052524079402
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2547712,
+      "elapsed_seconds": 0.757624794,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 751.8016809999997,
+          "max_ms": 17.766245,
+          "p50_ms": 0.820576,
+          "p95_ms": 6.386986,
+          "p99_ms": 13.400807
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 490.6414059999998,
+          "max_ms": 17.327749,
+          "p50_ms": 0.525487,
+          "p95_ms": 1.946028,
+          "p99_ms": 10.509752
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 479.1416130000005,
+          "max_ms": 17.405824,
+          "p50_ms": 0.496282,
+          "p95_ms": 1.790258,
+          "p99_ms": 9.342481
+        },
+        "sidebar.call.ok": {
+          "count": 8,
+          "total_ms": 58.571895,
+          "max_ms": 10.250419,
+          "p50_ms": 6.759127,
+          "p95_ms": 8.203854,
+          "p99_ms": 8.203854
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 1781.0990259999996,
+          "max_ms": 21.507681,
+          "p50_ms": 2.510097,
+          "p95_ms": 11.642638,
+          "p99_ms": 18.115684
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3069,
+      "writer_wait_ms": 2146.56406,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 675.7962570058128
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276652032,
+      "elapsed_seconds": 14.00217473,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 2,
+          "total_ms": 4000.7160729999996,
+          "max_ms": 2000.560994,
+          "p50_ms": 2000.155079,
+          "p95_ms": 2000.155079,
+          "p99_ms": 2000.155079
+        },
+        "health.call.ok": {
+          "count": 10,
+          "total_ms": 1566.333464,
+          "max_ms": 1485.748637,
+          "p50_ms": 6.288262,
+          "p95_ms": 24.888477,
+          "p99_ms": 24.888477
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 10960.981053000003,
+          "max_ms": 6094.348022,
+          "p50_ms": 5.159043,
+          "p95_ms": 26.209292,
+          "p99_ms": 40.128343
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 33262.99974100001,
+          "max_ms": 6105.262185,
+          "p50_ms": 0.571252,
+          "p95_ms": 17.424298,
+          "p99_ms": 29.627388
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 7333.470225999997,
+          "max_ms": 6106.505336,
+          "p50_ms": 0.854529,
+          "p95_ms": 8.947266,
+          "p99_ms": 27.54674
+        },
+        "sidebar.call.ok": {
+          "count": 141,
+          "total_ms": 1174.414661,
+          "max_ms": 44.694453,
+          "p50_ms": 6.971934,
+          "p95_ms": 17.809134,
+          "p99_ms": 28.793638
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 11605.280880999986,
+          "max_ms": 6108.847762,
+          "p50_ms": 6.473136,
+          "p95_ms": 33.43608,
+          "p99_ms": 45.02095
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 2,
+      "reader_wait_ms": 0.966707,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10743,
+      "writer_wait_ms": 46375.612194,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 585.0519764225224
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276660224,
+      "elapsed_seconds": 13.561099505,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 13,
+          "total_ms": 1323.2225810000002,
+          "max_ms": 779.918577,
+          "p50_ms": 31.079799,
+          "p95_ms": 127.348979,
+          "p99_ms": 127.348979
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 7609.590674000011,
+          "max_ms": 503.806793,
+          "p50_ms": 5.148093,
+          "p95_ms": 43.402321,
+          "p99_ms": 112.150269
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 36788.173434000135,
+          "max_ms": 794.975975,
+          "p50_ms": 0.583054,
+          "p95_ms": 20.244341,
+          "p99_ms": 58.55748
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1990.828864999999,
+          "max_ms": 187.736141,
+          "p50_ms": 0.900264,
+          "p95_ms": 13.037351,
+          "p99_ms": 48.506401
+        },
+        "sidebar.call.ok": {
+          "count": 136,
+          "total_ms": 1240.1483869999995,
+          "max_ms": 34.400594,
+          "p50_ms": 6.901252,
+          "p95_ms": 24.353151,
+          "p99_ms": 26.591975
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 9743.779672,
+          "max_ms": 620.542077,
+          "p50_ms": 6.786067,
+          "p95_ms": 60.85917,
+          "p99_ms": 154.221806
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 4.825863,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10783,
+      "writer_wait_ms": 41058.074197,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 604.0808119562574
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276656128,
+      "elapsed_seconds": 6.188640313,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 6,
+          "total_ms": 78.31689899999999,
+          "max_ms": 26.486097,
+          "p50_ms": 9.309039,
+          "p95_ms": 25.690869,
+          "p99_ms": 25.690869
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 4097.178765999996,
+          "max_ms": 36.235805,
+          "p50_ms": 4.822888,
+          "p95_ms": 20.360207,
+          "p99_ms": 26.566277
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 15974.223486000024,
+          "max_ms": 45.994271,
+          "p50_ms": 0.538462,
+          "p95_ms": 10.833484,
+          "p99_ms": 22.41578
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1196.7294210000007,
+          "max_ms": 32.362794,
+          "p50_ms": 0.820595,
+          "p95_ms": 10.470308,
+          "p99_ms": 21.874813
+        },
+        "sidebar.call.ok": {
+          "count": 62,
+          "total_ms": 489.7672060000001,
+          "max_ms": 20.211912,
+          "p50_ms": 6.476953,
+          "p95_ms": 15.809796,
+          "p99_ms": 19.842846
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4618.541026000001,
+          "max_ms": 39.297298,
+          "p50_ms": 6.342212,
+          "p95_ms": 25.586004,
+          "p99_ms": 30.823372
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 1,
+      "reader_wait_ms": 4.348546,
+      "rounds": 512,
+      "sessions": 4,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10768,
+      "writer_wait_ms": 17865.075378,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 1323.7156444189682
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2547712,
+      "elapsed_seconds": 0.848988123,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1259.18587,
+          "max_ms": 24.77755,
+          "p50_ms": 1.405182,
+          "p95_ms": 9.280796,
+          "p99_ms": 15.146653
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1083.1497330000004,
+          "max_ms": 19.193437,
+          "p50_ms": 1.093503,
+          "p95_ms": 8.646507,
+          "p99_ms": 13.225281
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1215.3092359999996,
+          "max_ms": 26.759667,
+          "p50_ms": 1.223024,
+          "p95_ms": 10.086755,
+          "p99_ms": 14.664046
+        },
+        "sidebar.call.ok": {
+          "count": 9,
+          "total_ms": 82.790159,
+          "max_ms": 14.351024,
+          "p50_ms": 7.469338,
+          "p95_ms": 12.735961,
+          "p99_ms": 12.735961
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4431.2628270000005,
+          "max_ms": 33.993426,
+          "p50_ms": 6.5344,
+          "p95_ms": 20.681514,
+          "p99_ms": 26.344244
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3069,
+      "writer_wait_ms": 5787.77921,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 603.0708629830856
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2543616,
+      "elapsed_seconds": 0.664146203,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1040.5154090000003,
+          "max_ms": 13.448015,
+          "p50_ms": 1.277746,
+          "p95_ms": 8.735232,
+          "p99_ms": 10.674037
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 897.9377859999994,
+          "max_ms": 14.142236,
+          "p50_ms": 1.009948,
+          "p95_ms": 7.663048,
+          "p99_ms": 12.096281
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 874.8494249999999,
+          "max_ms": 16.051906,
+          "p50_ms": 0.961748,
+          "p95_ms": 6.995307,
+          "p99_ms": 10.365002
+        },
+        "sidebar.call.ok": {
+          "count": 7,
+          "total_ms": 45.967271,
+          "max_ms": 10.124435,
+          "p50_ms": 5.854125,
+          "p95_ms": 8.342993,
+          "p99_ms": 8.342993
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 3358.845796999993,
+          "max_ms": 23.04039,
+          "p50_ms": 4.912204,
+          "p95_ms": 15.422416,
+          "p99_ms": 18.474751
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 6,
+      "reader_wait_ms": 17.797963,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3069,
+      "writer_wait_ms": 4490.908983,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 770.9145933339017
+    },
+    {
+      "batch": 1,
+      "db_logical_bytes": 2555904,
+      "elapsed_seconds": 0.820082532,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 1287.9158289999996,
+          "max_ms": 27.912781,
+          "p50_ms": 1.342997,
+          "p95_ms": 10.012006,
+          "p99_ms": 14.490894
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 1037.5687570000002,
+          "max_ms": 25.326983,
+          "p50_ms": 1.163293,
+          "p95_ms": 8.412562,
+          "p99_ms": 13.958324
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1093.4269779999995,
+          "max_ms": 22.525585,
+          "p50_ms": 1.145991,
+          "p95_ms": 9.09412,
+          "p99_ms": 13.313995
+        },
+        "sidebar.call.ok": {
+          "count": 9,
+          "total_ms": 76.52135200000001,
+          "max_ms": 15.432475,
+          "p50_ms": 7.626701,
+          "p95_ms": 11.514931,
+          "p99_ms": 11.514931
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 4215.406062000002,
+          "max_ms": 33.033582,
+          "p50_ms": 6.098409,
+          "p95_ms": 19.835371,
+          "p99_ms": 25.613125
+        }
+      },
+      "payload_bytes": 128,
+      "reader_wait_count": 6,
+      "reader_wait_ms": 18.105126,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 3068,
+      "writer_wait_ms": 5574.229893,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 624.3274061103889
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276647936,
+      "elapsed_seconds": 5.9247562049999996,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 60.30549,
+          "max_ms": 20.704807,
+          "p50_ms": 9.193464,
+          "p95_ms": 16.987737,
+          "p99_ms": 16.987737
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 4931.427786000001,
+          "max_ms": 44.603775,
+          "p50_ms": 6.442539,
+          "p95_ms": 23.617264,
+          "p99_ms": 32.748762
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 33511.70070999994,
+          "max_ms": 55.38442,
+          "p50_ms": 1.160738,
+          "p95_ms": 17.859707,
+          "p99_ms": 27.586714
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 1963.9552480000036,
+          "max_ms": 30.620645,
+          "p50_ms": 1.321277,
+          "p95_ms": 17.487656,
+          "p99_ms": 22.669521
+        },
+        "sidebar.call.ok": {
+          "count": 60,
+          "total_ms": 465.4557679999999,
+          "max_ms": 22.010466,
+          "p50_ms": 6.392696,
+          "p95_ms": 15.207336,
+          "p99_ms": 20.713524
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 8646.402663999996,
+          "max_ms": 86.837163,
+          "p50_ms": 15.110456,
+          "p95_ms": 35.020656,
+          "p99_ms": 46.406056
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10767,
+      "writer_wait_ms": 40483.253327,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 1382.6729263706472
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276656128,
+      "elapsed_seconds": 10.516318971,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 10,
+          "total_ms": 408.17488000000003,
+          "max_ms": 94.772727,
+          "p50_ms": 32.734455,
+          "p95_ms": 67.24666,
+          "p99_ms": 67.24666
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 8966.135158999996,
+          "max_ms": 111.347155,
+          "p50_ms": 11.329536,
+          "p95_ms": 48.500249,
+          "p99_ms": 78.369558
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 59622.18320699983,
+          "max_ms": 151.122964,
+          "p50_ms": 1.715801,
+          "p95_ms": 32.610966,
+          "p99_ms": 56.795133
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 3775.5747829999996,
+          "max_ms": 101.082109,
+          "p50_ms": 2.024815,
+          "p95_ms": 33.706272,
+          "p99_ms": 56.140365
+        },
+        "sidebar.call.ok": {
+          "count": 106,
+          "total_ms": 1780.6038509999996,
+          "max_ms": 98.7536,
+          "p50_ms": 10.93913,
+          "p95_ms": 36.742147,
+          "p99_ms": 44.896058
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 14983.476296000004,
+          "max_ms": 179.69532,
+          "p50_ms": 25.191221,
+          "p95_ms": 74.722446,
+          "p99_ms": 124.876828
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10789,
+      "writer_wait_ms": 72106.77221,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 778.9797953628464
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 276656128,
+      "elapsed_seconds": 11.537364426,
+      "growing": false,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 11,
+          "total_ms": 429.1321730000001,
+          "max_ms": 117.424922,
+          "p50_ms": 38.256494,
+          "p95_ms": 68.106648,
+          "p99_ms": 68.106648
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 8724.387303000001,
+          "max_ms": 110.926729,
+          "p50_ms": 6.965122,
+          "p95_ms": 67.592523,
+          "p99_ms": 100.054994
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 66186.49444599988,
+          "max_ms": 242.772416,
+          "p50_ms": 1.282144,
+          "p95_ms": 45.296816,
+          "p99_ms": 92.064937
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 3829.839221999999,
+          "max_ms": 146.009813,
+          "p50_ms": 1.515919,
+          "p95_ms": 39.956305,
+          "p99_ms": 90.422353
+        },
+        "sidebar.call.ok": {
+          "count": 116,
+          "total_ms": 986.1790350000001,
+          "max_ms": 46.763262,
+          "p50_ms": 6.595063,
+          "p95_ms": 15.94558,
+          "p99_ms": 28.488542
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 16901.519221999988,
+          "max_ms": 245.587931,
+          "p50_ms": 22.253138,
+          "p95_ms": 99.738275,
+          "p99_ms": 138.32804
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10788,
+      "writer_wait_ms": 79944.084894,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 710.0408462039162
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 293048320,
+      "elapsed_seconds": 38.782509325,
+      "growing": true,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 38,
+          "total_ms": 6988.878107999999,
+          "max_ms": 479.557679,
+          "p50_ms": 167.738476,
+          "p95_ms": 378.154397,
+          "p99_ms": 408.201908
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 45816.29201,
+          "max_ms": 575.506267,
+          "p50_ms": 72.751586,
+          "p95_ms": 231.714984,
+          "p99_ms": 329.057927
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 210140.77630000026,
+          "max_ms": 993.752472,
+          "p50_ms": 1.204069,
+          "p95_ms": 126.742228,
+          "p99_ms": 241.094035
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 12762.827658000002,
+          "max_ms": 582.973251,
+          "p50_ms": 1.46275,
+          "p95_ms": 118.279571,
+          "p99_ms": 188.178783
+        },
+        "sidebar.call.ok": {
+          "count": 388,
+          "total_ms": 2823.723022999998,
+          "max_ms": 21.148834,
+          "p50_ms": 6.29223,
+          "p95_ms": 13.766939,
+          "p99_ms": 18.346393
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 52826.40654499997,
+          "max_ms": 1004.129807,
+          "p50_ms": 68.973341,
+          "p95_ms": 319.391522,
+          "p99_ms": 471.789524
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10901,
+      "writer_wait_ms": 276506.106333,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 211.22924077321807
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 292757504,
+      "elapsed_seconds": 35.428814424,
+      "growing": true,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 35,
+          "total_ms": 5203.117969999999,
+          "max_ms": 338.614596,
+          "p50_ms": 144.947007,
+          "p95_ms": 315.211851,
+          "p99_ms": 328.091509
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 43413.708989999985,
+          "max_ms": 456.04584,
+          "p50_ms": 72.517641,
+          "p95_ms": 220.649239,
+          "p99_ms": 344.638487
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 183784.94574100015,
+          "max_ms": 455.273374,
+          "p50_ms": 1.088153,
+          "p95_ms": 114.445182,
+          "p99_ms": 222.692188
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 11849.459195000007,
+          "max_ms": 279.818149,
+          "p50_ms": 1.433556,
+          "p95_ms": 113.285394,
+          "p99_ms": 189.603112
+        },
+        "sidebar.call.ok": {
+          "count": 355,
+          "total_ms": 2350.6101660000013,
+          "max_ms": 18.826767,
+          "p50_ms": 5.78713,
+          "p95_ms": 10.830108,
+          "p99_ms": 16.544232
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 53914.742825000045,
+          "max_ms": 808.079047,
+          "p50_ms": 79.470058,
+          "p95_ms": 309.994139,
+          "p99_ms": 412.740036
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10887,
+      "writer_wait_ms": 250436.136244,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 231.22422054435495
+    },
+    {
+      "batch": 16,
+      "db_logical_bytes": 294080512,
+      "elapsed_seconds": 39.074031969,
+      "growing": true,
+      "instrumented": false,
+      "measurements": {
+        "health.call.ok": {
+          "count": 39,
+          "total_ms": 6421.344388999999,
+          "max_ms": 952.048386,
+          "p50_ms": 120.643326,
+          "p95_ms": 410.987708,
+          "p99_ms": 443.437346
+        },
+        "project.call.ok": {
+          "count": 512,
+          "total_ms": 49151.676086999985,
+          "max_ms": 1587.667337,
+          "p50_ms": 63.467884,
+          "p95_ms": 250.280366,
+          "p99_ms": 441.419183
+        },
+        "receive.call.ok": {
+          "count": 8192,
+          "total_ms": 201879.02502100024,
+          "max_ms": 1153.562986,
+          "p50_ms": 1.136914,
+          "p95_ms": 127.72259,
+          "p99_ms": 233.671323
+        },
+        "settle.call.ok": {
+          "count": 512,
+          "total_ms": 14588.797724000004,
+          "max_ms": 852.907842,
+          "p50_ms": 1.468541,
+          "p95_ms": 124.987374,
+          "p99_ms": 273.349792
+        },
+        "sidebar.call.ok": {
+          "count": 391,
+          "total_ms": 2530.880112999997,
+          "max_ms": 16.734226,
+          "p50_ms": 5.890292,
+          "p95_ms": 10.288671,
+          "p99_ms": 14.681498
+        },
+        "terminal_lifecycle.call.ok": {
+          "count": 512,
+          "total_ms": 59471.61402700004,
+          "max_ms": 1492.132409,
+          "p50_ms": 75.605422,
+          "p95_ms": 342.99953,
+          "p99_ms": 587.814392
+        }
+      },
+      "payload_bytes": 16384,
+      "reader_wait_count": 5,
+      "reader_wait_ms": 28.218388,
+      "rounds": 512,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "writer_wait_count": 10906,
+      "writer_wait_ms": 277331.908106,
+      "experiment": "delivery_without_transaction_observer",
+      "chunks_per_second": 209.653306484963
+    },
+    {
+      "elapsed_seconds": 0.044189227,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 343.5163870000001,
+          "max_ms": 19.163058,
+          "p50_ms": 1.521863,
+          "p95_ms": 9.786705,
+          "p99_ms": 17.573268
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 301.3858700000001,
+          "max_ms": 18.909425,
+          "p50_ms": 1.251129,
+          "p95_ms": 9.459697,
+          "p99_ms": 17.247832
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 41.78592299999998,
+          "max_ms": 8.377903,
+          "p50_ms": 0.217124,
+          "p95_ms": 0.389244,
+          "p99_ms": 0.502736
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 300.077092,
+      "experiment": "message_observed",
+      "updates_per_second": 2896.633607100663
+    },
+    {
+      "elapsed_seconds": 0.039423447,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 308.4169810000001,
+          "max_ms": 17.763062,
+          "p50_ms": 1.604827,
+          "p95_ms": 6.370897,
+          "p99_ms": 11.746724
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 271.30743600000017,
+          "max_ms": 17.583838,
+          "p50_ms": 1.280503,
+          "p95_ms": 5.821675,
+          "p99_ms": 11.543445
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 36.80227800000001,
+          "max_ms": 6.16215,
+          "p50_ms": 0.196807,
+          "p95_ms": 0.435411,
+          "p99_ms": 0.650151
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 269.893417,
+      "experiment": "message_observed",
+      "updates_per_second": 3246.7987895629726
+    },
+    {
+      "elapsed_seconds": 0.035889159,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 280.99623000000014,
+          "max_ms": 14.459783,
+          "p50_ms": 1.304998,
+          "p95_ms": 8.031579,
+          "p99_ms": 10.940443
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 246.72502300000002,
+          "max_ms": 14.276181,
+          "p50_ms": 1.096391,
+          "p95_ms": 5.972285,
+          "p99_ms": 10.779012
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 34.03112500000003,
+          "max_ms": 5.417363,
+          "p50_ms": 0.180927,
+          "p95_ms": 0.315988,
+          "p99_ms": 0.490273
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 245.580027,
+      "experiment": "message_observed",
+      "updates_per_second": 3566.536624611349
+    },
+    {
+      "elapsed_seconds": 0.600182549,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 4673.264259,
+          "max_ms": 150.264129,
+          "p50_ms": 25.12331,
+          "p95_ms": 89.285352,
+          "p99_ms": 122.217367
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 4091.210536,
+          "max_ms": 146.776889,
+          "p50_ms": 20.550319,
+          "p95_ms": 86.462588,
+          "p99_ms": 117.940957
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 580.5192649999999,
+          "max_ms": 19.656926,
+          "p50_ms": 3.800744,
+          "p95_ms": 7.754223,
+          "p99_ms": 17.000883
+        },
+        "sidebar.call.ok": {
+          "count": 5,
+          "total_ms": 47.383123,
+          "max_ms": 13.049569,
+          "p50_ms": 8.551577,
+          "p95_ms": 9.855854,
+          "p99_ms": 9.855854
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 4083.552053,
+      "experiment": "message_observed",
+      "updates_per_second": 213.26844676385284
+    },
+    {
+      "elapsed_seconds": 0.587580283,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 4534.698509999999,
+          "max_ms": 166.005959,
+          "p50_ms": 26.580303,
+          "p95_ms": 93.507961,
+          "p99_ms": 120.077654
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 3968.3982129999995,
+          "max_ms": 160.228715,
+          "p50_ms": 22.944205,
+          "p95_ms": 90.48777,
+          "p99_ms": 114.800532
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 564.616573,
+          "max_ms": 19.61041,
+          "p50_ms": 3.434662,
+          "p95_ms": 9.569842,
+          "p99_ms": 16.267818
+        },
+        "sidebar.call.ok": {
+          "count": 5,
+          "total_ms": 46.091368,
+          "max_ms": 13.122935,
+          "p50_ms": 8.627879,
+          "p95_ms": 10.001636,
+          "p99_ms": 10.001636
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 3960.721129,
+      "experiment": "message_observed",
+      "updates_per_second": 217.84257182094723
+    },
+    {
+      "elapsed_seconds": 0.527463191,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 4095.907582,
+          "max_ms": 116.240292,
+          "p50_ms": 24.928809,
+          "p95_ms": 73.371312,
+          "p99_ms": 97.242463
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 3585.706605,
+          "max_ms": 111.915653,
+          "p50_ms": 20.582859,
+          "p95_ms": 69.581709,
+          "p99_ms": 90.714102
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 507.756519,
+          "max_ms": 16.518916,
+          "p50_ms": 3.335358,
+          "p95_ms": 6.51742,
+          "p99_ms": 14.081639
+        },
+        "sidebar.call.ok": {
+          "count": 5,
+          "total_ms": 50.701768,
+          "max_ms": 12.242175,
+          "p50_ms": 9.817273,
+          "p95_ms": 11.939682,
+          "p99_ms": 11.939682
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 3576.189947,
+      "experiment": "message_observed",
+      "updates_per_second": 242.67096203875198
+    },
+    {
+      "elapsed_seconds": 10.317343802,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 4,
+          "total_ms": 8002.183972999999,
+          "max_ms": 2000.974058,
+          "p50_ms": 2000.304835,
+          "p95_ms": 2000.75902,
+          "p99_ms": 2000.75902
+        },
+        "health.call.ok": {
+          "count": 2,
+          "total_ms": 1313.764803,
+          "max_ms": 1258.805089,
+          "p50_ms": 54.959714,
+          "p95_ms": 54.959714,
+          "p99_ms": 54.959714
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 79983.71780399999,
+          "max_ms": 2345.750964,
+          "p50_ms": 499.001034,
+          "p95_ms": 1514.441142,
+          "p99_ms": 1706.761728
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 69709.09299200002,
+          "max_ms": 2275.203668,
+          "p50_ms": 426.975007,
+          "p95_ms": 1445.444692,
+          "p99_ms": 1651.274674
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 10268.437656000002,
+          "max_ms": 151.732421,
+          "p50_ms": 71.390165,
+          "p95_ms": 130.918291,
+          "p99_ms": 142.537097
+        },
+        "sidebar.call.ok": {
+          "count": 103,
+          "total_ms": 974.7703629999999,
+          "max_ms": 23.889986,
+          "p50_ms": 8.474303,
+          "p95_ms": 17.500682,
+          "p99_ms": 19.658309
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 143,
+      "writer_wait_ms": 79005.637787,
+      "experiment": "message_observed",
+      "updates_per_second": 12.406293950889513
+    },
+    {
+      "elapsed_seconds": 10.848964123,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 3,
+          "total_ms": 6001.461444,
+          "max_ms": 2000.654186,
+          "p50_ms": 2000.471956,
+          "p95_ms": 2000.471956,
+          "p99_ms": 2000.471956
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 3846.397423,
+          "max_ms": 1630.792561,
+          "p50_ms": 1070.002901,
+          "p95_ms": 1145.558841,
+          "p99_ms": 1145.558841
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 84224.51050099997,
+          "max_ms": 3174.355647,
+          "p50_ms": 494.862372,
+          "p95_ms": 1479.457128,
+          "p99_ms": 1971.659669
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 73417.82728900001,
+          "max_ms": 3096.767646,
+          "p50_ms": 414.578283,
+          "p95_ms": 1395.182563,
+          "p99_ms": 1900.713261
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 10805.182447999996,
+          "max_ms": 307.239439,
+          "p50_ms": 72.927937,
+          "p95_ms": 143.382551,
+          "p99_ms": 160.851695
+        },
+        "sidebar.call.ok": {
+          "count": 108,
+          "total_ms": 1025.8713709999997,
+          "max_ms": 20.701591,
+          "p50_ms": 8.937054,
+          "p95_ms": 14.726519,
+          "p99_ms": 16.900015
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 143,
+      "writer_wait_ms": 83242.210433,
+      "experiment": "message_observed",
+      "updates_per_second": 11.798361442512073
+    },
+    {
+      "elapsed_seconds": 10.765549538,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 2,
+          "total_ms": 4003.6988,
+          "max_ms": 2003.563981,
+          "p50_ms": 2000.134819,
+          "p95_ms": 2000.134819,
+          "p99_ms": 2000.134819
+        },
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 5737.344236,
+          "max_ms": 1576.532429,
+          "p50_ms": 1406.918616,
+          "p95_ms": 1495.799786,
+          "p99_ms": 1495.799786
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 83248.60952599997,
+          "max_ms": 3339.609905,
+          "p50_ms": 517.074023,
+          "p95_ms": 1642.137797,
+          "p99_ms": 1879.719846
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 72512.52021199999,
+          "max_ms": 3252.229378,
+          "p50_ms": 399.016438,
+          "p95_ms": 1572.110128,
+          "p99_ms": 1804.939682
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 10716.912173,
+          "max_ms": 151.754553,
+          "p50_ms": 73.048602,
+          "p95_ms": 134.719857,
+          "p99_ms": 146.018196
+        },
+        "sidebar.call.ok": {
+          "count": 107,
+          "total_ms": 989.7214960000003,
+          "max_ms": 23.132135,
+          "p50_ms": 8.753232,
+          "p95_ms": 14.238451,
+          "p99_ms": 19.031392
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 150,
+      "writer_wait_ms": 82208.156971,
+      "experiment": "message_observed",
+      "updates_per_second": 11.889778552240962
+    },
+    {
+      "elapsed_seconds": 0.048571924,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 382.7413659999999,
+          "max_ms": 25.082485,
+          "p50_ms": 1.220963,
+          "p95_ms": 16.681779,
+          "p99_ms": 19.891272
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 337.43644600000005,
+          "max_ms": 24.696827,
+          "p50_ms": 1.032812,
+          "p95_ms": 7.983449,
+          "p99_ms": 19.691371
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 44.800469000000014,
+          "max_ms": 11.09472,
+          "p50_ms": 0.189212,
+          "p95_ms": 0.468932,
+          "p99_ms": 1.127438
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 335.397232,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 2635.2672379212318
+    },
+    {
+      "elapsed_seconds": 0.038718454,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 292.986542,
+          "max_ms": 23.730769,
+          "p50_ms": 0.683171,
+          "p95_ms": 14.693558,
+          "p99_ms": 21.593381
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 256.622019,
+          "max_ms": 23.589986,
+          "p50_ms": 0.571393,
+          "p95_ms": 7.272506,
+          "p99_ms": 21.446157
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 36.083125999999986,
+          "max_ms": 13.475311,
+          "p50_ms": 0.12339,
+          "p95_ms": 0.250276,
+          "p99_ms": 0.288356
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 122,
+      "writer_wait_ms": 255.288777,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 3305.9171215875513
+    },
+    {
+      "elapsed_seconds": 0.033446392,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 263.7486939999999,
+          "max_ms": 19.510884,
+          "p50_ms": 0.786033,
+          "p95_ms": 12.242707,
+          "p99_ms": 18.510813
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 232.043539,
+          "max_ms": 19.346889,
+          "p50_ms": 0.679344,
+          "p95_ms": 7.15133,
+          "p99_ms": 18.391271
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 31.343760000000007,
+          "max_ms": 11.889659,
+          "p50_ms": 0.101739,
+          "p95_ms": 0.20394,
+          "p99_ms": 0.467741
+        }
+      },
+      "message_bytes": 16384,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 230.679075,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 3827.019667771639
+    },
+    {
+      "elapsed_seconds": 0.560582484,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 4322.4674700000005,
+          "max_ms": 175.920823,
+          "p50_ms": 25.698732,
+          "p95_ms": 77.189889,
+          "p99_ms": 123.864894
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 3777.875252,
+          "max_ms": 173.878712,
+          "p50_ms": 19.886344,
+          "p95_ms": 74.789772,
+          "p99_ms": 120.604615
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 543.1483959999997,
+          "max_ms": 23.195542,
+          "p50_ms": 2.830428,
+          "p95_ms": 17.040367,
+          "p99_ms": 20.605893
+        },
+        "sidebar.call.ok": {
+          "count": 5,
+          "total_ms": 46.49107000000001,
+          "max_ms": 15.996844,
+          "p50_ms": 8.134019,
+          "p95_ms": 8.641293,
+          "p99_ms": 8.641293
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 3770.505578,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 228.3339270372208
+    },
+    {
+      "elapsed_seconds": 0.684006076,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 5374.994100999997,
+          "max_ms": 207.475053,
+          "p50_ms": 23.071702,
+          "p95_ms": 134.765051,
+          "p99_ms": 142.108449
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 4705.656662,
+          "max_ms": 204.496599,
+          "p50_ms": 17.940662,
+          "p95_ms": 131.929775,
+          "p99_ms": 139.40634
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 666.9912269999996,
+          "max_ms": 89.952544,
+          "p50_ms": 2.672965,
+          "p95_ms": 11.271379,
+          "p99_ms": 57.884638
+        },
+        "sidebar.call.ok": {
+          "count": 6,
+          "total_ms": 45.516688,
+          "max_ms": 10.853261,
+          "p50_ms": 6.171136,
+          "p95_ms": 10.243275,
+          "p99_ms": 10.243275
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 4698.606962,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 187.13284061529302
+    },
+    {
+      "elapsed_seconds": 0.537279722,
+      "instrumented": true,
+      "measurements": {
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 4219.37401,
+          "max_ms": 143.459534,
+          "p50_ms": 20.740063,
+          "p95_ms": 96.451961,
+          "p99_ms": 134.057644
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 3696.1646679999994,
+          "max_ms": 140.299772,
+          "p50_ms": 16.277336,
+          "p95_ms": 94.13569,
+          "p99_ms": 130.93386
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 519.4453590000002,
+          "max_ms": 31.659376,
+          "p50_ms": 2.864161,
+          "p95_ms": 9.475787,
+          "p99_ms": 22.604873
+        },
+        "sidebar.call.ok": {
+          "count": 5,
+          "total_ms": 41.19814100000001,
+          "max_ms": 10.849414,
+          "p50_ms": 7.671829,
+          "p95_ms": 8.534385,
+          "p99_ms": 8.534385
+        }
+      },
+      "message_bytes": 1048576,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 127,
+      "writer_wait_ms": 3688.317954,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 238.23716912956564
+    },
+    {
+      "elapsed_seconds": 7.5844608220000005,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 1,
+          "total_ms": 2000.191073,
+          "max_ms": 2000.191073,
+          "p50_ms": 2000.191073,
+          "p95_ms": 2000.191073,
+          "p99_ms": 2000.191073
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 4583.734213000001,
+          "max_ms": 1871.36184,
+          "p50_ms": 1100.981553,
+          "p95_ms": 1442.287396,
+          "p99_ms": 1442.287396
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 58360.24879500001,
+          "max_ms": 2322.280792,
+          "p50_ms": 323.316081,
+          "p95_ms": 1191.042727,
+          "p99_ms": 1990.411531
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 50824.94595000002,
+          "max_ms": 2263.065198,
+          "p50_ms": 263.86603,
+          "p95_ms": 1137.194472,
+          "p99_ms": 1890.560364
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 7533.397257000001,
+          "max_ms": 149.030172,
+          "p50_ms": 50.851989,
+          "p95_ms": 107.985237,
+          "p99_ms": 120.911286
+        },
+        "sidebar.call.ok": {
+          "count": 75,
+          "total_ms": 679.5222909999998,
+          "max_ms": 31.415833,
+          "p50_ms": 7.990553,
+          "p95_ms": 14.931922,
+          "p99_ms": 17.575713
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 143,
+      "writer_wait_ms": 57389.802709,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 16.876611667465475
+    },
+    {
+      "elapsed_seconds": 8.340163651,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 1,
+          "total_ms": 2001.122166,
+          "max_ms": 2001.122166,
+          "p50_ms": 2001.122166,
+          "p95_ms": 2001.122166,
+          "p99_ms": 2001.122166
+        },
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 5325.716635,
+          "max_ms": 1935.667589,
+          "p50_ms": 1203.452846,
+          "p95_ms": 1560.769591,
+          "p99_ms": 1560.769591
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 64763.909682000005,
+          "max_ms": 2239.925108,
+          "p50_ms": 346.18149,
+          "p95_ms": 1478.502091,
+          "p99_ms": 1734.072952
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 56465.95735499998,
+          "max_ms": 2180.748105,
+          "p50_ms": 295.998567,
+          "p95_ms": 1430.672397,
+          "p99_ms": 1683.159409
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 8287.414661999996,
+          "max_ms": 147.482111,
+          "p50_ms": 55.159015,
+          "p95_ms": 125.23335,
+          "p99_ms": 135.694271
+        },
+        "sidebar.call.ok": {
+          "count": 83,
+          "total_ms": 988.8557659999998,
+          "max_ms": 23.304355,
+          "p50_ms": 11.775216,
+          "p95_ms": 19.635787,
+          "p99_ms": 22.444675
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 146,
+      "writer_wait_ms": 63767.548879,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 15.347420668976033
+    },
+    {
+      "elapsed_seconds": 7.694667883,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 1,
+          "total_ms": 2000.992705,
+          "max_ms": 2000.992705,
+          "p50_ms": 2000.992705,
+          "p95_ms": 2000.992705,
+          "p99_ms": 2000.992705
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 4693.16649,
+          "max_ms": 1995.387943,
+          "p50_ms": 1020.587137,
+          "p95_ms": 1506.344131,
+          "p99_ms": 1506.344131
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 59304.634611999994,
+          "max_ms": 2053.812747,
+          "p50_ms": 370.457895,
+          "p95_ms": 1099.494984,
+          "p99_ms": 1324.054835
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 51651.98818600001,
+          "max_ms": 2006.723632,
+          "p50_ms": 317.861229,
+          "p95_ms": 1036.171343,
+          "p99_ms": 1265.724698
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 7649.028543000004,
+          "max_ms": 136.910003,
+          "p50_ms": 51.152738,
+          "p95_ms": 100.074774,
+          "p99_ms": 108.602947
+        },
+        "sidebar.call.ok": {
+          "count": 76,
+          "total_ms": 690.3443950000003,
+          "max_ms": 16.815648,
+          "p50_ms": 8.52688,
+          "p95_ms": 13.769088,
+          "p99_ms": 15.924129
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 144,
+      "writer_wait_ms": 58327.276544,
+      "experiment": "message_without_reservation",
+      "updates_per_second": 16.634896001527657
+    },
+    {
+      "batch": 16,
+      "elapsed_seconds": 0.18059971,
+      "instrumented": true,
+      "isolated": "idle",
+      "measurements": {
+        "health.call.ok": {
+          "count": 32,
+          "total_ms": 2.622966,
+          "max_ms": 0.151151,
+          "p50_ms": 0.078055,
+          "p95_ms": 0.099916,
+          "p99_ms": 0.145611
+        },
+        "sidebar.call.ok": {
+          "count": 32,
+          "total_ms": 177.70586899999998,
+          "max_ms": 8.740212,
+          "p50_ms": 4.978377,
+          "p95_ms": 7.573121,
+          "p99_ms": 7.765639
+        }
+      },
+      "payload_bytes": 16384,
+      "rounds": 32,
+      "unsettled_observations": 0,
+      "writer_wait_count": 0,
+      "experiment": "isolated_observed"
+    },
+    {
+      "batch": 16,
+      "elapsed_seconds": 0.124475272,
+      "instrumented": true,
+      "isolated": "receive",
+      "measurements": {
+        "health.call.ok": {
+          "count": 32,
+          "total_ms": 2.6273329999999997,
+          "max_ms": 0.162753,
+          "p50_ms": 0.072505,
+          "p95_ms": 0.147384,
+          "p99_ms": 0.147955
+        },
+        "receive.call.ok": {
+          "count": 512,
+          "total_ms": 121.48241799999994,
+          "max_ms": 13.158116,
+          "p50_ms": 0.112519,
+          "p95_ms": 0.24211,
+          "p99_ms": 2.139699
+        },
+        "receive.entry.ok": {
+          "count": 512,
+          "total_ms": 3.390381999999999,
+          "max_ms": 0.035586,
+          "p50_ms": 0.00556,
+          "p95_ms": 0.013375,
+          "p99_ms": 0.020569
+        },
+        "receive.span.commit.ok": {
+          "count": 512,
+          "total_ms": 104.64028699999996,
+          "max_ms": 13.051869,
+          "p50_ms": 0.084808,
+          "p95_ms": 0.179504,
+          "p99_ms": 2.047788
+        }
+      },
+      "payload_bytes": 16384,
+      "rounds": 32,
+      "unsettled_observations": 0,
+      "writer_wait_count": 0,
+      "experiment": "isolated_observed"
+    },
+    {
+      "batch": 16,
+      "elapsed_seconds": 0.186279331,
+      "instrumented": true,
+      "isolated": "project",
+      "measurements": {
+        "health.call.ok": {
+          "count": 32,
+          "total_ms": 3.046205000000001,
+          "max_ms": 0.165057,
+          "p50_ms": 0.081331,
+          "p95_ms": 0.149728,
+          "p99_ms": 0.164576
+        },
+        "project.call.ok": {
+          "count": 32,
+          "total_ms": 182.92613799999998,
+          "max_ms": 15.42935,
+          "p50_ms": 4.041215,
+          "p95_ms": 13.739337,
+          "p99_ms": 13.81106
+        },
+        "project.entry.ok": {
+          "count": 32,
+          "total_ms": 0.2340249999999999,
+          "max_ms": 0.013836,
+          "p50_ms": 0.006362,
+          "p95_ms": 0.01099,
+          "p99_ms": 0.013215
+        },
+        "project.span.commit.ok": {
+          "count": 32,
+          "total_ms": 180.60730700000002,
+          "max_ms": 15.28992,
+          "p50_ms": 3.979529,
+          "p95_ms": 13.608103,
+          "p99_ms": 13.698652
+        }
+      },
+      "payload_bytes": 16384,
+      "rounds": 32,
+      "unsettled_observations": 0,
+      "writer_wait_count": 0,
+      "experiment": "isolated_observed"
+    },
+    {
+      "batch": 16,
+      "elapsed_seconds": 0.004460354,
+      "instrumented": true,
+      "isolated": "settle",
+      "measurements": {
+        "health.call.ok": {
+          "count": 32,
+          "total_ms": 1.683898,
+          "max_ms": 0.102872,
+          "p50_ms": 0.049502,
+          "p95_ms": 0.068838,
+          "p99_ms": 0.085479
+        },
+        "settle.call.ok": {
+          "count": 32,
+          "total_ms": 2.696503999999999,
+          "max_ms": 0.116918,
+          "p50_ms": 0.083836,
+          "p95_ms": 0.103703,
+          "p99_ms": 0.116036
+        },
+        "settle.entry.ok": {
+          "count": 32,
+          "total_ms": 0.126768,
+          "max_ms": 0.005781,
+          "p50_ms": 0.003797,
+          "p95_ms": 0.004729,
+          "p99_ms": 0.005069
+        },
+        "settle.span.commit.ok": {
+          "count": 32,
+          "total_ms": 2.5368870000000006,
+          "max_ms": 0.111728,
+          "p50_ms": 0.078596,
+          "p95_ms": 0.097501,
+          "p99_ms": 0.108191
+        }
+      },
+      "payload_bytes": 16384,
+      "rounds": 32,
+      "unsettled_observations": 0,
+      "writer_wait_count": 0,
+      "experiment": "isolated_observed"
+    },
+    {
+      "elapsed_seconds": 9.064361519,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 2,
+          "total_ms": 4002.522042,
+          "max_ms": 2002.484156,
+          "p50_ms": 2000.037886,
+          "p95_ms": 2000.037886,
+          "p99_ms": 2000.037886
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 4006.0016729999998,
+          "max_ms": 1624.385342,
+          "p50_ms": 951.889972,
+          "p95_ms": 1309.837806,
+          "p99_ms": 1309.837806
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 70313.64664299999,
+          "max_ms": 2809.81466,
+          "p50_ms": 386.567641,
+          "p95_ms": 1428.808061,
+          "p99_ms": 2392.745764
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 61269.510862000025,
+          "max_ms": 2735.371219,
+          "p50_ms": 322.645063,
+          "p95_ms": 1327.28616,
+          "p99_ms": 2332.722647
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 9012.562361000002,
+          "max_ms": 136.191668,
+          "p50_ms": 65.530509,
+          "p95_ms": 112.795604,
+          "p99_ms": 115.403864
+        },
+        "sidebar.call.ok": {
+          "count": 90,
+          "total_ms": 650.216988,
+          "max_ms": 14.341787,
+          "p50_ms": 6.499485,
+          "p95_ms": 11.110448,
+          "p99_ms": 14.021182
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 148,
+      "writer_wait_ms": 69262.642708,
+      "experiment": "paired_message_original",
+      "updates_per_second": 14.121237301898924
+    },
+    {
+      "elapsed_seconds": 11.113939141,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 3,
+          "total_ms": 6002.980530000001,
+          "max_ms": 2001.018129,
+          "p50_ms": 2001.012499,
+          "p95_ms": 2001.012499,
+          "p99_ms": 2001.012499
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 3786.745856,
+          "max_ms": 1668.909611,
+          "p50_ms": 676.587079,
+          "p95_ms": 1287.178053,
+          "p99_ms": 1287.178053
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 85912.76415999999,
+          "max_ms": 2728.659659,
+          "p50_ms": 475.157477,
+          "p95_ms": 1744.521044,
+          "p99_ms": 2269.714128
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 74843.13464599999,
+          "max_ms": 2664.678501,
+          "p50_ms": 399.449274,
+          "p95_ms": 1614.454987,
+          "p99_ms": 2206.359184
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 11067.870763000003,
+          "max_ms": 376.668114,
+          "p50_ms": 69.030176,
+          "p95_ms": 176.378582,
+          "p99_ms": 207.013575
+        },
+        "sidebar.call.ok": {
+          "count": 111,
+          "total_ms": 883.2997540000005,
+          "max_ms": 30.548242,
+          "p50_ms": 7.042555,
+          "p95_ms": 12.98264,
+          "p99_ms": 14.576403
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 151,
+      "writer_wait_ms": 84608.030437,
+      "experiment": "paired_message_original",
+      "updates_per_second": 11.517068644707635
+    },
+    {
+      "elapsed_seconds": 13.486140155,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 4,
+          "total_ms": 8002.795975,
+          "max_ms": 2001.024601,
+          "p50_ms": 2000.465131,
+          "p95_ms": 2000.897987,
+          "p99_ms": 2000.897987
+        },
+        "health.call.ok": {
+          "count": 3,
+          "total_ms": 4483.451883,
+          "max_ms": 1624.654643,
+          "p50_ms": 1511.748363,
+          "p95_ms": 1511.748363,
+          "p99_ms": 1511.748363
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 103751.80597699998,
+          "max_ms": 5183.408925,
+          "p50_ms": 577.248606,
+          "p95_ms": 2131.560843,
+          "p99_ms": 3298.96737
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 90323.5186,
+          "max_ms": 5083.714922,
+          "p50_ms": 473.027877,
+          "p95_ms": 2024.796663,
+          "p99_ms": 3185.821806
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 13423.022894999996,
+          "max_ms": 301.257694,
+          "p50_ms": 104.45218,
+          "p95_ms": 173.289919,
+          "p99_ms": 233.045739
+        },
+        "sidebar.call.ok": {
+          "count": 134,
+          "total_ms": 2585.495823,
+          "max_ms": 64.430673,
+          "p50_ms": 18.047538,
+          "p95_ms": 40.884862,
+          "p99_ms": 44.609578
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 147,
+      "writer_wait_ms": 102796.205769,
+      "experiment": "paired_message_original",
+      "updates_per_second": 9.491225697557642
+    },
+    {
+      "elapsed_seconds": 6.436304633,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 1,
+          "total_ms": 2000.657439,
+          "max_ms": 2000.657439,
+          "p50_ms": 2000.657439,
+          "p95_ms": 2000.657439,
+          "p99_ms": 2000.657439
+        },
+        "health.call.ok": {
+          "count": 4,
+          "total_ms": 3435.205131,
+          "max_ms": 1713.734318,
+          "p50_ms": 760.817788,
+          "p95_ms": 960.479523,
+          "p99_ms": 960.479523
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 49275.949299,
+          "max_ms": 1847.493794,
+          "p50_ms": 296.45279,
+          "p95_ms": 906.465498,
+          "p99_ms": 1325.418257
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 42882.26666300004,
+          "max_ms": 1749.594939,
+          "p50_ms": 248.129757,
+          "p95_ms": 854.567138,
+          "p99_ms": 1276.824471
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 6382.98553,
+          "max_ms": 128.673067,
+          "p50_ms": 44.918272,
+          "p95_ms": 96.376064,
+          "p99_ms": 99.688663
+        },
+        "sidebar.call.ok": {
+          "count": 64,
+          "total_ms": 574.6728969999999,
+          "max_ms": 36.040655,
+          "p50_ms": 7.087358,
+          "p95_ms": 15.906176,
+          "p99_ms": 29.325248
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 143,
+      "writer_wait_ms": 48293.377879,
+      "experiment": "paired_message_without_reservation",
+      "updates_per_second": 19.8871879593335
+    },
+    {
+      "elapsed_seconds": 5.623859927,
+      "instrumented": true,
+      "measurements": {
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 4608.6774000000005,
+          "max_ms": 1612.646274,
+          "p50_ms": 759.60824,
+          "p95_ms": 896.609843,
+          "p99_ms": 896.609843
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 43479.429883,
+          "max_ms": 1180.936154,
+          "p50_ms": 240.734917,
+          "p95_ms": 891.473612,
+          "p99_ms": 1114.187491
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 37897.553601,
+          "max_ms": 1147.598495,
+          "p50_ms": 181.183966,
+          "p95_ms": 851.571377,
+          "p99_ms": 1085.76971
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 5578.115668999996,
+          "max_ms": 104.953132,
+          "p50_ms": 41.536965,
+          "p95_ms": 97.280134,
+          "p99_ms": 101.953524
+        },
+        "sidebar.call.ok": {
+          "count": 56,
+          "total_ms": 414.93715100000014,
+          "max_ms": 14.159288,
+          "p50_ms": 7.21733,
+          "p95_ms": 11.604869,
+          "p99_ms": 13.284301
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 145,
+      "writer_wait_ms": 42481.465207,
+      "experiment": "paired_message_without_reservation",
+      "updates_per_second": 22.760168578430527
+    },
+    {
+      "elapsed_seconds": 12.241227301,
+      "instrumented": true,
+      "measurements": {
+        "health.call.deadline": {
+          "count": 3,
+          "total_ms": 6008.386995,
+          "max_ms": 2006.755868,
+          "p50_ms": 2001.522658,
+          "p95_ms": 2001.522658,
+          "p99_ms": 2001.522658
+        },
+        "health.call.ok": {
+          "count": 5,
+          "total_ms": 5182.057392,
+          "max_ms": 1756.018964,
+          "p50_ms": 1090.063864,
+          "p95_ms": 1382.735574,
+          "p99_ms": 1382.735574
+        },
+        "message_update.call.ok": {
+          "count": 128,
+          "total_ms": 94850.465376,
+          "max_ms": 2963.705979,
+          "p50_ms": 535.189912,
+          "p95_ms": 1917.759176,
+          "p99_ms": 2601.150687
+        },
+        "message_update.entry.ok": {
+          "count": 128,
+          "total_ms": 82742.04320399999,
+          "max_ms": 2841.87793,
+          "p50_ms": 412.629631,
+          "p95_ms": 1842.091097,
+          "p99_ms": 2533.64201
+        },
+        "message_update.span.commit.ok": {
+          "count": 128,
+          "total_ms": 12051.238441000001,
+          "max_ms": 247.352973,
+          "p50_ms": 82.414382,
+          "p95_ms": 185.780614,
+          "p99_ms": 228.980511
+        },
+        "sidebar.call.ok": {
+          "count": 122,
+          "total_ms": 3071.974882000002,
+          "max_ms": 53.212324,
+          "p50_ms": 24.368922,
+          "p95_ms": 37.833818,
+          "p99_ms": 42.07229
+        }
+      },
+      "message_bytes": 16777216,
+      "sessions": 8,
+      "unsettled_observations": 0,
+      "updates": 128,
+      "workload": "message_update",
+      "writer_wait_count": 150,
+      "writer_wait_ms": 93831.823667,
+      "experiment": "paired_message_without_reservation",
+      "updates_per_second": 10.456467873081936
+    }
+  ]
+}

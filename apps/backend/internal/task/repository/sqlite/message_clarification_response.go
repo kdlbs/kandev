@@ -152,11 +152,147 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	return messages, nil
 }
 
+// ReattachActiveClarificationBundle clears the detached marker from one exact
+// pending bundle after a live waiter re-adopted it, so the projection and the
+// orchestrator's live-clarification guard stop treating the bundle as
+// abandoned. Only pending, currently detached rows on the session's current
+// durable turn change; a superseded, terminal, or never-detached bundle is
+// left untouched and yields no rows.
+func (r *Repository) ReattachActiveClarificationBundle(
+	ctx context.Context,
+	sessionID, pendingID string,
+) ([]*models.Message, bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin clarification reattach: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	drv := r.db.DriverName()
+	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
+		return nil, false, err
+	}
+	if err := lockClarificationSessionRow(ctx, tx, drv, sessionID); err != nil {
+		return nil, false, err
+	}
+	updatedAt := r.nowUTC()
+	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = ?
+		WHERE task_session_id = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s = ?
+		  AND %s
+		  AND NOT (%s)
+		  AND turn_id = (
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY %s
+			LIMIT 1
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_session_messages bundle
+			WHERE %s = ?
+			  AND (
+				bundle.type != 'clarification_request'
+				OR bundle.task_session_id != task_session_messages.task_session_id
+				OR bundle.turn_id != task_session_messages.turn_id
+			  )
+		  )
+		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		          content, requests_input, type, metadata, created_at, updated_at
+	`, clarificationReattachedMetadataExpr(drv),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"),
+		nonTerminalSessionPredicate("task_session_messages"),
+		clarificationNotDetachedPredicate(drv),
+		predicate, orderBy, bundlePendingIDExpr)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID, pendingID)
+	if err != nil {
+		return nil, false, fmt.Errorf("reattach active clarification messages: %w", err)
+	}
+	messages, _, err := scanMessageRows(rows, 0)
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, false, fmt.Errorf("scan reattached clarification messages: %w", err)
+	}
+	if closeErr != nil {
+		return nil, false, fmt.Errorf("close reattached clarification rows: %w", closeErr)
+	}
+	active, err := r.activeClarificationBundleExists(ctx, tx, drv, sessionID, pendingID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit clarification reattach: %w", err)
+	}
+	return messages, active, nil
+}
+
+func (r *Repository) activeClarificationBundleExists(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv, sessionID, pendingID string,
+) (bool, error) {
+	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
+	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
+	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	query := fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM task_session_messages m
+			WHERE m.task_session_id = ?
+			  AND m.type = 'clarification_request'
+			  AND %[1]s = ?
+			  AND COALESCE(%[2]s, '') IN ('', 'pending')
+			  AND %[3]s
+			  AND m.turn_id = (
+				SELECT turn_row.id
+				FROM task_session_turns turn_row
+				WHERE turn_row.task_session_id = m.task_session_id
+				  AND %[4]s
+				ORDER BY %[5]s
+				LIMIT 1
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM task_session_messages bundle
+				WHERE %[6]s = ?
+				  AND (
+					bundle.type != 'clarification_request'
+					OR bundle.task_session_id != m.task_session_id
+					OR bundle.turn_id != m.turn_id
+				  )
+			  )
+		)
+	`, pendingIDExpr, statusExpr, nonTerminalSessionPredicate("m"), predicate, orderBy, bundlePendingIDExpr)
+	var active bool
+	if err := tx.GetContext(ctx, &active, r.db.Rebind(query), sessionID, pendingID, pendingID); err != nil {
+		return false, fmt.Errorf("check active clarification bundle: %w", err)
+	}
+	return active, nil
+}
+
 func clarificationDetachedMetadataExpr(driverName string) string {
 	if dialect.IsPostgres(driverName) {
 		return "jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb)::text"
 	}
 	return "json_set(metadata, '$.agent_disconnected', json('true'))"
+}
+
+// clarificationReattachedMetadataExpr removes the detached marker so the row
+// reads exactly like a bundle whose waiter never went away.
+func clarificationReattachedMetadataExpr(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return "(metadata::jsonb - 'agent_disconnected')::text"
+	}
+	return "json_remove(metadata, '$.agent_disconnected')"
 }
 
 func clarificationExpiredMetadataExpr(driverName string) string {
@@ -189,40 +325,75 @@ func (r *Repository) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*models.Message, bool, error) {
+	messages, claimed, _, err := r.completeActiveClarificationBundle(ctx, pendingID, status, responses, nil)
+	return messages, claimed, err
+}
+
+// CompleteActiveClarificationBundleWithAttachments claims the response and
+// adopts the complete answer-file set inside the same transaction. Removed
+// retry claims are returned for best-effort byte release after commit.
+func (r *Repository) CompleteActiveClarificationBundleWithAttachments(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	claims []models.ClarificationAttachmentClaim,
+	scope models.ClarificationAttachmentScope,
+) ([]*models.Message, bool, []string, error) {
+	plan := &clarificationAttachmentPlan{scope: scope, claims: claims}
+	return r.completeActiveClarificationBundle(ctx, pendingID, status, responses, plan)
+}
+
+func (r *Repository) completeActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+	plan *clarificationAttachmentPlan,
+) ([]*models.Message, bool, []string, error) {
 	if status != clarificationStatusAnswered && status != clarificationStatusRejected {
-		return nil, false, fmt.Errorf("invalid clarification terminal status %q", status)
+		return nil, false, nil, fmt.Errorf("invalid clarification terminal status %q", status)
+	}
+	queueTablePresent, err := r.clarificationAttachmentQueueTablePresent(ctx, plan)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	drv := r.db.DriverName()
 	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
+	if err := r.lockClarificationAnswerTask(ctx, tx, plan); err != nil {
+		return nil, false, nil, err
+	}
+
 	claimedRows, err := r.claimActiveClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if claimedRows == 0 {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	messages, err := r.loadClaimedClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if int64(len(messages)) != claimedRows {
-		return nil, false, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
+		return nil, false, nil, fmt.Errorf("claimed %d clarification rows but loaded %d", claimedRows, len(messages))
 	}
-	if err := r.completeClaimedClarificationMessages(ctx, tx, drv, messages, status, responses); err != nil {
-		return nil, false, err
+	released, err := r.completeClarificationClaim(
+		ctx, tx, drv, messages, status, responses, plan, queueTablePresent,
+	)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("commit clarification bundle completion: %w", err)
+		return nil, false, nil, fmt.Errorf("commit clarification bundle completion: %w", err)
 	}
-	return messages, true, nil
+	return messages, true, released, nil
 }
 
 // RestoreActiveClarificationBundle reopens a current-turn terminal bundle when
@@ -310,15 +481,29 @@ func (r *Repository) lockClarificationBundleTurnWrites(
 	// same rows before evaluating the non-terminal claim predicate forces one
 	// side to observe the other's committed state.
 	for _, sessionID := range sessionIDs {
-		var lockedSessionID string
-		if err := tx.GetContext(
-			ctx,
-			&lockedSessionID,
-			r.db.Rebind(`SELECT id FROM task_sessions WHERE id = ? FOR UPDATE`),
-			sessionID,
-		); err != nil {
-			return fmt.Errorf("lock clarification session %q: %w", sessionID, err)
+		if err := lockClarificationSessionRow(ctx, tx, driverName, sessionID); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func lockClarificationSessionRow(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	driverName, sessionID string,
+) error {
+	if !dialect.IsPostgres(driverName) {
+		return nil
+	}
+	var lockedSessionID string
+	if err := tx.GetContext(
+		ctx,
+		&lockedSessionID,
+		`SELECT id FROM task_sessions WHERE id = $1 FOR UPDATE`,
+		sessionID,
+	); err != nil {
+		return fmt.Errorf("lock clarification session %q: %w", sessionID, err)
 	}
 	return nil
 }
@@ -573,6 +758,18 @@ func (r *Repository) completeClaimedClarificationMessages(
 	status string,
 	responses map[string]interface{},
 ) error {
+	return r.completeClaimedClarificationMessagesWithManifests(ctx, tx, drv, messages, status, responses, nil)
+}
+
+func (r *Repository) completeClaimedClarificationMessagesWithManifests(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	drv string,
+	messages []*models.Message,
+	status string,
+	responses map[string]interface{},
+	manifests map[string][]models.ClarificationAnswerAttachment,
+) error {
 	updatedAt := r.nowUTC()
 	claimedStatusExpr := dialect.JSONExtract(drv, "metadata", "status")
 	updateQuery := r.db.Rebind(fmt.Sprintf(`
@@ -589,10 +786,25 @@ func (r *Repository) completeClaimedClarificationMessages(
 		completedMetadata := maps.Clone(message.Metadata)
 		completedMetadata["status"] = status
 		completedMetadata[clarificationResponseDeliveryPendingKey] = true
+		manifest := manifests[questionID]
+		if manifests != nil {
+			if manifest == nil {
+				delete(completedMetadata, "attachments")
+			} else {
+				completedMetadata["attachments"] = manifest
+			}
+		}
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {
 				return fmt.Errorf("missing response for clarification question %s", questionID)
+			}
+			if manifests != nil {
+				canonical, canonicalErr := canonicalClarificationResponse(response, questionID, manifest)
+				if canonicalErr != nil {
+					return canonicalErr
+				}
+				response = canonical
 			}
 			completedMetadata["response"] = response
 		}
@@ -622,4 +834,28 @@ func (r *Repository) completeClaimedClarificationMessages(
 		message.UpdatedAt = updatedAt
 	}
 	return nil
+}
+
+// canonicalClarificationResponse rewrites one stored answer so its attachment
+// descriptors exactly match the canonical registry set adopted above.
+func canonicalClarificationResponse(
+	response interface{},
+	questionID string,
+	manifest []models.ClarificationAnswerAttachment,
+) (interface{}, error) {
+	raw, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("marshal clarification response for %s: %w", questionID, err)
+	}
+	canonical := map[string]interface{}{}
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return nil, fmt.Errorf("decode clarification response for %s: %w", questionID, err)
+	}
+	canonical["question_id"] = questionID
+	if len(manifest) == 0 {
+		delete(canonical, "attachments")
+	} else {
+		canonical["attachments"] = manifest
+	}
+	return canonical, nil
 }

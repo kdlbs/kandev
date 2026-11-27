@@ -17,7 +17,8 @@ parity between CLI and other Kandev launch surfaces.
 ## Ownership
 
 This system owns the native Kandev CLI, command routing, CLI configuration,
-and CLI-specific compatibility behavior.
+CLI-specific compatibility behavior, and raw agent-terminal input contracts.
+The UI system owns reusable controls used to deliver those inputs.
 
 ## Exclusions
 

@@ -1,11 +1,18 @@
 ---
 id: "01-resolve-local-base-targets"
 title: "Resolve local base targets"
-status: done
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/requirements/local-repositories.md"
+requirements:
+  - REQ-WORKSPACES-LOCAL-REPOSITORIES-001
+acceptance_criteria:
+  - AC-WORKSPACES-LOCAL-REPOSITORIES-001.6
+  - AC-WORKSPACES-LOCAL-REPOSITORIES-001.7
+  - AC-WORKSPACES-LOCAL-REPOSITORIES-001.8
+system_design:
+  - ../../specs/workspaces/system-design/local-repositories.md
 ---
 
 # Task 01: Resolve local base targets
@@ -105,3 +112,18 @@ PR fixup:
 - Fixup red: the new underlying-error assertions failed 4 tests before the
   production change. Fixup green: the focused backend suite passed 11 tests and
   the desktop E2E passed 1 test.
+
+
+### PR #3680 browser regression repair (2026-10-10)
+
+The captured normal shard replay reproduced a missing Review button in the
+local-only desktop Merge scenario. The Changes surface had no pending diff,
+so Review was correctly absent. Its Pull menu remained available. The helper
+now opens that existing menu, matching this work order's desktop acceptance
+contract. The Merge response and base-commit reachability checks remain.
+The focused desktop scenario passed with retries disabled (6.3 seconds).
+
+The combined managed run passed all eight tests without retries: desktop Merge,
+phone Rebase, and the six swimlane-height cases in their file order (43.4
+seconds). The missing Review button repair changes only the desktop test entry
+point. Product behavior and phone interactions remain the existing contracts.

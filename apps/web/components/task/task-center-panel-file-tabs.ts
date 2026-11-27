@@ -1,4 +1,12 @@
+import { treePath } from "@/hooks/file-rename-continuity";
 import type { OpenFileTab } from "@/lib/types/backend";
+
+export type FileEditorTab = OpenFileTab & { instanceId?: symbol };
+const MAX_FILE_TABS = 4;
+
+export function installFileEditorTab(tab: OpenFileTab): FileEditorTab {
+  return { ...tab, instanceId: Symbol() };
+}
 
 export function getFileTabKey(file: Pick<OpenFileTab, "path" | "repo">): string {
   return `${file.repo ?? ""}\u0000${file.path}`;
@@ -21,9 +29,12 @@ function areOpenFileTabsEqual(left: OpenFileTab, right: OpenFileTab): boolean {
   return openFileTabKeys.every((key) => Object.is(left[key], right[key]));
 }
 
-export function upsertOpenFileTab(prev: OpenFileTab[], fileTab: OpenFileTab): OpenFileTab[] {
+export function upsertOpenFileTab(prev: FileEditorTab[], fileTab: OpenFileTab): FileEditorTab[] {
   const fileKey = getFileTabKey(fileTab);
-  const existingIndex = prev.findIndex((tab) => getFileTabKey(tab) === fileKey);
+  const workspacePath = treePath(fileTab);
+  const existingIndex = prev.findIndex(
+    (tab) => getFileTabKey(tab) === fileKey || (!!workspacePath && treePath(tab) === workspacePath),
+  );
   if (existingIndex >= 0) {
     const existing = prev[existingIndex];
     const refreshed = existing.isDirty
@@ -37,11 +48,30 @@ export function upsertOpenFileTab(prev: OpenFileTab[], fileTab: OpenFileTab): Op
       : {
           ...existing,
           ...fileTab,
+          path: existing.path,
+          name: existing.name,
+          repo: existing.repo,
+          instanceId: existing.instanceId,
           renderedPreview: fileTab.renderedPreview ?? existing.renderedPreview,
         };
     if (areOpenFileTabsEqual(existing, refreshed)) return prev;
     return prev.map((tab, index) => (index === existingIndex ? refreshed : tab));
   }
-  const maxTabs = 4;
-  return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
+  const installed = installFileEditorTab(fileTab);
+  return prev.length >= MAX_FILE_TABS ? [...prev.slice(1), installed] : [...prev, installed];
+}
+
+/** Restoration fills unused slots without replacing live editors or drafts. */
+export function mergeRestoredFileTabs(
+  live: FileEditorTab[],
+  restored: OpenFileTab[],
+): FileEditorTab[] {
+  const capacity = Math.max(0, MAX_FILE_TABS - live.length);
+  if (!capacity) return live;
+  const missing = restored.filter((file) => {
+    const key = getFileTabKey(file);
+    const path = treePath(file);
+    return !live.some((tab) => getFileTabKey(tab) === key || (!!path && treePath(tab) === path));
+  });
+  return missing.length ? [...live, ...missing.slice(0, capacity)] : live;
 }

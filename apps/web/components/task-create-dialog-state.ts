@@ -1,21 +1,21 @@
+/* eslint-disable max-lines -- task-create form state owns one complete reset and hydration contract. */
+
 "use client";
+import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
+
+/* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository, TaskPriority } from "@/lib/types/http";
+import type { InitialWorkspaceLayout, LocalRepository, TaskPriority } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
-import {
-  repositorySelectionsFromInitialValues,
-  resetTaskForm,
-  seededRemoteRepositories,
-  type FormResetters,
-} from "@/components/task-create-dialog-form-reset";
+import { useFormResetEffects } from "./task-create-dialog-reset-effects";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
-import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
+import { setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
   TaskCreateDialogInitialValues,
@@ -27,11 +27,10 @@ import {
   useRepositorySelectionState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
-import { createDebugLogger } from "@/lib/debug/log";
-import { clampTaskTitleInput, truncateRemoteTaskTitle } from "@/lib/task-title";
+import { useTaskCreateWorkflowSteps } from "@/hooks/use-task-create-workflow-steps";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
-
-const stateDebug = createDebugLogger("task-create:state");
+import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 
 export type {
   StepType,
@@ -39,131 +38,6 @@ export type {
 } from "@/components/task-create-dialog-types";
 export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 export { useLockedFieldSync } from "@/components/task-create-dialog-locked-fields";
-
-type FormResetEffectsArgs = {
-  open: boolean;
-  workspaceId: string | null;
-  workflowId: string | null;
-  initialValues: TaskCreateDialogInitialValues | undefined;
-  resetters: FormResetters;
-  setDraftDescription: (v: string) => void;
-  setCurrentDefaults: (v: { name: string; description: string }) => void;
-  setOpenCycle: React.Dispatch<React.SetStateAction<number>>;
-  prevDialogRef: React.RefObject<{ open: boolean; workspaceId: string | null }>;
-  lockedWorkflow: boolean;
-};
-
-function useFormResetEffects({
-  open,
-  workspaceId,
-  workflowId,
-  initialValues,
-  resetters,
-  setDraftDescription,
-  setCurrentDefaults,
-  setOpenCycle,
-  prevDialogRef,
-  lockedWorkflow,
-}: FormResetEffectsArgs) {
-  useEffect(() => {
-    const previous = prevDialogRef.current;
-    (prevDialogRef as React.MutableRefObject<typeof previous>).current = { open, workspaceId };
-
-    if (!open || (previous.open && previous.workspaceId === workspaceId)) return;
-
-    setOpenCycle((c) => c + 1);
-
-    const defaults = resolveFormDefaults(initialValues, workspaceId);
-    stateDebug("open-reset", {
-      workspace_id: workspaceId ?? "-",
-      workflow_id: workflowId ?? "-",
-      source: defaults.source,
-      title_present: defaults.name.trim().length > 0,
-      description_present: defaults.description.trim().length > 0,
-      initial_repository_id: initialValues?.repositoryId ?? "-",
-      initial_branch: initialValues?.branch ?? initialValues?.checkoutBranch ?? "-",
-    });
-    setCurrentDefaults(defaults);
-    resetTaskForm(
-      resetters,
-      defaults.name,
-      defaults.description,
-      lockedWorkflow ? workflowId : null,
-      initialValues,
-    );
-    setDraftDescription(defaults.description);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedWorkflow, open, workflowId, workspaceId]);
-
-  useEffect(() => {
-    if (!open) return;
-    stateDebug("discovery-reset", {
-      workspace_id: workspaceId ?? "-",
-      remote_url: initialValues?.remoteUrl ?? initialValues?.githubUrl ?? "-",
-      seeded_remote_branch: initialValues?.checkoutBranch ?? initialValues?.branch ?? "-",
-    });
-    resetDiscoveryState(resetters, initialValues);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workspaceId]);
-}
-
-/** Checks if initialValues has any user-provided content */
-function hasUserContent(initialValues?: TaskCreateDialogInitialValues): boolean {
-  const title = initialValues?.title ?? "";
-  const description = initialValues?.description ?? "";
-  return title.trim().length > 0 || description.trim().length > 0;
-}
-
-/** Resolves form defaults from draft (for create) or initialValues (for edit) */
-function resolveFormDefaults(
-  initialValues: TaskCreateDialogInitialValues | undefined,
-  workspaceId: string | null,
-) {
-  const draft =
-    !hasUserContent(initialValues) && workspaceId ? getTaskCreateDraft(workspaceId) : null;
-  const initTitle = initialValues?.title ?? "";
-  const initDesc = initialValues?.description ?? "";
-  let name = initTitle;
-  if (draft?.title) {
-    name = clampTaskTitleInput(draft.title);
-  } else if (initialValues?.githubUrl) {
-    name = truncateRemoteTaskTitle(initTitle);
-  }
-  return {
-    name,
-    description: draft?.description ?? initDesc,
-    source: resolveDefaultsSource(Boolean(draft), initialValues),
-  };
-}
-
-function resolveDefaultsSource(
-  hasDraft: boolean,
-  initialValues: TaskCreateDialogInitialValues | undefined,
-) {
-  if (hasDraft) return "draft";
-  if (hasUserContent(initialValues)) return "initial-values";
-  return "empty";
-}
-
-function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
-  const remoteRepositories = seededRemoteRepositories(iv);
-  resetters.setDiscoveredRepositories([]);
-  resetters.setDiscoverReposLoaded(false);
-  if (resetters.resetRepositorySelections) {
-    resetters.resetRepositorySelections(repositorySelectionsFromInitialValues(iv));
-  } else {
-    resetters.setUseRemote(remoteRepositories.length > 0);
-    resetters.setRemoteRepos(remoteRepositories);
-  }
-  resetters.setUseRemote(remoteRepositories.length > 0);
-  resetters.setGitHubUrlError(null);
-  resetters.setFreshBranchEnabled(false);
-  resetters.setCurrentLocalBranch("");
-  resetters.setRemoteProviderReadiness?.({});
-  // The dialog stays mounted between opens, so without this the previous
-  // create's predecessor selection reappears on the next one.
-  resetters.setBlockedBy([]);
-}
 
 /** Hook to manage draft persistence for task creation dialog */
 function useDraftPersistence(
@@ -219,7 +93,30 @@ function useWorkflowAgentProfileState() {
  */
 function useTaskDependencyState() {
   const [blockedBy, setBlockedBy] = useState<string[]>([]);
-  return { blockedBy, setBlockedBy };
+  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | undefined>();
+  const [relatedTaskIds, setRelatedTaskIds] = useState<string[]>([]);
+  return {
+    blockedBy,
+    setBlockedBy,
+    selectedParentTaskId,
+    setSelectedParentTaskId,
+    relatedTaskIds,
+    setRelatedTaskIds,
+  };
+}
+
+function useTaskMCPSelectionState() {
+  const [builtinMCPPreferences, setBuiltinMCPPreferences] = useState<BuiltinMCPCreateDraft>();
+  const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
+  const [mcpServerIdsDirty, setMcpServerIdsDirty] = useState(false);
+  return {
+    mcpServerIds,
+    setMcpServerIds,
+    mcpServerIdsDirty,
+    setMcpServerIdsDirty,
+    builtinMCPPreferences,
+    setBuiltinMCPPreferences,
+  };
 }
 
 function useFreshBranchState() {
@@ -253,7 +150,11 @@ function useFormStateValues(workflowId: string | null) {
   const [openCycle, setOpenCycle] = useState(0);
   // Start as false so a fresh mount with open=true is detected as a rising edge
   // (callers like QuickTaskLauncher conditionally mount the dialog already-open).
-  const prevDialogRef = useRef({ open: false, workspaceId: null as string | null });
+  const prevDialogRef = useRef({
+    open: false,
+    workspaceId: null as string | null,
+    workflowId: null as string | null,
+  });
 
   // currentDefaults stores the loaded draft/initial values for this open cycle
   const [currentDefaults, setCurrentDefaults] = useState<{ name: string; description: string }>({
@@ -293,6 +194,8 @@ function useFormStateValues(workflowId: string | null) {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [remoteProviderReadiness, setRemoteProviderReadiness] =
     useState<TaskRemoteProviderReadinessMap>({});
+  const [initialWorkspaceLayout, setInitialWorkspaceLayout] =
+    useState<InitialWorkspaceLayout>("repository");
   return {
     taskName,
     setTaskName,
@@ -344,6 +247,8 @@ function useFormStateValues(workflowId: string | null) {
     setPriority,
     remoteProviderReadiness,
     setRemoteProviderReadiness,
+    initialWorkspaceLayout,
+    setInitialWorkspaceLayout,
   };
 }
 
@@ -380,6 +285,7 @@ export function useDialogFormState(
   useRemoteReposSeedEffect(ghUrl.useRemote, repos.remoteRepos, repos.setRemoteRepos);
   const freshBranch = useFreshBranchState();
   const dependencies = useTaskDependencyState();
+  const mcpSelections = useTaskMCPSelectionState();
   const branchesByUrl = useBranchesByURL(workspaceId);
   const prInfoByUrl = usePRInfoByURL(workspaceId);
 
@@ -394,36 +300,13 @@ export function useDialogFormState(
     prevDialogRef: form.prevDialogRef,
     lockedWorkflow,
     resetters: {
-      setBlockedBy: dependencies.setBlockedBy,
-      setTaskName: form.setTaskName,
-      setHasTitle: form.setHasTitle,
-      setHasDescription: form.setHasDescription,
-      setHasPendingAttachmentUploads: form.setHasPendingAttachmentUploads,
-      setRepositories: repos.setRepositories,
-      setRepositoriesDirty: repos.setRepositoriesDirty,
-      setRemoteRepos: repos.setRemoteRepos,
-      resetRepositorySelections: repos.resetRepositorySelections,
-      setAgentProfileId: form.setAgentProfileId,
-      setExecutorId: form.setExecutorId,
-      setExecutorProfileId: form.setExecutorProfileId,
-      setExecutorChoiceTouched: form.setExecutorChoiceTouched,
-      setAutomaticExecutorRestore: form.setAutomaticExecutorRestore,
-      setFolderOnlyExecutorNotice: form.setFolderOnlyExecutorNotice,
-      setSelectedWorkflowId: form.setSelectedWorkflowId,
-      setWorkflowAgentOverrides: form.setWorkflowAgentOverrides,
-      setFetchedSteps: form.setFetchedSteps,
-      setDiscoveredRepositories: discovery.setDiscoveredRepositories,
-      setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
-      setUseRemote: ghUrl.setUseRemote,
-      setGitHubUrlError: ghUrl.setGitHubUrlError,
-      setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
-      setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
-      setNoRepository: form.setNoRepository,
-      setPreferLocalExecutor: form.setPreferLocalExecutor,
-      setWorkspacePath: form.setWorkspacePath,
-      setAutopilot: form.setAutopilot,
-      setPriority: form.setPriority,
-      setRemoteProviderReadiness: form.setRemoteProviderReadiness,
+      ...dependencies,
+      ...mcpSelections,
+      ...form,
+      ...repos,
+      ...discovery,
+      ...ghUrl,
+      ...freshBranch,
     },
   });
 
@@ -461,6 +344,7 @@ export function useDialogFormState(
     ...repos,
     ...freshBranch,
     ...dependencies,
+    ...mcpSelections,
     branchesByUrl,
     prInfoByUrl,
     clearDraft,
@@ -610,6 +494,7 @@ export function useSessionRepoName(isSessionMode: boolean) {
 
 type TaskCreateDialogDataArgs = {
   open: boolean;
+  enabled?: boolean;
   workspaceId: string | null;
   workflowId: string | null;
   defaultStepId: string | null;
@@ -618,8 +503,24 @@ type TaskCreateDialogDataArgs = {
   agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
+function resolveLoadedWorkflowSnapshot(args: {
+  effectiveWorkflowId: string | null;
+  workspaceId: string | null;
+  workflows: Array<{ id: string; workspaceId?: string }>;
+  snapshots: Record<string, WorkflowSnapshotData>;
+}): WorkflowSnapshotData | null {
+  const { effectiveWorkflowId, workspaceId, workflows, snapshots } = args;
+  if (!effectiveWorkflowId || !workspaceId) return null;
+  const workflow = workflows.find((item) => item.id === effectiveWorkflowId);
+  if (!workflow || workflow.workspaceId !== workspaceId) return null;
+  const snapshot = snapshots[effectiveWorkflowId];
+  if (!snapshot || snapshot.isPlaceholder || snapshot.fetchFailed) return null;
+  return snapshot;
+}
+
 export function useTaskCreateDialogData({
   open,
+  enabled = true,
   workspaceId,
   workflowId,
   defaultStepId,
@@ -634,19 +535,6 @@ export function useTaskCreateDialogData({
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const workspaceSnapshotWorkspaceId = useAppStore(
-    (state) => state.workspaceContextRead.workspaceId,
-  );
-  const workspaceSnapshotPending = useAppStore(
-    (state) => state.workspaceContextRead.snapshotPending,
-  );
-  const workspaceSnapshotError = useAppStore((state) => state.workspaceContextRead.snapshotError);
-  const workspaceSnapshotRead = {
-    workspaceId: workspaceSnapshotWorkspaceId,
-    pending: workspaceSnapshotPending,
-    error: workspaceSnapshotError,
-  };
-  const refreshWorkspaceSnapshots = useAppStore((state) => state.requestWorkspaceContextRefresh);
   const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
@@ -683,14 +571,25 @@ export function useTaskCreateDialogData({
     userSettingsLoaded: taskCreateUserSettings.loaded,
     agentProfileRecentUseContext,
   });
+  const selectedWorkflowSteps = useTaskCreateWorkflowSteps({
+    open,
+    enabled,
+    workspaceId,
+    workflowId: computed.effectiveWorkflowId,
+    openCycle: fs.openCycle,
+    loadedSnapshot: resolveLoadedWorkflowSnapshot({
+      effectiveWorkflowId: computed.effectiveWorkflowId,
+      workspaceId,
+      workflows,
+      snapshots,
+    }),
+  });
   return {
     workflows,
     workspaces,
     agentProfiles,
     executors,
     snapshots,
-    workspaceSnapshotRead,
-    refreshWorkspaceSnapshots,
     repositories,
     repositoriesLoading,
     repositoriesLoaded,
@@ -699,5 +598,6 @@ export function useTaskCreateDialogData({
     taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,
     userSettingsLoaded: taskCreateUserSettings.loaded,
     computed,
+    selectedWorkflowSteps,
   };
 }

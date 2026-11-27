@@ -3,17 +3,20 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // terminalizeAfterPromotionRepo pauses the prompt claim after the session has
@@ -145,6 +148,22 @@ func (m *dispatchBoundaryAgentManager) PromptAgentWithDispatchCallback(
 	return result, nil
 }
 
+func (m *dispatchBoundaryAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+}
+
 func (r *terminalizeAfterPromotionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
 	r.mu.Lock()
 	r.getCalls++
@@ -235,7 +254,7 @@ func TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume(t *testing.T) {
 		repo:         barrierRepo,
 		logger:       testLogger(),
 		agentManager: agentMgr,
-		executor:     executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}),
+		executor:     withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})),
 		messageQueue: queue,
 	}
 	errCh := make(chan error, 1)
@@ -283,7 +302,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenPostClaimReloadFails(t *testin
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = failingRepo
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = queue
 	svc.turnService = &postClaimReloadErrorTurnService{
 		repoBackedTurnService: &repoBackedTurnService{repo: repo},
@@ -339,7 +358,7 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = barrierRepo
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageQueue = queue
 	svc.turnService = &terminalizeAfterPromptClaimTurnService{
 		repoBackedTurnService: &repoBackedTurnService{repo: repo},
@@ -372,15 +391,15 @@ func TestWorkflowAutoStartRollsBackPromptClaimWhenTerminalizedAfterClaim(t *test
 	}
 }
 
-func TestProcessOnEnterReplacesReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
-	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCompleted, true)
+func TestProcessOnEnterDoesNotReplaceCompletedSessionAfterPromptClaim(t *testing.T) {
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCompleted)
 }
 
 func TestProcessOnEnterPreservesCancelledReusedSessionTerminalizedAfterPromptClaim(t *testing.T) {
-	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCancelled, false)
+	testProcessOnEnterTerminalizedAfterPromptClaim(t, models.TaskSessionStateCancelled)
 }
 
-func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState models.TaskSessionState, wantReplacement bool) {
+func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState models.TaskSessionState) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-terminalized-replacement", "session-source", "step-source")
@@ -475,39 +494,11 @@ func testProcessOnEnterTerminalizedAfterPromptClaim(t *testing.T, terminalState 
 
 	sessions, err := repo.ListTaskSessions(ctx, source.TaskID)
 	requireNoError(t, err)
-	if !wantReplacement {
-		if len(sessions) != 2 {
-			t.Fatalf("session count = %d, want no replacement after cancellation", len(sessions))
-		}
-		stored, err := repo.GetTaskSession(ctx, target.ID)
-		requireNoError(t, err)
-		if stored.State != models.TaskSessionStateCancelled {
-			t.Fatalf("cancelled target state = %s, want CANCELLED", stored.State)
-		}
-		if len(launchPrompts) != 0 {
-			t.Fatalf("launch prompts = %#v, want no replacement launch after cancellation", launchPrompts)
-		}
-		return
-	}
-	if len(sessions) != 3 {
-		t.Fatalf("session count = %d, want replacement after terminalized reuse", len(sessions))
-	}
-	var replacement *models.TaskSession
-	for _, session := range sessions {
-		if session.ID != source.ID && session.ID != target.ID {
-			replacement = session
-			break
-		}
-	}
-	if replacement == nil || replacement.AgentProfileID != target.AgentProfileID || !replacement.IsPrimary {
-		t.Fatalf("replacement = %#v, want primary fresh target-profile session", replacement)
-	}
-	if isTerminalSessionState(replacement.State) {
-		t.Fatalf("replacement state = %s, want a nonterminal launched session", replacement.State)
-	}
-	if len(launchPrompts) == 0 || !strings.Contains(launchPrompts[len(launchPrompts)-1], "handoff") {
-		t.Fatalf("replacement launch prompts = %#v, want handoff delivery", launchPrompts)
-	}
+	require.Len(t, sessions, 2, "one accepted entry cannot allocate after terminalization")
+	stored, err := repo.GetTaskSession(ctx, target.ID)
+	requireNoError(t, err)
+	require.Equal(t, terminalState, stored.State)
+	require.Empty(t, launchPrompts, "terminalized route must not launch a replacement")
 }
 
 func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T) {
@@ -526,7 +517,7 @@ func TestWorkflowAutoStartReleasesTerminalGuardAfterPromptAdmission(t *testing.T
 		release:          make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- svc.autoStartStepPrompt(ctx, session.TaskID, session, &wfmodels.WorkflowStep{}, "review the task", false, false, nil)
@@ -642,9 +633,10 @@ func TestWorkflowAutoStartCreatedTerminalizedGuard(t *testing.T) {
 
 // terminalizeImplicitSwitchRepo pauses the implicit profile-switch goroutine
 // just before autoStartStepPrompt, so the test can terminalize the session
-// and assert the goroutine detects it and creates a replacement.
+// and assert the goroutine does not allocate again for the same entry.
 type terminalizeImplicitSwitchRepo struct {
 	sessionExecutorStore
+	taskMetadataCarryTaker
 	targetSessionID string
 	promptCalled    chan struct{} // closed when autoStartStepPrompt is about to run
 	allowPrompt     chan struct{} // close to let autoStartStepPrompt proceed
@@ -668,25 +660,23 @@ func (r *terminalizeImplicitSwitchRepo) GetTask(ctx context.Context, taskID stri
 }
 
 // TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard verifies that the
-// implicit profile-switch goroutine in processOnEnter's default branch detects
-// that a reused session has terminalized before dispatch and creates a
-// replacement session via createNewSessionForStep.
+// implicit profile-switch goroutine does not allocate another destination
+// when its recorded session terminalizes before dispatch.
 func TestProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, false)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, false)
 }
 
 func TestProcessOnEnterImplicitProfileSwitchPreservesCancellation(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false, false)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCancelled, false)
 }
 
 func TestProcessOnEnterImplicitProfileSwitchSurvivesCallerCancellation(t *testing.T) {
-	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true, true)
+	testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(t, models.TaskSessionStateCompleted, true)
 }
 
 func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	t *testing.T,
 	terminalState models.TaskSessionState,
-	wantReplacement bool,
 	cancelCaller bool,
 ) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -694,6 +684,13 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	assertCtx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-implicit-switch", "session-implicit-switch-source", "step-source")
+	const handoff = "Preserve this completion handoff."
+	const visiblePrompt = "Review @principles."
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	_, err := promptService.CreatePrompt(ctx, "principles", "Apply the repository principles.")
+	require.NoError(t, err)
+	_, promptReferenceContext := promptService.AppendReferenceExpansionsWithContext(ctx, visiblePrompt, nil)
+	require.NotEmpty(t, promptReferenceContext)
 
 	source, err := repo.GetTaskSession(ctx, "session-implicit-switch-source")
 	requireNoError(t, err)
@@ -723,10 +720,11 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	seedExecutorRunning(t, repo, target.ID, target.TaskID, "execution-implicit-switch")
 
 	barrierRepo := &terminalizeImplicitSwitchRepo{
-		sessionExecutorStore: repo,
-		targetSessionID:      target.ID,
-		promptCalled:         make(chan struct{}, 1),
-		allowPrompt:          make(chan struct{}),
+		sessionExecutorStore:   repo,
+		taskMetadataCarryTaker: repo,
+		targetSessionID:        target.ID,
+		promptCalled:           make(chan struct{}, 1),
+		allowPrompt:            make(chan struct{}),
 	}
 
 	agentMgr := &mockAgentManager{
@@ -753,16 +751,40 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 		WorkflowID:     "wf1",
 		Name:           "Target",
 		AgentProfileID: target.AgentProfileID,
-		Prompt:         "review the task",
+		Prompt:         visiblePrompt,
 		// No auto_start_agent — implicit profile switch path.
 	}
+	dbTask, err := repo.GetTask(ctx, source.TaskID)
+	requireNoError(t, err)
+	dbTask.WorkflowStepID = step.ID
+	requireNoError(t, repo.UpdateTask(ctx, dbTask))
+	seedHandoffCarryToken(t, repo, source.TaskID, step.ID, handoff, "implicit-switch-handoff")
 	stepGetter.steps[step.ID] = step
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.repo = barrierRepo
+	svc.promptExpander = promptService
+	core, logs := observer.New(zapcore.InfoLevel)
+	observed, err := logger.NewFromZap(zap.New(core))
+	requireNoError(t, err)
+	svc.logger = observed
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	type launchedPrompt struct {
+		sessionID  string
+		content    string
+		startAgent bool
+	}
+	launches := make(chan launchedPrompt, 8)
+	agentMgr.launchAgentFunc = func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launches <- launchedPrompt{
+			sessionID: request.SessionID, content: request.TaskDescription, startAgent: request.StartAgent,
+		}
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-implicit-replacement"}, nil
+	}
 
 	done := make(chan struct{})
 	go func() {
-		svc.processOnEnter(ctx, source.TaskID, source, step, "Test", 0, stepGetter.steps["step-source"])
+		svc.processOnEnter(ctx, source.TaskID, source, step, visiblePrompt, 0, stepGetter.steps["step-source"])
 		close(done)
 	}()
 
@@ -776,50 +798,22 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	close(barrierRepo.allowPrompt)
 
 	<-done
-
-	if !wantReplacement {
-		require.Eventually(t, func() bool {
-			sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
-			if err != nil || len(sessions) != 2 {
-				return false
-			}
-			stored, err := repo.GetTaskSession(assertCtx, target.ID)
-			return err == nil && stored.State == models.TaskSessionStateCancelled
-		}, 5*time.Second, 50*time.Millisecond, "expected cancellation to prevent a replacement session")
-		return
+	completionMessage := "failed to create replacement after terminalized profile switch"
+	if terminalState == models.TaskSessionStateCancelled {
+		completionMessage = "implicit profile switch cancelled before dispatch; not creating replacement"
 	}
-
-	// The inner goroutine (implicit profile switch) must finish before we can
-	// assert on its results. Wait on a progress observation: the replacement
-	// session appearing as primary in the database.
-	var replacement *models.TaskSession
 	require.Eventually(t, func() bool {
-		sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
-		if err != nil || len(sessions) != 3 {
-			return false
-		}
-		for _, s := range sessions {
-			if s.ID != source.ID && s.ID != target.ID && s.IsPrimary {
-				replacement = s
-				return true
-			}
-		}
-		return false
-	}, 5*time.Second, 50*time.Millisecond, "expected a primary replacement session to appear")
-
-	if isTerminalSessionState(replacement.State) {
-		t.Fatalf("replacement state = %s, want nonterminal", replacement.State)
-	}
-	// The terminalized target must remain in its COMPLETED state.
+		return logs.FilterMessage(completionMessage).Len() == 1
+	}, 10*time.Second, 10*time.Millisecond, "implicit replacement attempt did not finish")
+	sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
 	finalTarget, err := repo.GetTaskSession(assertCtx, target.ID)
-	requireNoError(t, err)
-	if finalTarget.State != models.TaskSessionStateCompleted {
-		t.Errorf("terminalized target state = %s, must remain COMPLETED", finalTarget.State)
-	}
-	// The source session (the previous current session) must not be primary.
+	require.NoError(t, err)
+	require.Equal(t, terminalState, finalTarget.State)
 	finalSource, err := repo.GetTaskSession(assertCtx, source.ID)
-	requireNoError(t, err)
-	if finalSource.IsPrimary {
-		t.Error("source session must not be primary after the implicit switch")
-	}
+	require.NoError(t, err)
+	require.False(t, finalSource.IsPrimary)
+	require.Empty(t, launches)
+	require.Empty(t, messages.userMessages)
 }

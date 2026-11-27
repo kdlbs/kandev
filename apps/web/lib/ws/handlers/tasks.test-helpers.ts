@@ -53,6 +53,7 @@ export function makeStore(initial: Partial<AppState> = {}) {
     upsertQuickChatSessionFromEvent: vi.fn(),
     removeQuickChatSessionsForTask: vi.fn(),
     clearQueueStatus: vi.fn(),
+    removeTaskSession: vi.fn(),
     ...initial,
   } as unknown as AppState;
 

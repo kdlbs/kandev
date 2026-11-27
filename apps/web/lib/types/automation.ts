@@ -1,3 +1,29 @@
+import type { BuiltinMCPPackage, BuiltinMCPDescriptor } from "./builtin-mcp";
+import type { BackendMessage } from "./backend-message";
+
+/** Workspace-scoped notice that a run row was recorded. Identifiers only. */
+export type AutomationRunCreatedPayload = {
+  workspace_id: string;
+  automation_id: string;
+  run_id: string;
+  status: string;
+};
+
+export type AutomationBackendMessageMap = {
+  "automation.run.created": BackendMessage<"automation.run.created", AutomationRunCreatedPayload>;
+};
+
+export type AutomationMCPSelection = {
+  builtin_packages: BuiltinMCPPackage[];
+  definition_ids: string[];
+};
+export type AutomationMCPOptions = {
+  packages: BuiltinMCPDescriptor[];
+  definitions: { id: string; name: string; enabled: boolean }[];
+  inherited: { id: string; name: string; origins: string[] }[];
+  task_defaults: BuiltinMCPPackage[];
+  task_blocked: BuiltinMCPPackage[];
+};
 // Automation types matching backend models in internal/automation/models.go
 
 export type TriggerType =
@@ -7,27 +33,112 @@ export type TriggerType =
   | "github_push"
   | "github_ci"
   | "webhook"
-  | "plugin_event";
+  | "plugin_event"
+  | "manual";
+
+export type RetryMode = "disabled" | "finite" | "infinite";
+export type RetryBackoff = "fixed" | "exponential";
+export type RetryHistoryMode = "attempts" | "timeline";
+
+export type RetryPolicy = {
+  mode: RetryMode;
+  max_retries: string;
+  delay_seconds: string;
+  backoff: RetryBackoff;
+  history_mode: RetryHistoryMode;
+};
 
 export type RunStatus =
   | "triggered"
   | "task_created"
+  | "scheduled_retry"
+  | "retry_scheduling_failed"
   | "succeeded"
   | "failed"
   | "skipped"
   | "archived"
   | "cancelled";
+export type ManagedDeliveryStatus =
+  | "pending_delivery"
+  | "accepted"
+  | "running"
+  | "completed"
+  | "failed"
+  | "paused"
+  | "uncertain"
+  | "unavailable";
 
-export type ContinuationPolicy = "new_task" | "reuse_thread";
-export type TaskMode = "automation_run" | "normal_task";
+export type ContinuationPolicy = "new_task" | "reuse_thread" | "reuse_per_pr";
+
+/** What happens to a per-PR task when its pull request ends. */
+export type PREndAction = "keep" | "archive" | "delete";
+
+/** reuse_per_pr options; empty or keep for every other policy. */
+export type PRContinuationSettings = {
+  follow_up_prompt?: string;
+  pr_continuation_step_id?: string;
+  pr_merged_action?: PREndAction;
+  pr_closed_action?: PREndAction;
+};
+export type TaskMode = "automation_run" | "normal_task" | "managed_conversation";
 export type RepositoryMode = "workspace_default" | "selected" | "none";
+
+export type ManagedConversationDestination = {
+  plugin_id: string;
+  instance_key: string;
+  revision: number;
+};
+
+export type ManagedConversationDestinationOption = ManagedConversationDestination & {
+  plugin_name: string;
+  paused: boolean;
+  unavailable_reason?: string;
+};
 
 export type AutomationRepository = {
   repository_id: string;
   base_branch: string;
 };
 
-export type Automation = {
+/**
+ * Exact plugin tool approval saved for one private automation. The policy
+ * version binds it to the installed plugin configuration displayed at save
+ * time; a plugin update or configuration change requires review.
+ */
+export type AutomationPluginToolSelection = {
+  plugin_id: string;
+  installation_id: string;
+  policy_version: string;
+  tool_names: string[];
+};
+
+export type AutomationPluginToolOption = {
+  local_name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
+  read_only_hint: boolean;
+  destructive_hint: boolean;
+  idempotent_hint: boolean;
+  open_world_hint: boolean;
+};
+
+export type AutomationPluginToolGroup = {
+  plugin_id: string;
+  display_name: string;
+  version: string;
+  installation_id: string;
+  policy_version: string;
+  tools: AutomationPluginToolOption[];
+};
+
+export type AutomationPluginToolOptionsResponse = {
+  groups: AutomationPluginToolGroup[];
+};
+
+export type Automation = PRContinuationSettings & {
+  mcp_selection?: AutomationMCPSelection | null;
+  mcp_selection_revision?: number;
   id: string;
   workspace_id: string;
   name: string;
@@ -46,6 +157,10 @@ export type Automation = {
   max_concurrent_runs: number;
   /** How later firings get their task and conversation context. */
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
+  retry_policy?: RetryPolicy;
+  /** Exact plugin tools approved by the last native editor save. */
+  plugin_tools?: AutomationPluginToolSelection[];
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -86,24 +201,39 @@ export type AutomationRun = {
   trigger_data: Record<string, unknown>;
   error_message: string;
   created_at: string;
+  retry_group_id?: string;
+  retry_parent_run_id?: string;
+  attempt_number?: number;
+  retry_state?:
+    | "none"
+    | "scheduled"
+    | "claimed"
+    | "triggered"
+    | "superseded"
+    | "exhausted"
+    | "completed"
+    | "cancelled"
+    | "scheduling_failed";
+  retry_scheduled_at?: string | null;
+  retry_failure_phase?: string;
+  retry_failure_class?: string;
   /** Tail of the agent's last message on the generated task, truncated server-side. */
   summary?: string;
-  /**
-   * The run's conversation. Absent when the run never produced a task or the
-   * task is gone — the detail view mounts its transcript from this, so a run
-   * without one is reported rather than offered as something to open.
-   */
   session_id?: string;
-  /** Exact provider turn represented by this run when a session is shared. */
   turn_id?: string;
+  delivery_status?: ManagedDeliveryStatus;
   thread_action?: "created" | "resumed" | "replaced";
   thread_reason?: string;
-  /** Snapshot of the rendered task title at admission time. */
   display_title?: string;
   /** Why the webhook dedup key ended up empty (unresolved/not configured). Empty when a key was resolved. */
   dedup_reason?: string;
   /** Why the webhook repository selector produced no binding. Empty when a repository was bound. */
   repository_reason?: string;
+};
+
+export type AutomationRunsPage = {
+  items: AutomationRun[];
+  next_cursor?: string;
 };
 
 /**
@@ -124,11 +254,30 @@ export type WorkspaceAutomationRun = AutomationRun & {
  * row claims it has never run. The server answers per automation instead, so a
  * row's two claims do not depend on how noisy its neighbours are.
  */
+export type PendingRetrySummary = {
+  count: number;
+  items: AutomationRun[];
+  limit: number;
+};
+
+export type RetryHistoryAttempt = {
+  retry_group_id: string;
+  trigger_ids: string[];
+  attempts: AutomationRun[];
+  completed: boolean;
+};
+
+export type RetryHistoryPage = {
+  scope: string;
+  items: RetryHistoryAttempt[];
+  next_cursor?: string;
+  high_water_mark: string;
+};
+
 export type AutomationSummary = {
   automation_id: string;
-  /** Open under the same definition the concurrency cap uses. */
   open_runs: number;
-  /** Absent when the automation has never run, or its runs were all deleted. */
+  pending_retries?: PendingRetrySummary;
   last_run?: AutomationRun;
 };
 
@@ -146,6 +295,9 @@ export type GitHubPRTriggerConfig = {
   authors?: string[];
   labels?: string[];
   exclude_draft?: boolean;
+  quiet_period_minutes?: number;
+  reviewers?: string[];
+  include_existing_prs?: boolean;
 };
 
 export type GitHubPushTriggerConfig = {
@@ -222,10 +374,12 @@ export type TriggerTypeInfo = {
 
 // --- Request/response DTOs ---
 
-export type CreateAutomationRequest = {
+export type CreateAutomationRequest = PRContinuationSettings & {
+  mcp_selection?: AutomationMCPSelection;
   workspace_id: string;
   name: string;
   description?: string;
+  enabled?: boolean;
   workflow_id: string;
   workflow_step_id: string;
   agent_profile_id: string;
@@ -236,8 +390,11 @@ export type CreateAutomationRequest = {
   task_title_template?: string;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
+  retry_policy?: RetryPolicy;
+  plugin_tools?: AutomationPluginToolSelection[];
   triggers?: Array<{
     type: TriggerType;
     config: Record<string, unknown>;
@@ -245,7 +402,9 @@ export type CreateAutomationRequest = {
   }>;
 };
 
-export type UpdateAutomationRequest = {
+export type UpdateAutomationRequest = PRContinuationSettings & {
+  mcp_selection?: AutomationMCPSelection;
+  expected_mcp_selection_revision?: number;
   name?: string;
   description?: string;
   workflow_id?: string;
@@ -259,8 +418,11 @@ export type UpdateAutomationRequest = {
   enabled?: boolean;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
+  retry_policy?: RetryPolicy;
+  plugin_tools?: AutomationPluginToolSelection[];
 };
 
 // CreateAutomationResponse mirrors the backend's one-time webhook secret

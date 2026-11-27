@@ -4,10 +4,11 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-08-17
+updated: 2026-10-20
 owners:
   - cfl
 ---
+
 # Dynamic Agent Routing System Design Part 1
 
 ## Purpose and boundaries
@@ -16,9 +17,75 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| Requirement                                                                      | Design section                                                                |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`                                           | [Migrated source detail](#migrated-source-detail)                             |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9`) | [Standalone settings save publication](#standalone-settings-save-publication) |
+
+## Standalone settings save publication
+
+Agents owns profile values and their shared picker projection. Platform's
+[editor reconciliation contract](../../platform/system-design/agent-settings-parity.md#editor-reconciliation)
+owns the existing draft, acknowledgement, conflict, and settings-save interface
+behavior. This section covers collection publication after one standalone
+dynamic-profile save; it adds no server concurrency or owner-lifetime policy.
+
+`AgentProfilePage` renders `DynamicAgentProfileEditor`, whose
+`useDynamicAgentProfileEditorState` registers the standalone save with
+`useSettingsSaveContributor`. `updateAgentProfileAction` sends the existing
+PATCH and returns the canonical `normalizeAgentProfile` result. While that
+request is pending, registered `agent.profile.created`, `agent.profile.updated`,
+and `agent.profile.deleted` handlers can change `settingsAgents.items` and
+`agentProfiles.items` in the same app store. An option can be present even when
+its Settings owner is absent.
+
+After the awaited response, obtain the current store through `useAppStoreApi`.
+Build the next agent list from that current `settingsAgents.items`, replacing
+only the response's existing profile under the editor's existing owner.
+Compare the response against the current matching profile using
+`isProfileRevisionNewer`; preserve a newer current revision. That predicate
+uses `compareTimestamps` and the established editable-snapshot equality rule
+for equal timestamps. Do not substitute lexical timestamp ordering or a new
+dynamic-version arbitration rule. An identical response needs no replacement.
+
+Map only existing rows. If the owner or matching profile is absent at response
+time, do not synthesize it from captured props or append the response. This is
+a bounded absence behavior, not a cross-owner movement or resurrection policy.
+If a same-profile option survives without a Settings row, preserve the current
+option through existing option reconciliation; do not reconstruct its owner.
+
+Publish the next list and reconcile flattened options against the current
+`agentProfiles.items` using `reconcileAgentProfileOptions` from
+`agent-profile-page-state.ts`, directly or through its existing
+`useSyncAgentsToStore` helper. Its `mergeOptionsByNewest` preserves all IDs not
+represented by the rebuild and selects the newer timestamp per represented ID;
+equal or missing timestamps retain the established rebuilt-option tie behavior.
+The map uses the latest agent list, so a deleted unrelated profile contributes
+no rebuilt option and cannot reappear from a captured list. Preserve newer
+flattened options even when their represented Settings snapshot is older.
+Keep this response-publication sequence synchronous after the current-state
+read, without another awaited step or a new synchronization framework.
+
+Continue passing the response and submitted snapshot to the existing draft
+acknowledgement path. Candidate policies, version submission, dirty revision,
+edits made during the request, external conflict recovery, toast/error handling,
+and saving cleanup retain their existing semantics. Rejection publishes no
+collection. An embedded editor with `onDraftChange` remains parent-owned and
+does not submit or publish a standalone save. The current coordinator's policy
+validation gate remains in force.
+
+Desktop and phone consume this same state path. No markup, copy, layout, touch,
+navigation, scroll, or breakpoint change is required; a real-state component
+regression with the rendered `AgentProfilePicker` covers the state-only mobile
+parity exception. Use the existing dynamic-routing feature opt-in in tests;
+the flag registry, profiles, defaults, and release policy are unchanged.
+
+The focused delivery is [Preserve profiles during dynamic saves](../../../plans/preserve-dynamic-profile-saves/plan.md).
+Its real-provider/coordinator/registered-WS regressions cover concurrent
+unrelated create/update/delete, mixed represented and unrepresented options,
+retained picker labels, newer target revisions, absence, and the existing ACK,
+failure, policy-validation, and embedded-draft controls. This repair does not
+rewrite concrete-profile saves or add a caller for `useProfileEnabledToggle`.
 
 ## Migrated source detail
 
@@ -61,12 +128,22 @@ its work through complete existing agent profiles.
 - Kandev always registers one built-in virtual agent family with canonical ID
   `dynamic` and display name Dynamic. It cannot be disabled or uninstalled,
   does not expose a CLI command, and is not probed as a concrete inference
-  agent. Profiles created under it have kind `dynamic`.
+  agent. Profiles created under it have kind `dynamic`. Every lifecycle launch
+  path resolves its agent through one helper that rejects the virtual family
+  with `ErrVirtualProfile`, so a virtual agent never reaches command building.
 - Agent settings can create a dynamic profile with a user-defined name,
   description, icon, and availability scope.
 - A dynamic profile references existing concrete agent profiles. It never
   copies or merges their credentials, environment, model, ACP options, flags,
   permissions, passthrough behavior, or MCP configuration.
+- Switching concrete candidates clears the previous provider's observed
+  `runtime_config` and `session_mode` metadata in the same revision-guarded
+  write as the route projection, under the session settings lock. Explicit
+  `runtime_config_overrides` survive, and the current workflow step's declared
+  `set_session_mode` is restored. Same-candidate retries keep their settings.
+  Mode and model events whose execution profile differs from the session's
+  current concrete profile are stale. A changed session revision rejects the
+  switch instead of overwriting newer state.
 - A dynamic profile's candidate list can reference only concrete, launchable
   profiles. It cannot reference itself, another dynamic profile, or a rich
   Office identity in the first version. An Office identity's separate
@@ -190,6 +267,12 @@ its work through complete existing agent profiles.
   mappings.
 - Office run, dashboard, and inbox surfaces can show route status and recovery
   actions, but they do not edit routing policy.
+- Before removing workspace provider routing, carry the
+  [Office author-provider exclusion](../../office/requirements/review-author-provider-exclusion.md)
+  into the shared resolver. Preserve its run events and route attempt records.
+  Move **Review on a different provider** to the replacement settings surface.
+  Retire the `agent_bound_profile` warning once the shared resolver enforces
+  the rule for profile-bound agents.
 
 ### Route selection
 
@@ -209,8 +292,9 @@ a validated near reset, retry the same candidate with a bounded exponential
 schedule, and then either skip to the next candidate or stop. Exact policy
 fields, ordering, legacy normalization, validation, and unknown-error behavior
 are owned by [Provider Error Recovery](../../platform/requirements/provider-error-recovery.md).
-Unknown, ambiguous, stale, or effect-unsafe failures always stop automatic
-recovery even if a class policy would retry or skip.
+Unknown failures stop automatic recovery except for the opt-in
+[repeated-failure extension](dynamic-unclassified-fallback.md).
+Ambiguous, stale, or effect-unsafe failures always stop automatic recovery.
 
 If no candidate is eligible, the task remains assigned to the dynamic profile
 and enters a visible waiting or action-required state. It is not reassigned to a
@@ -297,9 +381,9 @@ parameters.
 The frontend applies route and capability changes by generation. It discards
 late events from a previous downstream session, inserts a localized system row
 for the structured reason, and replaces rather than merges provider-specific
-  controls. The tab and message composer remain mounted. Route-change rows are
-  durable and appear after reload. The current controls describe the active
-  concrete route. They do not change the logical author shown on earlier turns.
+controls. The tab and message composer remain mounted. Route-change rows are
+durable and appear after reload. The current controls describe the active
+concrete route. They do not change the logical author shown on earlier turns.
 
 ### Shared health and probing
 
@@ -336,6 +420,9 @@ for the structured reason, and replaces rather than merges provider-specific
 - At the deadline, one worker acquires a half-open probe lease. Other tasks keep
   using alternatives or wait. Probe success closes the circuit, failure extends
   its backoff.
+- Shared circuits use the default ladder and retained failure count described
+  in [dynamic circuit backoff](dynamic-circuit-backoff.md). The dynamic-agent
+  feature gate controls execution; there is no separate backoff toggle.
 - Recovery affects future route selection. A healthy active fallback session is
   not interrupted when an earlier candidate recovers.
 
@@ -445,6 +532,10 @@ and never derive historical attribution from current session state.
   returns the current route snapshot. A stale generation returns a conflict
   with the authoritative snapshot. An action during an active turn returns a
   failed-precondition response.
+  The browser applies an action response against the current session row. A
+  session projection received after the request owns the same or a newer route
+  generation; a delayed action response cannot replace that projection. The
+  response must not recreate a removed session or invent a session timestamp.
 - Route events use the contracts described above. All route-scoped user actions
   include the expected generation so a stale Retry now or Skip now action cannot
   affect a successor route.
@@ -452,6 +543,10 @@ and never derive historical attribution from current session state.
   Office read models consume shared route status by task-session or run ID.
 
 ## Delivery and rollout
+
+This section records the initial gated delivery. The later
+[graduation design](dynamic-routing-graduation.md) owns default-on promotion and
+retirement after the base implementation plan is complete.
 
 - The feature is guarded by `features.dynamicAgentRouting` and
   `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING`. The backend is authoritative and

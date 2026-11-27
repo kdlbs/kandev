@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { dwell } from "../../helpers/causal-waits";
 import {
@@ -25,7 +26,10 @@ test.describe.serial("opt-in authentication", () => {
   const MEMBER = { email: "member@e2e.dev", password: "memberpass123", displayName: "Member" };
 
   test.beforeAll(async ({ backend }) => {
-    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
+    await backend.restart({
+      KANDEV_FEATURES_AUTH: "true",
+      KANDEV_DATABASE_PATH: path.join(backend.tmpDir, "kandev-auth-lifecycle.db"),
+    });
   });
 
   test.afterAll(async ({ backend }) => {

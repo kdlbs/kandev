@@ -22,7 +22,9 @@ var (
 		supervisor.attachSignals()
 	}
 	startParentWatchFn = func(supervisor *processSupervisor) *parentWatchdog {
-		watchdog := newParentWatchdogFromEnv(supervisor.shutdown, launcherExit)
+		watchdog := newParentWatchdogFromEnv(func(reason string) {
+			supervisor.shutdown(reason)
+		}, launcherExit)
 		watchdog.start()
 		return watchdog
 	}
@@ -82,6 +84,7 @@ type managedAppConfig struct {
 	Mode       string
 	Backend    string
 	BackendCWD string
+	BundleDir  string
 	Ports      portConfig
 	LogLevel   string
 	Opts       Options
@@ -149,7 +152,11 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	env := backendEnvForConfig(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken, nil, cfg.Startup)
+	var extraEnv []string
+	if cfg.BundleDir != "" {
+		extraEnv = append(extraEnv, "KANDEV_BUNDLE_DIR="+cfg.BundleDir)
+	}
+	env := backendEnvForConfig(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken, extraEnv, cfg.Startup)
 	backend, dumpLogs, err := launchBackendFn(backendLaunchConfig{
 		Command:    cfg.Backend,
 		Args:       []string{"__backend"},

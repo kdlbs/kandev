@@ -88,16 +88,13 @@ export function taskColorPresentation(token: FixedAutomaticTaskColor): TaskMarke
   return { token, className: AUTOMATIC_TASK_COLOR_BAR_CLASS[token] };
 }
 
-export function fixedAutomaticTaskColor(token: FixedAutomaticTaskColor): TaskMarkerPresentation {
-  return taskColorPresentation(token);
-}
-
 /** Maps persisted workflow color data to a safe marker presentation. */
 export function parseWorkflowStepColor(value: string | undefined): TaskMarkerPresentation {
   if (!value) return taskColorPresentation("gray");
   const hex = value.match(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/);
   if (hex) return { token: "custom", style: { backgroundColor: hex[0] } };
 
-  const token = WORKFLOW_CLASS_TOKEN[value] ?? WORKFLOW_COLOR_TOKEN[value.toLowerCase()];
+  const normalized = value.toLowerCase();
+  const token = WORKFLOW_CLASS_TOKEN[normalized] ?? WORKFLOW_COLOR_TOKEN[normalized];
   return token ? taskColorPresentation(token) : taskColorPresentation("gray");
 }

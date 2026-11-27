@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 
 /**
@@ -11,6 +12,16 @@ import { KanbanPage } from "../../pages/kanban-page";
  * the per-watch poller-driven cleanup against the auto policy.
  */
 test.describe("PR watcher cleanup policy", () => {
+  let originalStepIds: string[] = [];
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    const { steps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    originalStepIds = steps.map((step) => step.id).sort();
+  });
+  test.afterEach(async ({ apiClient, seedData }) => {
+    const { steps } = await apiClient.listWorkflowSteps(seedData.workflowId);
+    expect(steps.map((step) => step.id).sort()).toEqual(originalStepIds);
+  });
+
   /**
    * Auto-started review tasks used to be preserved forever because the
    * auto-start prompt itself counted as user activity. The fix tags those
@@ -158,10 +169,11 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Keep Inbox", 0);
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Keep Cleanup Workflow");
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Keep Inbox", 0);
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       {
@@ -182,7 +194,7 @@ test.describe("PR watcher cleanup policy", () => {
       .toBeTruthy();
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(workflow.id);
     await expect(kanban.taskCardByTitle("PR #501: Keep me forever")).toBeVisible({
       timeout: 15_000,
     });
@@ -304,6 +316,12 @@ test.describe("PR watcher cleanup policy", () => {
     // the task. Under always-policy it should NOT.
     const { sessions } = await apiClient.listTaskSessions(prTask!.id);
     expect(sessions.length).toBeGreaterThan(0);
+    await waitForSessionState(apiClient, {
+      taskId: prTask!.id,
+      sessionId: sessions[0].id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the automatic review prompt before submitting a user message",
+    });
     await apiClient.addUserMessage(prTask!.id, sessions[0].id, "wait, hold on");
 
     await apiClient.mockGitHubAddPRs([
@@ -357,10 +375,14 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Orphan Inbox", 0);
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Orphan Cleanup Workflow",
+    );
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Orphan Inbox", 0);
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       { repos: [{ owner: "testorg", name: "testrepo" }] },
@@ -378,7 +400,7 @@ test.describe("PR watcher cleanup policy", () => {
       .toBeTruthy();
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(workflow.id);
     await expect(kanban.taskCardByTitle("PR #701: Orphan via disabled watch")).toBeVisible({
       timeout: 15_000,
     });
@@ -436,10 +458,14 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Cascade Inbox", 0);
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Cascade Cleanup Workflow",
+    );
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Cascade Inbox", 0);
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       { repos: [{ owner: "testorg", name: "testrepo" }] },
@@ -457,7 +483,7 @@ test.describe("PR watcher cleanup policy", () => {
       .toBeTruthy();
 
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(workflow.id);
     await expect(kanban.taskCardByTitle("PR #801: Cascade-delete me")).toBeVisible({
       timeout: 15_000,
     });
@@ -500,10 +526,11 @@ test.describe("PR watcher cleanup policy", () => {
       },
     ]);
 
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Drain Inbox", 0);
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Drain Cleanup Workflow");
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Drain Inbox", 0);
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       { repos: [{ owner: "testorg", name: "testrepo" }] },
@@ -543,7 +570,9 @@ test.describe("PR watcher cleanup policy", () => {
     await cleanupButton.click();
 
     // Toast surfaces the deletion count.
-    await expect(testPage.getByText(/deleted 1 task/i)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /deleted 1 task/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
     expect(tasks.find((t) => t.title.includes("PR #901"))).toBeUndefined();

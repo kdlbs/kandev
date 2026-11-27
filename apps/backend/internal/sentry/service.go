@@ -60,11 +60,12 @@ func (e ErrInstanceInUse) Error() string {
 // Service orchestrates Sentry instance storage, the per-instance cached client,
 // and the browse operations used by the HTTP handlers.
 type Service struct {
-	store    *Store
-	secrets  SecretStore
-	log      *logger.Logger
-	mu       sync.Mutex
-	clientFn ClientFactory
+	executorContext func(context.Context, string, string) (context.Context, error)
+	store           *Store
+	secrets         SecretStore
+	log             *logger.Logger
+	mu              sync.Mutex
+	clientFn        ClientFactory
 	// clients caches one Client per instance ID.
 	clients map[string]Client
 	// clientGen is incremented by invalidateClient each time a cached client

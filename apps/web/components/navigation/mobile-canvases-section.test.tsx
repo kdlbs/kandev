@@ -17,6 +17,9 @@ it("keeps the disclosure target present and hidden until expanded", () => {
       onNavigate={() => {}}
     />,
   );
+  expect(screen.getByTestId("mobile-workspace-canvases-settings").getAttribute("href")).toBe(
+    "/settings/workspaces/workspace/canvases",
+  );
   const toggle = screen.getByRole("button", { name: "Canvases" });
   const panelId = toggle.getAttribute("aria-controls");
   expect(panelId).toBeTruthy();
@@ -30,4 +33,31 @@ it("keeps the disclosure target present and hidden until expanded", () => {
   fireEvent.click(toggle);
   expect(document.getElementById(panelId!)).toBe(panel);
   expect(panel?.hidden).toBe(true);
+});
+
+it("keeps the canvas row test id stable inside the disclosure", () => {
+  render(
+    <MobileCanvasesSection
+      workspaceId="workspace"
+      entries={[
+        {
+          target: { kind: "canvas", id: "canvas-1" },
+          label: "Canvas one",
+          href: "/canvases/canvas-1",
+          source: "canvas",
+          available: true,
+        },
+      ]}
+      loading={false}
+      error={null}
+      onRetry={() => {}}
+      onNavigate={() => {}}
+    />,
+  );
+
+  const toggle = screen.getByRole("button", { name: "Canvases" });
+  fireEvent.click(toggle);
+  expect(screen.getByTestId("mobile-workspace-canvas-canvas-1").getAttribute("href")).toBe(
+    "/canvases/canvas-1",
+  );
 });

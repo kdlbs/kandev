@@ -15,6 +15,7 @@ pub const MENU_ZOOM_IN_EQUALS: &str = "desktop.v1.zoom-in-equals";
 pub const MENU_ZOOM_OUT: &str = "desktop.v1.zoom-out";
 pub const MENU_ZOOM_RESET: &str = "desktop.v1.zoom-reset";
 pub const MENU_FULLSCREEN: &str = "desktop.v1.fullscreen";
+pub const MENU_DEVELOPER_TOOLS: &str = "desktop.v1.developer-tools";
 pub const MENU_QUIT: &str = "desktop.v1.quit";
 pub const MENU_HELP_DOCS: &str = "desktop.v1.help-docs";
 pub const MENU_HELP_REPOSITORY: &str = "desktop.v1.help-repository";
@@ -25,6 +26,11 @@ const ZOOM_STEP: f64 = 0.1;
 const MIN_ZOOM: f64 = 0.5;
 const MAX_ZOOM: f64 = 2.0;
 
+#[cfg(target_os = "macos")]
+pub const DEVELOPER_TOOLS_ACCELERATOR: &str = "Cmd+Alt+KeyI";
+#[cfg(not(target_os = "macos"))]
+pub const DEVELOPER_TOOLS_ACCELERATOR: &str = "Ctrl+Shift+KeyI";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     Emit(&'static str),
@@ -32,6 +38,7 @@ pub enum MenuAction {
     ZoomOut,
     ZoomReset,
     Fullscreen,
+    DeveloperTools,
     Quit,
     HelpDocs,
     HelpRepository,
@@ -48,6 +55,7 @@ pub fn menu_action(id: &str) -> Option<MenuAction> {
         MENU_ZOOM_OUT => Some(MenuAction::ZoomOut),
         MENU_ZOOM_RESET => Some(MenuAction::ZoomReset),
         MENU_FULLSCREEN => Some(MenuAction::Fullscreen),
+        MENU_DEVELOPER_TOOLS => Some(MenuAction::DeveloperTools),
         MENU_QUIT => Some(MenuAction::Quit),
         MENU_HELP_DOCS => Some(MenuAction::HelpDocs),
         MENU_HELP_REPOSITORY => Some(MenuAction::HelpRepository),
@@ -104,6 +112,24 @@ mod tests {
             Some(MenuAction::Emit(CLOSE_CONTEXT_EVENT))
         );
         assert!(CLOSE_CONTEXT_EVENT.starts_with(DESKTOP_EVENT_PREFIX));
+    }
+
+    #[test]
+    fn developer_tools_id_resolves_to_a_native_action() {
+        assert_eq!(
+            menu_action("desktop.v1.developer-tools"),
+            Some(MenuAction::DeveloperTools)
+        );
+    }
+
+    #[test]
+    fn developer_tools_uses_the_platform_accelerator() {
+        let expected = if cfg!(target_os = "macos") {
+            "Cmd+Alt+KeyI"
+        } else {
+            "Ctrl+Shift+KeyI"
+        };
+        assert_eq!(DEVELOPER_TOOLS_ACCELERATOR, expected);
     }
 
     #[test]

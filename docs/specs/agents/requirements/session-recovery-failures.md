@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-18
+updated: 2026-11-17
 owners:
   - Kandev
 ---
@@ -17,10 +17,7 @@ retain durable bootstrap error and contribution-admission ownership.
 
 ## Requirements
 
-The recovery amendments are implemented in the
-[contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md).
-The package records the implementation and browser/regression verification
-results, including the shared recovery owner and phone touch-target checks.
+[Contribution recovery implementation](../../../plans/contribution-resume-recovery/plan.md).
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005: Workspace access after failed startup
 
@@ -42,7 +39,7 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.1:** When the same failure appears in automatic recovery, session state, and the transcript, the selected session shall show one active recovery card. An equivalent top banner, stopped-session warning, or synthetic agent error shall not repeat it.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.2:** The card shall show a localized cause summary, valid actions, and one initially collapsed details disclosure. Resume and restore causes shall have separate labels and bounded, sanitized details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.3:** A failure before agent startup shall be described as startup or recovery failure. It shall not state that the agent encountered an error while working.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall show pending state on the error entry and disable equivalent actions. Successful resume shall retire its actions without removing history. Workspace-only success shall retain the stopped-agent notice.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Pending recovery shall show an aligned grid spinner and readable operation label before disabled recovery actions. Resume success shall retire actions and retain history. Workspace-only success shall retain the stopped-agent notice.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall show the session error at its chronological position in the transcript. Normal message scrolling shall govern initial placement, pagination, and new entries. Errors shall not force a separate scroll position. Recovery actions and the composer shall remain reachable on desktop and phone.
@@ -52,21 +49,73 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.10:** A recoverable failure that occurs after agent startup, such as a model provider rejecting a dispatched prompt, shall carry the same bounded, sanitized failure detail in its initially collapsed details disclosure as bootstrap and managed-runtime failures do. The detail shall be sanitized of URLs, credentials, and identifiers, and shall be omitted when sanitization leaves nothing usable, in which case the generic recovery card remains. This lets a user expand a short provider error, such as an invalid tool definition, without the raw detail appearing in the summary line.
 
+#### Presentation amendment (September 19)
+
+The [session error UI package](../../../plans/session-error-recovery-ui/plan.md)
+records these additions. Recovery permissions, error scope, history, and provider
+identity remain unchanged.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.11:** When a send failure, startup failure, stopped notice, and unavailable workspace report the same correlated failure, the task view shall expose one active recovery control surface and one new-failure announcement. A dependent workspace pane shall retain a short unavailable state with a route to the owner. Independent failures and failures without trustworthy correlation shall remain distinct; equal text alone shall not suppress an error.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.12:** Each active failure shall show a localized title describing the failed operation, one short cause summary, and at most one recommended eligible recovery action. All eligible recovery actions shall be visible as individual buttons without an overflow menu: the recommended action first and alternatives following, using standard app button styling, wrapping on desktop and stacking on phones. Status-check retry, workspace restoration, session resume, runtime retry, branch recovery, and fresh start shall retain their distinct effects and existing confirmations. A non-retryable refusal shall explain its prerequisite instead of offering a retry that is known to fail.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.13:** Technical details shall be initially collapsed, operation-labelled, bounded, and copyable. Display and clipboard shall use the same sanitized content, excluding credential values, sensitive secret references, local paths, and private identifiers. Redaction shall precede truncation, retain safe cause distinctions, and never expose hidden raw text through accessible labels, tooltips, or clipboard fallbacks. Unusable details shall be omitted. Clipboard failure shall keep selectable sanitized text and announce failure without a raw fallback.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.14:** At desktop, resized pane, phone, and coarse-pointer tablet sizes, summaries and expanded diagnostics shall use the available content width, wrap readable words and unbroken tokens, and produce no horizontal document overflow. Text shall not occupy an icon-width column when content width is available. Historical session details shall share the transcript scroll owner. Active recovery details shall use the recovery surface scroll owner without a nested diagnostic scroller; shared task details shall retain their existing dialog or drawer scroll owner. Ordinary fine-pointer actions shall measure 28 pixels at standard font size; phone/coarse-pointer targets shall measure at least 44 pixels.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.15:** A new failure shall announce its short summary once without stealing typing focus or forcing transcript scrolling. Historical entries shall not announce on pagination or reload. Recovery pending and result states shall be accessible; keyboard and touch shall reach all eligible actions and details. Closing a recovery confirmation shall return focus to its initiating action, or a deterministic surviving recovery control if that action disappears. Labels, copy feedback, disabled reasons, and summaries shall update with the selected locale.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.16:** While recovery is pending, equivalent actions shall be disabled across all mounted consumers. Success shall retire only matching controls and retain history; workspace-only success shall not imply the agent resumed. A failed new attempt shall preserve its own cause and identity, with no stale completion clearing a successor failure. A missing profile, archive, branch-loss refusal, or unknown session status shall not enable a more permissive recovery path.
+
+#### Uniform recovery amendment (September 20)
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.17:** When the selected session cannot accept messages because of an unresolved failure, one active recovery card shall replace the composer. Failed startup, interrupted-session recovery, runtime installation, and provider quota shall use the same title, cause, action, and details order and consistent amber warning styling, with spinner/status pending feedback and red failed-attempt text. The transcript shall retain a compact chronological error record without duplicate mutation controls. A session that can accept messages shall retain its usable composer; a historical error alone shall not block messaging.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.18:** Recovery choices shall retain existing capability and refusal checks. Runtime installation shall offer its runtime retry rather than generic resume. Quota failures shall retain provider/model/reset guidance and shall not offer unsupported model switching or a fabricated retry deadline. When no recovery operation is eligible, the card shall explain the prerequisite without an inert primary action. Archive and Delete shall remain available through the task menu, outside the recovery card.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.19:** Correlated dependent workspace panes shall navigate to the active recovery card instead of repeating its diagnostics or actions. Explicit navigation shall activate Chat and focus the card on desktop and phone. Unrelated task, workspace, or session failures shall retain their own scope and explanation. Pending recovery and a failed retry shall update the active card; successful agent recovery shall restore the composer with its draft and attachments intact. Workspace-only recovery shall not enable messaging or claim the agent resumed.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.20:** The active card shall keep title and actions reachable at narrow or short viewport sizes and enlarged text. Expanded details shall be bounded and wrapped within a single recovery-region scroll owner, never a nested preformatted-text scroller. Initial failure shall not steal focus or force transcript scrolling. A user-initiated successful recovery shall return focus to the restored composer only when focus belonged to the disappearing recovery controls; background recovery shall not move focus from unrelated content.
+
+#### Startup cause amendment (September 30)
+
+Criteria .21-.34 use the
+[startup cause design](../system-design/session-startup-failure-explanations.md)
+and its [package](../../../plans/session-startup-failure-explanations/plan.md).
+The [Auggie contract](explicit-resume-settings.md) remains authoritative.
+Criterion .24 qualifies .13 only for validated host references in labelled details.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.21:** When a populated model catalog omits a saved model, startup or resume shall retain the requested value and report its absence from that catalog. It shall not claim removal, renaming, account restriction, or temporary unavailability.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.22:** Empty catalog, unsupported selection, and application failure shall remain distinct and shall not imply model removal. Application-failure copy shall identify the safe model value actually passed to the call, including fallback or variation values.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.23:** An unconfirmed permission mode, a different confirmed effective mode, and a failed mode application shall remain distinct, with requested and effective values when known. A no-prompt claim shall require evidence that dispatch did not occur.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.24:** Causes, safe selectors, operation, phase, time, and host references shall survive reload and reconnect. Use reliable agent identity and a sanitized model label or ID. Validate host `resume-<uint64>` attempt IDs separately from UUID execution IDs; redact arbitrary prose.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.25:** Unknown failures and older records without selection evidence shall retain a safe fallback. It shall not infer a cause from generic text or invent values.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.26:** Visible and copied details shall contain only bounded safe evidence. Do not persist provider secrets, stderr, stack traces, environment blocks, or arbitrary provider errors. Omit unsafe selectors and catalog labels; bounds alone do not make values safe.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.27:** After workspace-only recovery, the visible card shall retain the session failure and separately state read-only workspace availability. It shall not claim the agent resumed or the conversation was lost. Missing or uncertain workspace availability shall remain explicit.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.28:** One correlated attempt shall render one explanation, without repeated labels, messages, or transport wrappers. A genuinely different failed recovery operation shall retain its own cause.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.29:** Separate failed attempts and sessions shall retain distinct history and occurrence times, even when their text matches. Only the current unresolved attempt shall own controls.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.30:** A correlated failure before readiness or prompt dispatch shall not produce the completed-with-no-output warning. Lifecycle history entries shall not be presented as completed inference turns. Event order and reload shall preserve this distinction.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.31:** A real completed agent turn with no output shall retain empty-turn feedback, including existing slash-command guidance. An unrelated historical startup failure shall not suppress it.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.32:** Successful same-conversation recovery shall clear matching controls and retain resolved history. Each eligible owned resume shall persist bounded, stamp-specific proof so history stays resolved after reload without its optional transcript notice. Show the attempt's confirmed model or no model claim, retain the settings/permission disclosure, and preserve saved settings and native identity.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.33:** Delayed prior events shall not replace recovered state or settle a later failure. Tie success to the captured failure stamp and owned resume attempt; a global timestamp or dismissal alone is not recovery proof.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.34:** Desktop and native phone layouts shall show the cause before technical disclosure. Both shall support eligible actions, pending feedback, wrapped diagnostics, and safe copy feedback. Phone and coarse-pointer actions shall measure at least 44 pixels. Copy and status labels shall update with the selected locale, with all shipped locales supplied.
+
+#### Startup transport amendment (October 20)
+
+Criterion .35 narrows .22; see the
+[transport package](../../../plans/start-model-transport-failure/plan.md).
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.35:** Fail-closed startup model branches shall pass typed agent-stream loss, cancellation, and deadlines through unchanged. Opaque replies shall remain application failures; wording alone shall not establish disconnection. Auto-fallback remains unchanged.
+
+#### Startup process diagnostics amendment (November 7)
+
+The [process diagnostic design](../system-design/startup-process-diagnostics.md)
+and [fix package](../../../plans/agent-startup-process-diagnostics/plan.md) cover .36.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.36:** When a subprocess exits before initialization completes, startup and resume shall report the observed exit status. Recognized toolchain configuration refusals shall retain a specific safe explanation in recovery and backend diagnostics. A concurrent pipe or EOF error shall not replace that evidence. Missing or stale exit evidence shall retain the safe fallback.
+
 ## Session error history amendment
 
-The September 14 amendment changes criteria 006.4 and 006.7 and adds 006.8 and 006.9.
-Implementation is complete in the [error scope package](../../../plans/error-scope-and-history/plan.md).
-This supersedes the reveal-at-top behavior from the completed startup recovery scrolling package.
-The task system owns durable history and shared error scope through
-[task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).
+The [error scope package](../../../plans/error-scope-and-history/plan.md) replaces
+reveal-at-top placement with normal transcript scrolling. Tasks own
+[durable history and shared scope](../../tasks/requirements/task-launch-failure-recovery.md).
 
 ## Recovery attempt isolation
 
-Criteria 007.1 through 007.6 are implemented in the
-[resume cancellation package](../../../plans/resume-cancellation/plan.md).
-The accepted-turn amendment adds criteria 007.7 through 007.9. Its
-implementation and verification are recorded in the
-[resumed turn cancellation package](../../../plans/resumed-turn-cancellation/plan.md).
+Implementation: [criteria 007.1-.6](../../../plans/resume-cancellation/plan.md)
+and [criteria 007.7-.9](../../../plans/resumed-turn-cancellation/plan.md).
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007: Isolated recovery attempts
 
@@ -95,3 +144,5 @@ branch-loss, and provider identity rules remain in
 ## System design
 
 [Session recovery failures](../system-design/session-recovery-failures.md).
+
+[Blocked-session guidance package](../../../plans/blocked-session-recovery-guidance/plan.md).

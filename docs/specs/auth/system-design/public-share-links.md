@@ -25,7 +25,69 @@ is defense in depth. It is not the share service authorization boundary.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AUTH-AUTH-001` | [Authorization boundary](#authorization-boundary) |
-| `REQ-AUTH-PUBLIC-SHARE-LINKS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AUTH-PUBLIC-SHARE-LINKS-001` | [Snapshot metadata redaction](#snapshot-metadata-redaction) and [Migrated source detail](#migrated-source-detail) |
+
+## Snapshot metadata redaction
+
+`internal/task/share.BuildSnapshot` owns the redaction boundary for both
+`Service.PreviewSnapshot` and `Service.CreateShare`. One `Redactor`, initialized
+from `workspaceRootsFor(session)`, handles metadata and the existing message
+pipeline. `taskMeta` and `sessionMeta` project into new export values and apply
+`Redactor.String` to the descriptive strings before `Redactor.Applied` is
+collected. The existing known-secret patterns, placeholders, path matching,
+multi-root precedence, and sorted distinct rule names remain unchanged.
+
+### Export field audit
+
+| Export field | Source and treatment |
+| --- | --- |
+| `task.title` | `Task.Title`: apply `Redactor.String`. |
+| `session.agent_type` | String from `AgentProfileSnapshot["agent_type"]`: apply `Redactor.String`. |
+| `session.model` | String from `AgentProfileSnapshot["model"]`: apply `Redactor.String`. |
+| `session.executor_type` | String from `ExecutorSnapshot["type"]`: apply `Redactor.String`. |
+| `task.workflow_step` | `Task.WorkflowStepID`: preserve this identifier, including existing omission semantics. |
+| `version`, `kandev_version`, `exported_at` | Schema/build identity and export timestamp: preserve their current semantics. |
+| `session.started_at`, `session.completed_at` | Preserve timestamps and optional completion. |
+
+The three session strings normally contain provider identifiers or model names.
+They are extracted from persisted maps without content validation, so the
+existing string rules also cover anomalous credential/path values there.
+Missing or non-string entries retain the existing empty-string projection.
+No source row, source map, or message is mutated. Other source metadata is not
+exported and does not acquire a generic JSON scrubbing path.
+
+`GistBackend.Upload` serializes the constructed snapshot as `snapshot.json` and
+passes it to `BuildShareHTML`, `BuildGistREADME`, and `gistDescription`. All
+four consumers use the redacted metadata from that snapshot; no renderer or
+provider-specific redactor is introduced. Metadata-only matches enter the same
+`redaction.applied_rules` union as message matches, even when the body is clean.
+Authorization still runs before construction and workspace-scoped provider
+resolution remains unchanged. This repair implements AC001.6 through AC001.8
+of `REQ-AUTH-PUBLIC-SHARE-LINKS-001` at the existing construction boundary.
+
+### Compatibility and verification
+
+The snapshot schema stays at version 1. The existing message filtering,
+system-content stripping, tool-argument handling, locale threading, and
+error behavior are retained. New previews and new publications receive the
+correction; stored gists are not re-rendered, scanned, or automatically revoked.
+The draft status remains honest about the wider migrated design's acceptance.
+No new security architecture or ADR is needed to complete this existing pass.
+
+Regressions exercise the real builder and service preview, then upload the
+builder result through `NewGistBackend` and an in-memory `github.MockClient`.
+They assert the absence of synthetic matched values from all three files and
+the description, the expected replacements and rule log, ordinary metadata
+and body preservation, unchanged identifiers/timestamps, and source
+nonmutation. No real credential, user data, or network publication is used.
+The backend produces identical artifact data for desktop and phones; no layout,
+touch, scrolling, navigation, or breakpoint behavior changes. Browser tests and
+screenshots add no evidence for this construction-only defect.
+
+See the [metadata redaction implementation plan](../../../plans/public-share-metadata-redaction/plan.md)
+for the single repair work order. The completed
+[share authorization package](../../../plans/share-authorization-boundary/plan.md)
+remains the record for access-control behavior and is not reopened.
 
 ## Migrated source detail
 

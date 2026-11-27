@@ -2,15 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { Fragment, type ReactNode } from "react";
+import { IconCopy, IconEdit, IconPin, IconPinFilled, IconTrash } from "@tabler/icons-react";
 import {
-  IconCopy,
-  IconEdit,
-  IconPencil,
-  IconPin,
-  IconPinFilled,
-  IconTrash,
-} from "@tabler/icons-react";
-import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+} from "@kandev/ui/context-menu";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import {
   KanbanCardContextMenuItems,
@@ -19,6 +17,7 @@ import {
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
+import { TaskFlagItem } from "./task-flag-menu-item";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { TaskPluginLinkMenu, selectTaskLinkActions } from "./task-switcher-link-menu";
 import {
@@ -26,6 +25,9 @@ import {
   TaskCreateSubtaskItem,
   TaskDeleteItem,
   TaskDetachItem,
+  TaskRenameItem,
+  TaskShowInGraphItem,
+  TaskTurnErrorDismissItem,
 } from "./task-switcher-action-items";
 import {
   useTaskPluginLinkActions,
@@ -37,6 +39,7 @@ import { TaskPriorityContextMenu } from "./task-priority-context-menu";
 import type { TaskContextMenuItemsProps } from "./task-switcher-context-menu";
 import { taskRowActionAvailability } from "./task-row-action-availability";
 import { TaskMoveItems } from "./task-switcher-context-menu-move-items";
+import { TaskContextMenuSubContent } from "./task-context-menu-sub-content";
 
 type SingleSelectionMenuProps = TaskContextMenuItemsProps & {
   actingIds: string[];
@@ -56,6 +59,7 @@ type SingleGroupProps = Pick<
   | "onTogglePin"
   | "onEditTask"
   | "onRenameTask"
+  | "flagActions"
   | "onCreateSubtask"
   | "onDetachTask"
   | "onArchiveTask"
@@ -72,6 +76,7 @@ type SingleGroupProps = Pick<
   | "onMoveToStep"
   | "isMixedWorkflowSelection"
   | "moveTasks"
+  | "nativeUnlinkEntries"
 > & {
   linkActions?: LinkActions;
   pluginLinkActions?: PluginLinkMenuAction[];
@@ -161,7 +166,9 @@ function SingleSelectionMenuGroups(props: SingleSelectionMenuProps & SingleMenuS
         },
         {
           key: "edit",
-          visible: Boolean(!task.isArchived || props.onRenameTask),
+          visible: Boolean(
+            !task.isArchived || props.onRenameTask || props.nativeUnlinkEntries?.length,
+          ),
           content: <SingleEditGroup {...props} />,
         },
         {
@@ -258,6 +265,7 @@ function SingleMarkGroup({
           onSelect={(priority) => void updateTaskPriority(task.id, priority)}
         />
       )}
+      <TaskTurnErrorDismissItem task={task} disabled={isDeleting} />
     </>
   );
 }
@@ -267,12 +275,36 @@ function SingleEditGroup({
   isDeleting,
   onEditTask,
   onRenameTask,
-}: Pick<SingleGroupProps, "task" | "isDeleting" | "onEditTask" | "onRenameTask">) {
+  flagActions,
+  nativeUnlinkEntries,
+}: Pick<
+  SingleGroupProps,
+  "task" | "isDeleting" | "onEditTask" | "onRenameTask" | "flagActions" | "nativeUnlinkEntries"
+>) {
   const { t } = useTranslation();
   return (
     <>
-      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      {nativeUnlinkEntries?.length ? (
+        <ContextMenuSub>
+          <ContextMenuSubTrigger data-testid="task-row-edit-submenu">
+            <IconEdit className="mr-2 h-4 w-4" />
+            {t("common:edit")}
+          </ContextMenuSubTrigger>
+          <TaskContextMenuSubContent className="w-56">
+            <TaskEditItem
+              task={task}
+              disabled={isDeleting}
+              onEditTask={onEditTask}
+              label={t("common:editTask")}
+            />
+            <KanbanCardContextMenuItems entries={nativeUnlinkEntries} />
+          </TaskContextMenuSubContent>
+        </ContextMenuSub>
+      ) : (
+        <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
+      )}
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
+      <TaskFlagItem task={task} disabled={isDeleting} actions={flagActions} />
       {taskRowActionAvailability(task).mark && (
         <ContextMenuItem disabled>
           <IconCopy className="mr-2 h-4 w-4" />
@@ -309,6 +341,7 @@ function SingleRelationshipsGroup({
 >) {
   return (
     <>
+      <TaskShowInGraphItem task={task} disabled={isDeleting} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       {!task.isArchived && (
         <TaskNestContextMenuItems
@@ -546,40 +579,23 @@ function TaskPinItem({
   );
 }
 
-function TaskRenameItem({
-  task,
-  disabled,
-  onRenameTask,
-}: {
-  task: TaskSwitcherItem;
-  disabled?: boolean;
-  onRenameTask?: (taskId: string, currentTitle: string) => void;
-}) {
-  const { t } = useTranslation();
-  if (!onRenameTask) return null;
-  return (
-    <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
-      <IconPencil className="mr-2 h-4 w-4" />
-      {t("task:rename")}
-    </ContextMenuItem>
-  );
-}
-
 function TaskEditItem({
   task,
   disabled,
   onEditTask,
+  label,
 }: {
   task: TaskSwitcherItem;
   disabled?: boolean;
   onEditTask?: (task: TaskSwitcherItem) => void;
+  label?: string;
 }) {
   const { t } = useTranslation();
   if (!onEditTask || !taskRowActionAvailability(task).edit) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
       <IconEdit className="mr-2 h-4 w-4" />
-      {t("common:edit")}
+      {label ?? t("common:edit")}
     </ContextMenuItem>
   );
 }

@@ -1,12 +1,16 @@
 import { test, expect } from "../../fixtures/test-base";
+import { seededAgentProfile } from "../../helpers/seeded-agent-profile";
 
 test.describe("Agent settings profile layout", () => {
-  test("keeps profile creation in the agent card header", async ({ testPage, apiClient }) => {
-    const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    if (!agent || agent.profiles.length === 0) {
-      throw new Error("The E2E fixture must provide a configured agent profile");
-    }
+  test("keeps profile creation in the agent card header", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Select the seeded profile's owner by identity: list order changes with
+    // discovery, and a virtual family such as Dynamic can sort first with no
+    // profiles of its own.
+    const { agent } = await seededAgentProfile(apiClient, seedData.agentProfileId);
 
     await testPage.goto("/settings/agents");
 
@@ -42,6 +46,11 @@ test.describe("Agent settings profile layout", () => {
       actions
         .locator("[data-testid]")
         .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid"))),
-    ).resolves.toEqual(["open-host-shell", "rescan-agents-button", "new-agent-button"]);
+    ).resolves.toEqual([
+      "agent-options-trigger",
+      "open-host-shell",
+      "rescan-agents-button",
+      "new-agent-button",
+    ]);
   });
 });

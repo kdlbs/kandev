@@ -54,13 +54,17 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
-	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+	AutomationConditions   []AutomationCondition   `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+	NotificationFormatters []NotificationFormatter `yaml:"notification_formatters,omitempty" json:"notification_formatters,omitempty"`
 
-	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
-	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Webhooks         []Webhook         `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
+	Actions          []Action          `yaml:"actions,omitempty" json:"actions,omitempty"`
+	SidebarGroupings []SidebarGrouping `yaml:"sidebar_groupings,omitempty" json:"sidebar_groupings,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
 	// Ownership is checked across active plugins by the runtime registry.
 	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
+	// ExecutorProviders declares remote compute providers this plugin owns.
+	ExecutorProviders []ExecutorProvider `yaml:"executor_providers,omitempty" json:"executor_providers,omitempty"`
 	// ReferenceSources declares composer sources this plugin owns while active.
 	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
@@ -86,19 +90,56 @@ type Manifest struct {
 }
 
 const (
-	AgentToolSurfaceKanban = "kanban-task"
-	AgentToolSurfaceOffice = "office-task"
+	AgentToolSurfaceKanban      = "kanban-task"
+	AgentToolSurfaceOffice      = "office-task"
+	AgentToolSurfaceManaged     = "managed-conversation"
+	AgentToolSurfaceAutomation  = "automation"
+	AgentToolSurfaceCoordinator = "coordinator"
+	AgentToolSurfaceExternal    = "external"
+)
+
+const (
+	// AgentToolInvocationScopeTask is the default scope: the operation
+	// requires the task identity bound to its execution.
+	AgentToolInvocationScopeTask = "task"
+	// AgentToolInvocationScopeInstance marks a read that does not require task
+	// identity and may therefore be exposed to instance-only contexts.
+	AgentToolInvocationScopeInstance = "instance"
+	// AgentToolInvocationScopeWorkspace marks a read that requires a
+	// host-verified workspace on the external surface.
+	AgentToolInvocationScopeWorkspace = "workspace"
+	// AgentToolWorkspaceArgument is the host-owned external argument that
+	// carries the verified workspace ID. Plugin input schemas cannot declare it.
+	AgentToolWorkspaceArgument = "kandev_workspace_id"
 )
 
 // AgentTool is an MCP tool a plugin contributes to matching task sessions.
 // The exposed MCP name is derived by the host and is not author-controlled.
 type AgentTool struct {
-	Name         string               `yaml:"name" json:"name"`
-	Description  string               `yaml:"description" json:"description"`
-	Surfaces     []string             `yaml:"surfaces" json:"surfaces"`
-	InputSchema  map[string]any       `yaml:"input_schema" json:"input_schema"`
-	OutputSchema map[string]any       `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
-	Annotations  AgentToolAnnotations `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+	Name            string               `yaml:"name" json:"name"`
+	Description     string               `yaml:"description" json:"description"`
+	Surfaces        []string             `yaml:"surfaces" json:"surfaces"`
+	InvocationScope string               `yaml:"invocation_scope,omitempty" json:"invocation_scope,omitempty"`
+	InputSchema     map[string]any       `yaml:"input_schema" json:"input_schema"`
+	OutputSchema    map[string]any       `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	Annotations     AgentToolAnnotations `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+}
+
+// NormalizedInvocationScope returns the explicit scope, defaulting an omitted
+// value to the historical task scope.
+func (t AgentTool) NormalizedInvocationScope() string {
+	if t.InvocationScope == "" {
+		return AgentToolInvocationScopeTask
+	}
+	return t.InvocationScope
+}
+
+// IsInstanceRead reports whether the declaration explicitly opts into
+// instance scope and carries the true read-only hint required by the
+// instance-only MCP contexts.
+func (t AgentTool) IsInstanceRead() bool {
+	return t.NormalizedInvocationScope() == AgentToolInvocationScopeInstance &&
+		t.Annotations.ReadOnlyHint != nil && *t.Annotations.ReadOnlyHint
 }
 
 // AgentToolAnnotations are MCP hints. Nil values preserve omission so the
@@ -162,6 +203,36 @@ type Capabilities struct {
 	// visibility, and lifecycle — the plugin never receives raw database or
 	// user identity through this surface.
 	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
+	// ExecutorProvider permits the plugin to allocate and manage remote
+	// execution environments through the host's operation-scoped provider API.
+	ExecutorProvider bool `yaml:"executor_provider,omitempty" json:"executor_provider,omitempty"`
+}
+
+// ExecutorProvider describes one provider implementation owned by a plugin.
+// Provider identities are derived as plugin:<plugin-id>:<key>.
+type ExecutorProvider struct {
+	Key                    string                       `yaml:"key" json:"key"`
+	DisplayName            string                       `yaml:"display_name" json:"display_name"`
+	Description            string                       `yaml:"description" json:"description"`
+	LocalizedMessages      map[string]string            `yaml:"localized_messages,omitempty" json:"localized_messages,omitempty"`
+	ContractVersion        int                          `yaml:"contract_version" json:"contract_version"`
+	SupportedStateVersions []int                        `yaml:"supported_state_versions" json:"supported_state_versions"`
+	ProfileSchema          map[string]any               `yaml:"profile_schema" json:"profile_schema"`
+	ResourceStateSchema    map[string]any               `yaml:"resource_state_schema" json:"resource_state_schema"`
+	Capabilities           ExecutorProviderCapabilities `yaml:"capabilities" json:"capabilities"`
+}
+
+// ExecutorProviderCapabilities is the maximum feature set a provider can
+// offer. Profile and inspected resource capabilities can only narrow it.
+type ExecutorProviderCapabilities struct {
+	Terminal            bool   `yaml:"terminal,omitempty" json:"terminal,omitempty"`
+	Files               bool   `yaml:"files,omitempty" json:"files,omitempty"`
+	Git                 bool   `yaml:"git,omitempty" json:"git,omitempty"`
+	EmbeddedEditor      bool   `yaml:"embedded_editor,omitempty" json:"embedded_editor,omitempty"`
+	Preview             bool   `yaml:"preview,omitempty" json:"preview,omitempty"`
+	Reattach            bool   `yaml:"reattach,omitempty" json:"reattach,omitempty"`
+	Retention           string `yaml:"retention" json:"retention"`
+	MaximumLifetimeSecs int64  `yaml:"maximum_lifetime_seconds,omitempty" json:"maximum_lifetime_seconds,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login
@@ -219,11 +290,12 @@ type Action struct {
 }
 
 const (
-	ActionScopeWorkspace      = "workspace"
-	ActionScopeTask           = "task"
-	ActionScopeRepository     = "repository"
-	ActionAccessAuthenticated = "authenticated"
-	ActionAccessAdmin         = "admin"
+	ActionScopeWorkspace            = "workspace"
+	ActionScopeTask                 = "task"
+	ActionScopeRepository           = "repository"
+	ActionScopeNotificationProvider = "notification_provider"
+	ActionAccessAuthenticated       = "authenticated"
+	ActionAccessAdmin               = "admin"
 )
 
 // EffectiveAccess preserves the original action contract: actions are
@@ -282,6 +354,7 @@ type ReferenceSource struct {
 // optional/secondary when a bundle is declared: native routes come from the
 // bundle at runtime.
 type UISection struct {
+	FileViewers []FileViewer   `yaml:"file_viewers,omitempty" json:"file_viewers,omitempty"`
 	Pages       []UIPage       `yaml:"pages,omitempty" json:"pages,omitempty"`
 	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
@@ -339,5 +412,17 @@ func Parse(data []byte) (*Manifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, err
 	}
+	for i := range m.AgentTools {
+		if m.AgentTools[i].InvocationScope == "" {
+			m.AgentTools[i].InvocationScope = AgentToolInvocationScopeTask
+		}
+	}
 	return &m, nil
+}
+
+// FileViewer declares the exact formats a native UI contribution can preview.
+type FileViewer struct {
+	ID         string   `yaml:"id" json:"id"`
+	Title      string   `yaml:"title" json:"title"`
+	Extensions []string `yaml:"extensions" json:"extensions"`
 }

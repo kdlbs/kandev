@@ -45,6 +45,356 @@ func TestAppendSessionModelsMessageFallsBackToPersistedFlatModels(t *testing.T) 
 	}
 }
 
+func TestAppendSessionModelsMessageUsesPersistedConfigAfterCacheRestart(t *testing.T) {
+	model := streams.SessionModelInfo{ModelID: "mock-fast", Name: "Mock Fast"}
+	option := streams.ConfigOption{
+		Type:         "select",
+		ID:           "model",
+		Name:         "Model",
+		CurrentValue: "mock-fast",
+		Category:     "model",
+	}
+	effortOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "effort",
+		CurrentValue: "high",
+	}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID:       model.ModelID,
+				CurrentModeID:        "effective-mode",
+				SettingsPolicy:       streams.SessionSettingsPolicyProviderRestored,
+				Models:               []streams.SessionModelInfo{model},
+				ConfigOptions:        []streams.ConfigOption{option, effortOption},
+				ConfigOptionsSettled: true,
+			},
+		},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != model.ModelID {
+		t.Fatalf("current model = %q, want %q", payload.CurrentModelID, model.ModelID)
+	}
+	if len(payload.Models) != 1 || payload.Models[0].Name != model.Name {
+		t.Fatalf("models = %#v, want persisted model %q", payload.Models, model.Name)
+	}
+	if len(payload.ConfigOptions) != 2 || payload.ConfigOptions[0].CurrentValue != option.CurrentValue {
+		t.Fatalf("config options = %#v, want persisted model option", payload.ConfigOptions)
+	}
+	if payload.ConfigOptions[1].ID != effortOption.ID ||
+		payload.ConfigOptions[1].CurrentValue != effortOption.CurrentValue {
+		t.Fatalf("config options = %#v, want persisted effort option", payload.ConfigOptions)
+	}
+	if !payload.ConfigOptionsSettled {
+		t.Fatal("config options settled = false, want true")
+	}
+	if payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("settings policy = %q, want provider_restored", payload.SessionSettingsPolicy)
+	}
+}
+
+func TestAppendSessionModelsMessagePrefersPersistedRuntimeOverridesOverStaleCache(t *testing.T) {
+	model := streams.SessionModelInfo{ModelID: "mock-smart", Name: "Mock Smart"}
+	fastModel := streams.SessionModelInfo{ModelID: "mock-fast", Name: "Mock Fast"}
+	modelOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "model",
+		Category:     "model",
+		CurrentValue: "mock-fast",
+		Options: []streams.ConfigOptionValue{
+			{Value: "mock-fast", Name: "Mock Fast"},
+			{Value: "mock-smart", Name: "Mock Smart"},
+		},
+	}
+	effortOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "effort",
+		CurrentValue: "high",
+		Options: []streams.ConfigOptionValue{
+			{Value: "high", Name: "High"},
+			{Value: "max", Name: "Max"},
+		},
+	}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				Model: "mock-smart",
+				ConfigOptions: map[string]string{
+					"model":  "mock-smart",
+					"effort": "max",
+				},
+			},
+		},
+	}
+	liveState := &lifecycle.CachedModelState{
+		CurrentModelID: "mock-fast",
+		Models:         []streams.SessionModelInfo{fastModel, model},
+		ConfigOptions:  []streams.ConfigOption{modelOption, effortOption},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, liveState, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != "mock-smart" {
+		t.Fatalf("current model = %q, want persisted explicit override mock-smart", payload.CurrentModelID)
+	}
+	if payload.ConfigOptions[0].CurrentValue != "mock-smart" {
+		t.Fatalf("model option = %q, want persisted explicit override mock-smart", payload.ConfigOptions[0].CurrentValue)
+	}
+	if payload.ConfigOptions[1].CurrentValue != "max" {
+		t.Fatalf("effort = %q, want persisted explicit override max", payload.ConfigOptions[1].CurrentValue)
+	}
+	if liveState.ConfigOptions[1].CurrentValue != "high" {
+		t.Fatalf("live cache effort = %q, want unchanged high", liveState.ConfigOptions[1].CurrentValue)
+	}
+
+	session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = models.SessionRuntimeConfig{
+		ConfigOptions: map[string]string{"effort": "low"},
+	}
+	messages = appendSessionModelsMessageFromState(session.ID, session, liveState, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages with unsupported override = %d, want 1", len(messages))
+	}
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload with unsupported override: %v", err)
+	}
+	if payload.ConfigOptions[1].CurrentValue != "high" {
+		t.Fatalf("effort with unsupported override = %q, want live value high", payload.ConfigOptions[1].CurrentValue)
+	}
+}
+
+func TestAppendSessionModeMessageUsesProviderRestoredSnapshot(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModeID:  "effective-mode",
+				SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+			},
+		},
+	}
+
+	messages := appendSessionModeMessage(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want one restored mode message", len(messages))
+	}
+	var payload lifecycle.SessionModeEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session mode payload: %v", err)
+	}
+	if payload.CurrentModeID != "effective-mode" {
+		t.Fatalf("current mode = %q, want effective-mode", payload.CurrentModeID)
+	}
+	if payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("settings policy = %q, want provider_restored", payload.SessionSettingsPolicy)
+	}
+}
+
+func TestAppendSessionModeMessageReplaysUnknownRestoredMode(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+			},
+		},
+	}
+
+	messages := appendSessionModeMessage(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want one empty restored mode message", len(messages))
+	}
+	var payload lifecycle.SessionModeEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session mode payload: %v", err)
+	}
+	if payload.CurrentModeID != "" || payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("restored mode payload = %#v, want unknown provider-restored mode", payload)
+	}
+}
+
+func TestAppendSessionModeMessageSkipsLegacyModelOnlySnapshot(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "saved-model",
+				Models:         []streams.SessionModelInfo{{ModelID: "saved-model", Name: "Saved model"}},
+			},
+		},
+	}
+
+	messages := appendSessionModeMessage(session.ID, session, nil, nil)
+	if len(messages) != 0 {
+		t.Fatalf("messages = %d, want no mode replay for model-only legacy snapshot", len(messages))
+	}
+}
+
+func TestAppendSessionModeMessageReplaysStrictUnknownMode(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				SettingsAttemptID: "ordinary-attempt",
+			},
+		},
+	}
+
+	messages := appendSessionModeMessage(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want one empty strict mode message", len(messages))
+	}
+	var payload lifecycle.SessionModeEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session mode payload: %v", err)
+	}
+	if payload.CurrentModeID != "" || payload.SessionSettingsPolicy != streams.SessionSettingsPolicyStrict {
+		t.Fatalf("strict mode payload = %#v, want unknown strict mode", payload)
+	}
+}
+
+func TestAppendSessionModelsMessageReplaysUnknownRestoredSelectors(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+			},
+		},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want one empty restored model message", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != "" || payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("restored model payload = %#v, want unknown provider-restored model", payload)
+	}
+}
+
+func TestAppendSessionModelsMessageReplaysStrictUnknownSelectors(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				SettingsAttemptID: "ordinary-attempt",
+			},
+		},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want one empty strict model message", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != "" || payload.SessionSettingsPolicy != streams.SessionSettingsPolicyStrict {
+		t.Fatalf("strict model payload = %#v, want unknown strict model", payload)
+	}
+}
+
+func TestAppendSessionModelsMessageKeepsPersistedSelectionWithoutStaleConfig(t *testing.T) {
+	model := streams.SessionModelInfo{ModelID: "persisted-model", Name: "Persisted model"}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: model.ModelID,
+				Models:         []streams.SessionModelInfo{model},
+				ConfigOptions: []streams.ConfigOption{{
+					Type:         "select",
+					ID:           "model",
+					CurrentValue: "stale-persisted-model",
+				}},
+				ConfigOptionsSettled: true,
+			},
+		},
+	}
+
+	messages := appendSessionModelsMessageFromState(
+		session.ID,
+		session,
+		&lifecycle.CachedModelState{},
+		nil,
+	)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != model.ModelID {
+		t.Fatalf("current model = %q, want %q", payload.CurrentModelID, model.ModelID)
+	}
+	if len(payload.Models) != 1 || payload.Models[0].ModelID != model.ModelID {
+		t.Fatalf("models = %#v, want persisted model %q", payload.Models, model.ModelID)
+	}
+	if len(payload.ConfigOptions) != 0 {
+		t.Fatalf("config options = %#v, want live empty catalog", payload.ConfigOptions)
+	}
+	if !payload.ConfigOptionsSettled {
+		t.Fatal("config options settled = false, want persisted settlement marker")
+	}
+}
+
+func TestAppendSessionModelsMessagePreservesSettledEmptySnapshot(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				ConfigOptionsSettled: true,
+			},
+		},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1 settled-empty notification", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if !payload.ConfigOptionsSettled {
+		t.Fatal("config options settled = false, want true")
+	}
+	if len(payload.ConfigOptions) != 0 {
+		t.Fatalf("config options = %#v, want empty", payload.ConfigOptions)
+	}
+}
+
 func TestAppendSessionModelsMessageKeepsLiveStateAuthoritative(t *testing.T) {
 	session := &models.TaskSession{
 		ID:     "session-1",
@@ -55,6 +405,11 @@ func TestAppendSessionModelsMessageKeepsLiveStateAuthoritative(t *testing.T) {
 				Models: []streams.SessionModelInfo{{
 					ModelID: "persisted-flat-model",
 					Name:    "Persisted flat model",
+				}},
+				ConfigOptions: []streams.ConfigOption{{
+					Type:         "select",
+					ID:           "model",
+					CurrentValue: "stale-persisted-model",
 				}},
 			},
 		},
@@ -68,6 +423,7 @@ func TestAppendSessionModelsMessageKeepsLiveStateAuthoritative(t *testing.T) {
 		name            string
 		liveState       *lifecycle.CachedModelState
 		wantConfigCount int
+		wantConfigValue string
 	}{
 		{
 			name: "live config options",
@@ -76,6 +432,7 @@ func TestAppendSessionModelsMessageKeepsLiveStateAuthoritative(t *testing.T) {
 				ConfigOptions:  liveOptions,
 			},
 			wantConfigCount: len(liveOptions),
+			wantConfigValue: liveOptions[0].CurrentValue,
 		},
 		{
 			name: "settled empty catalog",
@@ -105,6 +462,9 @@ func TestAppendSessionModelsMessageKeepsLiveStateAuthoritative(t *testing.T) {
 			}
 			if len(payload.ConfigOptions) != tt.wantConfigCount {
 				t.Fatalf("config options = %d, want %d", len(payload.ConfigOptions), tt.wantConfigCount)
+			}
+			if tt.wantConfigValue != "" && payload.ConfigOptions[0].CurrentValue != tt.wantConfigValue {
+				t.Fatalf("config option value = %q, want %q", payload.ConfigOptions[0].CurrentValue, tt.wantConfigValue)
 			}
 		})
 	}

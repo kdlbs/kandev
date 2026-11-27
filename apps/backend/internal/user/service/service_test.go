@@ -307,6 +307,19 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyEscapeCancelsAgentPreference(t *testing.T) {
+	settings := &models.UserSettings{EscapeCancelsAgent: true}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil || !settings.EscapeCancelsAgent {
+		t.Fatal("omitted preference should remain enabled")
+	}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{EscapeCancelsAgent: ptr(false)}); err != nil || settings.EscapeCancelsAgent {
+		t.Fatal("explicit false should disable the preference")
+	}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{EscapeCancelsAgent: ptr(true)}); err != nil || !settings.EscapeCancelsAgent {
+		t.Fatal("explicit true should enable the preference")
+	}
+}
+
 // TestApplyBasicSettings_PreventAutoStartAgentOnOpen verifies the auto-start setting is preserved when omitted and toggled by explicit values.
 func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
 	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {
@@ -642,6 +655,18 @@ func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 
 // TestApplyBasicSettings_TasksListPreferences verifies tasks list sort and group are applied and invalid values rejected.
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
+	t.Run("canonicalizes legacy and current workflow step groups", func(t *testing.T) {
+		for _, value := range []string{"state", "workflow_step", " state "} {
+			settings := &models.UserSettings{TasksListSort: "created_asc"}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{TasksListGroup: ptr(value)}); err != nil {
+				t.Fatalf("apply group %q: %v", value, err)
+			}
+			if settings.TasksListGroup != "workflow_step" || settings.TasksListSort != "created_asc" {
+				t.Fatalf("settings = (%q, %q), want (workflow_step, created_asc)", settings.TasksListGroup, settings.TasksListSort)
+			}
+		}
+	})
+
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
 		req := &UpdateUserSettingsRequest{
@@ -1926,6 +1951,36 @@ func TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersis
 	}
 }
 
+// TestUpdateUserSettingsRejectsInvalidAgentTabCloseBehaviorWithoutPersisting
+// documents the reviewer-requested settings API contract.
+func TestUpdateUserSettingsRejectsInvalidAgentTabCloseBehaviorWithoutPersisting(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &recordingUserRepository{getSettings: &models.UserSettings{
+		AgentTabCloseBehavior: models.AgentTabCloseBehaviorHidePanel,
+	}}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	_, err = svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		AgentTabCloseBehavior: ptr("close_everything"),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateUserSettings error = %v, want validation error", err)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 0 {
+		t.Fatalf("persist calls = %d, want 0", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if repo.getSettings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("saved behavior = %q, want hide_panel", repo.getSettings.AgentTabCloseBehavior)
+	}
+	if len(eventBus.publishedEvents) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventBus.publishedEvents))
+	}
+}
+
 // TestClearDefaultEditorIDPreservesTaskCreateLastUsed verifies clearing the default editor preserves task-create last-used in the write and event.
 func TestClearDefaultEditorIDPreservesTaskCreateLastUsed(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
@@ -2015,7 +2070,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 				Branch:       "feature",
 			},
 		}
-		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		repo := &recordingUserRepository{updateSettings: updatedSettings, updateChanged: true}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
@@ -2063,7 +2118,7 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 				WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
 			},
 		}
-		repo := &recordingUserRepository{updateSettings: updatedSettings}
+		repo := &recordingUserRepository{updateSettings: updatedSettings, updateChanged: true}
 		eventBus := &recordingEventBus{}
 		svc := newTestService(repo, eventBus)
 
@@ -2075,6 +2130,22 @@ func TestRecordTaskCreateLastUsed(t *testing.T) {
 		}
 		if len(eventBus.publishedEvents) != 1 {
 			t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+		}
+	})
+
+	t.Run("unchanged patch publishes no settings event", func(t *testing.T) {
+		repo := &recordingUserRepository{updateSettings: &models.UserSettings{UserID: store.DefaultUserID}, updateChanged: false}
+		eventBus := &recordingEventBus{}
+		svc := newTestService(repo, eventBus)
+
+		if err := svc.RecordTaskCreateLastUsed(context.Background(), models.TaskCreateLastUsed{Branch: "feature"}); err != nil {
+			t.Fatalf("RecordTaskCreateLastUsed: %v", err)
+		}
+		if repo.updateCalls != 1 {
+			t.Fatalf("expected one repository call, got %d", repo.updateCalls)
+		}
+		if len(eventBus.publishedEvents) != 0 {
+			t.Fatalf("expected no settings event, got %d", len(eventBus.publishedEvents))
 		}
 	})
 
@@ -2143,46 +2214,6 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 
 }
 
-// TestAzureDevOpsBrowsePreferencesArePatched verifies Azure DevOps browse preferences are patched, persisted, and published.
-func TestAzureDevOpsBrowsePreferencesArePatched(t *testing.T) {
-	log, err := logger.NewFromZap(zap.NewNop())
-	if err != nil {
-		t.Fatalf("logger: %v", err)
-	}
-	preferences := json.RawMessage(`{"workspace-a":{"mode":"board","projectId":"project-a"}}`)
-	updatedSettings := &models.UserSettings{
-		UserID:                       store.DefaultUserID,
-		AzureDevOpsBrowsePreferences: preferences,
-	}
-	repo := &recordingUserRepository{
-		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
-		preservingSettings: updatedSettings,
-	}
-	eventBus := &recordingEventBus{}
-	settings, err := NewService(repo, eventBus, log).UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
-		AzureDevOpsBrowsePreferences: rawPatch(preferences),
-	})
-	if err != nil {
-		t.Fatalf("update Azure DevOps preferences: %v", err)
-	}
-	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
-		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
-	}
-	if repo.preservingInput == nil || string(repo.preservingInput.AzureDevOpsBrowsePreferences) != string(preferences) {
-		t.Fatalf("persisted AzureDevOpsBrowsePreferences = %+v, want %s", repo.preservingInput, preferences)
-	}
-	if len(eventBus.publishedEvents) != 1 {
-		t.Fatalf("settings events = %d, want 1", len(eventBus.publishedEvents))
-	}
-	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("settings event data = %T, want map", eventBus.publishedEvents[0].Data)
-	}
-	if got, ok := eventData["azure_devops_browse_preferences"].(json.RawMessage); !ok || string(got) != string(preferences) {
-		t.Fatalf("event AzureDevOpsBrowsePreferences = %s, want %s", got, preferences)
-	}
-}
-
 type recordingUserRepository struct {
 	getUserCalls                              int
 	getDefaultUserCalls                       int
@@ -2193,6 +2224,7 @@ type recordingUserRepository struct {
 	updateUserID                              string
 	updatePatch                               models.TaskCreateLastUsed
 	updateSettings                            *models.UserSettings
+	updateChanged                             bool
 	updateErr                                 error
 	getSettings                               *models.UserSettings
 	getErr                                    error
@@ -2256,14 +2288,14 @@ func (r *recordingUserRepository) UpdateTaskCreateLastUsed(
 	_ context.Context,
 	userID string,
 	patch models.TaskCreateLastUsed,
-) (*models.UserSettings, error) {
+) (*models.UserSettings, bool, error) {
 	r.updateCalls++
 	r.updateUserID = userID
 	r.updatePatch = patch
 	if r.updateErr != nil {
-		return nil, r.updateErr
+		return nil, false, r.updateErr
 	}
-	return r.updateSettings, nil
+	return r.updateSettings, r.updateChanged, nil
 }
 
 // Close records the close call.

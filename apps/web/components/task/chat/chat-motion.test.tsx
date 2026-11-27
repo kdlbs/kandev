@@ -37,9 +37,10 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-it("animates a new row once and cancels it when the transcript hides", () => {
+it("animates a new row once and releases it when the transcript hides", () => {
   const cancel = vi.fn();
-  const animate = vi.fn(() => ({ cancel }));
+  const handle: { cancel: () => void; effect: unknown } = { cancel, effect: {} };
+  const animate = vi.fn(() => handle);
   Object.defineProperty(Element.prototype, "animate", { configurable: true, value: animate });
   const tree = (ids: string[], live = true) => (
     <ChatMotionProvider sessionId="session" messages={ids.map((id) => ({ id }))} live={live}>
@@ -58,6 +59,7 @@ it("animates a new row once and cancels it when the transcript hides", () => {
   expect(animate).toHaveBeenCalledTimes(1);
   view.rerender(tree(["old", "new"], false));
   expect(cancel).toHaveBeenCalledTimes(1);
+  expect(handle.effect).toBeNull();
   view.rerender(tree(["old", "new"]));
   expect(animate).toHaveBeenCalledTimes(1);
 });

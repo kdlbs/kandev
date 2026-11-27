@@ -4,7 +4,14 @@ import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap, WorkflowPayload } from "@/lib/types/backend";
 import { registerWorkflowsHandlers } from "./workflows";
 
-type WorkflowItem = { id: string; workspaceId: string; name: string; hidden?: boolean };
+type WorkflowItem = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  hidden?: boolean;
+  source?: string;
+  source_path?: string;
+};
 
 const MESSAGE_TIMESTAMP = "2026-01-01T00:00:00Z";
 const REVIEW_STEP_ID = "step-1";
@@ -86,6 +93,38 @@ function stepDeletedMessage(
     timestamp: MESSAGE_TIMESTAMP,
   };
 }
+
+describe("workflow provenance", () => {
+  const synced = { source: "github", source_path: ".kandev/workflows/review.yaml" };
+  const workflow = { id: "wf-1", workspaceId: "ws-1", name: "Review" };
+
+  it.each(["created", "updated"] as const)("retains provenance from workflow.%s", (event) => {
+    const store = makeStore(event === "created" ? [] : [workflow], null);
+    const handlers = registerWorkflowsHandlers(store);
+    const payload = { id: workflow.id, workspace_id: "ws-1", name: workflow.name, ...synced };
+    if (event === "created") handlers["workflow.created"]?.(createdMessage(payload));
+    else handlers["workflow.updated"]?.(updatedMessage(payload));
+    expect(store.getState().workflows.items[0]).toMatchObject(synced);
+  });
+
+  it("releases provenance when sync is removed", () => {
+    const store = makeStore([{ ...workflow, ...synced }], null);
+    const handlers = registerWorkflowsHandlers(store);
+    const manual = { source: "manual", source_path: "" };
+    handlers["workflow.updated"]?.(
+      updatedMessage({ id: workflow.id, workspace_id: "ws-1", name: workflow.name, ...manual }),
+    );
+    expect(store.getState().workflows.items[0]).toMatchObject(manual);
+  });
+
+  it("preserves provenance when a payload omits it", () => {
+    const store = makeStore([{ ...workflow, ...synced }], null);
+    registerWorkflowsHandlers(store)["workflow.updated"]?.(
+      updatedMessage({ id: workflow.id, workspace_id: "ws-1", name: "Renamed" }),
+    );
+    expect(store.getState().workflows.items[0]).toMatchObject(synced);
+  });
+});
 
 describe("workflow.created handler — preserves user filter", () => {
   it("does not promote a new workflow when activeId is null ('All Workflows')", () => {
@@ -207,6 +246,38 @@ describe("workflow.updated handler — hidden flag reconciles activeId", () => {
 });
 
 describe("workflow step handlers", () => {
+  it("retains the unclassified fallback veto from step events", () => {
+    const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
+    store.setState({
+      ...store.getState(),
+      kanban: {
+        workflowId: "wf-1",
+        steps: [
+          { id: REVIEW_STEP_ID, title: REVIEW_STEP_NAME, color: REVIEW_STEP_COLOR, position: 1 },
+        ],
+        tasks: [],
+      },
+    } as AppState);
+    const handlers = registerWorkflowsHandlers(store);
+    const step = Object.assign(
+      {
+        id: REVIEW_STEP_ID,
+        workflow_id: "wf-1",
+        name: REVIEW_STEP_NAME,
+        state: "review",
+        position: 1,
+        color: REVIEW_STEP_COLOR,
+      },
+      { disable_unclassified_fallback: true },
+    );
+
+    handlers["workflow.step.updated"]?.(stepUpdatedMessage(step));
+
+    expect(store.getState().kanban.steps[0]).toMatchObject({
+      disable_unclassified_fallback: true,
+    });
+  });
+
   it("preserves WIP fields from step update payloads", () => {
     const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
     store.setState({
@@ -241,7 +312,9 @@ describe("workflow step handlers", () => {
       auto_advance_requires_signal: true,
     });
   });
+});
 
+describe("workflow step snapshot handlers", () => {
   it("keeps cached workflow snapshots in sync for step changes", () => {
     const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], null);
     const initialStep = {

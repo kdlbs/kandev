@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/agent/mcpconfig/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/authz"
@@ -25,11 +27,18 @@ const queryTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
+// hostCLIWarmupTimeout bounds the background vendor CLI model refresh started
+// by a discovery request.
+var hostCLIWarmupTimeout = 30 * time.Second
+
 type Handlers struct {
-	controller *controller.Controller
-	hub        Broadcaster
-	logger     *logger.Logger
-	interlock  gin.HandlerFunc
+	controller  *controller.Controller
+	hub         Broadcaster
+	logger      *logger.Logger
+	interlock   gin.HandlerFunc
+	catalog     *mcpconfig.CatalogService
+	selections  *mcpconfig.SelectionService
+	marketplace *registry.MarketplaceService
 }
 
 type Broadcaster interface {
@@ -46,10 +55,67 @@ func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logge
 }
 
 func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
+	RegisterRoutesWithMCPCatalog(router, ctrl, hub, log, interlockToken, nil, nil)
+}
+
+// RegisterRoutesWithMCPCatalog registers agent settings and the workspace MCP catalog.
+func RegisterRoutesWithMCPCatalog(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplace(router, ctrl, hub, log, interlockToken, repo, authorizer, nil)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplace registers catalog and discovery dependencies.
+func RegisterRoutesWithMCPCatalogAndMarketplace(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+) {
+	RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+		router, ctrl, hub, log, interlockToken, repo, authorizer, marketplace, nil,
+	)
+}
+
+// RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections registers the MCP
+// catalog, marketplace, and typed scope-selection APIs.
+func RegisterRoutesWithMCPCatalogAndMarketplaceAndSelections(
+	router *gin.Engine,
+	ctrl *controller.Controller,
+	hub Broadcaster,
+	log *logger.Logger,
+	interlockToken string,
+	repo mcpconfig.CatalogRepository,
+	authorizer mcpconfig.WorkspaceAuthorizer,
+	marketplace *registry.MarketplaceService,
+	selections *mcpconfig.SelectionService,
+) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
-	ctrl.SetJobBroadcaster(hub)
+	if ctrl != nil {
+		ctrl.SetJobBroadcaster(hub)
+	}
 	handlers := NewHandlers(ctrl, hub, log, interlockToken)
+	if repo != nil {
+		catalog := mcpconfig.NewCatalogService(repo)
+		catalog.SetWorkspaceAuthorizer(authorizer)
+		if selections != nil {
+			selections.ConfigureCatalogUsage(catalog)
+		}
+		handlers.catalog = catalog
+	}
+	handlers.marketplace = marketplace
+	handlers.selections = selections
 	handlers.registerHTTP(router)
 }
 
@@ -64,6 +130,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
+	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
+	api.POST("/agents/:id/plugin-discovery", cfg, h.httpDiscoverCopilotPlugins)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
@@ -72,12 +140,15 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
+	api.PUT("/agents/:id/profiles/order", cfg, h.interlock, h.httpReorderAgentProfiles)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
+	api.POST("/agent-models/:agentName/probe", cfg, h.httpProbeAgentProfile)
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", cfg, h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
+	api.PATCH("/agent-update/:agentName/automatic", cfg, h.interlock, h.httpSetAutomaticRuntimeUpdates)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -89,6 +160,30 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
+	api.GET("/agent-profiles/:id/mcp-selections", h.httpListProfileMCPSelections)
+	api.PUT("/agent-profiles/:id/mcp-selections", h.interlock, h.httpReplaceProfileMCPSelections)
+	api.GET("/repositories/:id/mcp-selections", h.httpListRepositoryMCPSelections)
+	api.PUT("/repositories/:id/mcp-selections", h.interlock, h.httpReplaceRepositoryMCPSelections)
+	api.GET("/tasks/:id/mcp-selections", h.httpListTaskMCPSelections)
+	api.PUT("/tasks/:id/mcp-selections", h.interlock, h.httpReplaceTaskMCPSelections)
+	api.GET("/task-sessions/:id/mcp-selections", h.httpListTaskSessionMCPSelections)
+	api.PUT("/task-sessions/:id/mcp-selections", h.interlock, h.httpReplaceTaskSessionMCPSelections)
+	api.GET("/workspaces/:id/mcp-profile-owners", h.httpListMCPProfileOwners)
+	api.GET("/workspaces/:id/mcp-profile-owners/:profileID", h.httpGetMCPProfileOwner)
+	api.GET("/workspaces/:id/mcp-servers", h.httpListMCPCatalog)
+	api.POST("/workspaces/:id/mcp-servers", h.interlock, h.httpCreateMCPCatalog)
+	api.GET("/workspaces/:id/mcp-servers/:serverID", h.httpGetMCPCatalog)
+	api.GET("/workspaces/:id/mcp-servers/:serverID/usage", h.httpMCPCatalogUsage)
+	api.PATCH("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpUpdateMCPCatalog)
+	api.DELETE("/workspaces/:id/mcp-servers/:serverID", h.interlock, h.httpDeleteMCPCatalog)
+	api.GET("/mcp-marketplace", h.httpSearchMCPMarketplace)
+	api.GET("/mcp-marketplace/entry", h.httpGetMCPMarketplaceEntry)
+	api.POST("/mcp-marketplace/refresh", h.interlock, h.httpRefreshMCPMarketplace)
+	api.POST("/workspaces/:id/mcp-marketplace/install", h.interlock, h.httpInstallMCPMarketplace)
+	// The owner release is the only way to lift a provider account-block hold;
+	// profile edits and enablement never release it.
+	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/routing/circuits", h.httpListRoutingCircuits)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -101,6 +196,20 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
+	// An Agents settings page load and a Rescan both land here. Re-read any
+	// stale vendor CLI catalogue off the response path so the model selector
+	// reflects the CLI currently on disk.
+	h.warmHostCLIModelsAsync()
+}
+
+// warmHostCLIModelsAsync refreshes stale vendor CLI model catalogues without
+// delaying the discovery response.
+func (h *Handlers) warmHostCLIModelsAsync() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), hostCLIWarmupTimeout)
+		defer cancel()
+		h.controller.WarmHostCLIModels(ctx)
+	}()
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -140,20 +249,76 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.UseDefault && request.TargetVersion != "" {
+	request.TargetFamily = strings.TrimSpace(request.TargetFamily)
+	if request.UseDefault && (request.TargetVersion != "" || request.TargetFamily != "" || request.ExpectedRuntimeRevision != 0) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
-	if !request.UseDefault && request.TargetVersion == "" {
+	if request.TargetFamily != "" && request.TargetFamily != "v2" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target family is invalid"})
+		return
+	}
+	if h.controller.IsHarnessUpdate(name) && (request.TargetVersion != "" || request.UseDefault) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "self-update does not accept a target version or use_default"})
+		return
+	}
+	if !h.controller.IsHarnessUpdate(name) && !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
+		return
+	}
+	if request.ReviewedRuntime != nil && !validReviewedRuntimeRequest(c, name, h, request) {
 		return
 	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
 		}
+		if request.TargetFamily == "v2" {
+			if request.ExpectedRuntimeRevision == 0 {
+				return nil, controller.ErrRuntimeMigrationUnsupported
+			}
+			return h.controller.EnqueueOpenCodeMigration(
+				c.Request.Context(), name, request.TargetVersion, request.ExpectedRuntimeRevision,
+			)
+		}
+		if request.ExpectedRuntimeRevision != 0 {
+			return nil, controller.ErrRuntimeMigrationUnsupported
+		}
+		if request.ReviewedRuntime != nil {
+			return h.controller.EnqueueReviewedAgentUpdate(
+				c.Request.Context(), name, request.TargetVersion, *request.ReviewedRuntime,
+			)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
+}
+
+// validReviewedRuntimeRequest keeps review evidence on the ordinary pinned
+// update form. Migration, return-to-default, harness, and revision-shaped
+// requests keep their legacy wire contracts and reject mixed evidence.
+func validReviewedRuntimeRequest(
+	c *gin.Context,
+	name string,
+	h *Handlers,
+	request dto.AgentUpdateRequest,
+) bool {
+	if h.controller.IsHarnessUpdate(name) ||
+		request.UseDefault ||
+		request.TargetFamily != "" ||
+		request.ExpectedRuntimeRevision != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime cannot be combined with this update form"})
+		return false
+	}
+	evidence := request.ReviewedRuntime
+	if evidence == nil ||
+		strings.TrimSpace(evidence.RuntimeID) == "" ||
+		strings.TrimSpace(evidence.Package) == "" ||
+		strings.TrimSpace(evidence.CurrentVersion) == "" ||
+		strings.TrimSpace(evidence.EffectiveVersion) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewed runtime evidence is incomplete"})
+		return false
+	}
+	return true
 }
 
 func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
@@ -162,6 +327,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		return
 	}
 	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	targetFamily := strings.TrimSpace(c.Query("target_family"))
 	useDefault := false
 	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -171,15 +337,23 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		}
 		useDefault = parsed
 	}
-	if useDefault && targetVersion != "" {
+	if useDefault && (targetVersion != "" || targetFamily != "") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
+	extendUpdateStatusWriteDeadline(c)
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
-	if useDefault {
+	switch {
+	case targetFamily != "":
+		if useDefault {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target family cannot be combined with use_default"})
+			return
+		}
+		preview, err = h.controller.PreviewAgentUpdateFamily(c.Request.Context(), name, targetVersion, targetFamily)
+	case useDefault:
 		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
-	} else {
+	default:
 		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
 	}
 	if err == nil {
@@ -195,6 +369,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 }
 
 func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	extendUpdateStatusWriteDeadline(c)
 	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
@@ -250,6 +425,17 @@ func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
 	return true
 }
 
+func writeReviewChangedIfPresent(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrRuntimeReviewChanged) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error": "runtime changed after review; refresh the preview",
+		"code":  "runtime_review_changed",
+	})
+	return true
+}
+
 type maintenanceErrorClassifier func(error) (int, string, bool)
 
 func (h *Handlers) enqueueMaintenance(
@@ -265,6 +451,9 @@ func (h *Handlers) enqueueMaintenance(
 		return
 	}
 	if writeMaintenanceConflictIfPresent(c, err) {
+		return
+	}
+	if writeReviewChangedIfPresent(c, err) {
 		return
 	}
 	if status, message, matched := classify(err); matched {
@@ -303,6 +492,16 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeReviewInvalid):
+		return http.StatusBadRequest, "runtime review evidence is invalid", true
+	case errors.Is(err, controller.ErrRuntimeReviewChanged):
+		return http.StatusConflict, "runtime changed after review; refresh the preview", true
+	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
+	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):
+		return http.StatusConflict, "OpenCode runtime migration is blocked by active work", true
+	case errors.Is(err, managedruntime.ErrOpenCodeSelectionRevisionConflict):
+		return http.StatusConflict, "OpenCode runtime changed; refresh the preview", true
 	default:
 		return 0, "", false
 	}
@@ -320,6 +519,9 @@ func classifyUpdatePreviewError(err error) (int, string, bool) {
 	}
 	if errors.Is(err, controller.ErrRuntimeUpdateTargetMissing) {
 		return http.StatusBadRequest, "target version is not published", true
+	}
+	if errors.Is(err, controller.ErrRuntimeMigrationUnsupported) {
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	}
 	return 0, "", false
 }
@@ -405,15 +607,19 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name              string                 `json:"name"`
-	Model             string                 `json:"model"`
-	FallbackModel     string                 `json:"fallback_model,omitempty"`
-	AutoFallback      bool                   `json:"auto_fallback"`
-	RequireExactModel bool                   `json:"require_exact_model"`
-	Mode              string                 `json:"mode,omitempty"`
-	CLIFlags          []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars           []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix     string                 `json:"command_prefix,omitempty"`
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
+	Name                    string                 `json:"name"`
+	Model                   string                 `json:"model"`
+	FallbackModel           string                 `json:"fallback_model,omitempty"`
+	AutoFallback            bool                   `json:"auto_fallback"`
+	RequireExactModel       bool                   `json:"require_exact_model"`
+	CursorMCPAuthEnabled    *bool                  `json:"cursor_mcp_auth_enabled,omitempty"`
+	CursorPluginsMCPEnabled *bool                  `json:"cursor_plugins_mcp_enabled,omitempty"`
+	Mode                    string                 `json:"mode,omitempty"`
+	CLIFlags                []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars                 []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	DevinSandboxInherited   bool                   `json:"devin_sandbox_inherited,omitempty"`
+	CommandPrefix           string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -432,16 +638,24 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 			return
 		}
+		if err := (dto.ProfileCreateRequest{AgentID: body.Name, Name: profile.Name, ExecutionGrade: profile.ExecutionGrade}).Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:              profile.Name,
-			Model:             profile.Model,
-			FallbackModel:     profile.FallbackModel,
-			AutoFallback:      profile.AutoFallback,
-			RequireExactModel: profile.RequireExactModel,
-			Mode:              profile.Mode,
-			CLIFlags:          profile.CLIFlags,
-			EnvVars:           profile.EnvVars,
-			CommandPrefix:     profile.CommandPrefix,
+			Name:                    profile.Name,
+			ExecutionGrade:          profile.ExecutionGrade,
+			Model:                   profile.Model,
+			FallbackModel:           profile.FallbackModel,
+			AutoFallback:            profile.AutoFallback,
+			RequireExactModel:       profile.RequireExactModel,
+			CursorMCPAuthEnabled:    profile.CursorMCPAuthEnabled,
+			CursorPluginsMCPEnabled: profile.CursorPluginsMCPEnabled,
+			Mode:                    profile.Mode,
+			CLIFlags:                profile.CLIFlags,
+			EnvVars:                 profile.EnvVars,
+			DevinSandboxInherited:   profile.DevinSandboxInherited,
+			CommandPrefix:           profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -450,8 +664,11 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
+		if writeClaudeExactModelAliasConflict(c, err) {
+			return
+		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) || errors.Is(err, controller.ErrInvalidDevinPermissionIntent) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -461,6 +678,19 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+const claudeExactModelAliasConflictMessage = "Choose a full model ID in Start model, or remove ANTHROPIC_MODEL from Environment Variables."
+
+func writeClaudeExactModelAliasConflict(c *gin.Context, err error) bool {
+	if !errors.Is(err, controller.ErrClaudeExactModelAliasConflict) {
+		return false
+	}
+	c.JSON(http.StatusBadRequest, gin.H{
+		"error":      claudeExactModelAliasConflictMessage,
+		"error_code": controller.ClaudeExactModelAliasConflictErrorCode,
+	})
+	return true
 }
 
 func (h *Handlers) httpGetAgent(c *gin.Context) {
@@ -522,285 +752,13 @@ func (h *Handlers) httpDeleteAgent(c *gin.Context) {
 	h.broadcastAvailableAgentsAsync()
 }
 
-type updateProfileMcpConfigRequest struct {
-	Enabled    *bool                          `json:"enabled"`
-	Servers    map[string]mcpconfig.ServerDef `json:"servers"`
-	MCPServers map[string]mcpconfig.ServerDef `json:"mcpServers"`
-	Meta       map[string]any                 `json:"meta,omitempty"`
-}
-
-func (h *Handlers) httpGetProfileMcpConfig(c *gin.Context) {
-	profileID := c.Param("id")
-	if profileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
-		return
-	}
-
-	resp, err := h.controller.GetAgentProfileMcpConfig(c.Request.Context(), profileID)
-	if err != nil {
-		if err == controller.ErrAgentProfileNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
-			return
-		}
-		if err == controller.ErrAgentMcpUnsupported {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
-			return
-		}
-		h.logger.Error("failed to get mcp config", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get mcp config"})
-		return
-	}
-	c.JSON(http.StatusOK, resp)
-}
-
-func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
-	profileID := c.Param("id")
-	if profileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
-		return
-	}
-
-	var body updateProfileMcpConfigRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	if body.Enabled == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
-		return
-	}
-	servers := body.Servers
-	if len(servers) == 0 && len(body.MCPServers) > 0 {
-		servers = body.MCPServers
-	}
-	if servers == nil {
-		servers = map[string]mcpconfig.ServerDef{}
-	}
-
-	resp, err := h.controller.UpdateAgentProfileMcpConfig(c.Request.Context(), profileID, controller.UpdateAgentProfileMcpConfigRequest{
-		Enabled: *body.Enabled,
-		Servers: servers,
-		Meta:    body.Meta,
-	})
-	if err != nil {
-		if err == controller.ErrAgentProfileNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
-			return
-		}
-		if err == controller.ErrAgentMcpUnsupported {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp not supported by agent"})
-			return
-		}
-		h.logger.Error("failed to update mcp config", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update mcp config"})
-		return
-	}
-	c.JSON(http.StatusOK, resp)
-	h.broadcastProfileMCPConfigUpdated(profileID, resp.WorkspaceID)
-}
-
-type createProfileRequest = dto.ProfileCreateRequest
-
-func (h *Handlers) httpCreateProfile(c *gin.Context) {
-	var body createProfileRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	body.AgentID = c.Param("id")
-	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
-		return
-	}
-	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
-	if err != nil {
-		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
-		}
-		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
-			errors.Is(err, controller.ErrDynamicProfilePositions) ||
-			errors.Is(err, controller.ErrDynamicProfileRule) ||
-			errors.Is(err, controller.ErrDynamicProfileCandidate) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
-			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		h.logger.Error("failed to create profile", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
-		return
-	}
-	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
-	c.JSON(http.StatusOK, resp)
-}
-
-type updateProfileRequest = dto.ProfileUpdateRequest
-
-func (h *Handlers) httpUpdateProfile(c *gin.Context) {
-	var body updateProfileRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	body.ID = c.Param("id")
-	body.Force = c.Query("force") == queryTrue
-	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
-		return
-	}
-	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
-		return
-	}
-	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequestFromDTO(body))
-	if err != nil {
-		if err == controller.ErrAgentProfileNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
-			return
-		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) ||
-			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) ||
-			errors.Is(err, controller.ErrDynamicProfileVersionConflict) {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-			return
-		}
-		if errors.Is(err, controller.ErrDynamicProfileCandidatesRequired) ||
-			errors.Is(err, controller.ErrDynamicProfilePositions) ||
-			errors.Is(err, controller.ErrDynamicProfileRule) ||
-			errors.Is(err, controller.ErrDynamicProfileCandidate) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		var inUseErr *controller.ErrProfileInUseDetail
-		if errors.As(err, &inUseErr) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error":            "agent profile is in use",
-				"utility_agents":   inUseErr.UtilityAgents,
-				"dynamic_profiles": inUseErr.DynamicProfiles,
-			})
-			return
-		}
-		h.logger.Error("failed to update profile", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
-		return
-	}
-	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileUpdated, resp)
-	c.JSON(http.StatusOK, resp)
-}
-
-// httpDuplicateProfile copies a profile's full configuration into a new row
-// named "<source> copy" and returns the new profile. No request body: the
-// copy name is derived server-side. The existing agent.profile.created
-// notification lets every open settings surface pick the copy up live.
-func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
-	profileID := c.Param("id")
-	if profileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
-		return
-	}
-	resp, err := h.controller.DuplicateProfile(c.Request.Context(), controller.DuplicateProfileRequest{
-		ID: profileID,
-	})
-	if err != nil {
-		if err == controller.ErrAgentProfileNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
-			return
-		}
-		if errors.Is(err, controller.ErrDynamicProfileDuplicationUnsupported) {
-			c.JSON(http.StatusConflict, gin.H{"error": "dynamic profiles cannot be duplicated"})
-			return
-		}
-		h.logger.Error("failed to duplicate profile", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
-		return
-	}
-	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
-	c.JSON(http.StatusOK, resp)
-}
-
-// broadcastProfileEvent fans a profile create/update/delete event out.
-// Kanban profiles (empty WorkspaceID) go to every settings client.
-// Office-scoped profiles are routed through the workspace-scoped broadcaster
-// so their configuration (env vars, servers, ...) never leaks across
-// workspace/user boundaries — the HTTP agent list hides them via
-// filterGlobalProfiles, and the WS path must not contradict that. When the
-// hub does not support workspace routing (test fakes), the office event is
-// dropped fail-closed.
-func (h *Handlers) broadcastProfileEvent(ctx context.Context, action string, profile *dto.AgentProfileDTO) {
-	if h.hub == nil {
-		return
-	}
-	// Profile events can arrive before settings-agent hydration. Include the
-	// capability needed by sessionless pickers so they need not guess.
-	inferenceCapable := false
-	if action != ws.ActionAgentProfileDeleted {
-		agent, err := h.controller.GetAgent(ctx, profile.AgentID)
-		if err != nil {
-			h.logger.Warn("failed to load agent capability for profile event", zap.Error(err))
-		} else {
-			inferenceCapable = agent.InferenceCapable
-		}
-	}
-	notification, _ := ws.NewNotification(action, gin.H{
-		"profile":           profile,
-		"inference_capable": inferenceCapable,
-	})
-	if profile.WorkspaceID != "" {
-		if workspaceHub, ok := h.hub.(interface {
-			BroadcastToWorkspaceOrDrop(string, *ws.Message)
-		}); ok {
-			workspaceHub.BroadcastToWorkspaceOrDrop(profile.WorkspaceID, notification)
-		}
-		return
-	}
-	h.hub.Broadcast(notification)
-}
-
-func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	force := c.Query("force") == "true"
-	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
-	if err != nil {
-		if err == controller.ErrAgentProfileNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
-			return
-		}
-		var inUseErr *controller.ErrProfileInUseDetail
-		if errors.As(err, &inUseErr) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error":            "agent profile is in use",
-				"active_sessions":  inUseErr.ActiveSessions,
-				"watchers":         inUseErr.Watchers,
-				"routing_tiers":    inUseErr.RoutingTiers,
-				"automations":      inUseErr.Automations,
-				"utility_agents":   inUseErr.UtilityAgents,
-				"dynamic_profiles": inUseErr.DynamicProfiles,
-			})
-			return
-		}
-		h.logger.Error("failed to delete profile", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
-		return
-	}
-	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileDeleted, profile)
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
 type commandPreviewRequest struct {
-	Model              string           `json:"model"`
-	PermissionSettings map[string]bool  `json:"permission_settings"`
-	CLIPassthrough     bool             `json:"cli_passthrough"`
-	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
-	CommandPrefix      string           `json:"command_prefix,omitempty"`
+	Model                  string           `json:"model"`
+	PermissionSettings     map[string]bool  `json:"permission_settings"`
+	CLIPassthrough         bool             `json:"cli_passthrough"`
+	CLIFlags               []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix          string           `json:"command_prefix,omitempty"`
+	CopilotSelectedPlugins []string         `json:"copilot_selected_plugins,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -817,11 +775,12 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 	}
 
 	resp, err := h.controller.PreviewAgentCommand(c.Request.Context(), agentName, controller.CommandPreviewRequest{
-		Model:              body.Model,
-		PermissionSettings: body.PermissionSettings,
-		CLIPassthrough:     body.CLIPassthrough,
-		CLIFlags:           body.CLIFlags,
-		CommandPrefix:      body.CommandPrefix,
+		Model:                  body.Model,
+		PermissionSettings:     body.PermissionSettings,
+		CLIPassthrough:         body.CLIPassthrough,
+		CLIFlags:               body.CLIFlags,
+		CommandPrefix:          body.CommandPrefix,
+		CopilotSelectedPlugins: body.CopilotSelectedPlugins,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))
@@ -882,33 +841,5 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
-}
-
-func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
-	agentName := strings.TrimSpace(c.Param("agentName"))
-	if agentName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
-		return
-	}
-	var req dto.ResolveAgentModelConfigRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model resolution request"})
-		return
-	}
-	resp, err := h.controller.ResolveAgentModelConfig(c.Request.Context(), agentName, req)
-	if err != nil {
-		if errors.Is(err, controller.ErrModelRequired) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
-			return
-		}
-		if errors.Is(err, controller.ErrAgentNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
-			return
-		}
-		h.logger.Error("failed to resolve agent model options", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve agent model options"})
-		return
-	}
 	c.JSON(http.StatusOK, resp)
 }

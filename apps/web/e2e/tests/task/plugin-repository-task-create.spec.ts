@@ -169,9 +169,11 @@ test.describe("first-use plugin repository task creation", () => {
 
     const disable = await apiClient.rawRequest("POST", `/api/plugins/${PLUGIN_ID}/disable`);
     expect(disable.ok, await disable.text()).toBe(true);
-    const response = await createWithoutAgent(testPage);
-    expect(response.status()).toBe(503);
     await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("submit-start-agent")).toBeDisabled();
+    await expect(dialog.getByTestId("submit-start-agent-chevron")).toBeDisabled();
+    await expect(dialog.getByTestId("remote-repo-chip-trigger")).toContainText("TEAM/fixture");
+    await expect(dialog.getByTestId("remote-branch-chip-trigger")).toContainText(FIXTURE_BRANCH);
     await expect(
       testPage.getByText(
         "The repository provider is unavailable. Check the connection and try again.",
@@ -180,6 +182,26 @@ test.describe("first-use plugin repository task creation", () => {
         },
       ),
     ).toBeVisible();
+    const response = await apiClient.rawRequest("POST", "/api/v1/tasks", {
+      workspace_id: seedData.workspaceId,
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      title,
+      workspace_sources: [
+        {
+          kind: "repository",
+          remote_url: FIXTURE_REPOSITORY_URL,
+          provider: FIXTURE_PROVIDER,
+          provider_repo_id: FIXTURE_REPOSITORY_ID,
+          provider_owner: "TEAM",
+          provider_name: "fixture",
+          provider_host: "bitbucket.example.test",
+          base_branch: "main",
+          checkout_branch: FIXTURE_BRANCH,
+        },
+      ],
+    });
+    expect(response.status, await response.text()).toBe(503);
     const tasks = await apiClient.listTasks(seedData.workspaceId);
     expect(tasks.tasks.some((task) => task.title === title)).toBe(false);
     expect(await fixtureRepositories(apiClient, seedData.workspaceId)).toHaveLength(0);

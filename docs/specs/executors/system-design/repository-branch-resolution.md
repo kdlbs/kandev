@@ -18,10 +18,11 @@ The existing URL resolver reads `origin`; this correction does not introduce rem
 
 | Criteria | Design section |
 | --- | --- |
-| AC-EXECUTORS-REPOSITORY-BRANCH-001.1, .2 | Branch conversion |
+| AC-EXECUTORS-REPOSITORY-BRANCH-001.1, .2 | Branch conversion; Template expansion |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.3 | Preserved state |
-| AC-EXECUTORS-REPOSITORY-BRANCH-001.4 | Script integration |
+| AC-EXECUTORS-REPOSITORY-BRANCH-001.4 | Script integration; Template expansion |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.5 | Failure behavior |
+| AC-EXECUTORS-REPOSITORY-BRANCH-002.6, .7, .8 | Remote materialization request budget |
 
 ## Branch conversion
 
@@ -58,6 +59,59 @@ Both paths require the converted branch name.
 Normalization precedes shell quoting. Existing quoting and command-injection regression tests remain mandatory.
 Tests must include a quoted branch value and prove that shell evaluation preserves literal data.
 
+## Template expansion
+
+`scriptengine.Resolver.Resolve` expands placeholders from the original assembled
+template once. Inserted values are opaque to that expansion, including values
+that contain the exact spelling of another registered placeholder. For example,
+the plain branch `topic/{{workspace.path}}` remains that literal branch after
+`repository.branch` is inserted, regardless of the workspace path or map order.
+Shell quoting protects shell evaluation; it does not protect data from a later
+text-replacement pass.
+
+Keep `mergedVars` and registration semantics unchanged: providers override
+static values, later providers override earlier providers, and later static
+registrations replace earlier static values. Providers are evaluated once per
+nonempty resolution, in registration order. Empty input bypasses providers;
+an empty merged map returns the input unchanged. Each exact registered
+`{{key}}` occurrence in the original template is replaced, including repeated
+occurrences and empty values. Unknown placeholders remain literal. Do not add
+a key grammar, whitespace normalization, or a recursive expansion mode.
+
+Build literal pattern/value pairs from the merged map and perform one
+`strings.NewReplacer(...).Replace(script)` operation. The replacement operation
+does not scan inserted values. Repeated `ReplaceAll` calls over evolving output,
+sorting those calls, and expansion to a fixed point do not implement this contract.
+No provider, quoting helper, branch converter, storage format, or executor
+lifecycle change is needed.
+
+### Script fragments and caller compatibility
+
+`RepositoryProvider` supplies `repository.setup_script` as verbatim shell text.
+`AgentInstallProvider` supplies its already-trimmed and deduplicated install
+fragment; agentctl, Git identity, and GitHub authentication providers construct
+their commands before resolution. These fragments remain executable shell text
+when inserted, without additional quoting, trimming, or placeholder expansion.
+Test byte equality against each provider's returned value, including an embedded
+known placeholder, a newline, quotes, and shell parameter syntax.
+
+The production callers in `docker_launch.go`, `executor_sprites_operations.go`,
+`executor_sprites_lifecycle.go`, `executor_ssh_scripts.go`,
+`executor_kubernetes_bootstrap.go`, `executor_kubernetes_cleanup.go`, and
+`preparer_script.go` assemble templates and then resolve once. Their generated
+checkout fragments are appended to the template before resolution; they are
+distinct from provider values inserted during resolution.
+The placeholder registry, fragment tests, and public executor documentation
+do not establish nested interpolation inside provider-returned script text.
+Custom fragments that depended on accidental map-order expansion will instead
+retain their bytes. This correction does not promise recursive interpolation.
+
+SSH's existing `resolveSSHScript` rejects any remaining `{{` sequence after
+resolution, including a literal sequence inside data or a fragment. That
+caller validation remains an independent limitation; resolver coverage does
+not establish successful SSH launch for such values. Local native Git tests
+establish command construction and checkout without claiming live executor coverage.
+
 ## Failure behavior
 
 The change performs no network lookup and adds no retry.
@@ -72,10 +126,24 @@ It covers the current fetch template and a saved clone template, then checks HEA
 A missing branch case proves that preparation does not select the default branch.
 These tests use isolated directories and require no Sprites account or user workspace.
 
+Resolver regression coverage uses the actual repository and workspace providers,
+with a temporary native Git remote containing distinct `main` and
+`topic/{{workspace.path}}` commits and sentinel bytes. Execute current fetch-style
+and saved clone-style templates and verify branch, HEAD, and exact sentinel
+bytes. A missing literal branch must fail without selecting `main`.
+A bounded render assertion checks every result against independently constructed
+literal command text; a detected mutation is executed once to expose the Git
+failure. A separate literal-command control proves fixture validity.
+Compatibility tests cover ordinary branches, repeated and unknown tokens,
+empty inputs/maps/values, precedence, and opaque script fragments. The complete
+`internal/scriptengine` package runs with the race detector after correction.
+
 ## Implementation plans
 
 - [Remote clone branch correction](../../../plans/remote-clone-branch/plan.md)
 - [Remote PR review checkout](../../../plans/remote-pr-review-checkout/plan.md)
+- [Literal executor placeholder expansion](../../../plans/executor-literal-placeholder-expansion/plan.md)
+- [Repository materialization timeout](../../../plans/repository-materialization-timeout/plan.md)
 
 ## Selected remote checkout
 
@@ -137,3 +205,42 @@ Execute both current and saved clone-based prepare templates, then assert branch
 Also cover same-repository PRs, plain explicit branches, missing PR refs, conflicting local branch state, shell metacharacters, no selection, and resume.
 Shared resolver tests must cover Docker, SSH, and Kubernetes so selection propagation does not diverge by executor.
 Abbreviated AC references in this section belong to `AC-EXECUTORS-REPOSITORY-BRANCH-002`.
+
+## Remote materialization request budget
+
+The executor system owns this contract because repository preparation must finish before the remote agent starts.
+The [task attachment design](../../tasks/system-design/attach-workspace-sources.md) also consumes the same materialization client for live source attachment.
+
+`lifecycle.reconcileLaunchWorkspace` selects the repository projection before agent startup.
+Plugin remote executors include the primary repository because they have no built-in repository prepare script.
+Other clone-based executors prepare the primary repository separately and materialize additional repositories through agentctl.
+The shared path reaches `client.Client.MaterializeRepository` in `internal/agent/runtime/agentctl/client_workspace_sources.go`.
+
+`MaterializeRepository` must send its existing JSON request through `longRunningHTTPClient`.
+`newClient` initializes that client with a five-minute total timeout.
+The ordinary `httpClient` retains its 60-second timeout for other operations.
+`http.NewRequestWithContext` retains the supplied context, so earlier deadlines and cancellation still stop this request.
+The timeout covers the whole HTTP operation, including the response body.
+This design adds no retry or detached clone request.
+
+Both clients receive authentication, instance identity, and runtime binding transports during construction.
+`NewEndpointClient` also configures both clients with the same provider connection transport and redirect policy.
+The correction must reuse that wiring without a new transport or credential path.
+Request fields, response decoding, and `WorkspaceMaterializationError` retain their existing behavior.
+`RemoveMaterializedRepository`, lifecycle rollback, reconciliation, and rescan retain their current clients and contexts.
+
+The server handler passes the request context to `materializeGitRunner`.
+`materializeGitTimeout` independently limits clone commands to five minutes and fetch commands to 30 seconds after admission.
+Several Git operations and admission waits can consume one HTTP request budget.
+This correction therefore removes the premature one-minute limit without guaranteeing success for every large repository.
+Script-based primary clones and caller launch budgets retain their existing limits.
+
+### Regression coverage for request budgets
+
+Use `testing/synctest` and a context-aware in-memory HTTP transport to advance time without a network clone.
+Exercise the real client constructor and materialization method.
+A response after 61 simulated seconds must succeed, while an earlier caller deadline or cancellation must remain observable through `errors.Is`.
+A response beyond five simulated minutes must produce a timeout error.
+The existing typed-error test must initialize both clients and retain its authentication and checkout-identity assertions.
+Existing loopback HTTP tests cover wire behavior. Lifecycle projection tests cover primary and additional repository selection and batch rollback.
+These checks establish the shared client contract. They do not claim live cloud-provider or multi-gigabyte clone coverage.

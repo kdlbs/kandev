@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
+import { ApiError, fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
@@ -13,6 +13,7 @@ import type {
   TaskSession,
   Branch,
 } from "@/lib/types/http";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 export type RepositoryCloneSourceResponse = {
   ready: boolean;
@@ -329,10 +330,12 @@ export async function listRepositoryScripts(repositoryId: string, options?: ApiR
 
 // Quick Chat operations
 type StartQuickChatCommon = {
+  creation_id?: string;
   title?: string;
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
   auto_title?: boolean;
 };
 
@@ -362,10 +365,47 @@ export type QuickChatRepositoryInput = {
   base_branch: string;
 };
 
+export type QuickChatStartErrorBody = {
+  error?: string;
+  task_id?: string;
+  session_id?: string;
+};
+
+export function getQuickChatRetainedSessionFromError(
+  error: unknown,
+): { taskId: string; sessionId: string } | null {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const body = error.body as QuickChatStartErrorBody;
+    if (
+      typeof body.task_id === "string" &&
+      body.task_id &&
+      typeof body.session_id === "string" &&
+      body.session_id
+    ) {
+      return { taskId: body.task_id, sessionId: body.session_id };
+    }
+  }
+  return null;
+}
+
 export type StartQuickChatResponse = {
   task_id: string;
-  session_id: string;
+  session_id?: string;
   agent_profile_id?: string;
+  creation_id?: string;
+  creation_complete?: boolean;
+  session_state?: string;
+  archived?: boolean;
+};
+
+export type QuickChatCreationStatusResponse = {
+  task_id: string;
+  creation_id: string;
+  creation_complete: boolean;
+  session_id?: string;
+  agent_profile_id?: string;
+  session_state?: string;
+  archived?: boolean;
 };
 
 export async function startQuickChat(
@@ -379,6 +419,17 @@ export async function startQuickChat(
   });
 }
 
+export async function getQuickChatCreation(
+  workspaceId: string,
+  creationId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<QuickChatCreationStatusResponse>(
+    `/api/v1/workspaces/${workspaceId}/quick-chat/creations/${creationId}`,
+    options,
+  );
+}
+
 export type QuickChatSessionResponse = {
   session_id: string;
   task_id: string;
@@ -386,11 +437,14 @@ export type QuickChatSessionResponse = {
   kind: "chat" | "config";
   name?: string;
   agent_profile_id?: string;
+  creation_id?: string;
 };
 
 export type ListQuickChatSessionsResponse = {
   sessions: QuickChatSessionResponse[];
   task_sessions: TaskSession[];
+  config_chat_restart_pending?: boolean;
+  config_chat_retiring_session_id?: string;
 };
 
 /**
@@ -412,6 +466,7 @@ export type StartConfigChatRequest = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
 };
 
 export type StartConfigChatResponse = {
@@ -429,4 +484,29 @@ export async function startConfigChat(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+export type ConfigChatRestartFailure = {
+  code: string;
+  stage: "validate" | "stop" | "delete" | "create" | "start";
+  old_deleted: boolean;
+  replacement?: StartConfigChatResponse;
+};
+
+export async function restartConfigChat(
+  workspaceId: string,
+  payload: { task_id: string; session_id: string },
+  confirmationId: string,
+) {
+  return fetchJson<StartConfigChatResponse>(
+    `/api/v1/workspaces/${workspaceId}/config-chat/restart`,
+    {
+      cache: "no-store",
+      init: {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "X-Kandev-Task-Delete-Confirmation": confirmationId },
+      },
+    },
+  );
 }

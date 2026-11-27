@@ -206,6 +206,8 @@ func TestRestoreTaskMessageRollbackIfSessionState_RejectionDoesNotMutateCandidat
 		candidate,
 		"session-rollback-rejected",
 		models.TaskSessionStateRunning,
+		v1.TaskStateInProgress,
+		"current-step",
 	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
@@ -249,6 +251,8 @@ func TestRestoreTaskMessageRollbackIfSessionState_RestoresFieldsAndRunner(t *tes
 		candidate,
 		"session-rollback-success",
 		models.TaskSessionStateRunning,
+		v1.TaskStateInProgress,
+		"current-step",
 	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)

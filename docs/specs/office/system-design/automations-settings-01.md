@@ -53,7 +53,7 @@ The target-mode amendment in `../requirements/automation-target-modes.md` restor
   - 2+ workspaces → workspace picker (grid of cards, click to enter).
 - Firing an automation by hand reports whether a run actually started. A trigger turned away by the concurrency cap, by dedup, or because the automation is disabled is reported as skipped with a reason — never as a successful fire, and it does not advance `last_triggered_at`.
 - A scheduled trigger carries a timezone alongside its cron expression. An empty timezone means UTC. The editor composes the schedule as a sentence and states the resolved next firing in both the chosen zone and UTC, because a cron expression alone never says which instant it means.
-- Cron expressions are validated with the scheduler's own parser at add/update time. Client-side validation MUST NOT be the only gate: an expression the scheduler cannot parse would otherwise save and then silently never fire.
+- `nextCronFire` in `internal/automation/scheduler.go` returns a nonzero occurrence or an error, including when robfig/cron finds none within five years. Shared save validation rejects errors before create/add/config-update writes; empty schedules stay unscheduled. `CronScheduler.shouldFire` returns false on errors for persisted rows without writing runs or cursors. Parser, timezone, and DST semantics stay shared.
 - The workflow offered for an automation MUST belong to that automation's workspace, enforced server-side. A UI filter is not an authorization boundary, and a workflow name present in two workspaces makes the wrong one look right.
 
 ## Data model

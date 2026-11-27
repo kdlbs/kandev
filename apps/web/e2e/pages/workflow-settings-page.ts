@@ -5,6 +5,23 @@ type StepProfileSessionLifecycle = {
   endPolicy: "complete" | "park";
 };
 
+export type WorkflowListViewPreference = "compact" | "detailed";
+
+export const WORKFLOW_LIST_VIEW_STORAGE_KEY = "kandev:workflows:settingsListView:v1";
+
+/** Seeds the Workflows list view for this page unless a choice is already stored. */
+export async function seedWorkflowListView(
+  page: Page,
+  view: WorkflowListViewPreference,
+): Promise<void> {
+  await page.addInitScript(
+    ([key, value]) => {
+      if (window.localStorage.getItem(key) === null) window.localStorage.setItem(key, value);
+    },
+    [WORKFLOW_LIST_VIEW_STORAGE_KEY, view] as const,
+  );
+}
+
 export class WorkflowSettingsPage {
   readonly page: Page;
   readonly addWorkflowButton: Locator;
@@ -24,7 +41,16 @@ export class WorkflowSettingsPage {
     this.cycleGuardDialog = page.getByTestId("workflow-cycle-guard-dialog");
   }
 
-  async goto(workspaceId: string) {
+  /**
+   * Opens the workflows settings route. Legacy specs edit card fields directly,
+   * so the Detailed list view is seeded unless the browser already stored a
+   * view choice; pass `listView: null` to exercise the product default.
+   */
+  async goto(
+    workspaceId: string,
+    { listView = "detailed" }: { listView?: WorkflowListViewPreference | null } = {},
+  ) {
+    if (listView) await seedWorkflowListView(this.page, listView);
     await this.page.goto(`/settings/workspaces/${workspaceId}/workflows`);
     // Wait for a client-rendered element to confirm hydration is complete
     // (networkidle is unreliable with persistent WebSocket connections)
@@ -42,45 +68,45 @@ export class WorkflowSettingsPage {
     { waitForName = false }: { waitForName?: boolean } = {},
   ): Promise<Locator> {
     const cards = this.page.locator('[data-testid^="workflow-card-"]');
+    let matchingTestId: string | null = null;
+    const findMatchingTestId = async (): Promise<string | null> => {
+      try {
+        const testIds = await cards.evaluateAll((elements) =>
+          elements
+            .map((element) => element.getAttribute("data-testid"))
+            .filter((testId): testId is string => Boolean(testId)),
+        );
+        for (const testId of testIds) {
+          const input = this.page.getByTestId(testId).locator("input").first();
+          if ((await input.inputValue({ timeout: 500 }).catch(() => null)) === name) {
+            return testId;
+          }
+        }
+      } catch {
+        // The import handler refreshes this route. A navigation can destroy
+        // the evaluation context between the card query and input read; the
+        // next poll observes the freshly hydrated page.
+      }
+      return null;
+    };
     if (waitForName) {
       await expect
         .poll(
           async () => {
-            const testIds = await cards.evaluateAll((elements) =>
-              elements
-                .map((element) => element.getAttribute("data-testid"))
-                .filter((testId): testId is string => Boolean(testId)),
-            );
-            for (const testId of testIds) {
-              const input = this.page.getByTestId(testId).locator("input").first();
-              if ((await input.inputValue({ timeout: 500 }).catch(() => null)) === name)
-                return true;
-            }
-            return false;
+            matchingTestId = await findMatchingTestId();
+            return matchingTestId !== null;
           },
           { timeout: 5_000 },
         )
         .toBe(true);
     } else {
       await expect(cards.first()).toBeVisible();
+      matchingTestId = await findMatchingTestId();
     }
 
-    const testIds = await cards.evaluateAll((elements) =>
-      elements
-        .map((element) => element.getAttribute("data-testid"))
-        .filter((testId): testId is string => Boolean(testId)),
-    );
-
-    for (const testId of testIds) {
-      const card = this.page.getByTestId(testId);
-      const input = card.locator("input").first();
-      const value = await input.inputValue({ timeout: 500 }).catch(() => null);
-      if (value === name) {
-        return card;
-      }
-    }
-
-    return this.page.getByTestId(`workflow-card-not-found-${name}`);
+    return matchingTestId
+      ? this.page.getByTestId(matchingTestId)
+      : this.page.getByTestId(`workflow-card-not-found-${name}`);
   }
 
   /** The pipeline step nodes within a specific workflow card. */
@@ -243,6 +269,55 @@ export class WorkflowSettingsPage {
       names.push(await input.inputValue());
     }
     return names;
+  }
+
+  /** The collapsed summary row (compact list view) for a workflow. */
+  compactRow(workflowId: string): Locator {
+    return this.page.getByTestId(`workflow-compact-row-${workflowId}`);
+  }
+
+  /** The Compact/Detailed list view control. */
+  listViewOption(view: WorkflowListViewPreference): Locator {
+    return this.page.getByTestId(`workflow-list-view-${view}`);
+  }
+
+  /** Rendered edges of the sync status card, its separator, and the workflow list. */
+  async syncSectionAndListEdges(): Promise<{
+    card: { left: number; right: number; top: number };
+    separator: { left: number; right: number; bottom: number };
+    list: { left: number; right: number };
+    dividerTop: number;
+    toggleTop: number;
+  }> {
+    return this.page.getByTestId("workflow-sync-section").evaluate((sync) => {
+      const card = sync.firstElementChild;
+      const separator = sync.lastElementChild;
+      const list = document.querySelector('[data-testid="workflow-order-list"]');
+      const toggle = document.querySelector('[data-testid="workflow-list-view-toggle"]');
+      const content = sync.closest('[data-settings-group-content="true"]');
+      if (!card || !separator || !list || !toggle || !content) {
+        throw new Error("workflows section layout not found");
+      }
+      const c = card.getBoundingClientRect();
+      const sep = separator.getBoundingClientRect();
+      const l = list.getBoundingClientRect();
+      return {
+        card: { left: c.left, right: c.right, top: c.top },
+        separator: { left: sep.left, right: sep.right, bottom: sep.bottom },
+        list: { left: l.left, right: l.right },
+        dividerTop: content.getBoundingClientRect().top,
+        toggleTop: toggle.getBoundingClientRect().top,
+      };
+    });
+  }
+
+  /** Vertical gap between the Workflows section divider and the list view control. */
+  async listViewToggleGapBelowDivider(): Promise<number> {
+    return this.page.getByTestId("workflow-list-view-toggle").evaluate((toggle) => {
+      const content = toggle.closest('[data-settings-group-content="true"]');
+      if (!content) throw new Error("workflows section content not found");
+      return toggle.getBoundingClientRect().top - content.getBoundingClientRect().top;
+    });
   }
 
   /** The drag handle for a specific workflow card. */

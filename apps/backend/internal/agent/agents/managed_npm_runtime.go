@@ -8,8 +8,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
-// ManagedNPMRuntimeSpec defines a built-in npm-distributed ACP runtime.
-// Package and ACPArgs must come from trusted agent metadata, never request
+// ManagedNPMRuntimeSpec defines a built-in npm-distributed agent runtime.
+// Package and Args must come from trusted agent metadata, never request
 // input, because update jobs execute them directly.
 //
 // NativeBinary optionally names a standalone CLI that ships the same ACP
@@ -19,8 +19,10 @@ import (
 type ManagedNPMRuntimeSpec struct {
 	Package        string
 	DefaultVersion string
-	ACPArgs        []string
-	NativeBinary   string
+	Args           []string
+	// ACPArgs remains as a compatibility alias for existing ACP agents.
+	ACPArgs      []string
+	NativeBinary string
 }
 
 // DefaultVersionOrPinned returns the reviewed default version, including the
@@ -38,12 +40,20 @@ func (s ManagedNPMRuntimeSpec) DefaultVersionOrPinned() string {
 	return ""
 }
 
-func newManagedNPMRuntimeSpec(packageName string, acpArgs ...string) ManagedNPMRuntimeSpec {
+func newManagedNPMRuntimeSpec(packageName string, args ...string) ManagedNPMRuntimeSpec {
 	return ManagedNPMRuntimeSpec{
 		Package:        packageName,
 		DefaultVersion: MustDefaultManagedNPMRuntimeVersion(packageName),
-		ACPArgs:        acpArgs,
+		Args:           args,
+		ACPArgs:        args,
 	}
+}
+
+func (s ManagedNPMRuntimeSpec) runtimeArgs() []string {
+	if s.Args != nil {
+		return s.Args
+	}
+	return s.ACPArgs
 }
 
 // PackageSpec returns the trusted package name or exact package@version spec.
@@ -73,28 +83,53 @@ func (s ManagedNPMRuntimeSpec) ExecutionCacheKey(versions ...string) string {
 // ACPCommand returns the normal launch command for the exact version when one
 // is supplied. An empty version uses the reviewed default.
 func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
-	return s.ACPCommandWithNpmPreference(version, false)
+	return s.RuntimeCommand(version)
+}
+
+// InteractiveCommand starts the selected package's CLI without ACP mode.
+func (s ManagedNPMRuntimeSpec) InteractiveCommand(version string) Command {
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), false)
+	return NewCommand(args...)
 }
 
 // ACPCommandWithNpmPreference builds a managed runtime launch command. The
 // package spec and ACP arguments remain trusted agent metadata; recovery only
 // changes npm's metadata freshness preference.
 func (s ManagedNPMRuntimeSpec) ACPCommandWithNpmPreference(version string, preferOnline bool) Command {
-	preference := "--prefer-offline"
-	if preferOnline {
-		preference = "--prefer-online"
-	}
-	args := []string{"npx", "--yes", preference}
-	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
-	args = append(args, s.PackageSpec(version))
-	args = append(args, s.ACPArgs...)
+	return s.runtimeCommandWithNpmPreference(version, preferOnline)
+}
+
+// RuntimeCommand returns the normal launch command for the exact managed
+// runtime version when one is supplied.
+func (s ManagedNPMRuntimeSpec) RuntimeCommand(version string) Command {
+	return s.runtimeCommandWithNpmPreference(version, false)
+}
+
+func (s ManagedNPMRuntimeSpec) runtimeCommandWithNpmPreference(version string, preferOnline bool) Command {
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), preferOnline)
+	args = append(args, s.runtimeArgs()...)
 	return NewCommand(args...)
+}
+
+// MatchRuntimeCommand recognizes the registered direct managed-npm launcher
+// and separates its required runtime arguments from authorized agent
+// arguments. Full-argv equality is not required because profiles may append
+// valid CLI flags.
+func (s ManagedNPMRuntimeSpec) MatchRuntimeCommand(command []string) (managedruntime.ManagedNPMInvocation, bool) {
+	invocation, err := managedruntime.ParseManagedNPMInvocation(command, s.Package, s.runtimeArgs())
+	if err != nil {
+		return managedruntime.ManagedNPMInvocation{}, false
+	}
+	return invocation, true
 }
 
 // CachedACPCommand returns the default exact-version launch command.
 func (s ManagedNPMRuntimeSpec) CachedACPCommand() Command {
-	return s.ACPCommand("")
+	return s.CachedCommand()
 }
+
+// CachedCommand returns the default exact-version launch command.
+func (s ManagedNPMRuntimeSpec) CachedCommand() Command { return s.RuntimeCommand("") }
 
 // CacheUpdateCommand returns the explicit cache preparation command. The
 // optional version makes npm prepare one deterministic package@version tree.
@@ -119,7 +154,7 @@ func (s ManagedNPMRuntimeSpec) CacheUpdateCommand(versions ...string) Command {
 // on NativeBinaryOnPath so remotes and containers use the managed runtime.
 func (s ManagedNPMRuntimeSpec) NativeCommand() Command {
 	args := []string{s.NativeBinary}
-	args = append(args, s.ACPArgs...)
+	args = append(args, s.runtimeArgs()...)
 	return NewCommand(args...)
 }
 
@@ -171,4 +206,76 @@ func firstVersion(versions []string) string {
 func isBuiltInManagedNPMRuntimePackage(packageName string) bool {
 	_, err := DefaultManagedNPMRuntimeVersion(packageName)
 	return err == nil
+}
+
+// BuiltinManagedNPMRuntime returns the trusted managed runtime descriptor for
+// a registered built-in agent that supports npm runtimes.
+func BuiltinManagedNPMRuntime(agentID string) (ManagedNPMRuntimeSpec, bool) {
+	switch agentID {
+	case NewClaudeACP().ID():
+		return NewClaudeACP().ManagedNPMRuntime(), true
+	case NewCodexACP().ID():
+		return NewCodexACP().ManagedNPMRuntime(), true
+	case NewCodexAppServer(true).ID():
+		return NewCodexAppServer(true).ManagedNPMRuntime(), true
+	case CopilotACPAgentID:
+		return NewCopilotACP().ManagedNPMRuntime(), true
+	case "gemini":
+		return NewGemini().ManagedNPMRuntime(), true
+	case OpenCodeACPAgentID:
+		return NewOpenCodeACP().ManagedNPMRuntime(), true
+	case "pi-acp":
+		return NewPiACP().ManagedNPMRuntime(), true
+	case "muse-acp":
+		return NewMuseACP().ManagedNPMRuntime(), true
+	default:
+		return ManagedNPMRuntimeSpec{}, false
+	}
+}
+
+// MatchBuiltinManagedNPMRuntime recognizes a registered direct managed-npm
+// launcher, including both supported OpenCode families. Required runtime
+// arguments and authorized agent arguments are separated structurally.
+func MatchBuiltinManagedNPMRuntime(
+	agentID string,
+	command []string,
+) (ManagedNPMRuntimeSpec, managedruntime.ManagedNPMInvocation, bool) {
+	if agentID == OpenCodeACPAgentID {
+		for _, family := range []managedruntime.OpenCodeFamily{
+			managedruntime.OpenCodeFamilyV1,
+			managedruntime.OpenCodeFamilyV2,
+		} {
+			spec, err := NewOpenCodeACP().ManagedNPMRuntimeForFamily(family)
+			if err != nil {
+				continue
+			}
+			if invocation, ok := spec.MatchRuntimeCommand(command); ok {
+				return spec, invocation, true
+			}
+		}
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	spec, ok := BuiltinManagedNPMRuntime(agentID)
+	if !ok {
+		return ManagedNPMRuntimeSpec{}, managedruntime.ManagedNPMInvocation{}, false
+	}
+	invocation, ok := spec.MatchRuntimeCommand(command)
+	return spec, invocation, ok
+}
+
+// BuiltinManagedNPMRuntimeForPackage resolves a registered distribution for an
+// exact package selection, including both supported OpenCode families.
+func BuiltinManagedNPMRuntimeForPackage(agentID, packageSpec string) (ManagedNPMRuntimeSpec, bool) {
+	spec, ok := BuiltinManagedNPMRuntime(agentID)
+	if !ok {
+		return ManagedNPMRuntimeSpec{}, false
+	}
+	if agentID == OpenCodeACPAgentID && strings.HasPrefix(packageSpec, managedruntime.OpenCodeV2Package+"@") {
+		var err error
+		spec, err = NewOpenCodeACP().ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV2)
+		if err != nil {
+			return ManagedNPMRuntimeSpec{}, false
+		}
+	}
+	return spec, strings.HasPrefix(packageSpec, spec.Package+"@")
 }

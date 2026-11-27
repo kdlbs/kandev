@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { ExecutorType } from "@/lib/types/http";
+import type { ExecutorType, Repository } from "@/lib/types/http";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 import {
@@ -14,6 +14,7 @@ import {
 import {
   remoteOriginSelectionIsCompatible,
   useSelectedRemoteOriginInspection,
+  isHostRepositorySelection,
 } from "@/components/task-create-dialog-remote-origin-inspection";
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
 
@@ -33,21 +34,32 @@ export function useSubtaskExecutorSourceState({
   workspaceId,
   executorType,
   selectedSources,
+  repositories,
 }: {
   fs: DialogFormState;
   workspaceId: string | null;
   executorType: ExecutorType | string | undefined;
   selectedSources: SelectedSource[];
+  repositories: Repository[];
 }): SubtaskExecutorSourceState {
   const { t } = useTranslation();
   const executorSourceNotice = fs.folderOnlyExecutorNotice
     ? t("task:folderOnlyExecutorSwitched")
     : null;
   const sourcePolicy = useMemo(
-    () => deriveExecutorSourcePolicy({ executorType, counts: sourceCounts(selectedSources) }),
-    [executorType, selectedSources],
+    () =>
+      deriveExecutorSourcePolicy({
+        executorType,
+        counts: sourceCounts(selectedSources, repositories),
+      }),
+    [executorType, repositories, selectedSources],
   );
-  const remoteOriginInspection = useSelectedRemoteOriginInspection(fs, workspaceId, executorType);
+  const remoteOriginInspection = useSelectedRemoteOriginInspection(
+    fs,
+    workspaceId,
+    executorType,
+    repositories,
+  );
   const pending =
     remoteOriginInspection.enabled &&
     remoteOriginInspection.candidates.some((candidate) => {
@@ -105,12 +117,14 @@ function resolveSourcePolicyReason(
   return t(reasonKey);
 }
 
-function sourceCounts(selections: SelectedSource[]) {
+function sourceCounts(selections: SelectedSource[], repositories: Repository[]) {
   return {
     sourceCount: selections.length,
     repositoryCount: selections.filter(isRepositorySource).length,
     folderCount: selections.filter((selection) => selection.kind === "folder").length,
-    localRepositoryCount: selections.filter((selection) => selection.kind === "local").length,
+    localRepositoryCount: selections.filter((selection) =>
+      isHostRepositorySelection(selection, repositories),
+    ).length,
     remoteOriginRepositoryCount: selections.filter(
       (selection) => selection.kind === "local" && selection.checkoutSource === "remote_origin",
     ).length,

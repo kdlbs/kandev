@@ -27,8 +27,9 @@ async function assertProfileDropdownFits(trigger: Locator, dropdownLabel: string
     await searchInput.click();
     await expect(searchInput).toBeFocused();
   }
-  const option = dropdown.getByRole("option").first();
+  const option = dropdown.locator('[role="option"]:not([aria-disabled="true"])').first();
   await expect(option).toBeVisible();
+  await expect(option).toBeEnabled();
   await option.click();
   await expect(dropdown).not.toBeVisible();
 }
@@ -41,6 +42,13 @@ test.describe("Dialog long text layout", () => {
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    const divider = testPage.getByTestId("sidebar-navigation-divider");
+    await divider.focus();
+    await divider.press("Home");
+    const expand = testPage.getByTestId("sidebar-navigation-expand");
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await expand.click();
+    await expect(expand).toHaveAttribute("aria-expanded", "true");
 
     await kanban.createTaskButton.first().click();
     const createDialog = testPage.getByTestId("create-task-dialog");

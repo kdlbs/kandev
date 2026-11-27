@@ -3,6 +3,8 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"github.com/kandev/kandev/internal/agent/hostcli"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -20,6 +22,7 @@ var (
 	_ Agent                         = (*MockAgent)(nil)
 	_ PassthroughAgent              = (*MockAgent)(nil)
 	_ InferenceAgent                = (*MockAgent)(nil)
+	_ HostCLIAgent                  = (*MockAgent)(nil)
 	_ OpenAICompatibleProviderAgent = (*MockAgent)(nil)
 )
 
@@ -38,18 +41,20 @@ type MockAgent struct {
 	// binary can be registered under multiple canonical routing provider
 	// IDs (e.g. "claude-acp", "codex-acp") in E2E mode. When empty the
 	// defaults ("mock-agent", "Mock Agent", "Mock") are returned.
-	id          string
-	name        string
-	displayName string
-	enabled     bool
-	binaryPath  string
-	supportsMCP bool
+	id           string
+	name         string
+	displayName  string
+	enabled      bool
+	binaryPath   string
+	supportsMCP  bool
+	displayOrder int
 }
 
 func NewMockAgent() *MockAgent {
 	return &MockAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
+				MCPStrategy:       mcpconfig.ClaudeStrategy{},
 				Supported:         true,
 				Label:             "TUI Passthrough",
 				Description:       "Terminal UI mode for testing",
@@ -63,7 +68,8 @@ func NewMockAgent() *MockAgent {
 				BufferMaxBytes:    DefaultBufferMaxBytes,
 			},
 		},
-		supportsMCP: true,
+		supportsMCP:  true,
+		displayOrder: 99,
 	}
 }
 
@@ -84,11 +90,21 @@ func NewMockAgentWithID(id, name, displayName string) *MockAgent {
 // SetEnabled enables or disables the mock agent at runtime.
 func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
 
+// SetDisplayOrder changes the listing priority for this mock instance.
+func (a *MockAgent) SetDisplayOrder(order int) { a.displayOrder = order }
+
 // SetBinaryPath overrides the mock-agent binary path.
 // Also updates the passthrough command to use the same binary.
 func (a *MockAgent) SetBinaryPath(path string) {
 	a.binaryPath = path
 	a.Cfg.PassthroughCmd = NewCommand(path, "--tui")
+}
+
+func (a *MockAgent) BuildPassthroughCommand(opts PassthroughOptions) Command {
+	if opts.Runtime == agentruntime.RuntimeSSH && opts.BaseCommand.IsEmpty() {
+		opts.BaseCommand = NewCommand(mockAgentDefaultID, "--tui")
+	}
+	return a.StandardPassthrough.BuildPassthroughCommand(opts)
 }
 
 // SetSupportsMCP controls whether the mock agent reports MCP support.
@@ -120,9 +136,12 @@ func (a *MockAgent) Description() string {
 	return "Mock agent for testing. Generates simulated responses with all message types."
 }
 func (a *MockAgent) Enabled() bool     { return a.enabled }
-func (a *MockAgent) DisplayOrder() int { return 99 }
+func (a *MockAgent) DisplayOrder() int { return a.displayOrder }
 
 func (a *MockAgent) Logo(v LogoVariant) []byte {
+	if a.ID() == AntigravityACPAgentID {
+		return NewAntigravityACP().Logo(v)
+	}
 	if v == LogoDark {
 		return mockLogoDark
 	}
@@ -131,7 +150,24 @@ func (a *MockAgent) Logo(v LogoVariant) []byte {
 
 func (a *MockAgent) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// Mock agent is always "available" when enabled (forced by settings controller).
-	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP}, nil
+	// The matched path is the configured binary so host CLI detection can run
+	// `mock-agent --version` exactly like a real vendor CLI.
+	return &DiscoveryResult{Available: true, SupportsMCP: a.supportsMCP, MatchedPath: a.binaryPath}, nil
+}
+
+// HostCLI exposes the mock binary as a vendor CLI so E2E tests can exercise
+// version detection and app-server model discovery without a real vendor tool.
+func (a *MockAgent) HostCLI() hostcli.Spec {
+	executable := mockAgentDefaultID
+	if a.binaryPath != "" {
+		executable = a.binaryPath
+	}
+	return hostcli.Spec{
+		DisplayName: "Mock Agent",
+		Executable:  executable,
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
+	}
 }
 
 func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
@@ -164,11 +200,15 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *MockAgent) Runtime() *RuntimeConfig {
+	env := map[string]string{}
+	if a.ID() == "pi-acp" {
+		env["KANDEV_MOCK_PI_THINKING"] = "true"
+	}
 	canRecover := true
 	return &RuntimeConfig{
 		Cmd:             Cmd(mockAgentDefaultID).Build(),
 		WorkingDir:      "{workspace}",
-		Env:             map[string]string{},
+		Env:             env,
 		ResourceLimits:  ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
 		Protocol:        agent.ProtocolACP,
 		ProjectSkillDir: DefaultProjectSkillDir,
@@ -244,6 +284,12 @@ func (a *MockAgent) LoginCommand() *LoginCommand {
 func (a *MockAgent) BillingType() usage.BillingType { return defaultBillingType() }
 
 func (a *MockAgent) PermissionSettings() map[string]PermissionSetting {
+	if a.ID() == CopilotACPAgentID {
+		return copilotPermSettings
+	}
+	if a.ID() == AntigravityACPAgentID {
+		return antigravityACPPermSettings
+	}
 	return emptyPermSettings
 }
 

@@ -38,7 +38,7 @@ test.describe("Task sidebar send to workflow", () => {
       targetStep.id,
     );
 
-    await expect(testPage.getByText(/Moved task to/i)).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Workflow changed.")).toBeVisible({ timeout: 10_000 });
     expect(testPage.url()).toBe(beforeUrl);
 
     const kanban = new KanbanPage(testPage);

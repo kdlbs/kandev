@@ -87,14 +87,14 @@ func TestCeilingReplaySynchronousReconciliationCallback(t *testing.T) {
 		QueuedAt:   time.Now().UTC(),
 	}
 
-	done := make(chan ceilingReplayOutcome, 1)
+	done := make(chan ceilingReplayResult, 1)
 	go func() {
 		done <- svc.replayCeilingDeferral(ctx, &models.Task{ID: taskID}, deferral)
 	}()
 
 	select {
 	case outcome := <-done:
-		require.Equal(t, ceilingReplaySucceeded, outcome)
+		require.Equal(t, ceilingReplaySucceeded, outcome.outcome)
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("ceiling replay blocked while a synchronous dispatch callback reconciled task state")
 	}
@@ -185,7 +185,7 @@ func TestCeilingReplayRevalidatesAfterRuntimePreparation(t *testing.T) {
 	}
 
 	outcome := svc.replayCeilingDeferral(ctx, &models.Task{ID: taskID}, deferral)
-	require.Equal(t, ceilingReplaySuperseded, outcome)
+	require.Equal(t, ceilingReplaySuperseded, outcome.outcome)
 	agentMgr.mu.Lock()
 	require.Empty(t, agentMgr.capturedPrompts)
 	agentMgr.mu.Unlock()

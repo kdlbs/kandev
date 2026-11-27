@@ -25,6 +25,27 @@ type BlockerRepository interface {
 	ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error)
 }
 
+// RelationRepository provides access to symmetric task relationships.
+type RelationRepository interface {
+	AddRelation(ctx context.Context, taskA, taskB string) error
+	ListRelationsForTask(ctx context.Context, taskID string) ([]string, error)
+	ListRelationsForTasks(ctx context.Context, taskIDs []string) (map[string][]string, error)
+	RemoveRelationsForTask(ctx context.Context, taskID string) error
+}
+
+type exactTaskBlockerRepository interface {
+	AddTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+	RemoveTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+}
+
 // taskDependencyCleaner removes every edge touching a task. Optional on
 // BlockerRepository so existing test doubles keep compiling.
 type taskDependencyCleaner interface {
@@ -81,6 +102,11 @@ type TaskStateActivityLogger interface {
 // SetBlockerRepository wires the blocker repository for office integration.
 func (s *Service) SetBlockerRepository(repo BlockerRepository) {
 	s.blockers = repo
+}
+
+// SetRelationRepository wires the relation repository for task integration.
+func (s *Service) SetRelationRepository(repo RelationRepository) {
+	s.relations = repo
 }
 
 // SetCommentRepository wires the comment repository for office integration.

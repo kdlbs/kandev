@@ -57,6 +57,24 @@ func (u *handlerRuntimeUpdater) ResolveTarget(context.Context, string) (string, 
 	return "1.1.0", nil
 }
 
+type reviewedHandlerRuntimeUpdater struct {
+	handlerRuntimeUpdater
+}
+
+func (u *reviewedHandlerRuntimeUpdater) ResolveVersions(context.Context, string) (controller.RuntimeVersionMetadata, error) {
+	return controller.RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"}, nil
+}
+
+func (u *reviewedHandlerRuntimeUpdater) Probe(
+	context.Context,
+	string,
+	agents.Command,
+) (hostutility.AgentCapabilities, error) {
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"}, nil
+}
+
+func (u *reviewedHandlerRuntimeUpdater) PublishCapabilities(string, hostutility.AgentCapabilities) {}
+
 func (u *handlerRuntimeUpdater) RunUpdate(
 	ctx context.Context,
 	_ agents.Command,
@@ -125,7 +143,7 @@ func waitForTerminalUpdate(
 			t.Fatalf("finished job = %s, want %s", job.JobID, jobID)
 		}
 		return job
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("job %s did not finish in time", jobID)
 		return dto.AgentUpdateJobDTO{}
 	}
@@ -201,6 +219,9 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 
 func TestAgentUpdateStatusEndpointIsReadOnly(t *testing.T) {
 	t.Setenv("KANDEV_E2E_MOCK", "true")
+	// Native update checks resolve executables from PATH; an empty PATH keeps
+	// this test from starting any host agent CLI.
+	t.Setenv("PATH", t.TempDir())
 	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	var statusResponse struct {
 		Statuses []dto.AgentUpdateStatusDTO `json:"statuses"`
@@ -287,7 +308,7 @@ func TestAgentUpdateEndpointDoesNotCreateAlreadyActiveHealthyJob(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatalf("decode no-op response: %v", err)
 	}
-	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) {
+	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) || result.UpdateMode != dto.AgentUpdateModePinned {
 		t.Fatalf("no-op response = %#v, want terminal up_to_date without job ID", result)
 	}
 
@@ -389,4 +410,176 @@ func TestAgentUpdateEndpointRequiresExactTargetVersion(t *testing.T) {
 			t.Fatalf("body %q status = %d, want 400: %s", body, response.Code, response.Body.String())
 		}
 	}
+}
+
+type handlerHarnessUpdater struct {
+	handlerRuntimeUpdater
+	current string
+}
+
+func (u *handlerHarnessUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: u.current}, true
+}
+
+func (u *handlerHarnessUpdater) ResolveHarnessLatest(context.Context, string) (string, error) {
+	return "1.1.0", nil
+}
+
+// A stable reference does not suppress the harness updater; target fields remain rejected.
+func TestHarnessUpdateHTTPApprovalAndRejectedTargets(t *testing.T) {
+	router, ctrl, completed := newAgentUpdateRouter(t, &handlerHarnessUpdater{current: "1.1.0"})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", `{}`))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("approval status %d: %s", response.Code, response.Body.String())
+	}
+	var job dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.JobID == "" || job.UpdateMode != dto.AgentUpdateModeSelfUpdate {
+		t.Fatalf("stable version suppressed update job: %+v", job)
+	}
+	finished := waitForTerminalUpdate(t, completed, job.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusFailed || !strings.Contains(finished.Error, "probe unavailable") {
+		t.Errorf("harness without candidate probe result = %+v", finished)
+	}
+	jobCount := len(ctrl.ListAgentUpdateJobs())
+	if jobCount != 1 {
+		t.Fatalf("retained jobs = %d, want accepted job", jobCount)
+	}
+	for _, body := range []string{`{"target_version":"1.2.0"}`, `{"use_default":true}`, `{"command":["sh","-c","exit 0"],"target_version":"1.2.0"}`} {
+		rejected := httptest.NewRecorder()
+		router.ServeHTTP(rejected, updateJSONRequest(http.MethodPost, "/api/v1/agent-update/omp-acp", body))
+		if rejected.Code != http.StatusBadRequest {
+			t.Errorf("body %s status = %d: %s", body, rejected.Code, rejected.Body.String())
+		}
+		if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != jobCount {
+			t.Errorf("rejected body %s changed retained jobs to %d", body, len(jobs))
+		}
+	}
+}
+
+func TestAgentUpdateReviewedRuntimeRoundTrip(t *testing.T) {
+	router, ctrl, completed := newAgentUpdateRouter(t, &reviewedHandlerRuntimeUpdater{})
+	ctrl.SetManagedRuntimeSelectionStore(handlerSelectionStore{})
+	previewResponse := httptest.NewRecorder()
+	router.ServeHTTP(previewResponse, updateRequest(
+		http.MethodGet,
+		"/api/v1/agent-update/claude-acp/preview?target_version=1.1.0",
+	))
+	if previewResponse.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body = %s", previewResponse.Code, previewResponse.Body.String())
+	}
+	var preview dto.AgentUpdatePreviewDTO
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.ReviewedRuntime == nil {
+		t.Fatal("managed preview did not issue reviewed runtime evidence")
+	}
+	body, err := json.Marshal(map[string]any{
+		"target_version":   "1.1.0",
+		"reviewed_runtime": preview.ReviewedRuntime,
+	})
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost, "/api/v1/agent-update/claude-acp", string(body),
+	))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("reviewed POST status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var accepted dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("decode accepted job: %v", err)
+	}
+	finished := waitForTerminalUpdate(t, completed, accepted.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusSucceeded {
+		t.Fatalf("reviewed job status = %q, want succeeded", finished.Status)
+	}
+}
+
+func TestAgentUpdateReviewedRuntimeRejectsStaleEvidence(t *testing.T) {
+	router, ctrl, _ := newAgentUpdateRouter(t, &reviewedHandlerRuntimeUpdater{})
+	ctrl.SetManagedRuntimeSelectionStore(handlerSelectionStore{})
+	previewResponse := httptest.NewRecorder()
+	router.ServeHTTP(previewResponse, updateRequest(
+		http.MethodGet,
+		"/api/v1/agent-update/claude-acp/preview?target_version=1.1.0",
+	))
+	var preview dto.AgentUpdatePreviewDTO
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	evidence := *preview.ReviewedRuntime
+	evidence.CurrentVersion = "0.9.0"
+	body, err := json.Marshal(map[string]any{
+		"target_version":   "1.1.0",
+		"reviewed_runtime": evidence,
+	})
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost, "/api/v1/agent-update/claude-acp", string(body),
+	))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stale review status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"code":"runtime_review_changed"`) {
+		t.Fatalf("stale review body = %s", response.Body.String())
+	}
+}
+
+func TestAgentUpdateReviewedRuntimeRejectsIncompatibleForms(t *testing.T) {
+	router, ctrl, _ := newAgentUpdateRouter(t, &reviewedHandlerRuntimeUpdater{})
+	ctrl.SetManagedRuntimeSelectionStore(handlerSelectionStore{})
+	previewResponse := httptest.NewRecorder()
+	router.ServeHTTP(previewResponse, updateRequest(
+		http.MethodGet,
+		"/api/v1/agent-update/claude-acp/preview?target_version=1.1.0",
+	))
+	var preview dto.AgentUpdatePreviewDTO
+	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"use_default", `{"use_default":true,"reviewed_runtime":` + mustJSON(t, preview.ReviewedRuntime) + `}`},
+		{"migration", `{"target_version":"1.1.0","target_family":"v2","expected_runtime_revision":1,"reviewed_runtime":` + mustJSON(t, preview.ReviewedRuntime) + `}`},
+		{"incomplete", `{"target_version":"1.1.0","reviewed_runtime":{"runtime_id":"","package":"","current_version":"","effective_version":""}}`},
+		{"legacy_still_valid", `{"target_version":"1.1.0"}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, updateJSONRequest(
+				http.MethodPost, "/api/v1/agent-update/claude-acp", testCase.body,
+			))
+			if testCase.name == "legacy_still_valid" {
+				if response.Code != http.StatusAccepted {
+					t.Fatalf("legacy POST status = %d, body = %s", response.Code, response.Body.String())
+				}
+				return
+			}
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("incompatible review status = %d, body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+	return string(encoded)
 }

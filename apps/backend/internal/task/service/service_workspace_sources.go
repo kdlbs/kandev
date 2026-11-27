@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -42,6 +44,8 @@ type WorkspaceSourceInput struct {
 type AttachWorkspaceSourcesRequest struct {
 	TaskID                    string
 	Sources                   []WorkspaceSourceInput
+	RepositoryPlacement       WorkspaceRepositoryPlacement
+	PreviewRevision           string
 	ExpectedParentID          string
 	ExpectedParentWorkspaceID string
 }
@@ -81,6 +85,28 @@ type WorkspaceSourceProviderRefresher interface {
 	RefreshTaskMCPProviders(context.Context, string) error
 }
 
+// WorkspaceSourceRescanner updates one live session's tracked workspace roots.
+// Adoption and detach use it to add or retire a repository tracker without
+// touching the agent process. Failures are best-effort: the attachment stays
+// authoritative and the next observer snapshot retries.
+type WorkspaceSourceRescanner interface {
+	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error
+}
+
+// WorkspaceSourceRescanExcluder keeps detached checkouts out of discovery
+// while a live session rescans its remaining roots.
+type WorkspaceSourceRescanExcluder interface {
+	RescanWorkspaceForSessionWithExclusions(ctx context.Context, sessionID, workDir string, sourceRoots, excludedRoots []string) error
+}
+
+// NestedWorkspaceExclusioner manages the outer checkout's Git excludes for a
+// worktree nested inside it. It keeps outer status and staging from exposing
+// the nested repository.
+type NestedWorkspaceExclusioner interface {
+	AddNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) (bool, error)
+	RemoveNestedWorkspaceExclusion(ctx context.Context, outerRoot, nestedPath string) error
+}
+
 // workspaceSourceProviderRefreshTimeout bounds the best-effort live update
 // after a source batch is committed. The attachment remains authoritative when
 // a database or agentctl dependency does not finish within this window.
@@ -115,9 +141,6 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		return nil, err
-	}
-	if len(existing) == 0 {
-		return nil, fmt.Errorf("%w: task must have a repository before attaching workspace sources", ErrInvalidWorkspaceSource)
 	}
 	store := s.workspaceSourceStore()
 	if store == nil {
@@ -155,6 +178,19 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	}
 	batch.ExpectedParentID = req.ExpectedParentID
 	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
+	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 && req.RepositoryPlacement != "" {
+		if err := s.validateExactWorkspaceRepositoryPlacement(ctx, task, inputs, req.RepositoryPlacement); err != nil {
+			return nil, err
+		}
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
+		return s.hydrateWorkspaceSourceResult(ctx, task, store)
+	}
+	if err := s.applyWorkspaceRepositoryPlacement(ctx, task, batch, req.RepositoryPlacement, req.PreviewRevision); err != nil {
+		cleanupCreated(context.WithoutCancel(ctx))
+		return nil, err
+	}
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
 		cleanupCreated(context.WithoutCancel(ctx))
 		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
@@ -367,8 +403,20 @@ func (s *Service) prepareRepositoryWorkspaceSource(ctx context.Context, task *mo
 		CheckoutOptions: input.CheckoutOptions,
 		CheckoutSource:  input.CheckoutSource,
 		ExpectedOrigin:  input.ExpectedOrigin,
+		PRNumber:        input.PRNumber,
 	})
 	if err != nil {
+		return nil, createdID, false, err
+	}
+	selectionSource := models.BaseBranchSelectionSourceExplicit
+	if strings.TrimSpace(input.BaseBranch) == "" {
+		selectionSource = models.BaseBranchSelectionSourceRepositoryDefault
+	}
+	if err := models.PutBaseBranchSelection(metadata, &models.BaseBranchSelection{
+		Version: models.BaseBranchSelectionVersion,
+		Branch:  base,
+		Source:  selectionSource,
+	}); err != nil {
 		return nil, createdID, false, err
 	}
 	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: metadata}, createdID, false, nil
@@ -498,10 +546,28 @@ func (s *Service) requireCloneableLocalRepository(ctx context.Context, taskID st
 	if err != nil || executorType == "" || isLocalWorkspaceExecutor(executorType) || executorType == string(models.ExecutorTypeWorktree) {
 		return err
 	}
-	if repository == nil || repository.RemoteURL == "" {
+	if !hasCloneableWorkspaceRepositoryLocator(repository) {
 		return fmt.Errorf("%w: local repository has no safe cloneable origin", ErrUnsupportedWorkspaceSource)
 	}
 	return nil
+}
+
+func hasCloneableWorkspaceRepositoryLocator(repository *models.Repository) bool {
+	if repository == nil {
+		return false
+	}
+	locator := strings.TrimSpace(repository.RemoteURL)
+	if locator == "" && repository.ProviderOwner != "" && repository.ProviderName != "" {
+		locator, _ = repoclone.CloneURLWithHost(repository.Provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repoclone.ProtocolHTTPS)
+	}
+	if locator == "" || strings.HasPrefix(locator, "/") || strings.HasPrefix(locator, "file:") {
+		return false
+	}
+	if strings.HasPrefix(locator, "git@") {
+		return true
+	}
+	parsed, err := url.Parse(locator)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == protocolHTTPS || parsed.Scheme == protocolHTTP || parsed.Scheme == repoclone.ProtocolSSH || parsed.Scheme == "git")
 }
 
 func classifyWorkspaceRepositoryError(err error) error {

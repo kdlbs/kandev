@@ -6,6 +6,7 @@ import type {
   ThreadFilterClause,
   ThreadFilterDimension,
   ThreadSortKey,
+  ThreadSortSpec,
   ThreadView,
   ThreadViewDraft,
 } from "@/lib/state/slices/ui/thread-view-types";
@@ -351,7 +352,11 @@ function attentionRank(status: ThreadStatus): number {
 }
 
 // eslint-disable-next-line complexity -- Each supported sort key has an explicit deterministic comparison.
-function compareSortKey(left: ThreadCandidate, right: ThreadCandidate, key: ThreadSortKey): number {
+function compareSortKey(
+  left: ThreadCandidate,
+  right: ThreadCandidate,
+  key: Exclude<ThreadSortKey, "selection">,
+): number {
   switch (key) {
     case "attention": {
       const bucket = compareNumbers(
@@ -392,15 +397,37 @@ function compareSortKey(left: ThreadCandidate, right: ThreadCandidate, key: Thre
   }
 }
 
-function compareCandidates(
-  left: ThreadCandidate,
-  right: ThreadCandidate,
-  view: ThreadView,
-): number {
-  const direction = view.sort.direction === "desc" ? -1 : 1;
-  const sorted = compareSortKey(left, right, view.sort.key);
-  if (sorted !== 0) return sorted * direction;
-  return left.taskId.localeCompare(right.taskId);
+/** The sort a view falls back to when Selection order has no task list to rank. */
+export const ATTENTION_SORT: ThreadSortSpec = { key: "attention", direction: "asc" };
+
+/** Selection order ranks by the selected scope's task list; the all scope has none. */
+export function effectiveThreadSort(
+  sort: ThreadSortSpec,
+  scopeMode: ThreadView["taskScope"]["mode"],
+): ThreadSortSpec {
+  return sort.key === "selection" && scopeMode === "all" ? ATTENTION_SORT : sort;
+}
+
+function selectionComparator(taskIds: readonly string[]) {
+  const rankByTaskId = new Map(taskIds.map((taskId, index) => [taskId, index]));
+  const rank = (candidate: ThreadCandidate) =>
+    rankByTaskId.get(candidate.taskId) ?? Number.MAX_SAFE_INTEGER;
+  return (left: ThreadCandidate, right: ThreadCandidate) => compareNumbers(rank(left), rank(right));
+}
+
+function candidateComparator(view: ThreadView) {
+  const sort = effectiveThreadSort(view.sort, view.taskScope.mode);
+  const direction = sort.direction === "desc" ? -1 : 1;
+  const sortKey = sort.key;
+  const compare =
+    sortKey === "selection"
+      ? selectionComparator(view.taskScope.taskIds)
+      : (left: ThreadCandidate, right: ThreadCandidate) => compareSortKey(left, right, sortKey);
+  return (left: ThreadCandidate, right: ThreadCandidate) => {
+    const sorted = compare(left, right);
+    if (sorted !== 0) return sorted * direction;
+    return left.taskId.localeCompare(right.taskId);
+  };
 }
 
 function cloneViewWithDraft(
@@ -470,7 +497,7 @@ export function queryThreadView(
   const scoped = applyTaskScope(candidates, effectiveView.taskScope);
   const matchingCandidates = scoped
     .filter((candidate) => candidateMatches(candidate, effectiveView.filters))
-    .sort((left, right) => compareCandidates(left, right, effectiveView));
+    .sort(candidateComparator(effectiveView));
   const deepLinkCandidate = options.requestedTaskId
     ? (candidates.find((candidate) => candidate.taskId === options.requestedTaskId) ?? null)
     : null;

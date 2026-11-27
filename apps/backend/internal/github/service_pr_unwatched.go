@@ -70,9 +70,10 @@ func taskPRNeedsUnwatchedSync(tp *TaskPR, now time.Time) bool {
 // leaves the row for the next attempt, matching the surrounding
 // reconciliation paths — a dead repo must not fail the caller's sync.
 //
-// Only lifecycle and head-scoped workflow-attention fields are written (see
-// reconcileTaskPRLifecycle). Passive reads use the cheap PR query. An explicit
-// refresh may also collect fresh Actions evidence for a row nobody watches.
+// Lifecycle, conflict observation, and head-scoped workflow-attention fields
+// are written (see reconcileTaskPRLifecycle). Passive reads use the cheap PR
+// query. An explicit refresh may also collect fresh Actions evidence for a row
+// nobody watches.
 // Check and review aggregates deliberately stay untouched: they belong to the
 // active, watch-covered PR.
 //
@@ -109,6 +110,17 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 		return
 	}
+	eligible := group[:0]
+	for _, tp := range group {
+		if tp != nil && tp.GitHubHost == resolved.host().String() {
+			eligible = append(eligible, tp)
+		}
+	}
+	group = eligible
+	if len(group) == 0 {
+		return
+	}
+	ctx = withGitHubOperationFence(ctx, s, workspaceID, resolved)
 	if explicitRefresh {
 		for _, tp := range group {
 			if tp == nil {
@@ -120,6 +132,12 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 		}
 	}
 	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group, explicitRefresh)
+	var unlock func()
+	ctx, unlock, err = s.lockResourceMutation(ctx, workspaceID)
+	if err != nil {
+		return
+	}
+	defer unlock()
 	seen := make(map[string]struct{}, len(group))
 	for _, tp := range group {
 		if tp == nil || tp.TaskID == "" {
@@ -173,9 +191,13 @@ func (s *Service) syncUnwatchedTaskPRGroup(
 // status sets ChecksPopulated/ReviewCountsPopulated with zeroed counts when
 // it has nothing to count, which SyncTaskPR then faithfully stores.
 func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, status *PRStatus) error {
+	if err := requireGitHubOperationCurrent(ctx); err != nil {
+		return err
+	}
 	pr := status.PR
 	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
 		resolveTaskPROutcomeFields(tp, status)
+	nextHasMergeConflicts := observedTaskPRMergeConflict(tp.HasMergeConflicts, pr, pr.MergeableState)
 	nextHeadSHA := tp.HeadSHA
 	if pr.HeadSHA != "" {
 		nextHeadSHA = pr.HeadSHA
@@ -189,7 +211,8 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 		!intPtrEqual(tp.ChangedFiles, changedFiles) ||
 		!stringPtrEqual(tp.MergedByLogin, mergedByLogin) ||
 		!stringPtrEqual(tp.ClosedByLogin, closedByLogin) ||
-		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt)
+		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt) ||
+		!boolPtrEqual(tp.HasMergeConflicts, nextHasMergeConflicts)
 	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
 	changed = changed || !workflowAttentionSemanticEqual(tp.WorkflowAttention, nextWorkflowAttention)
 
@@ -202,6 +225,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	tp.MergedByLogin = mergedByLogin
 	tp.ClosedByLogin = closedByLogin
 	tp.AutoMergeObservedAt = autoMergeObservedAt
+	tp.HasMergeConflicts = nextHasMergeConflicts
 	tp.WorkflowAttention = nextWorkflowAttention
 	tp.WorkflowAttentionJSON = marshalWorkflowAttention(nextWorkflowAttention)
 	now := s.now()
@@ -249,7 +273,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 }
 
 // batchedUnwatchedFetch runs the batched query under the same service-level
-// singleflight the watch path uses (see fetchBatchedWatchStatuses). Without it
+// singleflight the watch path uses (see fetchBatchedNumberedPhase). Without it
 // the on-demand sync, the workspace background refresh, and a second tab all
 // issue their own identical GraphQL call — the storm that singleflight exists
 // to damp. Keyed on the sorted ref set so equivalent callers share one flight,
@@ -318,8 +342,8 @@ func (s *Service) fetchUnwatchedTaskPRsPerPR(
 	if explicitRefresh {
 		statusCtx = withWorkflowAttentionCollector(ctx, func(
 			collectorCtx context.Context, collectorClient Client, owner, repo string, pr *PR,
-		) (*WorkflowAttention, error) {
-			return s.collectWorkflowAttention(
+		) (*workflowObservation, error) {
+			return s.collectWorkflowObservation(
 				collectorCtx, collectorClient, resolved.CacheScope, owner, repo, pr,
 			)
 		})
@@ -408,13 +432,19 @@ func (s *Service) collectStaleWorkspaceSyncTargets(
 		for _, watch := range watches {
 			appendWatch(watch)
 		}
+		watchLifetimes, err := s.store.ListPRWatchesByTaskIncludingRetired(ctx, taskID)
+		if err != nil {
+			s.logger.Debug("list PR watch lifetimes for refresh failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			watchLifetimes = watches
+		}
 		rows, err := s.store.ListTaskPRsByTask(ctx, taskID)
 		if err != nil {
 			s.logger.Debug("list task PRs for refresh failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			continue
 		}
-		pending = append(pending, unwatchedTaskPRs(rows, watches, now, false)...)
+		pending = append(pending, unwatchedTaskPRs(rows, watchLifetimes, now, false)...)
 	}
 	// Searching watches can be absent from the task-PR projection or can have
 	// a fresh cached row while still needing their adaptive discovery check.

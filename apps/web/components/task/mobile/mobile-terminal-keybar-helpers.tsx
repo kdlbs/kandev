@@ -23,11 +23,12 @@ export type KeyDef = {
 
 export const KEYS: readonly KeyDef[] = [
   { id: "esc", label: "Esc", ariaLabelKey: "task:keyEscape", seq: KEY_SEQUENCES.esc },
-  { id: "tab", label: "Tab", ariaLabelKey: "task:keyTab", seq: KEY_SEQUENCES.tab },
   { id: "up", label: "↑", ariaLabelKey: "task:keyArrowUp", seq: KEY_SEQUENCES.up },
   { id: "down", label: "↓", ariaLabelKey: "task:keyArrowDown", seq: KEY_SEQUENCES.down },
   { id: "left", label: "←", ariaLabelKey: "task:keyArrowLeft", seq: KEY_SEQUENCES.left },
   { id: "right", label: "→", ariaLabelKey: "task:keyArrowRight", seq: KEY_SEQUENCES.right },
+  { id: "enter", label: "↵", ariaLabelKey: "task:keyEnter", seq: KEY_SEQUENCES.enter },
+  { id: "tab", label: "Tab", ariaLabelKey: "task:keyTab", seq: KEY_SEQUENCES.tab },
   { id: "home", label: "Home", ariaLabelKey: "task:keyHome", seq: KEY_SEQUENCES.home },
   { id: "end", label: "End", ariaLabelKey: "task:keyEnd", seq: KEY_SEQUENCES.end },
   { id: "pageup", label: "PgUp", ariaLabelKey: "task:keyPageUp", seq: KEY_SEQUENCES.pageUp },
@@ -74,7 +75,7 @@ export function KeybarButton({
       onClick={onTap}
       style={{ touchAction: "manipulation" }}
       className={cn(
-        "h-8 min-w-10 shrink-0 px-2 font-mono text-sm cursor-pointer",
+        "h-11 min-w-11 shrink-0 px-2 font-mono text-sm cursor-pointer",
         active && "ring-2 ring-primary/60",
         sticky && "ring-primary",
       )}

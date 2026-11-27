@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -129,7 +130,7 @@ func (s *Store) initSchema() error {
 	if err := s.addOAuthColumns(); err != nil {
 		return err
 	}
-	return nil
+	return s.migrateExecutorCreators()
 }
 
 func (s *Store) addConfigHealthColumns() error {
@@ -574,7 +575,7 @@ func (s *Store) resolveWorkspaceID(workspaceID string) (string, error) {
 // issueWatchInsertColumns / issueWatchSelectColumns split insert vs read so
 // the SELECT path can wrap nullable last_error in COALESCE (older databases
 // pre-self-heal migration may return NULL).
-const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchInsertColumns = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	repository_id, base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -591,7 +592,7 @@ func nullableInt(v *int) interface{} {
 	return *v
 }
 
-const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchSelectColumns = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, jql,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -601,6 +602,7 @@ const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
 func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
+	w.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if w.ID == "" {
 		w.ID = uuid.New().String()
 	}
@@ -612,7 +614,7 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO jira_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), w.CreatedByUserID,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, w.JQL,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
@@ -742,26 +744,6 @@ func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-// ReserveIssueWatchTask atomically claims a slot for a (watch, ticket) pair via
-// INSERT OR IGNORE. Returns true when this caller won the race and should
-// proceed to create the task. False either means another handler already
-// reserved the same ticket or the row already exists from a prior run.
-func (s *Store) ReserveIssueWatchTask(ctx context.Context, watchID, issueKey, issueURL string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO jira_issue_watch_tasks (id, issue_watch_id, issue_key, issue_url, task_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(issue_watch_id, issue_key) DO NOTHING`),
-		uuid.New().String(), watchID, issueKey, issueURL, "", time.Now().UTC())
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows == 1, nil
-}
-
 // AssignIssueWatchTaskID stamps the created task ID onto a previously-reserved
 // dedup row. Returns an error if no reservation matches — callers should treat
 // that as a programming bug since they only call this after a successful
@@ -791,24 +773,6 @@ func (s *Store) ReleaseIssueWatchTask(ctx context.Context, watchID, issueKey str
 		`DELETE FROM jira_issue_watch_tasks WHERE issue_watch_id = ? AND issue_key = ?`),
 		watchID, issueKey)
 	return err
-}
-
-// ListSeenIssueKeys returns the set of ticket keys already reserved against a
-// watch. Returning a set in one query is cheaper than per-ticket existence
-// checks — a single JQL search can return up to 50 tickets per tick, so the
-// per-call savings scale with the workspace's watch count.
-func (s *Store) ListSeenIssueKeys(ctx context.Context, watchID string) (map[string]struct{}, error) {
-	var keys []string
-	err := s.ro.SelectContext(ctx, &keys, s.ro.Rebind(
-		`SELECT issue_key FROM jira_issue_watch_tasks WHERE issue_watch_id = ?`), watchID)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]struct{}, len(keys))
-	for _, k := range keys {
-		out[k] = struct{}{}
-	}
-	return out, nil
 }
 
 // ListIssueWatchTaskIDs returns every task_id recorded against a watch,

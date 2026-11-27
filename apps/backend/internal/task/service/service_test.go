@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/testutil"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -36,6 +37,13 @@ type MockEventBus struct {
 	// publishErrors, when non-nil, makes Publish fail for the listed
 	// subjects, for tests of publish-failure retry semantics.
 	publishErrors map[string]error
+}
+
+// These read/cascade fakes reject a field mutation outside their test scope.
+type unsupportedTaskFieldUpdater struct{}
+
+func (unsupportedTaskFieldUpdater) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, errors.New("field updates are not supported by this test repository")
 }
 
 type recordingTaskClarificationCanceller struct {
@@ -181,48 +189,47 @@ func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, in
 // testUnits exposes each test's unit service so a seed can build a tree.
 var testUnits = map[string]*orgunit.Service{}
 
+var serviceTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *sqlx.DB) error {
+	if _, err := sqliterepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
+		return err
+	}
+	// Match production startup order, including Office's task constraints.
+	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	if _, err := workflowrepo.NewWithDB(database, database, nil); err != nil {
+		return err
+	}
+	_, err := orgunit.NewStore(db.NewPool(database, database))
+	return err
+})
+
 func createTestServiceWithSessionsRepo(
 	t *testing.T,
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
 ) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
-	if _, err := worktree.NewSQLiteStore(sqlxDB, sqlxDB); err != nil {
-		t.Fatalf("failed to init worktree store: %v", err)
-	}
-	// Apply office migrations on top of the task schema. The office
-	// package adds CHECK constraints (notably tasks.priority) and
-	// enables foreign_keys=ON. Running both migrations here mirrors
-	// production startup so service-layer tests catch cross-package
-	// constraint regressions automatically.
-	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to apply office migrations: %v", err)
-	}
-	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
-		t.Fatalf("failed to initialize workflow repository: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlxDB.Close(); err != nil {
-			t.Errorf("failed to close sqlite db: %v", err)
-		}
-		if err := cleanup(); err != nil {
-			t.Errorf("failed to close repo: %v", err)
-		}
-	})
+	return createTestServiceWithTaskAndSessionRepos(t, func(repo *sqliterepo.Repository) repository.TaskRepository {
+		return repo
+	}, wrapSessions)
+}
+
+func createTestServiceWithTaskAndSessionRepos(
+	t *testing.T,
+	wrapTasks func(*sqliterepo.Repository) repository.TaskRepository,
+	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
+	sqlxDB, _ := serviceTestSQLiteTemplate.Open(t)
+	repo := sqliterepo.NewWithInitializedDB(sqlxDB, sqlxDB, nil)
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
 		Workspaces:        repo,
-		Tasks:             repo,
+		Tasks:             wrapTasks(repo),
 		TaskRepos:         repo,
 		Workflows:         repo,
 		Messages:          repo,
@@ -239,7 +246,11 @@ func createTestServiceWithSessionsRepo(
 		Reviews:           repo,
 		ResourceCleanups:  repo,
 		Usage:             repo,
+		BackgroundWork:    repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
+		return ProjectRepositorySources{WorkspaceID: "ws-1"}, nil
+	}))
 	svc.SetWorkspaceBootstrapper(repo)
 	// Reach comes from the unit tree, so the service tests wire the real one
 	// rather than a stub: a resolver the wiring never calls protects nothing.
@@ -1843,114 +1854,6 @@ func TestService_DeleteTaskDefersResourceCleanupOnPartialStopFailure(t *testing.
 	}
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-ok"); err != nil {
 		t.Fatalf("successful session executor row should remain retryable until cleanup completes: %v", err)
-	}
-}
-
-func TestService_QuickChatExpirationDeletesExpiredCandidates(t *testing.T) {
-	svc, eventBus, repo := createTestService(t)
-	ctx := context.Background()
-	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
-	quickChatDir := t.TempDir()
-	svc.SetQuickChatDir(quickChatDir)
-
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-expire", Name: "Expire"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	expiredTaskID := "quick-expired"
-	recentTaskID := "quick-recent"
-	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
-
-	createQuickChatExpirationServiceFixture(t, repo, ctx, expiredTaskID, now.Add(-8*24*time.Hour))
-	createQuickChatExpirationServiceFixture(t, repo, ctx, recentTaskID, now.Add(-time.Hour))
-	expiredSessionDir := filepath.Join(quickChatDir, expiredTaskID+"-session")
-	if err := os.MkdirAll(expiredSessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir expired session dir: %v", err)
-	}
-
-	svc.runQuickChatExpiration(ctx, now)
-	waitForCleanupDone(t, svc)
-
-	if _, err := repo.GetTask(ctx, expiredTaskID); err == nil {
-		t.Fatal("expired quick chat should be deleted")
-	}
-	if _, err := repo.GetTask(ctx, recentTaskID); err != nil {
-		t.Fatalf("recent quick chat should remain: %v", err)
-	}
-	if _, err := os.Stat(expiredSessionDir); !os.IsNotExist(err) {
-		t.Fatalf("expired quick-chat directory should be removed, got %v", err)
-	}
-	if !eventBusHasType(eventBus, "task.deleted") {
-		t.Fatalf("expected task.deleted event, got %#v", eventBus.GetPublishedEvents())
-	}
-}
-
-func TestService_QuickChatExpirationLoopRunsOnStartup(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
-
-	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-expire", Name: "Expire"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	taskID := "quick-expired-startup"
-	createQuickChatExpirationServiceFixture(t, repo, ctx, taskID, time.Now().UTC().Add(-8*24*time.Hour))
-
-	svc.StartQuickChatExpirationLoop(ctx)
-	waitForCleanupDone(t, svc)
-
-	if _, err := repo.GetTask(context.Background(), taskID); err == nil {
-		t.Fatal("expired quick chat should be deleted by startup sweep")
-	}
-}
-
-func TestService_DeleteExpiredQuickChatTaskIgnoresMissingTask(t *testing.T) {
-	svc, _, _ := createTestService(t)
-
-	deleted, err := svc.deleteExpiredQuickChatTask(context.Background(), "missing", time.Now().UTC())
-	if err != nil {
-		t.Fatalf("deleteExpiredQuickChatTask missing task: %v", err)
-	}
-	if deleted {
-		t.Fatal("missing task should not be reported as deleted")
-	}
-}
-
-func createQuickChatExpirationServiceFixture(
-	t *testing.T,
-	repo *sqliterepo.Repository,
-	ctx context.Context,
-	taskID string,
-	updatedAt time.Time,
-) {
-	t.Helper()
-	if err := repo.CreateTask(ctx, &models.Task{
-		ID:          taskID,
-		WorkspaceID: "ws-expire",
-		Title:       taskID,
-		State:       v1.TaskStateTODO,
-		Priority:    "medium",
-		IsEphemeral: true,
-		CreatedAt:   updatedAt.Add(-time.Hour),
-		UpdatedAt:   updatedAt,
-	}); err != nil {
-		t.Fatalf("CreateTask(%s): %v", taskID, err)
-	}
-	if _, err := repo.DB().ExecContext(ctx,
-		`UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?`,
-		updatedAt.Add(-time.Hour), updatedAt, taskID,
-	); err != nil {
-		t.Fatalf("backdate task(%s): %v", taskID, err)
-	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:        taskID + "-session",
-		TaskID:    taskID,
-		State:     models.TaskSessionStateCompleted,
-		StartedAt: updatedAt.Add(-time.Hour),
-		UpdatedAt: updatedAt,
-		IsPrimary: true,
-	}); err != nil {
-		t.Fatalf("CreateTaskSession(%s): %v", taskID, err)
 	}
 }
 

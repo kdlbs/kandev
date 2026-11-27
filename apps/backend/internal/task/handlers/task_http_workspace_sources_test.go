@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,22 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
+
+func TestHTTPCreateTaskRejectsInvalidWorkspaceSourceCheckout(t *testing.T) {
+	repo := newIdempotentCreateTaskRepo()
+	h := newIdempotencyTestHandlers(t, repo)
+	response := doCreateTask(h, `{
+		"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1",
+		"title":"Task","workspace_sources":[{
+			"kind":"repository","repository_id":"repo-1","checkout_source":"unknown"
+		}]
+	}`)
+
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"creation_rejected":true`)
+	require.Contains(t, response.Body.String(), "unsupported checkout_source")
+	require.Empty(t, repo.tasks)
+}
 
 func TestParseHTTPTaskWorkspaceSourcesPreservesFreshBranchFields(t *testing.T) {
 	sources, err := parseHTTPTaskWorkspaceSources([]json.RawMessage{json.RawMessage(`{

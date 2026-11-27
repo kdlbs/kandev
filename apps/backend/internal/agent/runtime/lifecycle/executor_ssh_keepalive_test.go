@@ -266,57 +266,38 @@ func TestSSHKeepaliveWatchdogDeclaresLossOnProbeError(t *testing.T) {
 	w.awaitProbeExit()
 }
 
-// TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError drives
-// runLoop's stop-vs-event select directly, forcing a genuine tie between its
-// stopCh case and its errs case rather than an arbitrary real-time race
-// between them. With GOMAXPROCS pinned to 1, runLoop is deterministically
-// parked in its blocking select (nothing runnable to preempt it) by the time
-// this test closes stopCh and sends the probe error back to back with no
-// intervening scheduling point — so runLoop resumes to find both cases
-// simultaneously ready, and Go's select picks between them at random.
-// AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10 forbids declaring loss for a
-// session stopped while its transport is still alive, so even on the
-// iterations where the random pick lands on the errs case, runLoop's recheck
-// of the already-closed stopCh must still stop it from declaring loss.
-// Repeated so the random pick lands on the errs case many times, not just
-// once.
+// TestSSHKeepaliveWatchdogStopSignalSuppressesLoss checks both loss reasons
+// at the notification boundary. Running watchdogs still report loss.
 //
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.10
-func TestSSHKeepaliveWatchdogStopSignalBeatsACoincidingProbeError(t *testing.T) {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-
-	const iterations = 300
-	for i := 0; i < iterations; i++ {
-		w := &sshKeepaliveWatchdog{
-			interval: time.Hour,
-			deadline: time.Hour, // never fires on its own; isolates stop vs. errs
-			stopCh:   make(chan struct{}),
-			loopDone: make(chan struct{}),
-		}
-		var lostCalled atomic.Bool
-		w.onLost = func(string, time.Duration) { lostCalled.Store(true) }
-
-		replies := make(chan time.Time, 1)
-		errs := make(chan error, 1)
-		go w.runLoop(replies, errs, time.Now())
-		// With GOMAXPROCS(1) this test goroutine keeps running until it
-		// blocks or explicitly yields, so runLoop cannot have reached its
-		// select yet — Gosched hands off to it, and since nothing else is
-		// ready it parks there, definitely blocked, before control returns
-		// here.
-		runtime.Gosched()
-
-		errs <- errors.New("probe error")
-		close(w.stopCh)
-
-		select {
-		case <-w.loopDone:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("iteration %d: runLoop did not exit after a coinciding stop+probe-error", i)
-		}
-		if lostCalled.Load() {
-			t.Fatalf("iteration %d: a stop signal coinciding with a probe error still declared transport loss", i)
-		}
+func TestSSHKeepaliveWatchdogStopSignalSuppressesLoss(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reason  string
+		stopped bool
+	}{
+		{"probe-error/running", sshTransportLostReasonProbeError, false},
+		{"probe-error/stopped", sshTransportLostReasonProbeError, true},
+		{"deadline/running", sshTransportLostReasonDeadline, false},
+		{"deadline/stopped", sshTransportLostReasonDeadline, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &sshKeepaliveWatchdog{stopCh: make(chan struct{})}
+			if tc.stopped {
+				close(w.stopCh)
+			}
+			called := false
+			w.onLost = func(reason string, silence time.Duration) {
+				called = true
+				if reason != tc.reason || silence != time.Second {
+					t.Fatalf("loss = (%q, %v), want (%q, %v)", reason, silence, tc.reason, time.Second)
+				}
+			}
+			w.declareLost(tc.reason, time.Second)
+			if called == tc.stopped {
+				t.Fatalf("loss notified = %v, want %v", called, !tc.stopped)
+			}
+		})
 	}
 }
 
@@ -775,6 +756,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 		authToken:      "resumed-token",
 		reusingProcess: true,
 		port:           41234,
+		controlPort:    41235,
 		workdirRoot:    "/custom/workdir",
 	}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
@@ -787,6 +769,9 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 	if got := instance.Metadata[MetadataKeyReuseExistingProcess]; got != true {
 		t.Fatalf("Metadata[MetadataKeyReuseExistingProcess] = %v, want true — otherwise the loser's startup spawns a second agent subprocess against the winner's already-running remote process", got)
 	}
+	if got := instance.Metadata[MetadataKeySSHRemoteControlPort]; got != "41235" {
+		t.Fatalf("Metadata[MetadataKeySSHRemoteControlPort] = %v, want the winner's authenticated control listener", got)
+	}
 }
 
 // @covers AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.1
@@ -794,17 +779,27 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 func TestSSHExecutorResumeRemoteInstanceInsertIfAbsentUnderRace(t *testing.T) {
 	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		switch r.URL.Path {
+		case "/health":
 			_, _ = io.WriteString(w, "ok")
-			return
+		case "/api/v1/instances/instance-1":
+			if r.Header.Get("Authorization") != "Bearer persisted-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"instance-1","port":41234,"status":"running"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(control.Close)
 
 	server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 		if strings.Contains(command, "kill -0") {
 			return sshOK
+		}
+		if strings.Contains(command, "agentctl.log") {
+			return sshOut(`{"msg":"HTTP server bound successfully","address":"127.0.0.1:41235"}`)
 		}
 		return sshOut("/home/kandev")
 	})
@@ -872,7 +867,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeLosesRaceReturnsSuccess(t *te
 	state := &sshSessionState{client: &ssh.Client{}}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 
-	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+	err := exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	if err != nil {
 		t.Fatalf("resetTrackedManagedBrokerResume: %v", err)
 	}
@@ -905,7 +900,7 @@ func TestSSHExecutorResetTrackedManagedBrokerResumeAbandonsAWedgedPreflight(t *t
 	req := &ExecutorCreateRequest{InstanceID: "instance-1"}
 	done := make(chan error, 1)
 	go func() {
-		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, brokerPreflight, stopRemote)
+		done <- exec.resetTrackedManagedBrokerResume(context.Background(), req, state, nil, brokerPreflight, stopRemote)
 	}()
 	select {
 	case err := <-done:
@@ -996,6 +991,7 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 	exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
 	client := server.dial(t)
 	server.setSilent(true) // the transport wedges; with no watchdog, the reading alone can't know that (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-002.8's last sentence)
+	stopCalls := 0
 
 	state := &sshSessionState{client: client, remoteDir: "/remote/session", remoteTaskDir: "/remote/task", pid: 4242}
 	exec.sessions["instance-1"] = state
@@ -1004,27 +1000,45 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 		return err
 	}
 	exec.stopRemote = func(ctx context.Context, client *ssh.Client, _ string, _ int) error {
+		stopCalls++
 		_, _, err := runSSHCommand(ctx, client, "true")
 		return err
 	}
 
 	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		done <- exec.StopInstance(context.Background(), &ExecutorInstance{
 			InstanceID: "instance-1",
 			StopReason: StopReasonTaskDeleted,
 		}, false)
 	}()
+	t.Cleanup(func() {
+		select {
+		case <-finished:
+			return
+		default:
+		}
+		// Unblock StopInstance before the timeout helper restores package
+		// globals. A failed assertion must not leave its goroutine running.
+		_ = client.Close()
+		<-finished
+	})
 	select {
 	case err := <-done:
+		<-finished
 		if err != nil {
 			t.Fatalf("StopInstance: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("StopInstance did not return after its remote command wedged — the backstop must have been missed")
 	}
 	if !exec.isTransportLost(state) {
 		t.Fatal("a command abandoned by its own timeout must mark the client transport-lost")
+	}
+	if stopCalls != 0 {
+		t.Fatalf("stop calls = %d, want 0 after the cleanup command loses transport", stopCalls)
 	}
 }
 

@@ -255,10 +255,9 @@ Cost resolution reuses the two-layer contract already proven in
   drifts from rounding once, and two writers that disagree about where to round
   produce different money for identical input. A *not recorded* (NULL) token
   count contributes zero to the numerator. `tokens_thought` is not priced.
-  This reproduces `costs.CalculateCostSubcents`
-  (`internal/office/costs/pricing.go`) exactly, so a row priced here and a row
-  priced by Office from the same tokens and rates are identical to the
-  subcent.
+  Both writers use `costs.CalculateCostSubcentsChecked`
+  (`internal/common/costs/pricing.go`). Identical tokens and rates produce
+  identical costs, including the overflow result.
 - **AC-8** (Unwanted behaviour) IF no provider-reported cost is present and
   pricing cannot be resolved, THEN the system SHALL record the row with
   `cost_subcents = 0` and `cost_source = unpriced`, and SHALL NOT drop the row.

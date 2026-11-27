@@ -338,11 +338,44 @@ func hasOSDotImport(file *ast.File) bool {
 func typeUses(fileSet *token.FileSet, file *ast.File) map[*ast.Ident]types.Object {
 	uses := make(map[*ast.Ident]types.Object)
 	config := types.Config{
-		Importer: importer.Default(),
+		Importer: envScanImporter{fallback: importer.Default()},
 		Error:    func(error) {},
 	}
 	_, _ = config.Check(file.Name.Name, fileSet, []*ast.File{file}, &types.Info{Uses: uses})
 	return uses
+}
+
+type envScanImporter struct {
+	fallback types.Importer
+}
+
+func (i envScanImporter) Import(path string) (*types.Package, error) {
+	if path == "os" {
+		return envScanOSPackage, nil
+	}
+	return i.fallback.Import(path)
+}
+
+var envScanOSPackage = newEnvScanOSPackage()
+
+func newEnvScanOSPackage() *types.Package {
+	pkg := types.NewPackage("os", "os")
+	stringParam := types.NewTuple(types.NewVar(token.NoPos, pkg, "key", types.Typ[types.String]))
+	getenvResults := types.NewTuple(types.NewVar(token.NoPos, pkg, "value", types.Typ[types.String]))
+	lookupenvResults := types.NewTuple(
+		types.NewVar(token.NoPos, pkg, "value", types.Typ[types.String]),
+		types.NewVar(token.NoPos, pkg, "ok", types.Typ[types.Bool]),
+	)
+	pkg.Scope().Insert(types.NewFunc(
+		token.NoPos, pkg, "Getenv",
+		types.NewSignatureType(nil, nil, nil, stringParam, getenvResults, false),
+	))
+	pkg.Scope().Insert(types.NewFunc(
+		token.NoPos, pkg, "LookupEnv",
+		types.NewSignatureType(nil, nil, nil, stringParam, lookupenvResults, false),
+	))
+	pkg.MarkComplete()
+	return pkg
 }
 
 // isEnvRead reports whether fun names os.Getenv, os.LookupEnv, or one of the

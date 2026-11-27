@@ -130,7 +130,10 @@ function KanbanCardFrame({
   return (
     <>
       <div ref={menu.detachAnchorRef} className="w-full">
-        <KanbanCardContextMenu entries={menu.contextMenuEntries}>
+        <KanbanCardContextMenu
+          entries={menu.contextMenuEntries}
+          onOpenChange={menu.onPRMenuOpenChange}
+        >
           <KanbanCardShell
             task={task}
             presentation={presentation}
@@ -148,6 +151,7 @@ function KanbanCardFrame({
             isArchiving={isArchiving}
             menuEntries={menu.dropdownMenuEntries}
             menuTriggerRef={menu.detachFocusReturnRef}
+            onPRMenuOpenChange={menu.onPRMenuOpenChange}
             onClick={onClick}
             onCheckboxClick={(e) => {
               e.stopPropagation();

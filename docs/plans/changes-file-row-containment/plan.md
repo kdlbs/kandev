@@ -3,6 +3,7 @@ created: 2026-08-25
 status: complete
 requirements:
   - REQ-UI-CHANGES-FILE-ROW-CONTAINMENT-001
+  - REQ-UI-CHANGES-FILE-ROW-CONTAINMENT-002
 system_design:
   - ../../specs/ui/system-design/changes-file-row-containment.md
 legacy_specs: []
@@ -14,8 +15,8 @@ legacy_specs: []
 
 Bring pull-request file rows onto the shrink-safe layout already used by local
 file rows, then prove the shared desktop and phone Changes surfaces keep long
-paths clear of trailing change metadata. One vertical TDD work order keeps the
-component correction and rendered geometry evidence coupled.
+paths clear of trailing change metadata. A second focused work order preserves
+touch access to existing working-tree file actions.
 
 ## Scope
 
@@ -25,11 +26,14 @@ component correction and rendered geometry evidence coupled.
 - Keep PR line statistics and status markers fixed at the trailing edge.
 - Preserve full-path discovery and PR/repository-aware diff opening.
 - Add focused desktop and mobile Playwright regressions.
+- Keep the touch file-action menu available through its opening animation and
+  until the user selects an action or dismisses it.
 
 ### Out of scope
 
 - Refactoring working-tree and PR rows into a new shared component.
-- Changing row density, actions, grouping, status visuals, or data sources.
+- Adding, removing, or redefining file actions, grouping, status visuals, or
+  data sources.
 - Changing Dockview constraints or mobile Changes navigation.
 
 ## Technical approach
@@ -66,6 +70,14 @@ the trailing region `shrink-0`; the PR row retained the older geometry.
 - In the Pixel 5 project, enter the existing focused mobile Changes surface and
   assert the same geometry, tap outcome, and absence of document overflow.
 
+### Touch action-menu correction
+
+The shared DropdownMenu primitive retains control of trigger activation and
+menu dismissal. Browser coverage waits for opening animations before action
+selection. File deletion transfers focus after the context menu closes.
+Coarse-pointer confirmation uses a compact Drawer at phone and tablet widths.
+Fine-pointer confirmation retains its anchored popover.
+
 ### Mobile design contract
 
 - Desktop outcome: resizable file rows contain long paths at the legal minimum.
@@ -91,6 +103,8 @@ the trailing region `shrink-0`; the PR row retained the older geometry.
   remains green as a routing safety check.
 - `AC-UI-CHANGES-FILE-ROW-CONTAINMENT-001.1` through `.4` are proved by the
   rendered browser scenarios below.
+- `AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.2` and `.5` are proved by the mobile
+  action-menu regression and successful selection of Edit.
 
 ## E2E tests
 
@@ -101,10 +115,15 @@ the trailing region `shrink-0`; the PR row retained the older geometry.
   `apps/web/e2e/tests/git/mobile-pr-file-row-containment.spec.ts`,
   `mobile-chrome` project, verifies Pixel 5 geometry, tap outcome, and document
   containment.
+- `AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.2` and `.5`:
+  `apps/web/e2e/tests/git/mobile-symlink-identification.spec.ts`,
+  `mobile-chrome` project, verifies that the action menu and Edit remain visible
+  after opening animations, then verifies Edit opens the selected file.
 
 ## Work orders
 
 - [x] [Task 01: Contain PR file rows](task-01-contain-pr-file-rows.md)
+- [x] [Task 02: Keep touch file actions available](task-02-touch-file-actions.md)
 
 ## Verification results
 
@@ -117,6 +136,11 @@ the trailing region `shrink-0`; the PR row retained the older geometry.
   assertions.
 - The focused PR-row Vitest suite passes 3 tests. Full web lint and typecheck
   pass.
+- Consolidation review (2026-09-30): the added touch-menu unit case passed
+  against unchanged main. The custom pointer-up toggle was therefore removed.
+  The browser regression retains menu visibility, hit-target, and Edit checks.
+  Confirmation unit tests reproduced the missing coarse-pointer tablet surface.
+  The adapter now explicitly opts file deletion into that surface.
 
 ## Risks
 

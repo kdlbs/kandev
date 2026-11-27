@@ -29,6 +29,7 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
           {notice}
           <SearchResultsList
             searchResults={props.searchResults}
+            repositoryDisplayLabels={props.repositoryDisplayLabels}
             fileStatuses={props.fileStatuses}
             onOpenFile={props.onOpenFile}
             showTouchActions={props.showTouchActions}
@@ -51,6 +52,7 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
     return (
       <SearchResultsList
         searchResults={props.searchResults}
+        repositoryDisplayLabels={props.repositoryDisplayLabels}
         fileStatuses={props.fileStatuses}
         onOpenFile={props.onOpenFile}
         showTouchActions={props.showTouchActions}
@@ -60,6 +62,7 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
   }
   const loadStateResult = renderSessionOrLoadState({
     isSessionFailed: props.isSessionFailed,
+    sessionId: props.sessionId,
     sessionError: props.sessionError,
     loadState: props.loadState,
     isLoadingTree: props.isLoadingTree,

@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
     available: boolean;
   }>,
   isMobile: false,
+  features: { coordinator: false, needsYouInbox: false, canvases: false } as Record<
+    string,
+    boolean
+  >,
   setUserSettings: vi.fn(),
   updateUserSettings: vi.fn(),
   fetchUserSettings: vi.fn(),
@@ -41,6 +45,8 @@ vi.mock("react-i18next", () => ({
     t: (key: string) =>
       ({
         "settings:sidebar": SIDEBAR_LABEL,
+        "coordinator:sidebarSectionLabel": "Coordinators",
+        "common:unavailable": "Unavailable",
         "settings:addShortcutSection": ADD_SECTION_LABEL,
         "settings:sectionName": SECTION_NAME_LABEL,
         "settings:moveUp": MOVE_UP_LABEL,
@@ -56,6 +62,12 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: mocks.isMobile, isFinePointer: true }),
 }));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: (feature: string) => mocks.features[feature] ?? false,
+}));
+
+vi.mock("@/hooks/use-in-office", () => ({ useOfficeModeState: () => "kanban" }));
 
 vi.mock("@/hooks/domains/sidebar/use-sidebar-shortcut-catalog", () => ({
   useSidebarShortcutCatalog: () => ({
@@ -101,6 +113,7 @@ describe("SidebarLayoutEditor", () => {
     mocks.setUserSettings.mockReset();
     mocks.catalog = [];
     mocks.isMobile = false;
+    mocks.features = { coordinator: false, needsYouInbox: false, canvases: false };
     mocks.state.workspaces.activeId = "workspace-1";
     mocks.state.userSettings = { sidebarLayoutsByWorkspace: {} };
   });
@@ -272,6 +285,30 @@ describe("SidebarLayoutEditor", () => {
       "disabled",
       true,
     );
+  });
+
+  it("keeps a disabled Coordinator choice visible and restores it when eligible", () => {
+    const view = render(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    const row = screen.getByTestId("sidebar-layout-node-coordinators");
+    expect(row.textContent).toContain("Coordinators");
+    expect(row.textContent).toContain("Unavailable");
+    expect(within(row).getByRole("switch")).toHaveProperty("disabled", true);
+
+    mocks.features.coordinator = true;
+    view.rerender(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    const restoredRow = screen.getByTestId("sidebar-layout-node-coordinators");
+    expect(restoredRow.textContent).not.toContain("Unavailable");
+    expect(within(restoredRow).getByRole("switch")).toHaveProperty("disabled", false);
   });
 
   it("loads the latest revision before retrying a same-workspace conflict", async () => {

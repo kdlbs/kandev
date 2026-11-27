@@ -16,6 +16,10 @@ storage instead of task-plan prose: a server-computed step-entry number injected
 into workflow prompt templates, replacing an agent counting headings in its own
 plan.
 
+It also owns the `{task_title}` placeholder (REQ-TWS-006), which injects the
+task's title into the same workflow prompt templates through the same
+present-token-only substitution path.
+
 **This system changes no workflow prompt and no workflow YAML.** The workflow
 rewrite that consumes the number is a separate card starting only after this one
 merges.
@@ -30,6 +34,7 @@ recorded under Out of scope 7; it is not deferred work owned by this system.
 |---|---|
 | [requirements/step-entry-number.md](requirements/step-entry-number.md) | REQ-TWS-001, REQ-TWS-002 |
 | [requirements/concurrency-and-idempotency.md](requirements/concurrency-and-idempotency.md) | REQ-TWS-005 |
+| [requirements/task-title.md](requirements/task-title.md) | REQ-TWS-006 |
 | [system-design/typed-workflow-state.md](system-design/typed-workflow-state.md) | Prior art, input inventory, E2E decision |
 
 The non-functional constraints and the named exclusions below are **system-wide**
@@ -58,6 +63,8 @@ and are stated here once rather than repeated per document.
 - **NFR-2:** No schema change. `task_step_transitions` is used as it stands.
 - **NFR-3:** No behaviour change for any template that does not contain
   `{step_entry_number}` — which today is every template in the live database.
+  The same holds for `{task_title}`: a template without it issues no task lookup
+  and renders byte-for-byte as before (AC-TWS-006.3).
 
 
 ## Out of scope

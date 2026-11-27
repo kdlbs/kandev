@@ -1,11 +1,15 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { FileViewerOptions } from "./file-viewer-options";
+import { PluginFilePreview } from "./plugin-file-preview";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { shouldOpenFilePreview } from "@/lib/plugins/file-viewer-selection";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
@@ -218,6 +222,7 @@ function useFileLoader({
   // a fetch is running, the new effect run starts a fresh fetch (rather than
   // being silently blocked) and the stale response is dropped on arrival — so
   // content from the wrong session/repo can never land in the buffer.
+  const store = useAppStoreApi();
   const inFlightKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (hasFile || !activeSessionId) return;
@@ -245,7 +250,14 @@ function useFileLoader({
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
         };
-        setFileState(fileKey, state);
+        const existing = useDockviewStore.getState().openFiles.get(fileKey);
+        if (existing) return;
+        setFileState(fileKey, {
+          ...state,
+          renderedPreview:
+            getFilePreviewKind(path, response.is_binary) === "markdown" &&
+            (store.getState().userSettings.markdownPreviewByDefault ?? true),
+        });
       })
       .catch(() => {
         /* stays on loading state */
@@ -253,7 +265,7 @@ function useFileLoader({
       .finally(() => {
         if (inFlightKeyRef.current === key) inFlightKeyRef.current = null;
       });
-  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo]);
+  }, [hasFile, activeSessionId, fileKey, path, setFileState, repo, store]);
 }
 
 /**
@@ -295,8 +307,17 @@ function useResyncOnTabActivate({
   repo,
   updateFileState,
 }: ResyncOnTabActivateArgs) {
+  const visitRef = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    visitRef.current = Symbol();
+    return () => {
+      visitRef.current = null;
+    };
+  }, [panelId, hasFile, activeSessionId, fileKey, path, repo]);
   useEffect(() => {
     if (!hasFile || !activeSessionId) return;
+    const visit = visitRef.current;
+    if (!visit) return;
     // panelPortalManager.acquire() runs in usePortalSlot's mount effect (the
     // dockview-side slot), which fires before child portals' effects, so the
     // entry is virtually always present here. There is one acceptable miss:
@@ -307,6 +328,7 @@ function useResyncOnTabActivate({
     // accept that edge case rather than wiring a manager-level subscription.
     const entry = panelPortalManager.get(panelId);
     if (!entry?.api) return;
+    const panelApi = entry.api;
     const syncNow = () => {
       const client = getWebSocketClient();
       if (!client) return;
@@ -317,14 +339,16 @@ function useResyncOnTabActivate({
         path,
         repo,
         updateFileState,
+        isCurrent: () =>
+          visitRef.current === visit && panelPortalManager.get(panelId)?.api === panelApi,
       });
     };
     // If the panel is already the active tab when this effect first runs,
     // onDidActiveChange won't fire (no transition), but the user is already
     // looking at the editor — sync immediately so the initial open path
     // benefits from the same WS-event-miss recovery as later activations.
-    if (entry.api.isActive) syncNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
+    if (panelApi.isActive) syncNow();
+    const disposable = panelApi.onDidActiveChange((event) => {
       if (event.isActive) syncNow();
     });
     return () => disposable.dispose();
@@ -505,7 +529,7 @@ function LoadedFileEditorPanel({
   );
 }
 
-export const FileEditorPanel = memo(function FileEditorPanel({
+const TextFileEditorPanel = memo(function TextFileEditorPanel({
   panelId,
   params,
 }: FileEditorPanelProps) {
@@ -600,5 +624,21 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         onDownload,
       }}
     />
+  );
+});
+
+export const FileEditorPanel = memo(function FileEditorPanel(props: FileEditorPanelProps) {
+  usePluginRegistry();
+  const path = props.params.path as string;
+  const repo = props.params.repo as string | undefined;
+  const key = buildRepoScopedItemId(path, repo);
+  const file = useDockviewStore((s) => s.openFiles.get(key));
+  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
+  if (sessionId && (file?.previewOnly || (!file && shouldOpenFilePreview(path))))
+    return <PluginFilePreview path={path} repo={repo} sessionId={sessionId} />;
+  return (
+    <FileViewerOptions path={path} repo={repo} sessionId={sessionId}>
+      <TextFileEditorPanel {...props} />
+    </FileViewerOptions>
   );
 });

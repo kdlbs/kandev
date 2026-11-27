@@ -15,6 +15,7 @@ import (
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +43,10 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	assert.Contains(t, props, "context_paragraphs")
 	assert.NotContains(t, props, "prompt", "legacy 'prompt' must not be top-level anymore")
 	assert.NotContains(t, props, "options", "legacy 'options' must not be top-level anymore")
+	questions := props[questionsArg].(map[string]interface{})
+	items := questions["items"].(map[string]interface{})
+	questionProps := items[propsKey].(map[string]interface{})
+	assert.Contains(t, questionProps, allowCustomTextArg, "question schema must expose the custom-text policy")
 
 	required, _ := parsed["required"].([]interface{})
 	requiredSet := make(map[string]bool)
@@ -49,6 +54,33 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 		requiredSet[r.(string)] = true
 	}
 	assert.True(t, requiredSet["questions"], "questions should be required")
+}
+
+func TestAskUserQuestion_ConciseContextGuidance(t *testing.T) {
+	server := newTaskModeServer(t, &testBackend{}, "task-current")
+	tool := server.mcpServer.ListTools()["ask_user_question_kandev"].Tool
+
+	for _, expected := range []string{
+		"1-3 short sentences or brief bullets",
+		"about 100 words or fewer",
+		"full reports, logs, and repeated conversation outside this call, before it",
+		"questions and options self-contained",
+	} {
+		assert.Contains(t, tool.Description, expected)
+	}
+
+	schema, err := json.Marshal(tool.InputSchema)
+	require.NoError(t, err)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props := parsed["properties"].(map[string]interface{})
+	for _, fieldName := range []string{"context", "context_paragraphs"} {
+		field := props[fieldName].(map[string]interface{})
+		description, ok := field["description"].(string)
+		require.True(t, ok, "%s needs a description", fieldName)
+		assert.Contains(t, description, "1-3 short sentences or brief bullets", fieldName)
+		assert.Contains(t, description, "about 100 words or fewer", fieldName)
+	}
 }
 
 // TestAskUserQuestion_RejectsLegacyPromptShape ensures payloads using the old
@@ -85,8 +117,9 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
 		"questions": []map[string]interface{}{
 			{
-				"id":     "q1",
-				"prompt": "Which database?",
+				"id":               "q1",
+				"prompt":           "Which database?",
+				allowCustomTextArg: false,
 				"options": []map[string]interface{}{
 					{"label": "Postgres", "description": "Relational"},
 					{"label": "Mongo", "description": "Document"},
@@ -103,6 +136,7 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	require.True(t, ok, "questions should be normalized to []map")
 	require.Len(t, questions, 1)
 	assert.Equal(t, "q1", questions[0]["id"])
+	assert.Equal(t, false, questions[0][allowCustomTextArg])
 
 	// Result text should be a JSON map keyed by question id.
 	require.NotEmpty(t, result.Content)
@@ -112,6 +146,20 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(textBlock.Text), &parsed))
 	q1 := parsed["q1"].(map[string]interface{})
 	assert.Equal(t, "q1_opt1", q1["selected_option"])
+}
+
+func TestAskUserQuestionRejectsNonBooleanCustomTextPolicy(t *testing.T) {
+	server := newTaskModeServer(t, &testBackend{}, "task-current")
+	result := callTool(t, server, "ask_user_question_kandev", map[string]interface{}{
+		"questions": []map[string]interface{}{{
+			"prompt": "Which database?", allowCustomTextArg: "sometimes",
+			"options": []map[string]interface{}{
+				{"label": "Postgres", "description": "Relational"},
+				{"label": "Mongo", "description": "Document"},
+			},
+		}},
+	})
+	assert.True(t, result.IsError)
 }
 
 func TestAskUserQuestion_PreservesLiteralContextEscapes(t *testing.T) {
@@ -148,6 +196,32 @@ func TestAskUserQuestion_JoinsContextParagraphs(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_ContextParagraphsOverrideLegacy(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	args := clarificationArgsWithParagraphs()
+	args["context"] = "Legacy context should be overridden."
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskUserQuestion_EmptyContextParagraphsUsesLegacyContextVerbatim(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	server := newTaskModeServer(t, backend, "task-current")
+	legacyContext := strings.Repeat("full report line\n", 80)
+	args := clarificationArgsWithParagraphs()
+	args["context"] = legacyContext
+	args["context_paragraphs"] = []string{}
+
+	result := callTool(t, server, "ask_user_question_kandev", args)
+	require.False(t, result.IsError)
+	payload := backend.lastPayload.(map[string]interface{})
+	assert.Equal(t, legacyContext, payload["context"])
 }
 
 func TestAskParentQuestion_JoinsContextParagraphs(t *testing.T) {
@@ -395,9 +469,9 @@ func (b *blockingAskBackend) RequestPayload(ctx context.Context, action string, 
 // result. This is the regression guard for the agent's MCP client aborting the
 // call with "fetch failed" after its idle timeout.
 func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
-	prev := askQuestionKeepAliveInterval
-	askQuestionKeepAliveInterval = 5 * time.Millisecond
-	t.Cleanup(func() { askQuestionKeepAliveInterval = prev })
+	prev := toolKeepAliveInterval
+	toolKeepAliveInterval = 5 * time.Millisecond
+	t.Cleanup(func() { toolKeepAliveInterval = prev })
 
 	release := make(chan struct{})
 	backend := &blockingAskBackend{
@@ -470,6 +544,93 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
 }
 
+// askThroughTransport drives a real tools/call JSON-RPC frame through the mcp-go
+// server (hooks included) on behalf of the given client session and returns the
+// payload the ask_user_question handler forwarded to the backend.
+func askThroughTransport(t *testing.T, s *Server, backend *testBackend, session mcpsrv.ClientSession, rawID string) map[string]interface{} {
+	t.Helper()
+	ctx := context.Background()
+	if session != nil {
+		ctx = s.mcpServer.WithContext(ctx, session)
+	}
+	frame := `{"jsonrpc":"2.0","id":` + rawID + `,"method":"tools/call","params":{"name":"ask_user_question_kandev","arguments":{"questions":[{"prompt":"Which color?","options":[{"label":"Red","description":"R"},{"label":"Blue","description":"B"}]}]}}}`
+	response := s.mcpServer.HandleMessage(ctx, []byte(frame))
+	raw, err := json.Marshal(response)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "not found")
+	require.Equal(t, ws.ActionMCPAskUserQuestion, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok, "backend payload should be a map, got %T", backend.lastPayload)
+	return payload
+}
+
+func newAskTransportSession(id string) *providerRefreshTestSession {
+	return &providerRefreshTestSession{id: id, notifications: make(chan mcplib.JSONRPCNotification, 8)}
+}
+
+// TestAskUserQuestion_RetryKeyIsStableForExactTransportRetry proves the
+// production path (JSON-RPC frame -> BeforeCallTool hook -> handler -> backend
+// payload) forwards the same retry_key when the agent re-sends the same request
+// id on the same MCP connection, and a different key otherwise.
+func TestAskUserQuestion_RetryKeyIsStableForExactTransportRetry(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+	conn := newAskTransportSession("conn-a")
+
+	first := askThroughTransport(t, s, backend, conn, "7")
+	firstKey, _ := first["retry_key"].(string)
+	require.NotEmpty(t, firstKey, "retry_key must be forwarded when connection and request id are known")
+	assert.Contains(t, firstKey, "conn-a/")
+	assert.Contains(t, firstKey, "int64:7")
+
+	retry := askThroughTransport(t, s, backend, conn, "7")
+	assert.Equal(t, firstKey, retry["retry_key"], "exact retry must reuse the identity")
+
+	next := askThroughTransport(t, s, backend, conn, "8")
+	assert.NotEqual(t, firstKey, next["retry_key"], "a different request id must not alias")
+
+	stringID := askThroughTransport(t, s, backend, conn, `"7"`)
+	assert.NotEqual(t, firstKey, stringID["retry_key"], "string and numeric ids are distinct JSON-RPC ids")
+}
+
+// TestAskUserQuestion_RetryKeyIsScopedToConnection guards the collision case
+// where a reconnecting client restarts its JSON-RPC ids at the same value.
+func TestAskUserQuestion_RetryKeyIsScopedToConnection(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	onA := askThroughTransport(t, s, backend, newAskTransportSession("conn-a"), "1")
+	onB := askThroughTransport(t, s, backend, newAskTransportSession("conn-b"), "1")
+	require.NotEmpty(t, onA["retry_key"])
+	require.NotEmpty(t, onB["retry_key"])
+	assert.NotEqual(t, onA["retry_key"], onB["retry_key"])
+}
+
+// TestAskUserQuestion_RetryKeyOmittedWithoutConnection keeps the backend on its
+// random identity when the call has no client session (direct handler use).
+func TestAskUserQuestion_RetryKeyOmittedWithoutConnection(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	payload := askThroughTransport(t, s, backend, nil, "7")
+	_, present := payload["retry_key"]
+	assert.False(t, present, "retry_key must be absent without a connection scope")
+}
+
+func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
+	req := &mcplib.CallToolRequest{}
+	req.Params.Meta = &mcplib.Meta{ProgressToken: "tok", AdditionalFields: map[string]any{"other": 1}}
+	stampTransportRequestID(req, float64(3))
+	assert.Equal(t, mcplib.ProgressToken("tok"), req.Params.Meta.ProgressToken)
+	assert.Equal(t, 1, req.Params.Meta.AdditionalFields["other"])
+	assert.Equal(t, "int64:3", req.Params.Meta.AdditionalFields[transportRequestIDMetaKey])
+
+	stampTransportRequestID(nil, 1)
+	untouched := &mcplib.CallToolRequest{}
+	stampTransportRequestID(untouched, nil)
+	assert.Nil(t, untouched.Params.Meta, "a nil id must not allocate meta")
+}
+
 // TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline protects the
 // managed-default safety margin described in the timeout design record. The
 // <= 60s bound targets the managed 300s watchdog, not every accepted
@@ -477,6 +638,6 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 // documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
 // cannot catch a default-value regression because it overrides the interval.
 func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
-	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
-	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+	assert.Greater(t, toolKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, toolKeepAliveInterval, 20*time.Second)
 }

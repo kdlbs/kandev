@@ -62,6 +62,15 @@ func JSONTypeIsString(driver, col, path string) string {
 	return fmt.Sprintf("json_type(%s, '$.%s') = 'text'", col, path)
 }
 
+// JSONTypeIsBoolean returns a WHERE-clause fragment asserting that the JSON
+// value at path is a boolean.
+func JSONTypeIsBoolean(driver, col, path string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("jsonb_typeof(%s::jsonb->'%s') = 'boolean'", col, path)
+	}
+	return fmt.Sprintf("json_type(%s, '$.%s') IN ('true', 'false')", col, path)
+}
+
 // JSONExtractIsNotNull returns the SQL fragment to check that a JSON path is not null.
 //
 //	SQLite:   json_extract(col, '$.path') IS NOT NULL

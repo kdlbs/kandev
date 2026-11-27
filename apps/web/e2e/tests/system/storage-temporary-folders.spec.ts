@@ -1,12 +1,57 @@
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
+  mockStorageDiskCapacity,
   mockPartialSystemTemporaryOverview,
   mockTemporaryArtifactOverview,
+  mockTemporaryEntryBreakdown,
   seedSystemTemporaryFile,
 } from "../../helpers/storage-maintenance";
 
 test.describe("System temporary folders", () => {
+  test("shows critical temporary capacity before folder analysis completes", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockStorageDiskCapacity(testPage);
+    let releaseOverview!: () => void;
+    let markOverviewStarted!: () => void;
+    const overviewReleased = new Promise<void>((resolve) => {
+      releaseOverview = resolve;
+    });
+    const overviewStarted = new Promise<void>((resolve) => {
+      markOverviewStarted = resolve;
+    });
+    await testPage.route("**/api/v1/system/storage", async (route) => {
+      if (route.request().method() === "GET") {
+        markOverviewStarted();
+        await overviewReleased;
+      }
+      await route.continue();
+    });
+
+    await testPage.goto("/settings/system/storage");
+    await overviewStarted;
+    const home = testPage.getByTestId("storage-disk-capacity-card");
+    await expect(home).toHaveAttribute("data-severity", "normal");
+    const temporary = testPage.getByTestId("storage-temporary-disk-capacity-0");
+    await expect(temporary).toHaveAttribute("data-severity", "critical");
+    await expect(temporary).toContainText("/isolated/tmp");
+    await expect(temporary).toContainText(
+      "Temporary-file operations can fail when this filesystem is full",
+    );
+    await prCapture.screenshot("system-temporary-capacity-warning", {
+      caption: "Storage reports critical temporary capacity while folder analysis is pending",
+    });
+
+    releaseOverview();
+    const trigger = testPage.getByTestId("storage-resource-system-temporary-trigger");
+    await expect(trigger).toBeVisible();
+    await testPage.getByTestId("storage-disk-view-temporary").click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
   test("measures the disposable root again after Analyze and excludes it from the total", async ({
     testPage,
     backend,
@@ -81,6 +126,46 @@ test.describe("System temporary folders", () => {
     });
   });
 
+  test("shows bounded entry ownership and navigates to existing cleanup without running it", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockTemporaryEntryBreakdown(testPage);
+    const storageMutations: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.method() !== "GET" && request.url().includes("/api/v1/system/storage")) {
+        storageMutations.push(request.url());
+      }
+    });
+    await testPage.goto("/settings/system/storage");
+
+    const temporaryTrigger = testPage.getByTestId("storage-resource-system-temporary-trigger");
+    await expect(temporaryTrigger).toBeVisible();
+    await temporaryTrigger.click();
+    const entries = testPage.getByTestId("storage-temporary-entries");
+    await expect(entries).toContainText("build-output");
+    await expect(entries).toContainText("900,000,000 B");
+    await expect(entries).toContainText("Not tracked by Kandev");
+    await expect(entries).toContainText("active-profile");
+    await expect(entries).toContainText("Ownership unknown");
+    await expect(entries).toContainText("5 other observed entries");
+    await expect(entries).toContainText("1 stale candidate");
+    await waitForFiniteAnimations(testPage.getByTestId("storage-resource-system-temporary"));
+    await prCapture.screenshot("system-temporary-largest-entries", {
+      caption: "Storage labels measured temporary entries and explains registered cleanup scope",
+    });
+
+    await testPage.getByTestId("storage-temporary-review-cleanup").click();
+    const cleanupTrigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
+    await expect(cleanupTrigger).toHaveAttribute("aria-expanded", "true");
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.testid),
+      )
+      .toBe("storage-resource-temporary-artifacts-trigger");
+    expect(storageMutations).toEqual([]);
+  });
+
   test("persists the opt-in policy and confirms explicit cleanup through quarantine", async ({
     testPage,
     prCapture,
@@ -111,7 +196,9 @@ test.describe("System temporary folders", () => {
     await testPage.goto("/settings/system/storage");
     await testPage.getByTestId("storage-temporary-artifacts-enabled").click();
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     await testPage.reload();
     await expect(testPage.getByTestId("storage-temporary-artifacts-enabled")).toHaveAttribute(
       "aria-checked",

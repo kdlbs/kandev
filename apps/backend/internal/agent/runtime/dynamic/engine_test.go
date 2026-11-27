@@ -65,6 +65,91 @@ func TestEnginePreferenceKeepsRetryOnCurrentCandidate(t *testing.T) {
 	}
 }
 
+func TestNewEngineUsesCircuitFailureLadderByDefault(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	profile := Profile{Candidates: []Candidate{{ID: "candidate", Enabled: true, BindingKey: "credential:default"}}}
+	failure := &routingerr.Error{Code: routingerr.CodeRateLimited}
+
+	for i, delay := range []time.Duration{time.Minute, 5 * time.Minute} {
+		engine.RecordResourceFailure(profile, "candidate", failure)
+		snapshots := engine.Circuits().Snapshots()
+		if len(snapshots) != 1 || snapshots[0].Failures != i+1 || !snapshots[0].Until.Equal(now.Add(delay)) {
+			t.Fatalf("default engine failure %d: got %+v, want count %d and deadline %v", i+1, snapshots, i+1, now.Add(delay))
+		}
+		now = now.Add(delay)
+	}
+}
+
+func TestKeywordCircuitKeepsLongestDeadlineAcrossFailureOrder(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	resetAt := now.Add(time.Hour)
+	candidate := Candidate{
+		ID: "candidate", Enabled: true, BindingKey: "credential:shared",
+		KeywordContextEnabled: true, KeywordAccountID: "account",
+	}
+	profile := Profile{Candidates: []Candidate{candidate}}
+	failure := func(withReset bool) *routingerr.Error {
+		result := &routingerr.Error{
+			Code: routingerr.CodeRateLimited,
+			Keyword: &routingerr.KeywordDecision{
+				Scope: "account", Action: "try_next", Backoff: 5 * time.Minute,
+			},
+		}
+		if withReset {
+			result.ResetHint = &resetAt
+		}
+		return result
+	}
+	for _, tc := range []struct {
+		name         string
+		firstHasHint bool
+	}{
+		{name: "later hint then no hint", firstHasHint: true},
+		{name: "no hint then later hint", firstHasHint: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := NewEngine(WithClock(func() time.Time { return now }))
+			engine.openCircuitForFailure(profile, candidate.ID, failure(tc.firstHasHint))
+			engine.openCircuitForFailure(profile, candidate.ID, failure(!tc.firstHasHint))
+			if snapshots := engine.Circuits().Snapshots(); len(snapshots) != 1 || !snapshots[0].Until.Equal(resetAt) {
+				t.Fatalf("circuit deadline = %+v, want %v", snapshots, resetAt)
+			}
+		})
+	}
+}
+
+func TestKeywordCircuitFailurePreservesActiveProbeLease(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	candidate := Candidate{
+		ID: "candidate", Enabled: true, BindingKey: "credential:shared",
+		KeywordContextEnabled: true, KeywordAccountID: "account",
+	}
+	profile := Profile{Candidates: []Candidate{candidate}}
+	key := keywordAccountCircuitKey(candidate.KeywordAccountID)
+	engine.Circuits().Open(key, now.Add(-time.Minute), routingerr.CodeRateLimited)
+	lease, ok := engine.Circuits().AcquireProbe(key, time.Minute)
+	if !ok {
+		t.Fatal("could not acquire setup probe lease")
+	}
+	failure := &routingerr.Error{
+		Code: routingerr.CodeRateLimited,
+		Keyword: &routingerr.KeywordDecision{
+			Scope: "account", Action: "try_next", Backoff: 5 * time.Minute,
+		},
+	}
+	engine.openCircuitForFailure(profile, candidate.ID, failure)
+
+	snapshots := engine.Circuits().Snapshots()
+	if len(snapshots) != 1 || !snapshots[0].ProbeUntil.Equal(lease.ExpiresAt) {
+		t.Fatalf("probe lease = %+v, want expiry %v", snapshots, lease.ExpiresAt)
+	}
+	if _, ok := engine.Circuits().AcquireProbe(key, time.Minute); ok {
+		t.Fatal("a second probe acquired the shared circuit before the first lease expired")
+	}
+}
+
 func TestEngineAppliesCandidateErrorActions(t *testing.T) {
 	profile := Profile{
 		ID:      "dynamic-1",
@@ -126,6 +211,110 @@ func TestEngineRoutesCodexUsageLimitThroughHardPolicy(t *testing.T) {
 	}
 	if decision.ExecutionProfileID != "fallback" || decision.Reason != "policy_skip" {
 		t.Fatalf("decision = %#v, want fallback selected by hard policy", decision)
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.6
+func TestEngineRoutesClaudeSessionLimitThroughHardPolicy(t *testing.T) {
+	failure := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: "claude-acp",
+		Stderr:     "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)",
+	})
+	if failure.Code != routingerr.CodeQuotaLimited || failure.Class != routingerr.ClassHard || failure.ResetHint == nil {
+		t.Fatalf("classification = %+v, want hard quota with reset hint", failure)
+	}
+
+	resetAt := *failure.ResetHint
+	now := resetAt.Add(-time.Hour)
+	profile := Profile{
+		ID: "dynamic-claude-quota", Version: 1,
+		Candidates: []Candidate{
+			{ID: "claude-primary", Enabled: true, BindingKey: "credential:claude-shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "claude-sibling", Enabled: true, BindingKey: "credential:claude-shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "healthy", Enabled: true, BindingKey: "credential:other", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	initial, err := engine.Select("claude-quota-session", profile, 0, "")
+	if err != nil || initial.ExecutionProfileID != "claude-primary" {
+		t.Fatalf("initial selection = %#v, %v; want claude-primary", initial, err)
+	}
+
+	decision, err := engine.ApplyFailure(
+		"claude-quota-session", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "healthy" || decision.Reason != "policy_skip" {
+		t.Fatalf("decision = %#v, want healthy candidate after shared-binding siblings are skipped", decision)
+	}
+	if !engine.Circuits().IsOpen("credential:claude-shared", now) {
+		t.Fatal("Claude shared credential circuit is not open before the reset deadline")
+	}
+
+	now = resetAt
+	probe, err := engine.Select("claude-reset-probe", profile, 0, "")
+	if err != nil || probe.ExecutionProfileID != "claude-primary" {
+		t.Fatalf("selection at reset = %#v, %v; want the first shared-binding candidate to probe", probe, err)
+	}
+	whileProbeHeld, err := engine.Select("claude-reset-probe-sibling", profile, 0, "")
+	if err != nil || whileProbeHeld.ExecutionProfileID != "healthy" {
+		t.Fatalf("selection while probe is held = %#v, %v; want healthy candidate", whileProbeHeld, err)
+	}
+	engine.ReleaseProbe(probe, true)
+	if engine.Circuits().IsOpen("credential:claude-shared", now) {
+		t.Fatalf("Claude shared credential circuit remains open after successful probe at reset %s", resetAt)
+	}
+}
+
+// A quota failure is scoped to the shared credential binding, not just the
+// execution profile that happened to run. Every candidate on the same account
+// must be skipped so the route advances to a different provider instead of
+// re-selecting a sibling profile that shares the exhausted quota.
+func TestEngineQuotaFailureSkipsSiblingsOnSharedBinding(t *testing.T) {
+	now := time.Unix(1000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	resetAt := now.Add(2 * time.Hour)
+	profile := Profile{
+		ID: "dynamic-quota", Version: 1,
+		Candidates: []Candidate{
+			{ID: "codex-a", Enabled: true, BindingKey: "credential:shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "codex-b", Enabled: true, BindingKey: "credential:shared", Policies: routingpolicy.DefaultDocument()},
+			{ID: "other", Enabled: true, BindingKey: "credential:other", Policies: routingpolicy.DefaultDocument()},
+		},
+	}
+	initial, err := engine.Select("session-quota", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	if initial.ExecutionProfileID != "codex-a" {
+		t.Fatalf("initial candidate = %q, want codex-a", initial.ExecutionProfileID)
+	}
+
+	failure := &routingerr.Error{
+		Code: routingerr.CodeQuotaLimited, Class: routingerr.ClassHard,
+		FallbackAllowed: true, ResetHint: &resetAt,
+	}
+	decision, err := engine.ApplyFailure(
+		"session-quota", profile, initial.Generation, initial.ExecutionProfileID, failure,
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if decision.ExecutionProfileID != "other" {
+		t.Fatalf("decision = %q, want the sibling codex-b to be skipped and other selected", decision.ExecutionProfileID)
+	}
+	if !engine.circuits.IsOpen("credential:shared", now) {
+		t.Fatal("shared credential binding circuit was not opened")
+	}
+	next, err := engine.Select("session-quota", profile, decision.Generation, "")
+	if err != nil {
+		t.Fatalf("subsequent Select: %v", err)
+	}
+	if next.ExecutionProfileID != "other" {
+		t.Fatalf("subsequent candidate = %q, want other while the shared binding is open", next.ExecutionProfileID)
 	}
 }
 
@@ -642,8 +831,12 @@ func TestCircuitProbeLeaseIsExclusive(t *testing.T) {
 	}
 	registry.ReleaseProbe(lease2, false, time.Second)
 	now = now.Add(2 * time.Second)
+	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); ok {
+		t.Fatal("failed probe ignored the default first-rung backoff")
+	}
+	now = now.Add(time.Minute)
 	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); !ok {
-		t.Fatal("probe lease was not released after failure backoff")
+		t.Fatal("probe lease was not released after the default backoff")
 	}
 }
 

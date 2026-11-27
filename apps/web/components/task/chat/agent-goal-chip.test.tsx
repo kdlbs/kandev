@@ -48,6 +48,24 @@ afterEach(() => {
   cleanup();
 });
 
+describe("AgentGoalChip click activation", () => {
+  it.each(["hover", "focus"])(
+    "keeps desktop details exposed when clicking after %s",
+    async (opening) => {
+      render(<AgentGoalChip goal={activeGoal()} />);
+      const trigger = screen.getByTestId(GOAL_CHIP_TEST_ID);
+      if (opening === "hover") fireEvent.mouseEnter(trigger);
+      else fireEvent.focus(trigger);
+      expect(await screen.findByTestId(GOAL_POPOVER_TEST_ID)).toBeTruthy();
+
+      fireEvent.click(trigger);
+
+      expect(screen.getByTestId(GOAL_POPOVER_TEST_ID)).toBeTruthy();
+      expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    },
+  );
+});
+
 describe("AgentGoalChip", () => {
   it("opens the goal details on desktop hover", async () => {
     render(<AgentGoalChip goal={activeGoal()} />);
@@ -75,9 +93,9 @@ describe("AgentGoalChip", () => {
 
     const details = await screen.findByTestId("agent-goal-drawer-content");
     expect(details.textContent).toContain(GOAL_OBJECTIVE);
-    expect(screen.getByRole("button", { name: "Close goal details" }).className).toContain(
-      "[@media(pointer:coarse)]:min-h-11",
-    );
+    const close = screen.getByRole("button", { name: "Close goal details" });
+    expect(close.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    expect(close.closest("[data-vaul-no-drag]")).not.toBeNull();
   });
 
   it("does not close the touch drawer when the trigger loses hover state", () => {

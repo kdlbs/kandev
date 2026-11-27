@@ -745,19 +745,28 @@ func TestGetCumulativeDiff_ReturnsErrorOnHTTPError(t *testing.T) {
 // gitStatusBody exercises every field of GitStatusResult.
 const gitStatusBody = `{
 	"success":true,"is_submodule":true,
+	"status_state":"ready","files_complete":true,"detail_state":"pending","error_code":"",
+	"tracker_id":"agentctl/tracker-1","tracker_epoch":17,"snapshot_revision":3,
 	"branch":"feature/x","remote_branch":"origin/feature/x",
 	"head_commit":"head1","base_commit":"base1",
 	"ahead":3,"behind":1,"remote_ahead":4,"remote_behind":2,
 	"remote_head_commit":"remote1",
 	"modified":["m.go"],"added":["a.go"],"deleted":["d.go"],
 	"untracked":["u.go"],"renamed":["r.go"],
-	"files":{"m.go":{"status":"M"}},
+	"files":{"m.go":{"status":"M","diff_state":"pending"}},
 	"timestamp":"2026-08-10T11:00:00Z",
 	"branch_additions":25,"branch_deletions":7
 }`
 
 func assertFullGitStatus(t *testing.T, result *GitStatusResult) {
 	t.Helper()
+	if result.StatusState != "ready" || !result.FilesComplete || result.DetailState != "pending" {
+		t.Errorf("quality = %q / %v / %q, want ready / true / pending",
+			result.StatusState, result.FilesComplete, result.DetailState)
+	}
+	if result.TrackerID != "agentctl/tracker-1" || result.TrackerEpoch != 17 || result.SnapshotRevision != 3 {
+		t.Errorf("ordering = %q / %d / %d, want tracker identity and 17 / 3", result.TrackerID, result.TrackerEpoch, result.SnapshotRevision)
+	}
 	if !result.Success || !result.IsSubmodule {
 		t.Errorf("success/is_submodule = %v / %v, want true / true", result.Success, result.IsSubmodule)
 	}
@@ -832,6 +841,35 @@ func TestGetGitStatusFresh_SendsFreshQueryParam(t *testing.T) {
 		t.Errorf("fresh = %q, want true — without it the server serves the poll-loop cache", fresh)
 	}
 	assertFullGitStatus(t, result)
+}
+
+func TestGetGitStatusWithDetailsRequestsEnrichedStatus(t *testing.T) {
+	detailedBody := strings.Replace(gitStatusBody, `"detail_state":"pending"`, `"detail_state":"ready"`, 1)
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, detailedBody))
+	result, err := newHTTPOnlyClient(srv.URL).GetGitStatusWithDetails(context.Background())
+	if err != nil {
+		t.Fatalf("GetGitStatusWithDetails: %v", err)
+	}
+	if got.Path != "/api/v1/git/status" || got.Query.Get("fresh") != "true" || got.Query.Get("details") != "wait" {
+		t.Errorf("request = %s %s?%s, want fresh details wait", got.Method, got.Path, got.RawQuery)
+	}
+	if !result.Success || result.StatusState != "ready" || result.DetailState != "ready" {
+		t.Fatalf("detailed status = %+v, want a ready result", result)
+	}
+}
+
+func TestGetGitStatusMultiRefreshSendsSupportedMode(t *testing.T) {
+	for _, mode := range []string{"fresh", "recover", "replay"} {
+		t.Run(mode, func(t *testing.T) {
+			srv, got := captureServer(t, jsonResponder(http.StatusOK, `{"success":true,"repos":[]}`))
+			if _, err := newHTTPOnlyClient(srv.URL).GetGitStatusMultiRefresh(context.Background(), mode); err != nil {
+				t.Fatalf("GetGitStatusMultiRefresh: %v", err)
+			}
+			if got.Path != "/api/v1/git/status/multi" || got.Query.Get("mode") != mode {
+				t.Errorf("request = %s %s?%s, want mode %q", got.Method, got.Path, got.RawQuery, mode)
+			}
+		})
+	}
 }
 
 func TestGetGitStatusMultiFresh_UsesMultiEndpointAndDecodesPerRepoEntries(t *testing.T) {

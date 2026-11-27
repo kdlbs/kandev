@@ -39,6 +39,7 @@ remain separate during repair.
 ## Work orders
 
 - [x] [Task 01: Preserve ceiling launch ownership](task-01-session-concurrency-ceiling.md)
+- [x] [Task 02: Keep ceiling-queued automation runs open](task-02-automation-run-start-deferral.md)
 
 ## Risks
 
@@ -56,3 +57,5 @@ semantics and the completed work order remain unchanged.
   ambiguous callback.
 - The startup ceiling is environment-only. Operators must restart the backend
   after changing it.
+- A queued automation start does not survive a backend restart: startup
+  reconciliation fails its unbound run, and the sweep then drops the start.

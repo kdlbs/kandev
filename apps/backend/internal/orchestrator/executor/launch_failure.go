@@ -13,7 +13,132 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// RecordEarlyLaunchFailure preserves typed recovery details for a prepared
+// session whose launch failed before entering LaunchPreparedSession. The state
+// transition is conditional, so an already settled session keeps its history.
+func (e *Executor) RecordEarlyLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
+	return e.handleEarlyLaunchFailure(ctx, taskID, sessionID, "", launchErr)
+}
+
+type quickChatStartFailureCommitter interface {
+	CommitQuickChatStartFailureIfCurrentAttempt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		models.LastAgentError,
+	) (bool, time.Time, error)
+}
+
+type workflowLaunchFailureOwnershipKey struct{}
+
+// WithWorkflowLaunchFailureOwnership carries the launch's session snapshot
+// into failure bookkeeping so the orchestrator can serialize it with a profile
+// switch before it marks the session failed.
+func WithWorkflowLaunchFailureOwnership(ctx context.Context, session *models.TaskSession) context.Context {
+	if session == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowLaunchFailureOwnershipKey{}, session)
+}
+
+// WorkflowLaunchFailureOwnershipFromContext returns the session snapshot set
+// by WithWorkflowLaunchFailureOwnership.
+func WorkflowLaunchFailureOwnershipFromContext(ctx context.Context) (*models.TaskSession, bool) {
+	session, ok := ctx.Value(workflowLaunchFailureOwnershipKey{}).(*models.TaskSession)
+	return session, ok && session != nil
+}
+
+func (e *Executor) RecordEarlyQuickChatStartFailure(
+	ctx context.Context,
+	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
+	launchErr error,
+) (bool, models.TaskSessionState, time.Time, error) {
+	safeErr := routingerr.SanitizeError(launchErr)
+	if safeErr == nil || taskID == "" || sessionID == "" || quickChatAttemptID == "" ||
+		errors.Is(launchErr, ErrExecutionAlreadyRunning) {
+		return false, "", time.Time{}, safeErr
+	}
+	committer, ok := e.repo.(quickChatStartFailureCommitter)
+	if !ok {
+		return false, "", time.Time{}, safeErr
+	}
+	failCtx := context.WithoutCancel(ctx)
+	session, owned := e.loadQuickChatFailureOwner(
+		failCtx, taskID, sessionID, quickChatAttemptID, agentAttemptID,
+	)
+	if !owned {
+		if session == nil {
+			return false, "", time.Time{}, safeErr
+		}
+		return false, session.State, time.Time{}, safeErr
+	}
+	errorValue := e.buildLastAgentError(failCtx, taskID, "", launchErr)
+	changed, updatedAt, err := committer.CommitQuickChatStartFailureIfCurrentAttempt(
+		failCtx,
+		taskID,
+		sessionID,
+		quickChatAttemptID,
+		agentAttemptID,
+		session.State,
+		errorValue,
+	)
+	if err != nil {
+		e.logger.Warn("failed to commit Quick Chat launch failure for its owning attempt",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return false, session.State, time.Time{}, safeErr
+	}
+	if !changed {
+		return false, session.State, time.Time{}, safeErr
+	}
+	e.notifyQuickChatStartFailure(failCtx, taskID, sessionID, safeErr)
+	return true, session.State, updatedAt, safeErr
+}
+
+func (e *Executor) loadQuickChatFailureOwner(
+	ctx context.Context,
+	taskID, sessionID, quickChatAttemptID, agentAttemptID string,
+) (*models.TaskSession, bool) {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		if err != nil {
+			e.logger.Warn("failed to load session before recording Quick Chat launch failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return nil, false
+	}
+	if models.StringFromAny(session.Metadata[models.SessionMetaKeyQuickChatStartAttemptID]) != quickChatAttemptID ||
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != agentAttemptID {
+		return session, false
+	}
+	return session, isQuickChatStartFailureState(session.State)
+}
+
+func isQuickChatStartFailureState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCreated, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Executor) notifyQuickChatStartFailure(ctx context.Context, taskID, sessionID string, safeErr error) {
+	if e.onEarlyLaunchTaskStateReconcile != nil {
+		if err := e.onEarlyLaunchTaskStateReconcile(ctx, taskID, sessionID, v1.TaskStateFailed); err != nil {
+			e.logger.Warn("failed to reconcile task after Quick Chat launch failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+	if e.onLaunchFailed != nil {
+		e.onLaunchFailed(ctx, taskID, sessionID, "", safeErr)
+	}
+}
 
 type launchFailureClassification struct {
 	code    string
@@ -22,6 +147,13 @@ type launchFailureClassification struct {
 }
 
 func classifyLaunchFailure(err error) launchFailureClassification {
+	var relocationErr *worktree.ManagedCloneRelocationRequiredError
+	if errors.As(err, &relocationErr) {
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryManagedCloneRelocationRequired,
+			message: "The task workspace contains local changes and needs explicit relocation.",
+		}
+	}
 	var recoveryErr *worktree.WorktreeRecoveryError
 	if errors.As(err, &recoveryErr) {
 		return launchFailureClassification{
@@ -32,6 +164,26 @@ func classifyLaunchFailure(err error) launchFailureClassification {
 		}
 	}
 	switch {
+	case isExecutorRuntimeUnavailable(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor runtime is unavailable. Choose an available runtime or ask an operator to enable it.",
+		}
+	case isExecutorEnvironmentMismatch(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution belongs to a different task environment. Start a new session for the selected workspace.",
+		}
+	case isExecutorRuntimeMismatch(err), isExecutorIdentityUnverified(err):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The retained execution does not satisfy the selected executor runtime. Stop it or start a new session on the selected runtime.",
+		}
+	case errors.Is(err, ErrExecutorRuntimeSelectionUnresolved):
+		return launchFailureClassification{
+			code:    models.LaunchErrorCategoryGenericLaunchFailure,
+			message: "The selected executor could not be resolved. Choose an available executor.",
+		}
 	case errors.Is(err, worktree.ErrWorkspaceCheckoutFailed):
 		return launchFailureClassification{
 			code:    models.LaunchErrorCategoryWorkspaceCheckoutFailed,
@@ -70,6 +222,9 @@ func launchFailureRecoveryActions(category, taskRepositoryID string, markReviewD
 	}
 	if category == models.LaunchErrorCategoryWorkspaceCheckoutFailed || category == models.LaunchErrorCategoryGenericLaunchFailure {
 		actions = append(actions, models.RecoveryActionRetryLaunch)
+	}
+	if category == models.LaunchErrorCategoryManagedCloneRelocationRequired {
+		actions = append(actions, models.RecoveryActionRelocateAndResume)
 	}
 	if category == models.LaunchErrorCategoryPRAlreadyClosed && markReviewDone {
 		actions = append(actions, models.RecoveryActionMarkReviewDone)
@@ -190,20 +345,22 @@ func bootstrapFailureCause(launchErr error, fromResume bool) ([]models.AgentErro
 	var failure *agentruntime.BootstrapFailure
 	if errors.As(launchErr, &failure) && failure != nil {
 		operation := failure.Operation
-		if operation == "" && fromResume {
-			operation = models.AgentErrorCauseOperationResume
+		if operation == "" {
+			operation = models.AgentErrorCauseOperationStart
+			if fromResume {
+				operation = models.AgentErrorCauseOperationResume
+			}
 		}
-		if operation != models.AgentErrorCauseOperationResume &&
+		if operation != models.AgentErrorCauseOperationStart &&
+			operation != models.AgentErrorCauseOperationResume &&
 			operation != models.AgentErrorCauseOperationRestoreWorkspace {
 			return nil, ""
 		}
-		code := failure.SafeCode()
-		detail := failure.SafeDetail()
-		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
-			Operation: operation,
-			Code:      code,
-			Detail:    detail,
-		}}), code
+		cause, ok := failure.SafeAgentErrorCause(operation)
+		if !ok {
+			return nil, ""
+		}
+		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause}), cause.Code
 	}
 	if !fromResume {
 		return nil, ""
@@ -257,28 +414,33 @@ func (e *Executor) loadBootstrapFailureSession(
 func (e *Executor) bootstrapFailureOwnsSession(
 	ctx context.Context,
 	sessionID, agentExecutionID string,
-) (bool, error) {
+	expectedStartAttemptID string,
+) (bool, bool, error) {
 	if sessionID == "" || agentExecutionID == "" {
-		return true, nil
+		return true, false, nil
 	}
 	session, err := e.loadBootstrapFailureSession(ctx, sessionID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if session == nil {
-		return false, nil
+		return false, false, nil
 	}
 	if session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
-		return false, nil
+		return false, true, nil
+	}
+	if expectedStartAttemptID != "" &&
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != expectedStartAttemptID {
+		return false, false, nil
 	}
 	if e.agentManager == nil {
-		return true, nil
+		return true, false, nil
 	}
 	liveExecutionID, lookupErr := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if lookupErr == nil && liveExecutionID != "" && liveExecutionID != agentExecutionID {
-		return false, nil
+		return false, true, nil
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // bootstrapFailureExpectation captures the final session observation used by
@@ -287,6 +449,7 @@ func (e *Executor) bootstrapFailureOwnsSession(
 func (e *Executor) bootstrapFailureExpectation(
 	ctx context.Context,
 	sessionID, agentExecutionID string,
+	expectedStartAttemptID string,
 ) (*models.TaskSession, string, bool, error) {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -296,6 +459,10 @@ func (e *Executor) bootstrapFailureExpectation(
 		return nil, "", false, fmt.Errorf("reload session before bootstrap failure commit: session %q is nil", sessionID)
 	}
 	if session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return session, "", false, nil
+	}
+	if expectedStartAttemptID != "" &&
+		models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != expectedStartAttemptID {
 		return session, "", false, nil
 	}
 
@@ -314,9 +481,10 @@ func (e *Executor) bootstrapFailureExpectation(
 func (e *Executor) commitBootstrapFailure(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
+	expectedStartAttemptID string,
 	errorValue models.LastAgentError,
 ) (bool, models.TaskSessionState, error) {
-	session, expectedStamp, owned, err := e.bootstrapFailureExpectation(ctx, sessionID, agentExecutionID)
+	session, expectedStamp, owned, err := e.bootstrapFailureExpectation(ctx, sessionID, agentExecutionID, expectedStartAttemptID)
 	if err != nil {
 		return false, "", err
 	}
@@ -332,6 +500,19 @@ func (e *Executor) commitBootstrapFailure(
 			agentExecutionID,
 			session.State,
 			expectedStamp,
+			expectedStartAttemptID,
+			errorValue,
+		)
+	}
+	if expectedStartAttemptID != "" {
+		return e.commitBootstrapFailureIfCurrentAttempt(
+			ctx,
+			taskID,
+			sessionID,
+			agentExecutionID,
+			session.State,
+			expectedStamp,
+			expectedStartAttemptID,
 			errorValue,
 		)
 	}
@@ -358,4 +539,27 @@ func (e *Executor) commitBootstrapFailure(
 	return false, session.State, fmt.Errorf(
 		"bootstrap failure requires an execution-fenced repository commit",
 	)
+}
+
+func (e *Executor) commitBootstrapFailureIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp, expectedStartAttemptID string,
+	errorValue models.LastAgentError,
+) (bool, models.TaskSessionState, error) {
+	committer, ok := e.repo.(bootstrapFailureAttemptCommitter)
+	if !ok {
+		return false, expectedState, fmt.Errorf("bootstrap failure requires a startup-attempt-fenced repository commit")
+	}
+	changed, _, err := committer.CommitBootstrapFailureIfCurrentAttempt(
+		ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, expectedStartAttemptID, errorValue,
+	)
+	if err != nil {
+		return false, expectedState, err
+	}
+	if !changed {
+		return false, expectedState, nil
+	}
+	return true, models.TaskSessionStateFailed, nil
 }

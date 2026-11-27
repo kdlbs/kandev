@@ -2,13 +2,18 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // StreamCallbacks defines callbacks for stream events
@@ -25,6 +30,7 @@ type StreamCallbacks struct {
 	OnGitReset                       func(execution *AgentExecution, reset *agentctl.GitResetNotification)
 	OnBranchSwitch                   func(execution *AgentExecution, branchSwitch *agentctl.GitBranchSwitchNotification)
 	OnFileChange                     func(execution *AgentExecution, notification *agentctl.FileChangeNotification)
+	OnWorktreeInventory              func(execution *AgentExecution, inventory *agentctl.WorktreeInventory)
 	OnShellOutput                    func(execution *AgentExecution, data string)
 	OnShellExit                      func(execution *AgentExecution, code int)
 	OnProcessOutput                  func(execution *AgentExecution, output *agentctl.ProcessOutput)
@@ -33,10 +39,39 @@ type StreamCallbacks struct {
 
 // StreamManager manages WebSocket streams to agent executions
 type StreamManager struct {
-	logger     *logger.Logger
-	callbacks  StreamCallbacks
-	mcpMu      sync.RWMutex
-	mcpHandler agentctl.MCPHandler
+	builtinActionResolver          BuiltinActionResolver
+	logger                         *logger.Logger
+	callbacks                      StreamCallbacks
+	reconciliationMu               sync.Mutex
+	deliveryReconciliations        map[string]*deliveryReconciliationCycle
+	stoppedReconciliations         map[string]struct{}
+	reconciliationContext          context.Context
+	reconciliationCancel           context.CancelFunc
+	reconciliationNow              func() time.Time
+	reconciliationWait             func(context.Context, time.Duration) error
+	deliveryHealthClock            func() time.Time
+	deliveryHealthWait             func(context.Context, time.Duration) error
+	deliveryHealthProbeInterval    time.Duration
+	deliveryHealthProbeTimeout     time.Duration
+	deliveryHealthRecoveryCooldown time.Duration
+	runtimeStorageProbeInterval    time.Duration
+	runtimeStorageSlots            chan struct{}
+	runtimeStorageAdvisories       sync.Map
+	onRuntimeStorageProbe          func(context.Context, *AgentExecution, RuntimeStorageProbeResult)
+	onRuntimeStoragePressure       func(context.Context, *AgentExecution, RuntimeStoragePressure)
+	onRuntimeStorageDetached       func(*AgentExecution, *deliveryStreamAttachment)
+	deliveryAttachments            sync.Map
+	isExecutionCurrent             func(*AgentExecution) bool
+	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
+	deliverySubmissionSettler      func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
+	deliveryMu                     sync.RWMutex
+	delivery                       AgentDeliveryRepository
+	ackMu                          sync.Mutex
+	ackWorkers                     map[string]*durableDeliveryAckWorker
+	ackStopped                     bool
+	ackWG                          sync.WaitGroup
+	mcpMu                          sync.RWMutex
+	mcpHandler                     agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
 	// stream's task. Nil leaves dispatch unscoped (single-user instances and
 	// isolated tests); set via Manager.SetMCPIdentityScoper.
@@ -147,12 +182,25 @@ func (c *stopChannelContext) Err() error {
 // Either way, Wait() closes a per-StreamManager internal channel that the
 // same drain sites observe — so Wait remains an absolute drain barrier.
 func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler agentctl.MCPHandler, stopCh <-chan struct{}) *StreamManager {
+	reconciliationContext, reconciliationCancel := context.WithCancel(context.Background())
 	return &StreamManager{
-		logger:     log.WithFields(zap.String("component", "stream-manager")),
-		callbacks:  callbacks,
-		mcpHandler: mcpHandler,
-		stopCh:     stopCh,
-		waitCh:     make(chan struct{}),
+		logger:                         log.WithFields(zap.String("component", "stream-manager")),
+		callbacks:                      callbacks,
+		mcpHandler:                     mcpHandler,
+		stopCh:                         stopCh,
+		waitCh:                         make(chan struct{}),
+		ackWorkers:                     make(map[string]*durableDeliveryAckWorker),
+		deliveryReconciliations:        make(map[string]*deliveryReconciliationCycle),
+		stoppedReconciliations:         make(map[string]struct{}),
+		reconciliationContext:          reconciliationContext,
+		reconciliationCancel:           reconciliationCancel,
+		reconciliationNow:              time.Now,
+		reconciliationWait:             waitForReconciliation,
+		deliveryHealthClock:            time.Now,
+		deliveryHealthProbeInterval:    defaultDeliveryHealthProbeInterval,
+		deliveryHealthProbeTimeout:     defaultDeliveryHealthProbeTimeout,
+		deliveryHealthRecoveryCooldown: defaultDeliveryHealthCooldown,
+		runtimeStorageSlots:            make(chan struct{}, defaultRuntimeStorageConcurrency),
 	}
 }
 
@@ -163,6 +211,54 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- struct{}) {
 	sm.connectUpdatesStreamAsync(execution, ready)
 	sm.ConnectWorkspaceStream(execution, nil)
+}
+
+// ConnectAllAndWait waits until the updates stream connection attempt has
+// finished and verifies the stream is attached before callers admit prompts.
+// The stream itself keeps the execution and manager lifetime, not this waiter's
+// shorter recovery-attempt context.
+func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *AgentExecution) error {
+	if sm == nil || execution == nil {
+		return errors.New("stream manager or execution is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
+		connected := client.HasAgentStream()
+		releaseClient()
+		if connected {
+			return nil
+		}
+	} else {
+		return errors.New("agentctl client is unavailable")
+	}
+
+	ready := make(chan struct{})
+	sm.ConnectAll(execution, ready)
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sm.waitCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	case <-sm.stopCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	}
+
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return errors.New("agentctl client became unavailable before updates stream connected")
+	}
+	connected := client.HasAgentStream()
+	releaseClient()
+	if !connected {
+		if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+			return err
+		}
+		return errors.New("agent updates stream did not connect")
+	}
+	return nil
 }
 
 func (sm *StreamManager) connectUpdatesStreamAsync(execution *AgentExecution, ready chan<- struct{}) {
@@ -199,8 +295,28 @@ func (sm *StreamManager) Wait() {
 	sm.wgMu.Lock()
 	sm.stopped = true
 	sm.wgMu.Unlock()
+	sm.reconciliationCancel()
+	sm.cancelAllDeliveryReconciliations()
 	sm.waitChOnce.Do(func() { close(sm.waitCh) })
 	sm.wg.Wait()
+	sm.ackMu.Lock()
+	sm.ackStopped = true
+	for _, worker := range sm.ackWorkers {
+		worker.cancel()
+	}
+	sm.ackMu.Unlock()
+	sm.ackWG.Wait()
+}
+
+func waitForReconciliation(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (sm *StreamManager) start(fn func()) bool {
@@ -296,7 +412,7 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
 	ctx := sm.streamContext(execution)
-	startupGeneration := execution.startupAttemptSnapshot()
+	startupGeneration, attempt := execution.deliveryStreamStartupSnapshot()
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		if ready != nil {
@@ -304,18 +420,90 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		}
 		return
 	}
-
-	err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
-		if sm.callbacks.OnAgentEventWithGeneration != nil {
-			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
-		} else if sm.callbacks.OnAgentEvent != nil {
-			sm.callbacks.OnAgentEvent(execution, event)
+	delivery := sm.deliveryRepository()
+	streamID := execution.DeliveryStreamID
+	if streamID == "" {
+		streamID = execution.SessionID
+	}
+	after, cursorErr := sm.initialDeliveryReplayCursor(ctx, execution, delivery, client, streamID)
+	execution.recordDeliveryStreamFailure(startupGeneration, cursorErr)
+	if cursorErr != nil {
+		sm.logger.Error("failed to load durable delivery replay cursor",
+			zap.String("instance_id", execution.ID),
+			zap.String("stream_id", streamID),
+			zap.Error(cursorErr))
+		releaseClient()
+		if ready != nil {
+			close(ready)
 		}
+		return
+	}
+
+	if execution.DeliveryMode == DurableDeliveryV1 && after > 0 {
+		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
+	}
+
+	// Bind this connection to the startup attempt captured before the replay
+	// RPC. Reconnects and replacement attempts must never complete this gate.
+	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration, attempt)
+	monitorCtx, monitorCancel := context.WithCancel(ctx)
+	attachment := sm.startDeliveryHealthMonitor(monitorCtx, monitorCancel, execution, client)
+	// Processor failure cancels only this connection, including when no later
+	// frame arrives. Disconnect handling reports the original processing error.
+	err := client.StreamUpdatesFromWithOwner(processor.ctx, func(event agentctl.AgentEvent) {
+		processor.enqueue(event)
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
+		attachment.close()
+		monitorCancel()
+		processErr := processor.close()
+		if processErr != nil {
+			sm.logger.Error("durable agent event processing failed",
+				zap.String("instance_id", execution.ID), zap.Error(processErr))
+			if disconnectErr == nil {
+				disconnectErr = processErr
+			} else {
+				disconnectErr = errors.Join(disconnectErr, processErr)
+			}
+		}
 		if disconnectErr != nil {
+			if errors.Is(disconnectErr, errDeliveryReplayReconciled) {
+				sm.reconnectAfterExpiredDeliveryReplay(execution)
+				return
+			}
+			overloaded := errors.Is(disconnectErr, agentctl.ErrAgentEventQueueFull) ||
+				errors.Is(disconnectErr, errStreamEventProcessorQueueFull)
+			if overloaded && execution.DeliveryMode != DurableDeliveryV1 {
+				disconnectErr = fmt.Errorf("%w: %v", ErrUncertainPromptDelivery, disconnectErr)
+				sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
+				return
+			}
+			if sm.shouldReconnectAfterStreamOverload(execution, disconnectErr) {
+				return
+			}
+			if execution.DeliveryMode == DurableDeliveryV1 && execution.deliverySubmissionIDSnapshot() != "" {
+				result := sm.reconcileDisconnectedSubmission(ctx, execution)
+				switch result.Outcome {
+				case DeliveryReconciliationRunningAttached, DeliveryReconciliationTerminalSettled,
+					DeliveryReconciliationOwnerMismatch:
+					return
+				default:
+					disconnectErr = errors.Join(ErrUncertainPromptDelivery, result.Err)
+				}
+			}
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
+	}, after, func(ownerID uint64) {
+		processor.progress.ownerID = ownerID
+		stage, ok := client.UpdateStreamStage()
+		if ok && stage.OwnerID == ownerID {
+			execution.installStreamProgress(processor.progress)
+		}
 	})
+	execution.recordDeliveryStreamFailure(startupGeneration, err)
+	if err != nil {
+		attachment.close()
+		monitorCancel()
+	}
 	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)
@@ -326,10 +514,57 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	if err != nil {
+		processor.fail(err)
+		_ = processor.close()
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	}
+}
+
+func (sm *StreamManager) reconnectAfterExpiredDeliveryReplay(execution *AgentExecution) {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return
+	}
+	if !sm.start(func() {
+		if sm.sleepOrStop(20 * time.Millisecond) {
+			sm.connectUpdatesStream(execution, nil)
+		}
+	}) {
+		sm.logger.Debug("skipping expired delivery replay reconnect during shutdown",
+			zap.String("execution_id", execution.ID))
+	}
+}
+
+// shouldReconnectAfterStreamOverload handles bounded queue pressure without
+// converting a recoverable durable stream into a failed prompt. The next
+// connection replays from the SQL projected cursor. Legacy streams have no
+// retained cursor contract, so their overflow is classified as uncertain.
+func (sm *StreamManager) shouldReconnectAfterStreamOverload(
+	execution *AgentExecution,
+	err error,
+) bool {
+	if execution == nil {
+		return false
+	}
+	readerOverflow := errors.Is(err, agentctl.ErrAgentEventQueueFull)
+	processorOverflow := errors.Is(err, errStreamEventProcessorQueueFull)
+	if !readerOverflow && !processorOverflow {
+		return false
+	}
+	if execution.DeliveryMode != DurableDeliveryV1 {
+		return false
+	}
+	if !sm.start(func() {
+		if !sm.sleepOrStop(20 * time.Millisecond) {
+			return
+		}
+		sm.connectUpdatesStream(execution, nil)
+	}) {
+		sm.logger.Debug("skipping durable stream overload reconnect during shutdown",
+			zap.String("execution_id", execution.ID))
+	}
+	return true
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {
@@ -350,11 +585,23 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)
 		return
 	}
+	uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+	uncertain := uncertainSubmissionID != "" || errors.Is(disconnectErr, ErrUncertainPromptDelivery)
+	signalError := "agent stream disconnected: " + disconnectErr.Error()
+	if uncertain {
+		signalError = fmt.Sprintf(
+			"%s: %s; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			disconnectErr,
+			uncertainSubmissionID,
+		)
+	}
 	if !execution.signalPromptCompletionForStartupGeneration(
 		startupGeneration,
 		PromptCompletionSignal{
 			IsError:          true,
-			Error:            "agent stream disconnected: " + disconnectErr.Error(),
+			Uncertain:        uncertain,
+			Error:            signalError,
 			PromptGeneration: promptGeneration,
 		},
 	) {
@@ -369,203 +616,34 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 	}
 }
 
-// connectMCPStream opens the agent updates WebSocket for a PASSTHROUGH session
-// purely to drain the MCP request channel: the agentctl instance serves /mcp and
-// proxies tool calls to the backend over this stream, so without it kandev MCP
-// tool calls hang. Passthrough agents don't speak ACP, so no agent events arrive
-// here (the PTY drives the UI). On disconnect it only logs — it must NOT signal
-// promptDoneCh or OnStreamDisconnect (which would mark the execution failed);
-// passthrough completion is detected via PTY idle, and a normal session end
-// closing this stream is expected, not an error.
-func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
-	ctx := sm.streamContext(execution)
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	if client == nil {
-		return
-	}
-	err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
-		if disconnectErr != nil {
-			sm.logger.Debug("passthrough MCP stream disconnected",
-				zap.String("execution_id", execution.ID),
-				zap.Error(disconnectErr))
-		}
-	})
-	releaseClient()
-	if err != nil {
-		sm.logger.Error("failed to connect passthrough MCP stream",
-			zap.String("execution_id", execution.ID),
-			zap.Error(err))
-	}
+// applyCanonicalCompactionResult attaches committed count/reporting metadata to
+// the live notification. It never recomputes the count: the projector is the
+// only authority, and a lost publish is repaired by normal hydration.
+func applyCanonicalCompactionResult(
+	event *agentctl.AgentEvent,
+	result models.CanonicalAgentDeliveryProjectionResult,
+) {
+	applyCanonicalCompactionMetadata(event, result.ContextCompactionCount, result.ContextCompactionReporting)
 }
 
-// buildWorkspaceCallbacks creates the WorkspaceStreamCallbacks for a given execution,
-// wiring each callback to the StreamManager's registered handlers.
-func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agentctl.WorkspaceStreamCallbacks {
-	return agentctl.WorkspaceStreamCallbacks{
-		OnShellOutput: func(data string) {
-			if sm.callbacks.OnShellOutput != nil {
-				sm.callbacks.OnShellOutput(execution, data)
-			}
-		},
-		OnShellExit: func(code int) {
-			if sm.callbacks.OnShellExit != nil {
-				sm.callbacks.OnShellExit(execution, code)
-			}
-		},
-		OnGitStatus: func(update *agentctl.GitStatusUpdate) {
-			if sm.callbacks.OnGitStatus != nil {
-				sm.callbacks.OnGitStatus(execution, update)
-			}
-		},
-		OnGitCommit: func(commit *agentctl.GitCommitNotification) {
-			if sm.callbacks.OnGitCommit != nil {
-				sm.callbacks.OnGitCommit(execution, commit)
-			}
-		},
-		OnGitReset: func(reset *agentctl.GitResetNotification) {
-			if sm.callbacks.OnGitReset != nil {
-				sm.callbacks.OnGitReset(execution, reset)
-			}
-		},
-		OnBranchSwitch: func(branchSwitch *agentctl.GitBranchSwitchNotification) {
-			if sm.callbacks.OnBranchSwitch != nil {
-				sm.callbacks.OnBranchSwitch(execution, branchSwitch)
-			}
-		},
-		OnFileChange: func(notification *agentctl.FileChangeNotification) {
-			if sm.callbacks.OnFileChange != nil {
-				sm.callbacks.OnFileChange(execution, notification)
-			}
-		},
-		OnProcessOutput: func(output *agentctl.ProcessOutput) {
-			if sm.callbacks.OnProcessOutput != nil {
-				sm.callbacks.OnProcessOutput(execution, output)
-			}
-		},
-		OnProcessStatus: func(status *agentctl.ProcessStatusUpdate) {
-			if sm.callbacks.OnProcessStatus != nil {
-				sm.callbacks.OnProcessStatus(execution, status)
-			}
-		},
-		OnConnected: func() {
-			sm.logger.Debug("workspace stream connected",
-				zap.String("instance_id", execution.ID))
-		},
-		OnError: func(err string) {
-			sm.logger.Debug("workspace stream error",
-				zap.String("instance_id", execution.ID),
-				zap.String("error", err))
-		},
-	}
-}
-
-// connectWorkspaceStream handles the unified workspace stream with retry logic
-func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := sm.streamContext(execution)
-
-	// Retry connection with exponential backoff
-	maxRetries := 5
-	backoff := 1 * time.Second
-	signaled := false
-
-	// Helper to signal ready (only once)
-	signalReady := func() {
-		if !signaled && ready != nil {
-			close(ready)
-			signaled = true
-		}
-	}
-
-	// Ensure we signal ready even on failure (so callers don't hang)
-	defer signalReady()
-
-	// Idempotency guard: if a workspace stream is already attached, another
-	// goroutine has connected it (e.g. workspace-only ensure followed by full
-	// launch promotion). Treat as success and exit cleanly.
-	if execution.GetWorkspaceStream() != nil {
-		sm.logger.Debug("workspace stream already attached, skipping connect",
-			zap.String("instance_id", execution.ID))
+// applyCanonicalCompactionMetadata attaches committed count/reporting metadata
+// to the live notification. It never recomputes the count: the projector is
+// the only authority, and a lost publish is repaired by normal hydration.
+func applyCanonicalCompactionMetadata(
+	event *agentctl.AgentEvent,
+	count *int64,
+	reporting *streams.ContextCompactionReporting,
+) {
+	if event == nil || (count == nil && reporting == nil) {
 		return
 	}
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Re-check before each retry in case another goroutine connected meanwhile.
-		if execution.GetWorkspaceStream() != nil {
-			sm.logger.Debug("workspace stream attached during retry, exiting",
-				zap.String("instance_id", execution.ID),
-				zap.Int("attempt", attempt))
-			return
-		}
-
-		callbacks := sm.buildWorkspaceCallbacks(execution)
-		client, releaseClient := execution.AcquireAgentCtlClient()
-		if client == nil {
-			return
-		}
-		ws, err := client.StreamWorkspace(ctx, callbacks)
-		releaseClient()
-		if err != nil {
-			sm.logger.Debug("workspace stream connection failed, retrying",
-				zap.String("instance_id", execution.ID),
-				zap.Int("attempt", attempt),
-				zap.Int("max_retries", maxRetries),
-				zap.Error(err))
-
-			if attempt < maxRetries {
-				// Exit early on Manager shutdown so the backoff doesn't
-				// strand a goroutine after Stop() returns.
-				if !sm.sleepOrStop(backoff) {
-					return
-				}
-				backoff *= 2 // Exponential backoff
-			}
-			continue
-		}
-
-		// Store the workspace stream on the execution for shell I/O
-		execution.SetWorkspaceStream(ws)
-		sm.logger.Debug("connected to unified workspace stream",
-			zap.String("instance_id", execution.ID))
-
-		// Signal that workspace stream is ready
-		signalReady()
-
-		// Wait for the stream to close. Also exits on Manager shutdown / Wait
-		// so the goroutine drains when the remote end keeps the connection
-		// open — in that case we close ws ourselves so the underlying WS
-		// read/write loops in agentctl.WorkspaceStream also exit. ws.Close
-		// is idempotent via closeOnce. The waitCh branch covers the case
-		// where the caller never closes external stopCh (or stopCh is nil)
-		// but still calls Wait — without it, isolated tests that triggered
-		// this select would leak under CI scheduling.
-		shutdown := func() {
-			ws.Close()
-		}
-		if sm.stopCh == nil {
-			select {
-			case <-ws.Done():
-			case <-sm.waitCh:
-				shutdown()
-			}
-		} else {
-			select {
-			case <-ws.Done():
-			case <-sm.stopCh:
-				shutdown()
-			case <-sm.waitCh:
-				shutdown()
-			}
-		}
-		// Block until the stream's read/write goroutines have fully unwound
-		// before returning. Done()/Close only signal shutdown, so without this
-		// the StreamManager's wg releases while a blocked websocket read is
-		// still draining — stranding a goroutine that leak detection catches.
-		ws.Wait()
-		execution.ClearWorkspaceStream(ws)
-		return
+	if event.Data == nil {
+		event.Data = make(map[string]any)
 	}
-
-	sm.logger.Error("failed to connect to workspace stream after retries",
-		zap.String("instance_id", execution.ID),
-		zap.Int("max_retries", maxRetries))
+	if count != nil {
+		event.Data[models.SessionMetaKeyContextCompactionCount] = *count
+	}
+	if reporting != nil {
+		event.Data[models.SessionMetaKeyContextCompactionReporting] = reporting
+	}
 }

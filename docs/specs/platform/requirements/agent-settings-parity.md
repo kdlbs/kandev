@@ -57,6 +57,7 @@ The existing document path and requirement IDs remain stable after this scope ex
 - **AC-PLATFORM-AGENT-SETTINGS-PARITY-002.7:** The configuration assistant shall use a compact update operation for adopted settings. New fields shall not enlarge its advertised argument schema.
 - **AC-PLATFORM-AGENT-SETTINGS-PARITY-002.8:** The backend shall validate each update against the current registered resource contract before applying any change.
 - **AC-PLATFORM-AGENT-SETTINGS-PARITY-002.9:** Invalid updates shall return structured field errors and a discovery reference. Unknown fields shall not be ignored or corrected automatically.
+- **AC-PLATFORM-AGENT-SETTINGS-PARITY-002.10:** When an ordinary or dynamic profile update omits `enabled`, a concurrent explicit enable or disable committed before that update shall remain effective. The successful update's returned profile and existing profile notification shall report the enabled value committed by that update, even if a later toggle commits before delivery. Explicit enabled changes shall retain their current dependency confirmation rules. Existing sessions shall remain unaffected.
 
 ### REQ-PLATFORM-AGENT-SETTINGS-PARITY-003: Authority and sensitive values
 
@@ -165,4 +166,5 @@ The existing document path and requirement IDs remain stable after this scope ex
 - [Dynamic provider choices](../../agents/requirements/dynamic-provider-options.md)
 - [Settings navigation discovery](../../ui/requirements/settings-discovery.md)
 - [System design](../system-design/agent-settings-parity.md)
+- [Profile enabled omission design supplement](../system-design/profile-enabled-omission.md)
 - [Domain adoption design](../system-design/agent-settings-domains.md)

@@ -1,10 +1,20 @@
 ---
+id: "01-wildcard-port-probe"
+title: "Detect wildcard listeners in the launcher port probe"
 status: done
-plan: "./plan.md"
-spec: "../../specs/executors/requirements/port-collision-safety.md"
 wave: 1
-parallel-safe: no
-parallelism: sequential
+depends_on: []
+plan: "./plan.md"
+requirements:
+  - REQ-EXECUTORS-CONTROL-OWNERSHIP-001
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
+acceptance_criteria:
+  - AC-EXECUTORS-CONTROL-OWNERSHIP-001.7
+  - AC-EXECUTORS-PORT-COLLISION-SAFETY-001.6
+  - AC-EXECUTORS-PORT-COLLISION-SAFETY-001.7
+system_design:
+  - ../../specs/executors/system-design/agent-survival-across-restart-01.md
+  - ../../specs/executors/system-design/remote-executor-plugins.md
 ---
 
 # Task 01: Detect wildcard listeners in the launcher port probe
@@ -69,3 +79,13 @@ golangci-lint run ./internal/launcher/... --new-from-rev=origin/main --timeout=5
 
 Default ports, fallback ranges, health-token ownership, the Windows address-in-use
 classifier, and backend runtime-state locking.
+
+## Follow-up (2026-10-01)
+
+The Windows Firewall follow-up to PR #30 renames this task's regression test
+`TestCanBindDetectsWildcardListener` to `TestCanBindDetectsOccupiedListener`. Unix keeps the
+wildcard-occupant assertion, so the original contract and its failure mode are unchanged. Windows
+holds the port with a loopback listener (`127.0.0.1:0`) instead, because a wildcard test listener
+binds a non-loopback interface and Windows Firewall prompts for every ephemeral
+`%TEMP%/go-build...` test binary. `canBind` production behavior is unchanged. See
+`docs/specs/executors/requirements/port-collision-safety.md` for the probe contract.

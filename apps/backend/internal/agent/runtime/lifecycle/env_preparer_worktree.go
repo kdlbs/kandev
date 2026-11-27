@@ -61,6 +61,11 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// repo-less requests use the original sequence unchanged.
 	if specs := req.Repositories; len(specs) >= 2 {
 		return p.prepareMultiRepo(ctx, req, specs, onProgress)
+	} else if len(specs) == 1 {
+		// An explicit single spec is authoritative over the legacy top-level
+		// fields, which may be empty or disagree after resume/recovery copies.
+		single := prepareRequestForRepoSpec(req, specs[0])
+		req = &single
 	}
 
 	start := time.Now()
@@ -81,26 +86,39 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	steps, ok := p.validateWorktreeRequest(req, stepIdx, totalSteps, onProgress, steps)
 	if !ok {
 		msg := steps[len(steps)-1].Error
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: msg, Error: errors.New(msg), Duration: time.Since(start)}, nil
+		return &EnvPrepareResult{
+			Success: false, Steps: steps, ErrorMessage: msg, Error: errors.New(msg), Duration: time.Since(start),
+		}, nil
 	}
 	stepIdx++
 
 	// Steps 2 (and optional sync): Create worktree (with optional pre-sync).
-	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
+	wt, _, steps, stepIdx, err := p.createWorktreeWithSync(ctx, req, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
-		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
+		cause := err
+		if shouldWrapPreparationError(err) {
+			cause = repositoryPreparationError(req, err)
+		}
+		return &EnvPrepareResult{
+			Success: false, Steps: steps, ErrorMessage: cause.Error(), Error: cause, Duration: time.Since(start),
+		}, nil
 	}
 	if req.WorkspaceReuseRequired {
+		workspacePath, err := p.effectiveWorkspacePath(req, wt.Path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace root: %w", err)
+		}
 		return &EnvPrepareResult{
 			Success:                true,
 			Steps:                  steps,
-			WorkspacePath:          wt.Path,
+			WorkspacePath:          workspacePath,
 			Duration:               time.Since(start),
 			WorktreeID:             wt.ID,
+			WorktreePath:           wt.Path,
 			WorktreeBranch:         wt.Branch,
 			WorktreeBranchOwner:    wt.BranchOwner,
 			WorktreeIntegrationRef: wt.IntegrationRef,
-			MainRepoGitDir:         filepath.Join(req.RepositoryPath, ".git"),
+			MainRepoGitDir:         worktreeMainRepoGitDir(wt, req.RepositoryPath),
 		}, nil
 	}
 
@@ -111,8 +129,15 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		stepIdx++
 	}
 
-	workspacePath := wt.Path
-	mainRepoGitDir := filepath.Join(req.RepositoryPath, ".git")
+	workspacePath, err := p.effectiveWorkspacePath(req, wt.Path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	// Repository setup already ran at wt.Path inside worktree.Manager.Create.
+	// The executor-level setup belongs to the agent's effective workspace root,
+	// which can be the task directory for a parent-root layout.
+	setupPath := workspacePath
+	mainRepoGitDir := worktreeMainRepoGitDir(wt, req.RepositoryPath)
 
 	// Step 3 (optional): Fetch PR branch is handled inside worktree.Manager.Create
 	// via CreateRequest.CheckoutBranch. If it was set and failed, Create() would have
@@ -139,13 +164,13 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// isScriptEffectivelyEmpty.
 	scriptReq := *req // shallow copy — Env map is shared (read-only in runSetupScriptStep)
 	scriptReq.RepoSetupScript = ""
-	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, setupPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve setup script: %w", err)
 	}
 	if resolvedScript != "" {
 		totalSteps++
-		steps = runSetupScriptStep(ctx, &scriptReq, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
+		steps = runSetupScriptStep(ctx, &scriptReq, setupPath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
 	}
 
 	return &EnvPrepareResult{
@@ -154,6 +179,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		WorkspacePath:             workspacePath,
 		Duration:                  time.Since(start),
 		WorktreeID:                wt.ID,
+		WorktreePath:              wt.Path,
 		WorktreeBranch:            wt.Branch,
 		WorktreeBranchOwner:       wt.BranchOwner,
 		WorktreeIntegrationRef:    wt.IntegrationRef,
@@ -162,6 +188,38 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		BaseBranch:                wt.BaseBranch,
 		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 	}, nil
+}
+
+// shouldWrapPreparationError limits the repository envelope to base-resolution
+// failures, where the requested ref alone does not identify the attachment.
+// Unrelated preparation errors keep their existing display text.
+func shouldWrapPreparationError(err error) bool {
+	if errors.Is(err, worktree.ErrInvalidBaseBranch) || errors.Is(err, worktree.ErrRemoteRefMissing) {
+		return true
+	}
+	message := err.Error()
+	return strings.Contains(message, "required fetched remote ref") ||
+		strings.Contains(message, "missing_remote_ref") ||
+		strings.Contains(message, "base branch does not exist")
+}
+
+// repositoryPreparationError names the failing attachment through the existing
+// preparation-error envelope even on the single-repository path.
+func repositoryPreparationError(req *EnvPrepareRequest, cause error) error {
+	return &RepositoryPreparationError{
+		RepositoryID:     req.RepositoryID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		RepositoryName:   req.RepoName,
+		Cause:            cause,
+	}
+}
+
+func (p *WorktreePreparer) effectiveWorkspacePath(req *EnvPrepareRequest, worktreePath string) (string, error) {
+	parentLayout := req.WorkspaceLayout == workspaceLayoutTaskRoot || (req.WorkspaceLayout == "" && len(req.Repositories) > 1)
+	if !parentLayout || req.TaskDirName == "" {
+		return worktreePath, nil
+	}
+	return p.worktreeMgr.TaskRoot(req.TaskDirName)
 }
 
 // validateWorktreeRequest runs the "Validate repository" step.
@@ -199,14 +257,15 @@ func (p *WorktreePreparer) validateWorktreeRequest(
 }
 
 // createWorktreeWithSync creates the worktree (with optional sync-base-branch step).
-// Returns the created worktree, updated steps, the next step index after creation, and any error.
+// Returns the worktree, whether this request created its directory, updated steps,
+// the next step index after creation, and any error.
 func (p *WorktreePreparer) createWorktreeWithSync(
 	ctx context.Context,
 	req *EnvPrepareRequest,
 	stepIdx, totalSteps int,
 	onProgress PrepareProgressCallback,
 	steps []PrepareStep,
-) (*worktree.Worktree, []PrepareStep, int, error) {
+) (*worktree.Worktree, bool, []PrepareStep, int, error) {
 	var syncStep *PrepareStep
 	syncStepIndex := -1
 	if req.PullBeforeWorktree {
@@ -236,10 +295,10 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// Complete the "Create worktree" step the moment the worktree dir is ready,
 	// before the per-repo setup script runs inside Create() — the setup script
 	// streams its own step, so this keeps the two from overlapping in the UI.
-	stepCompleted := false
+	var createdWorktree *worktree.Worktree
 	createReq.OnWorktreeCreated = func(wt *worktree.Worktree) {
+		createdWorktree = wt
 		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
-		stepCompleted = true
 	}
 
 	wt, err := p.worktreeMgr.Create(ctx, createReq)
@@ -249,18 +308,18 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 		// but a later phase like the setup script failed), leave it green — the
 		// failing phase owns its own step. Only attribute the error to "Create
 		// worktree" when it never completed (the creation itself failed).
-		if !stepCompleted {
+		if createdWorktree == nil {
 			completeStepError(&step, err.Error())
 			reportProgress(onProgress, step, stepIdx, totalSteps)
 		}
 		steps = append(steps, step)
 		p.logger.Error("worktree creation failed", zap.String("task_id", req.TaskID), zap.Error(err))
-		return nil, steps, stepIdx, err
+		return createdWorktree, createdWorktree != nil, steps, stepIdx, err
 	}
 
 	// Reuse of an existing worktree skips OnWorktreeCreated, so complete the
 	// step here when the callback did not fire.
-	if !stepCompleted {
+	if createdWorktree == nil {
 		completeCreateWorktreeStep(&step, wt, stepIdx, totalSteps, onProgress)
 	}
 	// A failed repository setup script is non-fatal: worktree.Manager.Create
@@ -285,7 +344,7 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 	// req.CheckoutBranch != "" (it is set inside fetchBranchToLocal), so the
 	// two warnings always co-occur and FetchWarning is never silently dropped.
 	steps = append(steps, step)
-	return wt, steps, stepIdx + 1, nil
+	return wt, createdWorktree != nil, steps, stepIdx + 1, nil
 }
 
 // buildWorktreeCreateRequest maps an EnvPrepareRequest onto the worktree
@@ -300,6 +359,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepositoryID:               req.RepositoryID,
 		RepositoryPath:             req.RepositoryPath,
 		BaseBranch:                 req.BaseBranch,
+		BaseBranchFallbackPolicy:   req.BaseBranchFallbackPolicy,
 		IntegrationRef:             req.IntegrationRef,
 		FallbackBaseBranch:         req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
@@ -322,6 +382,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepoName:                   req.RepoName,
 		BranchSlug:                 req.BranchSlug,
 		BranchIdentitySlug:         req.BranchIdentitySlug,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 		ContributionDestination:    req.ContributionDestination,
 		// Repository setup scripts receive profile and repository environment,
 		// but never the managed Git credential broker capabilities used to
@@ -464,20 +525,23 @@ func (p *WorktreePreparer) prepareMultiRepo(
 
 	stepIdx := 0
 	worktrees := make([]RepoWorktreeResult, 0, len(specs))
-	createdIDs := make([]string, 0, len(specs))
+	createdByAttempt := make([]*worktree.Worktree, 0, len(specs))
 
 	for _, spec := range specs {
-		wt, newSteps, nextIdx, err := p.prepareOneRepo(ctx, req, spec, stepIdx, totalSteps, onProgress, steps)
+		wt, createdByRequest, newSteps, nextIdx, err := p.prepareOneRepo(ctx, req, spec, stepIdx, totalSteps, onProgress, steps)
 		steps = newSteps
 		stepIdx = nextIdx
 		if err != nil {
+			if createdByRequest && wt != nil {
+				createdByAttempt = append(createdByAttempt, wt)
+			}
 			err = &RepositoryPreparationError{
 				RepositoryID:     spec.RepositoryID,
 				TaskRepositoryID: spec.TaskRepositoryID,
 				RepositoryName:   spec.RepoName,
 				Cause:            err,
 			}
-			p.rollbackWorktrees(ctx, createdIDs)
+			p.rollbackWorktrees(ctx, createdByAttempt)
 			return &EnvPrepareResult{
 				Success:      false,
 				Steps:        steps,
@@ -486,31 +550,38 @@ func (p *WorktreePreparer) prepareMultiRepo(
 				Duration:     time.Since(start),
 			}, nil
 		}
-		if spec.WorktreeID == "" || wt.ID != spec.WorktreeID {
-			createdIDs = append(createdIDs, wt.ID)
+		if createdByRequest {
+			createdByAttempt = append(createdByAttempt, wt)
 		}
 		worktrees = append(worktrees, RepoWorktreeResult{
 			TaskRepositoryID:          spec.TaskRepositoryID,
 			RepositoryID:              spec.RepositoryID,
+			WorkspaceRelativePath:     spec.WorkspaceRelativePath,
 			BranchSlug:                repoBranchIdentitySlug(spec),
 			WorktreeID:                wt.ID,
 			WorktreeBranch:            wt.Branch,
 			WorktreeBranchOwner:       wt.BranchOwner,
 			WorktreeIntegrationRef:    wt.IntegrationRef,
 			WorktreePath:              wt.Path,
-			MainRepoGitDir:            filepath.Join(spec.RepositoryPath, ".git"),
+			MainRepoGitDir:            worktreeMainRepoGitDir(wt, spec.RepositoryPath),
 			RequestedBaseBranch:       spec.BaseBranch,
 			BaseBranch:                wt.BaseBranch,
 			BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 		})
 	}
 
-	// Workspace path = task root (parent of any repo subdir). All repos share
-	// the same TaskDirName, so any worktree's parent works.
+	// Workspace path is the effective agent root. New parent-root layouts place
+	// repositories below the task root, so taking the first worktree's parent
+	// would incorrectly select an intermediate repository directory.
 	workspacePath := ""
 	if len(worktrees) > 0 {
-		workspacePath = filepath.Dir(worktrees[0].WorktreePath)
+		workspaceErr := error(nil)
+		workspacePath, workspaceErr = p.effectiveWorkspacePath(req, worktrees[0].WorktreePath)
+		if workspaceErr != nil {
+			return nil, fmt.Errorf("resolve workspace root: %w", workspaceErr)
+		}
 	}
+	steps = append(steps, p.unreachableCopyFilesSeedSteps(specs, worktrees, workspacePath)...)
 
 	res := &EnvPrepareResult{
 		Success:       true,
@@ -523,6 +594,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	// haven't been migrated yet.
 	if len(worktrees) > 0 {
 		res.WorktreeID = worktrees[0].WorktreeID
+		res.WorktreePath = worktrees[0].WorktreePath
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
 		res.WorktreeBranchOwner = worktrees[0].WorktreeBranchOwner
 		res.WorktreeIntegrationRef = worktrees[0].WorktreeIntegrationRef
@@ -534,11 +606,18 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	return res, nil
 }
 
+func worktreeMainRepoGitDir(wt *worktree.Worktree, registeredPath string) string {
+	if wt.SourceCommonDir != "" {
+		return wt.SourceCommonDir
+	}
+	return filepath.Join(registeredPath, ".git")
+}
+
 // prepareOneRepo runs the validate → create-worktree → fetch-PR sequence for
 // a single repo within a multi-repo preparation. The per-repo setup script
 // is executed by the worktree manager during Create() and is not re-run
-// here. Returns the created worktree, updated steps, the next step index,
-// and any error.
+// here. Returns the worktree, whether this request created its directory,
+// updated steps, the next step index, and any error.
 func (p *WorktreePreparer) prepareOneRepo(
 	ctx context.Context,
 	req *EnvPrepareRequest,
@@ -546,7 +625,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	stepIdx, totalSteps int,
 	onProgress PrepareProgressCallback,
 	steps []PrepareStep,
-) (*worktree.Worktree, []PrepareStep, int, error) {
+) (*worktree.Worktree, bool, []PrepareStep, int, error) {
 	repoLabel := spec.RepoName
 	if repoLabel == "" {
 		repoLabel = spec.RepositoryID
@@ -559,14 +638,14 @@ func (p *WorktreePreparer) prepareOneRepo(
 		completeStepError(&validateStep, "no repository path provided")
 		steps = append(steps, validateStep)
 		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
-		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: no repository path", repoLabel)
+		return nil, false, steps, stepIdx + 1, fmt.Errorf("repo %q: no repository path", repoLabel)
 	}
 	if !isGitRepoPath(spec.RepositoryPath) {
 		errMsg := fmt.Sprintf("repository path is not a git repository: %s", spec.RepositoryPath)
 		completeStepError(&validateStep, errMsg)
 		steps = append(steps, validateStep)
 		reportProgress(onProgress, validateStep, stepIdx, totalSteps)
-		return nil, steps, stepIdx + 1, fmt.Errorf("repo %q: %s", repoLabel, errMsg)
+		return nil, false, steps, stepIdx + 1, fmt.Errorf("repo %q: %s", repoLabel, errMsg)
 	}
 	completeStepSuccess(&validateStep)
 	steps = append(steps, validateStep)
@@ -574,42 +653,14 @@ func (p *WorktreePreparer) prepareOneRepo(
 	stepIdx++
 
 	// Sync (optional) + Create — reuses single-repo helper by translating spec→req.
-	subReq := *req
-	subReq.RepositoryID = spec.RepositoryID
-	subReq.TaskRepositoryID = spec.TaskRepositoryID
-	subReq.RepositoryPath = spec.RepositoryPath
-	subReq.RepoName = spec.RepoName
-	subReq.BaseBranch = spec.BaseBranch
-	subReq.IntegrationRef = spec.IntegrationRef
-	subReq.DefaultBranch = spec.DefaultBranch
-	subReq.CheckoutBranch = spec.CheckoutBranch
-	subReq.PRNumber = spec.PRNumber
-	subReq.QualifiedPRBase = spec.QualifiedPRBase
-	subReq.RemoteContribution = spec.RemoteContribution
-	subReq.CheckoutOptions = spec.CheckoutOptions
-	subReq.ContributionDestination = spec.ContributionDestination
-	subReq.WorktreeID = spec.WorktreeID
-	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
-	subReq.AllowBranchReplacement = req.AllowBranchReplacement || spec.AllowBranchReplacement
-	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
-	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
-	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
-	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
-	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
-	subReq.RefreshRepository = spec.RefreshRepository
-	subReq.RefreshRepositoryWithState = spec.RefreshRepositoryWithState
-	subReq.RemoteRefState = spec.RemoteRefState
-	subReq.BranchSlug = spec.BranchSlug
-	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
-	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
-	subReq.Repositories = nil
+	subReq := prepareRequestForRepoSpec(req, spec)
 
-	wt, steps, stepIdx, err := p.createWorktreeWithSync(ctx, &subReq, stepIdx, totalSteps, onProgress, steps)
+	wt, createdByRequest, steps, stepIdx, err := p.createWorktreeWithSync(ctx, &subReq, stepIdx, totalSteps, onProgress, steps)
 	if err != nil {
-		return nil, steps, stepIdx, err
+		return wt, createdByRequest, steps, stepIdx, err
 	}
 	if subReq.WorkspaceReuseRequired {
-		return wt, steps, stepIdx, nil
+		return wt, createdByRequest, steps, stepIdx, nil
 	}
 
 	// PR fetch step (mirrors single-repo path).
@@ -640,7 +691,44 @@ func (p *WorktreePreparer) prepareOneRepo(
 	// "script_execution" chat message. Running it here as well caused the
 	// script to execute twice per repo and broke non-idempotent setups.
 
-	return wt, steps, stepIdx, nil
+	return wt, createdByRequest, steps, stepIdx, nil
+}
+
+// prepareRequestForRepoSpec copies one attachment's prepare fields onto a
+// request. The returned request has no repository list so callers cannot
+// re-enter multi-repository preparation.
+func prepareRequestForRepoSpec(req *EnvPrepareRequest, spec RepoPrepareSpec) EnvPrepareRequest {
+	subReq := *req
+	subReq.RepositoryID = spec.RepositoryID
+	subReq.TaskRepositoryID = spec.TaskRepositoryID
+	subReq.RepositoryPath = spec.RepositoryPath
+	subReq.RepoName = spec.RepoName
+	subReq.BaseBranch = spec.BaseBranch
+	subReq.BaseBranchFallbackPolicy = spec.BaseBranchFallbackPolicy
+	subReq.IntegrationRef = spec.IntegrationRef
+	subReq.DefaultBranch = spec.DefaultBranch
+	subReq.CheckoutBranch = spec.CheckoutBranch
+	subReq.PRNumber = spec.PRNumber
+	subReq.QualifiedPRBase = spec.QualifiedPRBase
+	subReq.RemoteContribution = spec.RemoteContribution
+	subReq.CheckoutOptions = spec.CheckoutOptions
+	subReq.ContributionDestination = spec.ContributionDestination
+	subReq.WorktreeID = spec.WorktreeID
+	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired
+	subReq.AllowBranchReplacement = req.AllowBranchReplacement || spec.AllowBranchReplacement
+	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
+	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate
+	subReq.WorktreeBranchTicket = spec.WorktreeBranchTicket
+	subReq.PullBeforeWorktree = spec.PullBeforeWorktree
+	subReq.RemoteSyncHandled = spec.RemoteSyncHandled
+	subReq.RefreshRepository = spec.RefreshRepository
+	subReq.RefreshRepositoryWithState = spec.RefreshRepositoryWithState
+	subReq.RemoteRefState = spec.RemoteRefState
+	subReq.BranchSlug = spec.BranchSlug
+	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
+	subReq.WorkspaceRelativePath = spec.WorkspaceRelativePath
+	subReq.Repositories = nil
+	return subReq
 }
 
 func repoBranchIdentitySlug(spec RepoPrepareSpec) string {
@@ -651,12 +739,15 @@ func repoBranchIdentitySlug(spec RepoPrepareSpec) string {
 }
 
 // rollbackWorktrees removes any worktrees created during a failed multi-repo
-// preparation. Best effort: failures are logged and do not interrupt teardown.
-func (p *WorktreePreparer) rollbackWorktrees(ctx context.Context, ids []string) {
-	for _, id := range ids {
-		if err := p.worktreeMgr.RemoveByID(ctx, id, false); err != nil {
+// preparation. Initial materialization can create a checkout before its
+// environment transaction persists inventory, so rollback addresses the
+// worktree record itself rather than assuming a store row exists. Best
+// effort: failures are logged and do not interrupt teardown.
+func (p *WorktreePreparer) rollbackWorktrees(ctx context.Context, created []*worktree.Worktree) {
+	for _, wt := range created {
+		if err := p.worktreeMgr.RollbackCreatedPreparation(ctx, wt); err != nil {
 			p.logger.Warn("rollback: failed to remove worktree",
-				zap.String("worktree_id", id), zap.Error(err))
+				zap.String("worktree_id", wt.ID), zap.String("path", wt.Path), zap.Error(err))
 		}
 	}
 }
@@ -683,4 +774,51 @@ func applySyncProgressEvent(step *PrepareStep, event worktree.SyncProgressEvent)
 	case worktree.SyncProgressFailed:
 		completeStepError(step, event.Error)
 	}
+}
+
+// unreachableCopyFilesSeedSteps reports a repository copy_files seed that the
+// agent cannot read in this layout.
+//
+// copy_files always materializes into the repository's own worktree root. For a
+// single repository that is the agent's working directory; for two or more it
+// is one level below the task root the agent actually runs in. A seed meant to
+// configure the agent then lands where the agent never looks, and the resulting
+// session behaves as though the configuration were absent — which reads as a
+// missing permission rather than as a misplaced file.
+// It returns one prepare step per affected repository so the session surfaces
+// the mismatch. A backend log alone left the operator with a session that
+// behaves like a missing permission and no way to see why.
+func (p *WorktreePreparer) unreachableCopyFilesSeedSteps(
+	specs []RepoPrepareSpec, worktrees []RepoWorktreeResult, agentWorkingDir string,
+) []PrepareStep {
+	if len(specs) < 2 || agentWorkingDir == "" {
+		return nil
+	}
+	pathByRepositoryID := make(map[string]string, len(worktrees))
+	for _, wt := range worktrees {
+		pathByRepositoryID[wt.RepositoryID] = wt.WorktreePath
+	}
+	var out []PrepareStep
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.CopyFiles) == "" {
+			continue
+		}
+		destination := pathByRepositoryID[spec.RepositoryID]
+		if p.logger != nil {
+			p.logger.Warn("copy_files seed does not reach the agent working directory",
+				zap.String("repository", spec.RepoName),
+				zap.String("seed_destination", destination),
+				zap.String("agent_working_dir", agentWorkingDir),
+				zap.Int("repository_count", len(specs)))
+		}
+		step := beginStep("Check copy_files reachability for " + spec.RepoName)
+		completeStepSuccess(&step)
+		step.Warning = "Seeded files land in the " + spec.RepoName +
+			" worktree, which is below the agent's working directory."
+		step.WarningDetail = "Seed destination: " + destination +
+			"; agent working directory: " + agentWorkingDir +
+			". The agent does not read this location in a multi-repository task."
+		out = append(out, step)
+	}
+	return out
 }

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,8 +11,106 @@ import (
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+func TestProviderErrorFromErrorPreservesDailyReason(t *testing.T) {
+	secret := strings.Repeat("z", 48)
+	cases := []struct {
+		name, reason, rule string
+	}{
+		{"free daily", "free-models-per-day-high-balance", "opencode.rate.free_models_per_day.v1"},
+		{"model daily", "limit_rpd/" + secret, "opencode.rate.model_per_day.v1"},
+		{"other reason", "private-limit-" + secret, "opencode.stderr.rate.v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			projected := ProviderErrorFromError(&sdk.RequestError{
+				Code: -32603, Message: "Rate limit exceeded: " + tc.reason + " token: " + secret,
+				Data: map[string]any{"credential": secret},
+			}, "opencode-acp", "configured-model")
+			if projected == nil {
+				t.Fatal("missing ACP provider diagnostic")
+			}
+			encoded, err := json.Marshal(projected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), secret) {
+				t.Fatal("provider diagnostic exposed an opaque credential")
+			}
+			var received streams.ProviderError
+			if err := json.Unmarshal(encoded, &received); err != nil {
+				t.Fatal(err)
+			}
+			got := routingerr.Classify(routingerr.Input{
+				Phase: routingerr.PhaseStreaming, ProviderID: received.ProviderID, Stderr: received.Message,
+			})
+			if got.Code != routingerr.CodeRateLimited || got.ClassifierRule != tc.rule || got.ResetHint != nil {
+				t.Fatalf("projected classification = %+v, want rate limit with rule %s and no reset hint", got, tc.rule)
+			}
+		})
+	}
+}
+
+func TestProviderErrorFromErrorPreservesUnchangedDailyIdentity(t *testing.T) {
+	for _, reason := range []string{"free-models-per-day-ok", "limit_rpd/model-name"} {
+		t.Run(reason, func(t *testing.T) {
+			message := "Rate limit exceeded: " + reason
+			got := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: message}, "opencode-acp", "model")
+			if got == nil || got.Message != message || !got.DiagnosticIdentityComplete {
+				t.Fatalf("safe provider diagnostic lost its exact identity: %+v", got)
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12
+func TestProviderErrorFromErrorPreservesPrefixedFreeUsageLineBoundary(t *testing.T) {
+	secret := strings.Repeat("z", 48)
+	rawMessage := "Gateway token: " + secret + "\nError: free usage limit reached"
+	projected := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: rawMessage}, "opencode-acp", "model")
+	if projected == nil {
+		t.Fatal("missing ACP provider diagnostic")
+	}
+	if strings.Contains(projected.Message, secret) {
+		t.Fatal("sanitized provider diagnostic exposed a credential")
+	}
+	if !strings.Contains(projected.Message, "\nError: free usage limit reached") {
+		t.Fatalf("sanitized provider diagnostic lost its line boundary: %q", projected.Message)
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase: routingerr.PhaseStreaming, ProviderID: projected.ProviderID, Stderr: projected.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.ClassifierRule != "opencode.stderr.free_usage_prefixed.v1" {
+		t.Fatalf("projected classification = %+v, want prefixed OpenCode quota", classified)
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1, AC-AGENTS-CLAUDE-SESSION-LIMIT-001.2
+func TestProviderErrorFromErrorClaudeSessionLimit(t *testing.T) {
+	const notice = "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)"
+	providerErr := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: notice}, "claude-acp", "claude-sonnet")
+	if providerErr == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want projected Claude session-limit notice")
+	}
+	if providerErr.Source != streams.ProviderErrorSourceACPPrompt || providerErr.ProviderID != "claude-acp" {
+		t.Fatalf("projected provider error = %+v, want Claude ACP prompt diagnostic", providerErr)
+	}
+	if !strings.Contains(providerErr.Message, "Europe/Helsinki") {
+		t.Fatalf("projected message = %q, want the explicit reset zone to survive sanitization", providerErr.Message)
+	}
+
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerErr.ProviderID,
+		Stderr:     providerErr.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.Class != routingerr.ClassHard || classified.ResetHint == nil {
+		t.Fatalf("classification from projected terminal error = %+v, want hard quota with reset hint", classified)
+	}
+}
 
 func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 	const want = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
@@ -190,6 +289,85 @@ func TestProviderErrorFromACPRequestErrorProjectsGenericPromptFailure(t *testing
 	}
 	if !strings.Contains(got.Message, "529 Overloaded") {
 		t.Fatalf("generic ACP message = %q, want provider diagnostic", got.Message)
+	}
+}
+
+func TestProviderErrorDiagnosticIdentityAttestation(t *testing.T) {
+	const actionURL = "https://opencode.ai/workspace/wrk_123/go"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "raw ACP diagnostic",
+			err:  &sdk.RequestError{Code: -32603, Message: "provider overloaded"},
+			want: true,
+		},
+		{
+			name: "OpenCode ACP diagnostic",
+			err: &sdk.RequestError{
+				Code: -32603, Message: "provider overloaded",
+				Data: map[string]any{"action_url": actionURL},
+			},
+			want: true,
+		},
+		{
+			name: "sanitized ACP diagnostic",
+			err:  &sdk.RequestError{Code: -32603, Message: "provider failed https://private.example/token"},
+		},
+		{
+			name: "synthetic generic fallback",
+			err:  &sdk.RequestError{Code: -32603, Message: "https://private.example/token"},
+		},
+		{
+			name: "oversized ACP diagnostic",
+			err:  &sdk.RequestError{Code: -32603, Message: strings.Repeat("é", 513)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ProviderErrorFromError(tc.err, "", "")
+			if got == nil {
+				t.Fatal("ProviderErrorFromError() = nil, want a provider error")
+			}
+			if got.DiagnosticIdentityComplete != tc.want {
+				t.Fatalf("DiagnosticIdentityComplete = %t, want %t", got.DiagnosticIdentityComplete, tc.want)
+			}
+		})
+	}
+
+	t.Run("existing attestation survives provider projection copy", func(t *testing.T) {
+		got := ProviderErrorFromError(&providerPromptError{ProviderError: streams.ProviderError{
+			Source:  streams.ProviderErrorSourceOpenCodeStderr,
+			Message: "provider overloaded", OccurredAt: time.Now(), DiagnosticIdentityComplete: true,
+		}}, "", "")
+		if got == nil || !got.DiagnosticIdentityComplete {
+			t.Fatalf("ProviderErrorFromError() = %+v, want copied completeness attestation", got)
+		}
+	})
+}
+
+func TestParseOpenCodeStderrAttestsOnlyUnchangedBoundedDiagnostic(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "raw diagnostic", text: "provider overloaded", want: true},
+		{name: "URL removed", text: "provider failed https://private.example/token"},
+		{name: "whitespace normalized", text: "provider  overloaded"},
+		{name: "oversized", text: strings.Repeat("é", 513)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build error.error="` + tc.text + `"`
+			got, ok := parseOpenCodeStderrLine(line)
+			if !ok {
+				t.Fatal("parseOpenCodeStderrLine() rejected valid fixture")
+			}
+			if got.ProviderError.DiagnosticIdentityComplete != tc.want {
+				t.Fatalf("DiagnosticIdentityComplete = %t, want %t", got.ProviderError.DiagnosticIdentityComplete, tc.want)
+			}
+		})
 	}
 }
 

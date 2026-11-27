@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-NEEDS-YOU-INBOX-001
@@ -68,8 +68,10 @@ icon the deck never assigned it. The destination is the Inbox whether it renders
 one bucket or three, so adding the history and failed buckets later changes the
 tabs and not the sidebar.
 
-The one exception is Office mode. AC .1 through .3 keep this entry present
-regardless of mode, and Office renders its own `/office/inbox` entry already
+The one exception is Office mode. AC .1 through .3 keep this entry eligible
+regardless of mode; saved sidebar visibility now follows
+[direct customization](sidebar-customization.md#inbox-layout-entries).
+Office renders its own `/office/inbox` entry already
 labelled Inbox, so in that mode two identically named rows would be
 indistinguishable. There, and only there, this entry falls back to "Needs you".
 The deck did not have to solve this: it assumed the kanban workspace, where

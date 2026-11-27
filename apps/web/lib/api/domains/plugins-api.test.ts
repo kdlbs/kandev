@@ -7,17 +7,24 @@ vi.mock("@/lib/config", () => ({
 import {
   disablePlugin,
   enablePlugin,
+  getPluginCapabilityApprovalContext,
   getPlugin,
   getPluginConfig,
   getPluginSettings,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
+  listManagedConversationDestinations,
   setPluginAutoUpdate,
   syncPlugins,
   uninstallPlugin,
+  updatePluginCapabilityApproval,
   updatePluginConfig,
   updatePluginSettings,
+  revokePluginCapabilityApproval,
+  createPluginIdentityLinkCode,
+  listPluginIdentityLinks,
+  revokePluginIdentityLink,
 } from "./plugins-api";
 import { ApiError } from "../client";
 import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
@@ -39,6 +46,120 @@ afterEach(() => {
 const PLUGIN_ID = "acme-tools";
 const PLUGIN_URL = "http://api.test/api/plugins/acme-tools";
 const PARTIAL_INSTALL_WARNING = "plugin installed but failed to start: handshake timed out";
+
+describe("managed conversation destination discovery", () => {
+  it("lists workspace-local targets from an encoded workspace path", async () => {
+    const destinations = [
+      {
+        plugin_id: "kandev-plugin-coordinator",
+        plugin_name: "Coordinator",
+        instance_key: "daily-brief",
+        revision: 4,
+        paused: true,
+      },
+    ];
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ destinations }));
+
+    await expect(listManagedConversationDestinations("workspace/one")).resolves.toEqual(
+      destinations,
+    );
+
+    expect(String(fetchSpy.mock.calls.at(-1)?.[0])).toBe(
+      "http://api.test/api/plugins/workspaces/workspace%2Fone/managed-conversation-destinations",
+    );
+  });
+});
+
+describe("plugin capability approvals", () => {
+  it("queries an approval context scoped to an explicitly encoded workspace", async () => {
+    const response = { installation_id: "install-1", workspace_id: "workspace/one" };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(response));
+
+    await expect(
+      getPluginCapabilityApprovalContext("acme/tools", "workspace/one"),
+    ).resolves.toEqual(response);
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(
+      "http://api.test/api/plugins/acme%2Ftools/capability-approvals?workspace_id=workspace%2Fone",
+    );
+    expect(init?.method ?? "GET").toBe("GET");
+  });
+
+  it("sends a revision-bound grant or narrow request as JSON", async () => {
+    const input = {
+      workspace_id: "workspace-1",
+      expected_revision: 4,
+      manifest_digest: "digest-1",
+      capability_ids: ["host.v2.read:tasks"],
+      reason: "Read-only coordination",
+      audit_id: "audit-1",
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ revision: 5 }));
+
+    await expect(updatePluginCapabilityApproval(PLUGIN_ID, input)).resolves.toEqual({
+      revision: 5,
+    });
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/capability-approvals`);
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual(input);
+  });
+
+  it("sends revision-bound revocation as JSON DELETE", async () => {
+    const input = {
+      workspace_id: "workspace-1",
+      expected_revision: 5,
+      reason: "No longer needed",
+      audit_id: "audit-2",
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ state: "revoked" }));
+
+    await expect(revokePluginCapabilityApproval(PLUGIN_ID, input)).resolves.toEqual({
+      state: "revoked",
+    });
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/capability-approvals`);
+    expect(init?.method).toBe("DELETE");
+    expect(JSON.parse(String(init?.body))).toEqual(input);
+  });
+});
+
+describe("plugin identity links", () => {
+  it("lists own or all links, creates a code, and revokes an encoded link", async () => {
+    const link = {
+      id: "link/1",
+      provider: "discord",
+      subject: "1234",
+      display_name: "alice",
+      user_id: "user-1",
+      user_display_name: "Alice",
+      created_at: "2026-11-22T10:00:00Z",
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ links: [link] }));
+    await expect(listPluginIdentityLinks(PLUGIN_ID, "own")).resolves.toEqual([link]);
+    expect(String(fetchSpy.mock.calls.at(-1)?.[0])).toBe(`${PLUGIN_URL}/identity-links`);
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    await expect(listPluginIdentityLinks(PLUGIN_ID, "all")).resolves.toEqual([]);
+    expect(String(fetchSpy.mock.calls.at(-1)?.[0])).toBe(`${PLUGIN_URL}/identity-links?scope=all`);
+
+    const code = { code: "ABCD-EFGH-JKMN", expires_at: "2026-11-22T10:10:00Z" };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(code, 201));
+    await expect(createPluginIdentityLinkCode(PLUGIN_ID)).resolves.toEqual(code);
+    const [codeUrl, codeInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(codeUrl)).toBe(`${PLUGIN_URL}/identity-links/codes`);
+    expect(codeInit?.method).toBe("POST");
+
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(revokePluginIdentityLink(PLUGIN_ID, link.id)).resolves.toBeUndefined();
+    const [revokeUrl, revokeInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(revokeUrl)).toBe(`${PLUGIN_URL}/identity-links/link%2F1`);
+    expect(revokeInit?.method).toBe("DELETE");
+  });
+});
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -285,9 +406,14 @@ describe("enablePlugin / disablePlugin / uninstallPlugin", () => {
   });
 
   it("POSTs /api/plugins/:id/disable", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ disabled: true }));
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ disabled: true, remote_resources_may_remain: true }),
+    );
 
-    await disablePlugin(PLUGIN_ID);
+    await expect(disablePlugin(PLUGIN_ID)).resolves.toEqual({
+      disabled: true,
+      remote_resources_may_remain: true,
+    });
 
     const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
     expect(String(url)).toBe(`${PLUGIN_URL}/disable`);

@@ -7,6 +7,7 @@
 // and the Go unit coverage in workspace_tracker_test.go.
 import { test, expect } from "../../fixtures/test-base";
 import { createStandardProfile } from "../../helpers/git-helper";
+import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Chat tilde read links", () => {
@@ -59,7 +60,7 @@ test.describe("Chat tilde read links", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 45_000 });
+    await waitForActiveTaskSession(testPage, task.id, task.session_id);
 
     // The link carries the bare home path (selector stripped by splitReadFiles).
     const chat = session.activeChat();

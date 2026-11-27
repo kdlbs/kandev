@@ -3,6 +3,10 @@ version: "2"
 run:
   build-tags:
     - fts5
+    # The adapter e2e harness is gated behind this tag. Without it here,
+    # linting any package that carries the tag fails with "build constraints
+    # exclude all Go files", so a change to a tagged file cannot be committed.
+    - e2e
 
 linters:
   enable:
@@ -63,7 +67,7 @@ linters:
       # exempt from the file-length limit only. Excluding them from every
       # linter (a `paths:` entry) would silently drop correctness checks on
       # the contract's own implementation.
-      - path: pkg/pluginsdk/(host|data_types)\.go$
+      - path: (^|/)pluginsdk/(host|data_types)\.go$
         linters:
           - revive
         text: file-length-limit

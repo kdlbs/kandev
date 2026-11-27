@@ -1,10 +1,9 @@
 package process
 
 import (
-	"time"
+	"context"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +35,8 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	wt.workspaceSubMu.Unlock()
 	wt.logger.Info("workspace stream subscriber added", zap.Int("subscribers", count))
 
+	wt.replayWorktreeInventory(sub)
+
 	// Bare trackers (multi-repo task roots) don't track their own git state —
 	// `gitIndexPath == ""` means the workDir isn't itself a git repo, so any
 	// `currentStatus` here is either empty (initial) or stale from a previous
@@ -45,31 +46,23 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 		return
 	}
 
-	// Refresh the cache opportunistically before replaying. Use TryLock so a
-	// concurrent poll/refresh doesn't block the attach; in that case we fall
-	// through to replaying whatever's cached, which is still no worse than
-	// the previous behaviour. We deliberately don't go through
-	// tryUpdateGitStatus here because its broadcast would (a) duplicate the
-	// manual replay below for this subscriber and (b) push a redundant frame
-	// to every already-attached subscriber.
-	//
-	// Use the tracker's cancellable context (not context.Background) so
-	// Stop() can kill an in-flight `git status` here without waiting it out.
-	if wt.updateMu.TryLock() {
-		if status, err := wt.getGitStatusClass(wt.cancelCtx, subproc.GitInteractive); err == nil {
-			wt.mu.Lock()
-			wt.currentStatus = status
-			wt.mu.Unlock()
-		}
-		wt.updateMu.Unlock()
-	}
-
+	wt.gitStatusPublishMu.Lock()
 	wt.mu.RLock()
-	currentStatus := wt.currentStatus
+	currentStatus := cloneGitStatusUpdate(wt.currentStatus)
 	wt.mu.RUnlock()
 
 	if currentStatus.Timestamp.IsZero() {
-		currentStatus.Timestamp = time.Now()
+		wt.gitStatusPublishMu.Unlock()
+		ctx := wt.cancelCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go func() {
+			if _, err := wt.getBasicGitStatusClass(ctx, gitWorkClass(ctx)); err != nil && !wt.isGitStatusCancellation(err) {
+				wt.logger.Debug("workspace stream initial status failed", zap.Error(err))
+			}
+		}()
+		return
 	}
 	if currentStatus.RepositoryName == "" {
 		currentStatus.RepositoryName = wt.repositoryName
@@ -79,6 +72,7 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	case sub <- types.NewWorkspaceGitStatus(&currentStatus):
 	default:
 	}
+	wt.gitStatusPublishMu.Unlock()
 }
 
 // UnsubscribeWorkspaceStream removes a workspace stream subscriber and closes
@@ -98,6 +92,16 @@ func (wt *WorkspaceTracker) DetachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	count := len(wt.workspaceStreamSubscribers)
 	wt.workspaceSubMu.Unlock()
 	wt.logger.Info("workspace stream subscriber removed", zap.Int("subscribers", count))
+}
+
+// detachAllWorkspaceStreamSubscribers clears this tracker's subscription set
+// without closing any channel. Graph handoff uses it because a subscriber can
+// leave the manager registry before retirement runs; the retired tracker must
+// still drop every channel it actually holds before that channel is closed.
+func (wt *WorkspaceTracker) detachAllWorkspaceStreamSubscribers() {
+	wt.workspaceSubMu.Lock()
+	clear(wt.workspaceStreamSubscribers)
+	wt.workspaceSubMu.Unlock()
 }
 
 // notifyWorkspaceStreamGitStatus sends git status to all workspace stream subscribers

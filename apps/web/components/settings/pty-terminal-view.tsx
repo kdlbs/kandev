@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -18,6 +18,9 @@ import { openExternalLink } from "@/lib/desktop/external-links";
 import { clearBufferReader, exposeBufferReader } from "@/components/task/terminal-buffer-reader";
 import { pendingPtyStarts, type PendingPtyStart } from "./pty-terminal-lifecycle";
 import { FONT } from "@/lib/theme/colors";
+import { MobileTerminalKeybar } from "@/components/task/mobile/mobile-terminal-keybar";
+import { sendPtyInput } from "@/lib/terminal/send-pty-input";
+import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import {
   getFixedDarkTerminalTheme,
   TERMINAL_MINIMUM_CONTRAST_RATIO,
@@ -52,6 +55,7 @@ type PtyTerminalViewProps = {
   testIdPrefix?: string;
   className?: string;
   onStateChange?: (state: PtyTerminalState) => void;
+  mobileControls?: boolean;
 };
 
 function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAddon } {
@@ -103,55 +107,63 @@ function wireResize(
   return observer;
 }
 
-function reportExit(
-  sessionId: string,
-  exitCode: number | null,
-  report: (state: PtyTerminalState) => void,
-  disarm: () => void,
-) {
-  disarm();
-  report({ status: "exited", sessionId, exitCode, error: null });
+type SessionStreamContext = {
+  sessionId: string;
+  term: Terminal;
+  initialInput?: string;
+  report: (state: PtyTerminalState) => void;
+  disarm: () => void;
+  cancelledRef: { value: boolean };
+};
+
+function reportExit(context: SessionStreamContext, exitCode: number | null): void {
+  if (context.cancelledRef.value) return;
+  context.disarm();
+  context.report({ status: "exited", sessionId: context.sessionId, exitCode, error: null });
 }
 
-function openSessionWebSocket(
-  sessionId: string,
-  term: Terminal,
-  initialInput: string | undefined,
-  report: (state: PtyTerminalState) => void,
-  disarm: () => void,
-): WebSocket {
-  const ws = new WebSocket(agentLoginStreamUrl(sessionId));
+function openSessionWebSocket(context: SessionStreamContext): WebSocket {
+  const ws = new WebSocket(agentLoginStreamUrl(context.sessionId));
   ws.binaryType = "arraybuffer";
   ws.onmessage = (event) => {
+    if (context.cancelledRef.value) return;
     if (typeof event.data === "string") {
       try {
         const message = JSON.parse(event.data) as { type: string; exit_code?: number };
         if (message.type === "exit") {
-          reportExit(sessionId, message.exit_code ?? null, report, disarm);
+          reportExit(context, message.exit_code ?? null);
         }
       } catch {
         // Ignore non-JSON text frames.
       }
       return;
     }
-    term.write(new Uint8Array(event.data as ArrayBuffer));
+    context.term.write(new Uint8Array(event.data as ArrayBuffer));
   };
   ws.onerror = () => {
-    disarm();
-    report({
+    if (context.cancelledRef.value) return;
+    context.disarm();
+    context.report({
       status: "error",
-      sessionId,
+      sessionId: context.sessionId,
       exitCode: null,
       error: translate("agents:ptyConnectionError"),
     });
   };
   ws.onclose = () => {
-    disarm();
+    if (!context.cancelledRef.value) context.disarm();
   };
-  if (initialInput) {
-    ws.addEventListener("open", () => ws.send(new TextEncoder().encode(initialInput)), {
-      once: true,
-    });
+  if (context.initialInput) {
+    ws.addEventListener(
+      "open",
+      () => {
+        if (context.cancelledRef.value) return;
+        ws.send(new TextEncoder().encode(context.initialInput));
+      },
+      {
+        once: true,
+      },
+    );
   }
   return ws;
 }
@@ -170,6 +182,7 @@ type MountArgs = {
   wsRef: MutableRefObject<WebSocket | null>;
   sessionIdRef: MutableRefObject<string | null>;
   mountGenerationRef: MutableRefObject<number>;
+  sendInput: (data: string) => void;
 };
 
 type LateStartContext = {
@@ -234,18 +247,20 @@ function reportSession(
   session: AgentLoginSession,
   term: Terminal,
   isAttached: boolean,
+  cancelledRef: { value: boolean },
 ): void {
   args.sessionIdRef.current = session.session_id;
   reportSessionState(args, session);
-  args.wsRef.current = openSessionWebSocket(
-    session.session_id,
+  args.wsRef.current = openSessionWebSocket({
+    sessionId: session.session_id,
     term,
-    isAttached ? undefined : args.initialInput,
-    args.report,
-    () => {
+    initialInput: isAttached ? undefined : args.initialInput,
+    report: args.report,
+    disarm: () => {
       args.sessionIdRef.current = null;
     },
-  );
+    cancelledRef,
+  });
 }
 
 function reportSessionState(args: MountArgs, session: AgentLoginSession): void {
@@ -298,7 +313,7 @@ async function attachOrStart(args: MountArgs, cancelledRef: { value: boolean }):
       return;
     }
 
-    reportSession(args, session, term, isAttached);
+    reportSession(args, session, term, isAttached, cancelledRef);
   } catch (error) {
     clearPendingStart(args.ownerId, pending);
     const detachedQuickTab =
@@ -331,11 +346,7 @@ function mountSession(args: MountArgs): () => void {
     args.sessionIdRef,
     args.wsRef,
   );
-  const dataDisposable = terminal.term.onData((data) => {
-    if (args.wsRef.current?.readyState === WebSocket.OPEN) {
-      args.wsRef.current.send(new TextEncoder().encode(data));
-    }
-  });
+  const dataDisposable = terminal.term.onData(args.sendInput);
 
   return () => {
     cancelledRef.value = true;
@@ -363,6 +374,7 @@ export function PtyTerminalView({
   testIdPrefix = "pty",
   className = "h-[420px] rounded-md bg-[#0b0b0c] p-2 overflow-hidden",
   onStateChange,
+  mobileControls = false,
 }: PtyTerminalViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -373,6 +385,19 @@ export function PtyTerminalView({
   const mountGenerationRef = useRef(0);
   const reportRef = useRef(onStateChange);
   reportRef.current = onStateChange;
+  const mobileControlsRef = useRef(mobileControls);
+  mobileControlsRef.current = mobileControls;
+  const sendInput = useCallback((data: string) => {
+    sendPtyInput(wsRef.current, data, mobileControlsRef.current);
+  }, []);
+  const focusTerminal = useCallback(() => termRef.current?.focus(), []);
+
+  useEffect(() => {
+    if (!mobileControls) return;
+    const reset = useShellModifiersStore.getState().reset;
+    reset();
+    return reset;
+  }, [mobileControls, ownerId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -391,8 +416,22 @@ export function PtyTerminalView({
       wsRef,
       sessionIdRef,
       mountGenerationRef,
+      sendInput,
     });
-  }, [clientId, initialInput, lifecycle, ownerId, startSession]);
+  }, [clientId, initialInput, lifecycle, ownerId, startSession, sendInput]);
 
-  return <div ref={containerRef} data-testid={`${testIdPrefix}-terminal`} className={className} />;
+  return (
+    <>
+      <div ref={containerRef} data-testid={`${testIdPrefix}-terminal`} className={className} />
+      {mobileControls && (
+        <MobileTerminalKeybar
+          sessionId={sessionId}
+          visible
+          inline
+          onSend={sendInput}
+          onFocus={focusTerminal}
+        />
+      )}
+    </>
+  );
 }

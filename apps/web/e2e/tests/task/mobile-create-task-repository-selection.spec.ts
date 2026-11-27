@@ -2,13 +2,55 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { KanbanPage } from "../../pages/kanban-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { dwell } from "../../helpers/causal-waits";
 
 useRegularMode();
 
 test.describe("Create task workspace repository picker on mobile", () => {
-  test("adds another local row through the repository sheet", async ({ testPage, prCapture }) => {
+  test("opens parent workspace help and persists the selected layout", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.mobileFab.tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-create-advanced-settings-trigger").tap();
+    const layoutSetting = dialog.getByTestId("task-create-initial-workspace-layout-setting");
+    await expect(layoutSetting).toBeVisible();
+    const info = layoutSetting.getByTestId("task-create-initial-workspace-layout-info");
+    await info.tap();
+    await expect(
+      testPage.getByTestId("task-create-initial-workspace-layout-help-drawer"),
+    ).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
+    const checkbox = layoutSetting.getByTestId("task-create-initial-workspace-layout-checkbox");
+    await checkbox.tap();
+    await expect(checkbox).toHaveAttribute("data-state", "checked");
+    await dialog.getByTestId("task-title-input").fill("Mobile parent workspace task");
+    await dialog.getByTestId("task-description-input").fill("Create beside the repository");
+    await dialog.getByRole("button", { name: "Create only", exact: true }).tap();
+    await expect(dialog).toHaveCount(0);
+
+    const card = new KanbanPage(testPage).taskCardByTitle("Mobile parent workspace task");
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    const cardTestId = await card.getAttribute("data-testid");
+    const taskId = cardTestId?.replace(/^task-card-/, "");
+    if (!taskId || taskId === cardTestId) throw new Error(`unexpected task card: ${cardTestId}`);
+    await expect
+      .poll(() => apiClient.getTask(taskId), { timeout: 15_000 })
+      .toMatchObject({ initial_workspace_layout: "task_root" });
+  });
+
+  test("marks another row's repository while keeping it selectable", async ({
+    testPage,
+    prCapture,
+  }) => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileFab.click();
@@ -16,6 +58,7 @@ test.describe("Create task workspace repository picker on mobile", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
     const manager = testPage.getByTestId("mobile-repository-manager");
+    const sheet = testPage.getByTestId("mobile-repository-sheet-content");
     const management = testPage.getByTestId("mobile-repository-management");
     const repositoryChips = management.getByTestId("repo-chip-trigger");
 
@@ -30,11 +73,14 @@ test.describe("Create task workspace repository picker on mobile", () => {
       .getByTestId("task-repository-local-option")
       .filter({ hasText: "E2E Repo" });
     await expect(selectedElsewhere).toBeVisible();
+    await expect(selectedElsewhere.getByTestId("already-added-repository-marker")).toBeVisible();
     await selectedElsewhere.tap();
+    await expect(sheet).toBeHidden();
+    await manager.tap();
     await expect(management).toBeVisible();
     await expect(repositoryChips).toHaveCount(2);
     await expect(repositoryChips.nth(1)).toContainText("E2E Repo");
-    await waitForFiniteAnimations(testPage.getByTestId("mobile-repository-sheet-content"));
+    await waitForFiniteAnimations(sheet);
     await testPage.getByTestId("mobile-repository-done").dispatchEvent("click");
     await expect(manager).toContainText("Repositories (2)");
     await dwell(

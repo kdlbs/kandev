@@ -8,7 +8,12 @@
 // real workspace or task session.
 package hostutility
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/modelcatalog"
+)
 
 // Status reports the state of a host utility instance for a given agent type.
 type Status string
@@ -20,13 +25,16 @@ const (
 	StatusNotInstalled  Status = "not_installed"
 	StatusFailed        Status = "failed"
 	StatusNotConfigured Status = "not_configured"
+	StatusUnsupported   Status = "unsupported"
 )
 
 // AgentCapabilities is the cached result of probing an agent type.
 type AgentCapabilities struct {
-	AgentType    string `json:"agent_type"`
-	AgentName    string `json:"agent_name,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	AgentType      string              `json:"agent_type"`
+	AgentName      string              `json:"agent_name,omitempty"`
+	AgentVersion   string              `json:"agent_version,omitempty"`
+	RuntimeVariant string              `json:"runtime_variant,omitempty"`
+	RuntimeInfo    *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	Status Status `json:"status"`
 	Error  string `json:"error,omitempty"`
@@ -94,13 +102,14 @@ type Mode struct {
 }
 
 type ConfigOption struct {
-	Type         string               `json:"type"`
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	Description  string               `json:"description,omitempty"`
-	CurrentValue string               `json:"current_value"`
-	Category     string               `json:"category,omitempty"`
-	Options      []ConfigOptionChoice `json:"options,omitempty"`
+	Type         string                `json:"type"`
+	ID           string                `json:"id"`
+	Name         string                `json:"name"`
+	Description  string                `json:"description,omitempty"`
+	CurrentValue string                `json:"current_value"`
+	Category     string                `json:"category,omitempty"`
+	Options      []ConfigOptionChoice  `json:"options,omitempty"`
+	Catalog      *modelcatalog.Catalog `json:"catalog,omitempty"`
 }
 
 type ConfigOptionChoice struct {
@@ -113,20 +122,45 @@ type ConfigOptionChoice struct {
 // Model is required. Mode and ConfigOptions are optional future-dependent
 // inputs for providers whose options depend on more than the model.
 type ModelConfigResolutionRequest struct {
-	Model         string
-	Mode          string
-	ConfigOptions map[string]string
-	Refresh       bool
+	Model          string
+	Mode           string
+	ConfigOptions  map[string]string
+	Refresh        bool
+	ProfileContext *ProfileProbeContext
+}
+
+// ProfileProbeContext is a validated, server-resolved launch snapshot. Scope
+// includes the authorization principal and profile identity; secret values
+// stay in Env only for the bounded subprocess lifetime.
+type ProfileProbeContext struct {
+	Scope                  string
+	Env                    map[string]string
+	CLIFlags               []string
+	CommandPrefix          []string
+	CopilotSelectedPlugins []string
+}
+
+type ProfileCapabilityRequest struct {
+	Context ProfileProbeContext
+	Refresh bool
+}
+
+type ProfileCapabilityResult struct {
+	Capabilities    AgentCapabilities
+	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // ModelConfigResolution is the provider's complete option snapshot for one
 // model-resolution context.
 type ModelConfigResolution struct {
-	AgentType     string
-	Model         string
-	Status        Status
-	ConfigOptions []ConfigOption
-	Error         string
+	AgentType       string
+	Model           string
+	Status          Status
+	ConfigOptions   []ConfigOption
+	Error           string
+	ContextRevision string
+	ReasonCode      string `json:"-"`
 }
 
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.

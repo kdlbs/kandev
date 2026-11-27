@@ -24,11 +24,33 @@ function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
 }
 
 const C = (c: Omit<FilterClause, "id">): FilterClause => ({ id: "c1", ...c });
+const LAST_ACTIVITY_SORT_KEY = "lastActivityAt";
+const TEST_DATE_EARLY = "2026-04-01";
 
 describe("applyFilters — basics", () => {
   it("returns all when no clauses", () => {
     const tasks = [task({ id: "a" }), task({ id: "b" })];
     expect(applyFilters(tasks, [])).toHaveLength(2);
+  });
+});
+
+describe("applySort — effective color", () => {
+  it("uses the row's effective token and lets later rules break ties", () => {
+    const sorted = applySort(
+      [
+        task({ id: "red-old", effectiveColorToken: "red", updatedAt: "2026-01-01" }),
+        task({ id: "blue-new", effectiveColorToken: "blue", updatedAt: "2026-02-01" }),
+        task({ id: "red-new", effectiveColorToken: "red", updatedAt: "2026-03-01" }),
+      ],
+      {
+        key: "color",
+        color: "red",
+        direction: "desc",
+        thenBy: [{ key: "updatedAt", direction: "desc" }],
+      },
+    );
+
+    expect(sorted.map((entry) => entry.id)).toEqual(["red-new", "red-old", "blue-new"]);
   });
 });
 
@@ -150,6 +172,36 @@ describe("applyFilters — per-dimension", () => {
   });
 });
 
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.2
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.3
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.4
+describe("applyFilters — missing repository", () => {
+  const tasks = [
+    task({ id: "none", workflowId: "wf" }),
+    task({ id: "first", workflowId: "wf", repositoryPath: "org/first" }),
+    task({ id: "second", workflowId: "wf", repositoryPath: "org/second" }),
+    task({ id: "other-workflow", workflowId: "other" }),
+  ];
+
+  it.each<{ op: FilterClause["op"]; value: FilterClause["value"]; expected: string[] }>([
+    { op: "is", value: "undefined", expected: ["none"] },
+    { op: "in", value: ["undefined"], expected: ["none"] },
+    { op: "in", value: ["undefined", "org/first"], expected: ["none", "first"] },
+    { op: "in", value: ["org/first"], expected: ["first"] },
+    { op: "is_not", value: "undefined", expected: ["first", "second"] },
+    { op: "not_in", value: ["undefined", "org/first"], expected: ["second"] },
+    { op: "in", value: [], expected: [] },
+    { op: "not_in", value: [], expected: ["none", "first", "second"] },
+  ])("matches $op $value while applying other clauses", ({ op, value, expected }) => {
+    const result = applyFilters(tasks, [
+      C({ dimension: "repository", op, value }),
+      { id: "workflow", dimension: "workflow", op: "is", value: "wf" },
+    ]);
+
+    expect(result.map((task) => task.id)).toEqual(expected);
+  });
+});
+
 describe("applyFilters — repository (#1213)", () => {
   // The saved clause value is the filter option value, and the board sets each
   // task's repositoryPath — BOTH via repositorySlug. For a local repo the slug
@@ -238,7 +290,7 @@ describe("applyFilters — titleMatch + combos", () => {
 });
 
 describe("applySort", () => {
-  const early = "2026-04-01";
+  const early = TEST_DATE_EARLY;
   const middle = "2026-04-03";
   const late = "2026-04-05";
   const a = task({ id: "a", state: "REVIEW", updatedAt: early, title: "Zeta" });
@@ -272,7 +324,7 @@ describe("applySort", () => {
           createdAt: early,
         }),
       ],
-      { key: "lastActivityAt", direction: "desc" },
+      { key: LAST_ACTIVITY_SORT_KEY, direction: "desc" },
     );
     expect(out.map((t) => t.id)).toEqual(["activity", "updated-fallback", "created-fallback"]);
   });
@@ -280,7 +332,7 @@ describe("applySort", () => {
   it("keeps lastActivityAt stable for equal timestamps", () => {
     const out = applySort(
       [task({ id: "first", lastActivityAt: late }), task({ id: "second", lastActivityAt: late })],
-      { key: "lastActivityAt", direction: "asc" },
+      { key: LAST_ACTIVITY_SORT_KEY, direction: "asc" },
     );
     expect(out.map((t) => t.id)).toEqual(["first", "second"]);
   });
@@ -604,6 +656,7 @@ describe("applyView (integration)", () => {
       filters: [{ id: "f1", dimension: "isPRReview", op: "is", value: false }],
       sort: { key: "updatedAt", direction: "desc" },
       group: "none",
+      groupIndent: true,
       collapsedGroups: [],
     };
     const tasks = [
@@ -624,6 +677,7 @@ describe("applyView — pinned tasks", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -689,6 +743,7 @@ describe("applyView — custom sort", () => {
     filters: [],
     sort: { key: "custom", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -708,7 +763,7 @@ describe("applyView — custom sort", () => {
   it("places tasks not in orderedTaskIds after listed ones, newest createdAt first", () => {
     const tasks = [
       task({ id: "a", title: "Alpha", createdAt: "2026-01-01" }),
-      task({ id: "b", title: "Beta", createdAt: "2026-04-01" }),
+      task({ id: "b", title: "Beta", createdAt: TEST_DATE_EARLY }),
       task({ id: "c", title: "Gamma", createdAt: "2026-02-01" }),
     ];
     const out = applyView(tasks, customView, { pinnedTaskIds: [], orderedTaskIds: ["c"] });
@@ -791,6 +846,7 @@ describe("applyView — subtaskOrderByParentId", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
   const parentId = "p1";
@@ -846,6 +902,53 @@ describe("applyView — subtaskOrderByParentId", () => {
     });
     expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["a2", "a1"]);
     expect(out.subTasksByParentId.get("p2")?.map((t) => t.id)).toEqual(["b1", "b2"]);
+  });
+});
+
+describe("applyView — Last activity tree overrides", () => {
+  it("keeps pin and manual subtask order ahead of tree sorting without changing Updated", () => {
+    const lastActivityView: SidebarView = {
+      id: "activity",
+      name: "Activity",
+      filters: [],
+      sort: { key: LAST_ACTIVITY_SORT_KEY, direction: "desc" },
+      group: "none",
+      groupIndent: true,
+      collapsedGroups: [],
+    };
+    const tasks = [
+      task({ id: "parent", lastActivityAt: TEST_DATE_EARLY, updatedAt: TEST_DATE_EARLY }),
+      task({
+        id: "child",
+        parentTaskId: "parent",
+        lastActivityAt: "2026-04-10",
+        updatedAt: "2026-04-03",
+      }),
+      task({
+        id: "sibling",
+        parentTaskId: "parent",
+        lastActivityAt: "2026-04-02",
+        updatedAt: "2026-04-08",
+      }),
+      task({ id: "peer", lastActivityAt: "2026-04-04", updatedAt: "2026-04-05" }),
+    ];
+
+    const activity = applyView(tasks, lastActivityView, {
+      pinnedTaskIds: ["peer"],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { parent: ["sibling", "child"] },
+    });
+    expect(activity.groups[0].tasks.map((item) => item.id)).toEqual(["peer", "parent"]);
+    expect(activity.subTasksByParentId.get("parent")?.map((item) => item.id)).toEqual([
+      "sibling",
+      "child",
+    ]);
+
+    const updated = applyView(tasks, {
+      ...lastActivityView,
+      sort: { key: "updatedAt", direction: "desc" },
+    });
+    expect(updated.groups[0].tasks.map((item) => item.id)).toEqual(["peer", "parent"]);
   });
 });
 

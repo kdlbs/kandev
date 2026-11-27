@@ -7,12 +7,12 @@ import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { generateUUID } from "@/lib/utils";
+import { prepareReviewCommentRequest, type ReviewFileAdmission } from "./review-comment-request";
 import { updateUserSettings } from "@/lib/api";
-import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
 import { ReviewPRDiffBoundary } from "@/components/review/review-dialog-pr-state";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
@@ -39,8 +39,10 @@ import {
   type WorkspaceRestorationResult,
 } from "@/hooks/domains/session/use-workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { HistoricalTurnDiffViewer } from "./historical-turn-diff-viewer";
 
 type TaskChangesPanelProps = {
+  detailActive?: boolean;
   mode?: "all" | "file";
   filePath?: string;
   fileRepositoryName?: string;
@@ -108,6 +110,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     rawPRFiles,
     truncatedFilesCount,
     selectedPR: pr,
@@ -174,6 +177,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     truncatedFilesCount,
     prs: reviewSources.prs,
     selectedPR: reviewSources.selectedPR,
@@ -241,25 +245,32 @@ export function useFixCommentsRequest(
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { toast } = useToast();
 
-  return useCallback(() => {
-    if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
+  const sending = useRef(false);
+  const pendingFileAdmission = useRef<ReviewFileAdmission | null>(null);
+  return useCallback(async () => {
+    if (sending.current || workspaceBlocked || !activeSessionId || !activeTaskId) return;
     const comments = getPendingComments()
       .filter(isReviewComment)
       .filter((comment) => comment.sessionId === activeSessionId);
     if (comments.length === 0) return;
-    const markdown = formatReviewCommentsAsMarkdown(comments);
-    if (!markdown) return;
     const client = getWebSocketClient();
-    if (client)
-      client
-        .request("message.add", {
-          task_id: activeTaskId,
-          session_id: activeSessionId,
-          client_message_id: generateUUID(),
-          content: markdown,
-        })
-        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
-    markCommentsSent(comments.map((c) => c.id));
+    if (!client) return;
+    sending.current = true;
+    try {
+      await client.request(
+        "message.add",
+        prepareReviewCommentRequest(activeTaskId, activeSessionId, comments, pendingFileAdmission),
+      );
+      pendingFileAdmission.current = null;
+      const { byId } = useCommentsStore.getState();
+      markCommentsSent(
+        comments.filter((comment) => byId[comment.id] === comment).map((comment) => comment.id),
+      );
+    } catch {
+      toast({ title: t("task:failedToSendComments"), variant: "error" });
+    } finally {
+      sending.current = false;
+    }
   }, [
     activeSessionId,
     activeTaskId,
@@ -285,22 +296,21 @@ function useChangesActions(
   const { markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId ?? null);
   const { toast } = useToast();
 
-  const [splitView, setSplitView] = useState(
-    () => typeof window !== "undefined" && localStorage.getItem("diff-view-mode") === "split",
-  );
+  const [viewMode, setViewMode] = useGlobalViewMode();
+  const splitView = viewMode === "split";
   const [wordWrap, setWordWrap] = useState(defaultWordWrap);
 
-  const handleToggleSplitView = useCallback((split: boolean) => {
-    setSplitView(split);
-    const mode = split ? "split" : "unified";
-    localStorage.setItem("diff-view-mode", mode);
-    window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
-  }, []);
+  const handleToggleSplitView = useCallback(
+    (split: boolean) => setViewMode(split ? "split" : "unified"),
+    [setViewMode],
+  );
 
   const handleToggleReviewed = useCallback(
     (key: string, reviewed: boolean) => {
       if (reviewed) {
-        markReviewed(key, reviewDiffHashForKey(allFiles, key));
+        const diffHash = reviewDiffHashForKey(allFiles, key);
+        if (diffHash === null) return;
+        markReviewed(key, diffHash);
       } else {
         markUnreviewed(key);
       }
@@ -422,7 +432,7 @@ function ChangesPanelHeader({
   );
 }
 
-const TaskChangesPanel = memo(function TaskChangesPanel({
+const TaskChangesPanelLive = memo(function TaskChangesPanelLive({
   mode = "all",
   filePath,
   fileRepositoryName,
@@ -473,13 +483,15 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     filePath,
     sourceFilter,
     gitStatus: view.gitStatus,
+    statusByRepo: view.statusByRepo,
+    repositoryName: fileRepositoryName,
+    changeLayer,
     visibleCount: visible.visibleFiles.length,
     prDiffLoading: relevantPRLoading,
     onBecameEmpty,
   });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
-
   return (
     <PanelRoot>
       <ChangesPanelHeader
@@ -517,6 +529,19 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       </PanelBody>
     </PanelRoot>
   );
+});
+
+const TaskChangesPanel = memo(function TaskChangesPanel(props: TaskChangesPanelProps) {
+  if (props.selectedDiff?.historical) {
+    return (
+      <HistoricalTurnDiffViewer
+        target={props.selectedDiff.historical}
+        detailActive={props.detailActive}
+        onClose={props.onClearSelected}
+      />
+    );
+  }
+  return <TaskChangesPanelLive {...props} />;
 });
 
 function ChangesPanelContent({

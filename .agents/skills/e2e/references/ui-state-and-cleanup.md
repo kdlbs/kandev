@@ -23,11 +23,27 @@ already-active session may emit no new subscribe frame; consume the original
 frame or trigger a distinct state transition. Verify ordering in the owning
 Playwright project with `--retries=0`.
 
+When `page.routeWebSocket` gates frames, use `socket.onMessage` for
+browser-to-backend requests and `server.onMessage` for backend-to-browser
+notifications. Forward frames in the other direction immediately. If a
+foreground history refresh can replace a held row, also hold the target
+session's latest `message.list` response and verify it is queued before
+releasing the held frames.
+
 Arm every WebSocket wait before the action that should produce it, including all
 waits when one action emits multiple notifications. Establish startup state with
 REST `expect.poll`, then correlate each post-action event by an active-to-settled
 transition, revision, or timestamp; `watchWs` does not buffer frames, so never
 attach a wait after a spinner or visibility assertion.
+
+## Geometry and sticky overlays
+
+For geometry or hit-target assertions on settings pages, scroll the target clear
+of sticky headers and fixed Save bars before a center-point
+`elementFromPoint` check. `scrollIntoViewIfNeeded()` can consider a control in
+view while an overlay covers its center; use explicit center scrolling when
+appropriate, retain the hit-test assertion, and distinguish a test scroll
+position issue from a control that user scrolling cannot reach.
 
 ## Automatic lifecycle evidence
 

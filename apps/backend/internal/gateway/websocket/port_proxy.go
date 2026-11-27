@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -92,8 +93,10 @@ type proxyTokenConsumedKey struct{}
 
 // portProxyEntry caches a reverse proxy and its target for a session:port pair.
 type portProxyEntry struct {
-	proxy  *httputil.ReverseProxy
-	target string
+	proxy        *httputil.ReverseProxy
+	target       string
+	generation   string
+	runtimeEpoch uint64
 }
 
 // PortProxyHandler reverse-proxies HTTP and WebSocket traffic to arbitrary
@@ -166,10 +169,17 @@ func (h *PortProxyHandler) HandlePortProxy(c *gin.Context) {
 		c.Request = c.Request.WithContext(ctx)
 	}
 
-	proxy, err := h.resolveProxy(c, sessionID, port)
+	proxy, agentctlClient, err := h.resolveProxy(c, sessionID, port)
 	if err != nil {
 		return // error already written to response
 	}
+	boundCtx, cancel, err := agentctlClient.RuntimeBoundContext(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent runtime unavailable"})
+		return
+	}
+	defer cancel()
+	c.Request = c.Request.WithContext(boundCtx)
 
 	// Rewrite path: strip /port-proxy/:sessionId/:port prefix,
 	// forward as /api/v1/port-proxy/:port/{remainingPath} to agentctl.
@@ -220,58 +230,67 @@ func (h *PortProxyHandler) HandlePortProxy(c *gin.Context) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port int) (*httputil.ReverseProxy, error) {
+func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port int) (*httputil.ReverseProxy, *agentruntime.AgentCtlClient, error) {
 	cacheKey := sessionID + ":" + strconv.Itoa(port)
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if entry, ok := h.proxies[cacheKey]; ok {
-		return entry.proxy, nil
-	}
 
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found or no active execution"})
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 
 	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
-		return nil, fmt.Errorf("agentctl client not available")
+		return nil, nil, fmt.Errorf("agentctl client not available")
+	}
+	generation, err := agentctlClient.ConnectionGeneration(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl connection is unavailable"})
+		return nil, nil, fmt.Errorf("resolve agentctl connection generation: %w", err)
+	}
+	if !agentctlClient.RuntimeCurrent() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent runtime unavailable"})
+		return nil, nil, fmt.Errorf("agent runtime unavailable")
 	}
 
 	baseURL := agentctlClient.BaseURL()
 	target, err := url.Parse(baseURL)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to resolve agentctl target"})
-		return nil, err
+		return nil, nil, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	runtimeEpoch := agentctlClient.RuntimeEpoch()
+	if entry, ok := h.proxies[cacheKey]; ok && entry.target == baseURL && entry.generation == generation &&
+		entry.runtimeEpoch == runtimeEpoch && agentctlClient.RuntimeCurrent() {
+		return entry.proxy, agentctlClient, nil
 	}
 
-	authToken := agentctlClient.AuthToken()
 	// Public path that fronts this proxy on the gateway. Used by `ModifyResponse`
 	// to rewrite root-absolute URLs in proxied HTML/CSS so iframe asset requests
 	// stay on the same proxy chain instead of escaping to the host origin.
 	proxyPrefix := "/port-proxy/" + sessionID + "/" + strconv.Itoa(port)
-	proxy := h.createProxy(cacheKey, target, authToken, proxyPrefix)
-	h.proxies[cacheKey] = &portProxyEntry{proxy: proxy, target: baseURL}
+	proxy := h.createProxy(cacheKey, target, agentctlClient.ProxyTransport(), proxyPrefix)
+	h.proxies[cacheKey] = &portProxyEntry{
+		proxy: proxy, target: baseURL, generation: generation, runtimeEpoch: runtimeEpoch,
+	}
 
 	h.logger.Info("created port proxy",
 		zap.String("session_id", sessionID),
 		zap.Int("port", port),
 		zap.String("execution_id", execution.ID),
 		zap.String("target", baseURL))
-	return proxy, nil
+	return proxy, agentctlClient, nil
 }
 
-func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authToken, proxyPrefix string) *httputil.ReverseProxy {
+func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, transport http.RoundTripper, proxyPrefix string) *httputil.ReverseProxy {
 	proxy := &httputil.ReverseProxy{}
+	proxy.Transport = transport
 	proxy.Rewrite = func(r *httputil.ProxyRequest) {
 		r.SetURL(target)
-		r.Out.URL.Path = r.In.URL.Path
-		r.Out.URL.RawPath = ""
 		// Never forward the browser's Accept-Encoding: Go's Transport adds
 		// its own and transparently decompresses, so ModifyResponse (and the
 		// HTML/CSS rewriter) always sees identity bytes. Forwarding gzip/br
@@ -305,10 +324,6 @@ func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authTok
 			} else {
 				r.Out.Header.Del("Referer")
 			}
-		}
-		// Inject agentctl auth token
-		if authToken != "" {
-			r.Out.Header.Set("Authorization", "Bearer "+authToken)
 		}
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")

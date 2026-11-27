@@ -47,6 +47,15 @@ retaining package context and changed-code enforcement.
   pre-commit's staged-file selection and restoration of unstaged edits.
 - **AC-PLATFORM-GO-PRE-COMMIT-LINT-001.7:** CI and the explicit full-backend lint
   command shall retain backend-wide analysis, including impacts on other packages.
+- **AC-PLATFORM-GO-PRE-COMMIT-LINT-001.8:** Selected-package lint shall default to
+  a 3 GiB per-process Go memory target, two analysis CPUs, and two build workers.
+  Explicit memory, CPU, and build-parallelism overrides shall remain available;
+  unrelated Go flags shall be preserved. The memory target shall be documented
+  as soft rather than a limit on the entire process tree.
+- **AC-PLATFORM-GO-PRE-COMMIT-LINT-001.9:** Harness instructions for local backend
+  checks and PR fixups shall use selected-package lint and serialize heavyweight
+  validation. Full-backend local analysis shall require an explicit request and
+  OS-level resource limits; routine backend-wide validation shall belong to CI.
 
 ## Out of scope
 

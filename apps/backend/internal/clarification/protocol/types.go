@@ -1,0 +1,72 @@
+// Package protocol contains the wire types for clarification requests.
+package protocol
+
+import "time"
+
+// Option represents a single choice option for a question.
+type Option struct {
+	ID          string         `json:"option_id"`
+	Label       string         `json:"label"`       // Concise 1-5 words
+	Description string         `json:"description"` // Explanation of the option
+	Images      QuestionImages `json:"images,omitempty"`
+}
+
+// Question represents a single question with multiple choice options.
+type Question struct {
+	ID              string         `json:"id"`
+	Title           string         `json:"title"`   // Short label (max 12 chars)
+	Prompt          string         `json:"prompt"`  // Full question text
+	Options         []Option       `json:"options"` // 2-6 options
+	AllowCustomText *bool          `json:"allow_custom_text,omitempty"`
+	Images          QuestionImages `json:"images,omitempty"`
+	// ImageGroups declares which images the review view compares as pairs and
+	// which it shows alone. Omitted groups show the images as a gallery.
+	ImageGroups QuestionImageGroups `json:"image_groups,omitempty"`
+}
+
+// AnswerAttachment identifies one file-backed upload attached to an answer.
+// Path is populated only by the trusted runtime for live agent delivery and
+// never appears in browser REST results or durable metadata.
+type AnswerAttachment struct {
+	AttachmentID string `json:"attachment_id"`
+	Type         string `json:"type,omitempty"`
+	Name         string `json:"name,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	SizeBytes    int64  `json:"size_bytes,omitempty"`
+	DeliveryMode string `json:"delivery_mode,omitempty"`
+	Path         string `json:"path,omitempty"`
+}
+
+// AnswerAnnotation marks a rectangle on one of the question's images. The
+// rectangle is in image pixels of the image as the operator saw it, and the
+// observed size lets the agent rescale when the file has changed since.
+type AnswerAnnotation struct {
+	ImageID     string `json:"image_id"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	ImageWidth  int    `json:"image_width"`
+	ImageHeight int    `json:"image_height"`
+	Comment     string `json:"comment"`
+}
+
+// Answer represents the user's answer to a single question.
+type Answer struct {
+	QuestionID      string             `json:"question_id"`
+	SelectedOptions []string           `json:"selected_options,omitempty"` // Option IDs (single-choice ⇒ at most one)
+	CustomText      string             `json:"custom_text,omitempty"`      // Free-text input
+	Attachments     []AnswerAttachment `json:"attachments,omitempty"`      // File-backed answer evidence
+	Annotations     []AnswerAnnotation `json:"annotations,omitempty"`      // Regions marked on question images
+}
+
+// Response represents the user's response to a clarification request.
+// On success, Answers has exactly one entry per question in the request.
+// On rejection, Answers may be nil and Rejected/RejectReason describe the skip.
+type Response struct {
+	PendingID    string    `json:"pending_id"`
+	Answers      []Answer  `json:"answers,omitempty"`
+	Rejected     bool      `json:"rejected,omitempty"`
+	RejectReason string    `json:"reject_reason,omitempty"` // If rejected
+	RespondedAt  time.Time `json:"responded_at"`
+}

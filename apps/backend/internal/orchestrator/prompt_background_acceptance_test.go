@@ -48,7 +48,7 @@ func TestPromptTask_BackgroundWorkStaysBusy(t *testing.T) {
 			repo := setupTestRepo(t)
 			agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 
 			const (
@@ -157,7 +157,7 @@ func TestPromptTask_ClaudeExperimentAdmitsRecognizedBackgroundWork(t *testing.T)
 			repo := setupTestRepo(t)
 			agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-			svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+			svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 			svc.messageCreator = &mockMessageCreator{}
 			enableClaudeBackgroundPromptHandoffForTest(t, svc)
 
@@ -212,7 +212,7 @@ func TestPromptTask_NonClaudeFramesStayBusy(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	const (

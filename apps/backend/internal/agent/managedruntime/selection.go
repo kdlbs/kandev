@@ -97,7 +97,11 @@ func (s *Store) Get(ctx context.Context, agentID, packageName string) (Selection
 	if agentID == "" || packageName == "" {
 		return Selection{}, false, fmt.Errorf("%w: agent and package are required", ErrInvalidSelection)
 	}
-	raw, found, err := s.settings.Get(ctx, selectionKey(agentID))
+	return s.readVersionRecord(ctx, selectionKey(agentID), packageName)
+}
+
+func (s *Store) readVersionRecord(ctx context.Context, key, packageName string) (Selection, bool, error) {
+	raw, found, err := s.settings.Get(ctx, key)
 	if err != nil || !found {
 		return Selection{}, found, err
 	}
@@ -122,6 +126,10 @@ func (s *Store) Save(ctx context.Context, agentID, packageName, version string) 
 	if s == nil || s.settings == nil {
 		return errSettingsMissing
 	}
+	return s.writeVersionRecord(ctx, agentID, packageName, version, selectionKey(agentID))
+}
+
+func (s *Store) writeVersionRecord(ctx context.Context, agentID, packageName, version, key string) error {
 	if agentID == "" || packageName == "" {
 		return fmt.Errorf("%w: agent and package are required", ErrInvalidSelection)
 	}
@@ -132,7 +140,7 @@ func (s *Store) Save(ctx context.Context, agentID, packageName, version string) 
 	if err != nil {
 		return fmt.Errorf("marshal managed runtime selection: %w", err)
 	}
-	return s.settings.Save(ctx, selectionKey(agentID), raw)
+	return s.settings.Save(ctx, key, raw)
 }
 
 // Delete removes the operator selection for one trusted package. The built-in

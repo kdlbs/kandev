@@ -74,6 +74,7 @@ type MRWatch struct {
 // Projects holds the list of projects to monitor. An empty list means all
 // projects the user has access to.
 type ReviewWatch struct {
+	CreatedByUserID     string          `json:"-" db:"created_by_user_id"`
 	ID                  string          `json:"id" db:"id"`
 	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string          `json:"workflow_id" db:"workflow_id"`
@@ -114,6 +115,7 @@ type ReviewMRTask struct {
 
 // IssueWatch configures periodic polling for GitLab issues matching a query.
 type IssueWatch struct {
+	CreatedByUserID     string          `json:"-" db:"created_by_user_id"`
 	ID                  string          `json:"id" db:"id"`
 	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string          `json:"workflow_id" db:"workflow_id"`
@@ -244,6 +246,7 @@ type MRFeedbackEvent struct {
 // NewReviewMREvent is published when a new MR needing review is found by a
 // review watch and a task has been auto-created.
 type NewReviewMREvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	ReviewWatchID     string `json:"review_watch_id"`
 	WatchGeneration   int64  `json:"watch_generation"`
 	WorkspaceID       string `json:"workspace_id"`
@@ -260,6 +263,7 @@ type NewReviewMREvent struct {
 
 // NewIssueEvent is published when a new issue matching a watch is found.
 type NewIssueEvent struct {
+	CreatedByUserID   string `json:"created_by_user_id,omitempty"`
 	IssueWatchID      string `json:"issue_watch_id"`
 	WatchGeneration   int64  `json:"watch_generation"`
 	WorkspaceID       string `json:"workspace_id"`

@@ -51,11 +51,20 @@ function stateWith(...profiles: AgentProfile[]) {
   }
   return {
     settingsAgents: { items: [...agents.values()] },
-    agentProfiles: { items: [], version: 0 },
+    agentProfiles: { items: [], version: 0, orderByAgent: {} },
   };
 }
 
 describe("applyEnabledProfileUpdate", () => {
+  it("updates enabled state without copying saved Settings order into selectors", () => {
+    const old = { ...profile("old", "a", true), createdAt: "2026-01-01T00:00:00Z" };
+    const newer = { ...profile("new", "a", true), createdAt: "2026-02-01T00:00:00Z" };
+    const next = applyEnabledProfileUpdate(stateWith(old, newer), old, { ...old, enabled: false });
+    expect(next.agentProfiles.items.map((item) => item.id)).toEqual(["new", "old"]);
+    expect(next.agentProfiles.items.find((item) => item.id === "old")?.enabled).toBe(false);
+    expect(next.settingsAgents.items[0].profiles.map((item) => item.id)).toEqual(["old", "new"]);
+  });
+
   it("merges concurrent responses from the latest state in either order", () => {
     const first = profile("p1", "a1", true);
     const second = profile("p2", "a2", true);

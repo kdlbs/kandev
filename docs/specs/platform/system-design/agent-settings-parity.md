@@ -297,6 +297,10 @@ Keep either the existing REST broadcast or MCP event publication for its operati
 Do not add another publication to a shared helper while retaining both callers' publication.
 Do not introduce synthetic agent responses as a source of UI truth.
 
+The [profile enabled omission supplement](profile-enabled-omission.md) specifies
+the bounded storage repair for AC-PLATFORM-AGENT-SETTINGS-PARITY-002.10. It retains
+this vertical owner and is separate because this design is near its 32 KiB limit.
+
 The current MCP-document writers publish no update notification.
 Add `agent.profile.mcp_config.updated` as an invalidation event with `profile_id` and the domain's routing scope.
 Each accepted REST or MCP document write publishes this event once after persistence.

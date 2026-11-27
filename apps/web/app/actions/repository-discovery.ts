@@ -46,6 +46,13 @@ export async function addDesktopDiscoveryRootAction(path: string): Promise<Deskt
   });
 }
 
+export async function confirmHomeDesktopDiscoveryAction(): Promise<DesktopDiscoveryRoot> {
+  return fetchJson<DesktopDiscoveryRoot>(
+    `${apiBaseUrl}/api/v1/repositories/discovery/roots/confirm-home`,
+    { init: { method: "POST" } },
+  );
+}
+
 export async function reconnectDesktopDiscoveryRootAction(
   oldPath: string,
   newPath: string,

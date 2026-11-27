@@ -1,10 +1,14 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type {
   Automation,
+  AutomationMCPOptions,
   AutomationRun,
+  AutomationRunsPage,
   AutomationSummary,
   CreateAutomationRequest,
   CreateAutomationResponse,
+  AutomationPluginToolGroup,
+  AutomationPluginToolOptionsResponse,
   RevealWebhookSecretResponse,
   UpdateAutomationRequest,
   AddTriggerRequest,
@@ -12,6 +16,7 @@ import type {
   AutomationTrigger,
   TriggerTypeInfo,
   WorkspaceAutomationRun,
+  RetryHistoryPage,
 } from "@/lib/types/automation";
 
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
@@ -59,6 +64,16 @@ export async function deleteAutomation(id: string): Promise<void> {
   await requireClient().request("automation.delete", { id });
 }
 
+export async function getAutomationPluginToolOptions(
+  workspaceId: string,
+): Promise<AutomationPluginToolGroup[]> {
+  const response = await requireClient().request<AutomationPluginToolOptionsResponse>(
+    "automation.plugin_tool_options",
+    { workspace_id: workspaceId },
+  );
+  return response?.groups ?? [];
+}
+
 export async function enableAutomation(id: string): Promise<Automation> {
   return requireClient().request<Automation>("automation.enable", { id });
 }
@@ -88,6 +103,32 @@ export async function listAutomationRuns(
 ): Promise<AutomationRun[]> {
   return requireClient().request<AutomationRun[]>("automation.runs.list", {
     automation_id: automationId,
+    ...(limit ? { limit } : {}),
+  });
+}
+
+export async function listAutomationRunPage(
+  automationId: string,
+  cursor?: string,
+  limit = 200,
+): Promise<AutomationRunsPage> {
+  return requireClient().request<AutomationRunsPage>("automation.runs.list", {
+    automation_id: automationId,
+    page: true,
+    ...(cursor ? { cursor } : {}),
+    limit,
+  });
+}
+
+export async function listAutomationRetryHistory(
+  automationId: string,
+  cursor?: string,
+  limit?: number,
+): Promise<RetryHistoryPage> {
+  return requireClient().request<RetryHistoryPage>("automation.runs.list", {
+    automation_id: automationId,
+    history: true,
+    ...(cursor ? { cursor } : {}),
     ...(limit ? { limit } : {}),
   });
 }
@@ -217,5 +258,17 @@ export function listPluginWebhookReceipts(automationId: string) {
   return requireClient().request<PluginWebhookReceipt[]>("automation.webhook_binding", {
     automation_id: automationId,
     operation: "receipts",
+  });
+}
+
+export async function getAutomationMCPOptions(
+  workspaceId: string,
+  profileId: string,
+  repositoryIds: string[],
+): Promise<AutomationMCPOptions> {
+  return requireClient().request<AutomationMCPOptions>("automation.mcp_options", {
+    workspace_id: workspaceId,
+    agent_profile_id: profileId,
+    repository_ids: repositoryIds,
   });
 }

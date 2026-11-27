@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestGitCredentialRequestCarriesExactTaskScope(t *testing.T) {
@@ -533,6 +534,32 @@ func TestWorkspaceProviderRepositoryPathRejectsScopeWithoutRepoID(t *testing.T) 
 	}
 }
 
+func TestManagedCloneRelocationPathsAreProviderAndWorkspaceScoped(t *testing.T) {
+	t.Parallel()
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", nil)
+	repository := &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
+	}
+	root, source, ownerNameSource, destination, ok, err := cloner.ManagedCloneRelocationPaths(repository)
+	if err != nil || !ok {
+		t.Fatalf("ManagedCloneRelocationPaths() = (%q, %q, %q, %q, %t, %v), want managed paths", root, source, ownerNameSource, destination, ok, err)
+	}
+	if want := filepath.Join(root, "_providers", "github", "github.com", "acme", "widget"); source != want {
+		t.Fatalf("source path = %q, want %q", source, want)
+	}
+	if want := filepath.Join(root, "acme", "widget"); ownerNameSource != want {
+		t.Fatalf("legacy owner/name source path = %q, want %q", ownerNameSource, want)
+	}
+	if want := filepath.Join(root, "workspaces", "workspace-1", "github", "acme", "widget"); destination != want {
+		t.Fatalf("destination path = %q, want %q", destination, want)
+	}
+	repository.SourceType = "local"
+	if _, _, _, _, ok, err := cloner.ManagedCloneRelocationPaths(repository); err != nil || ok {
+		t.Fatalf("local source relocation = ok %t, err %v, want unsupported", ok, err)
+	}
+}
+
 func TestEnsureClonedAtPathRejectsExistingCheckoutWithDifferentOrigin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -612,9 +639,11 @@ func TestEnsureWorkspaceClonedUsesSelectedCredentialWithoutAmbientFallback(t *te
 	gitPath := filepath.Join(binDir, "git")
 	script := `#!/bin/sh
 printf '%s\n' "$@" > "$KANDEV_TEST_CAPTURE.args"
-helper=${GIT_CONFIG_VALUE_1#!}
-"$helper" get > "$KANDEV_TEST_CAPTURE.helper"
+helper_command=${GIT_CONFIG_VALUE_1#!}
+sh -c "$helper_command get" > "$KANDEV_TEST_CAPTURE.helper"
 printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_1" > "$KANDEV_TEST_CAPTURE.env"
+for clone_target do :; done
+mkdir -p "$clone_target/.git"
 `
 	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
@@ -673,6 +702,11 @@ printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$
 }
 
 func TestListLocalOriginBranchesUsesWorkspaceCredentialWithoutAmbientFallback(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KANDEV_TEST_REAL_GIT", realGit)
 	root := t.TempDir()
 	binDir := filepath.Join(root, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -686,8 +720,8 @@ if [ "$3" = config ]; then
   exit 0
 fi
 if [ "$3" = ls-remote ]; then
-  helper=${GIT_CONFIG_VALUE_1#!}
-  "$helper" get > "$KANDEV_TEST_CAPTURE.helper"
+  printf '%s\n' protocol=https host=github.com path=acme/private.git '' |
+    "$KANDEV_TEST_REAL_GIT" credential fill > "$KANDEV_TEST_CAPTURE.helper" || exit 1
   printf '%s\n' "$GH_TOKEN|$GITHUB_TOKEN|$GIT_CONFIG_GLOBAL|$GIT_CONFIG_NOSYSTEM|$KANDEV_REPOCLONE_GITHUB_USERNAME|$KANDEV_REPOCLONE_GITHUB_TOKEN|$GIT_CONFIG_VALUE_0" > "$KANDEV_TEST_CAPTURE.env"
   printf '%s\n' 'sha refs/heads/main' 'sha refs/heads/feature/api'
   exit 0
@@ -737,7 +771,7 @@ exit 1
 		parts[4] != "" || parts[5] != "" || parts[6] != "" {
 		t.Fatalf("git auth environment = %#v", parts)
 	}
-	if helper := readTestFile(t, capturePath+".helper"); helper != "username=x-access-token\npassword=workspace-token\n" {
+	if helper := readTestFile(t, capturePath+".helper"); !strings.Contains(helper, "username=x-access-token\npassword=workspace-token\n") {
 		t.Fatalf("credential helper output = %q", helper)
 	}
 }
@@ -785,9 +819,9 @@ func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
 	t.Parallel()
 
 	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
-	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
+	want := "git@gitlab.com:acme/platform/api.git"
 	got, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "azure_devops", "", want, "Platform", "api", "", "",
+		context.Background(), "workspace-a", "gitlab", "", want, "acme/platform", "api", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)

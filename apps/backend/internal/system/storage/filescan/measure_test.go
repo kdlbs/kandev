@@ -239,6 +239,113 @@ func TestMeasureWithOptionsCountsOnlyActuallySkippedEntries(t *testing.T) {
 	}
 }
 
+func TestMeasureWithOptionsBuildsBoundedChildSummaryAndRemainder(t *testing.T) {
+	root := t.TempDir()
+	for name, size := range map[string]int{"alpha": 5, "delta": 5, "gamma": 3} {
+		if err := os.WriteFile(filepath.Join(root, name), make([]byte, size), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+	beta := filepath.Join(root, "beta")
+	if err := os.Mkdir(beta, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beta, "data"), make([]byte, 9), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	results := NewLimiter(2).MeasureWithOptions(
+		context.Background(), []Root{{Path: root}},
+		MeasureOptions{TolerateEntryErrors: true, CountSkipped: true, ChildSummaryLimit: 2}, nil,
+	)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("measurement = %#v, want one successful result", results)
+	}
+	result := results[0]
+	if result.Bytes != 22 {
+		t.Fatalf("root bytes = %d, want 22", result.Bytes)
+	}
+	if len(result.Children) != 2 {
+		t.Fatalf("children = %#v, want bounded top two", result.Children)
+	}
+	if result.Children[0].Name != "beta" || result.Children[0].Kind != "directory" ||
+		result.Children[0].SizeBytes == nil || *result.Children[0].SizeBytes != 9 {
+		t.Fatalf("largest child = %#v, want beta directory with 9 bytes", result.Children[0])
+	}
+	if result.Children[1].Name != "alpha" || result.Children[1].SizeBytes == nil || *result.Children[1].SizeBytes != 5 {
+		t.Fatalf("second child = %#v, want alpha with 5 bytes", result.Children[1])
+	}
+	if result.OtherObservedBytes != 8 || result.OtherObservedCount != 3 {
+		t.Fatalf("other observed = %d bytes / %d entries, want 8 / 3", result.OtherObservedBytes, result.OtherObservedCount)
+	}
+	if result.ChildSummaryStatus != ChildSummaryMeasured {
+		t.Fatalf("child summary status = %q, want measured", result.ChildSummaryStatus)
+	}
+}
+
+func TestMeasureWithOptionsLeavesSkippedChildSizeUnknown(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "known"), []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "known"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	results := NewLimiter(1).MeasureWithOptions(
+		context.Background(), []Root{{Path: root, SymlinkPolicy: SkipSymlinks}},
+		MeasureOptions{TolerateEntryErrors: true, CountSkipped: true, ChildSummaryLimit: 20}, nil,
+	)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("measurement = %#v, want one successful result", results)
+	}
+	if len(results[0].Children) != 2 {
+		t.Fatalf("children = %#v, want known file and skipped symlink", results[0].Children)
+	}
+	var link ChildEntry
+	for _, child := range results[0].Children {
+		if child.Name == "link" {
+			link = child
+		}
+	}
+	if link.Kind != "symlink" || link.SizeBytes != nil || link.Completeness != ChildSummaryPartial {
+		t.Fatalf("link summary = %#v, want partial symlink with unknown size", link)
+	}
+	if results[0].ChildSummaryStatus != ChildSummaryPartial {
+		t.Fatalf("child summary status = %q, want partial", results[0].ChildSummaryStatus)
+	}
+}
+
+func TestMeasureWithOptionsCapsChildSummaryAtTwenty(t *testing.T) {
+	root := t.TempDir()
+	for index := range 25 {
+		name := string(rune('a' + index))
+		if err := os.WriteFile(filepath.Join(root, name), make([]byte, index+1), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+	results := NewLimiter(4).MeasureWithOptions(
+		context.Background(), []Root{{Path: root}},
+		MeasureOptions{ChildSummaryLimit: 50}, nil,
+	)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("measurement = %#v, want one successful result", results)
+	}
+	result := results[0]
+	if len(result.Children) != 20 {
+		t.Fatalf("child count = %d, want bounded top twenty", len(result.Children))
+	}
+	if result.Children[0].Name != "y" || result.Children[0].SizeBytes == nil || *result.Children[0].SizeBytes != 25 {
+		t.Fatalf("largest child = %#v, want y with 25 bytes", result.Children[0])
+	}
+	if result.Bytes != 325 || result.OtherObservedBytes != 15 || result.OtherObservedCount != 5 {
+		t.Fatalf("summary = %#v, want total 325 and remainder 15 bytes across 5 entries", result)
+	}
+}
+
 func TestMeasureWithOptionsPreservesBytesFromInterruptedTolerantPartition(t *testing.T) {
 	root := t.TempDir()
 	partition := filepath.Join(root, "partition")

@@ -1,3 +1,5 @@
+import { usesSavedSidebarDisclosure } from "@/lib/sidebar/sidebar-disclosure-query";
+import type { BuiltinMCPInitialPreferences } from "@/lib/types/builtin-mcp";
 import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
@@ -9,8 +11,12 @@ import type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   WorkspaceSourceRequest,
+  WorkspaceRepositoryPlacementPreview,
   Task,
+  SidebarTaskQuery,
+  SidebarTaskPageResponse,
   TaskPriority,
+  InitialWorkspaceLayout,
   MoveTaskResponse,
   ReorderBand,
   ReorderStepTasksResponse,
@@ -118,12 +124,19 @@ export async function createTask(
      * recorded as a start-when-unblocked intent rather than launching now.
      */
     blocked_by?: string[];
+    /** Symmetric task relationships to establish after creation. */
+    related_task_ids?: string[];
+    mcp_server_ids?: string[];
+    builtin_mcp_preferences?: BuiltinMCPInitialPreferences;
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
+    initial_workspace_layout?: InitialWorkspaceLayout;
     priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
+    /** Office agent instance to seat as the task's runner at create time. */
+    assignee_agent_profile_id?: string;
     /** Office task-handoffs phase 4/5 — workspace policy. */
     workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
     workspace_group_id?: string;
@@ -133,6 +146,11 @@ export async function createTask(
     autopilot?: boolean;
     /** Task-only replacements for fixed workflow step agent profiles. */
     workflow_agent_overrides?: Record<string, string>;
+    /**
+     * Caller-supplied create-idempotency identity. The native dialog sends its
+     * retained submission identity so a retried request resolves to one task.
+     */
+    external_id?: string;
   },
   options?: ApiRequestOptions,
 ) {
@@ -145,6 +163,7 @@ export async function createTask(
 export async function updateTask(
   taskId: string,
   payload: {
+    flag_note?: string;
     title?: string;
     description?: string;
     position?: number;
@@ -205,6 +224,34 @@ export async function attachTaskWorkspaceSources(
   );
 }
 
+export async function previewTaskWorkspaceSources(
+  taskId: string,
+  payload: AttachTaskWorkspaceSourcesRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<WorkspaceRepositoryPlacementPreview>(
+    `/api/v1/tasks/${taskId}/workspace-sources/preview`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function detachTaskRepository(
+  taskId: string,
+  taskRepositoryId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ detached: boolean }>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/repositories/${encodeURIComponent(taskRepositoryId)}`,
+    {
+      ...options,
+      init: { method: "DELETE", ...(options?.init ?? {}) },
+    },
+  );
+}
+
 export async function updateTaskRepositoryBaseBranch(
   taskId: string,
   taskRepositoryId: string,
@@ -228,30 +275,55 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type TaskWorkspaceCleanup = "delete" | "retain";
+
 export type DeleteTaskParams = {
+  allowUnverifiedWorkspaceChanges?: boolean;
+  workspaceCleanup?: TaskWorkspaceCleanup;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  confirmationId?: string;
 };
 
 export type TaskDeletePreflightResponse = {
+  workspace_inspection?: "complete" | "unknown" | "not_requested";
   requires_discard_consent: boolean;
+  confirmation_id: string;
 };
 
 export async function getTaskDeletePreflight(
   taskIds: string[],
   cascade: boolean,
+  discardWorktreeChanges = false,
   options?: ApiRequestOptions,
+  cleanup: Pick<DeleteTaskParams, "workspaceCleanup" | "allowUnverifiedWorkspaceChanges"> = {},
 ) {
+  const { workspaceCleanup, allowUnverifiedWorkspaceChanges = false } = cleanup;
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
     ...options,
     cache: "no-store",
     init: {
       method: "POST",
-      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      body: JSON.stringify({
+        task_ids: taskIds,
+        ...(allowUnverifiedWorkspaceChanges ? { allow_unverified_workspace_changes: true } : {}),
+        ...(workspaceCleanup ? { workspace_cleanup: workspaceCleanup } : {}),
+        cascade,
+        discard_worktree_changes: discardWorktreeChanges,
+      }),
       ...(options?.init ?? {}),
     },
   });
 }
+
+export type TaskDeletionResult = {
+  success: boolean;
+  workspace_cleanup?: TaskWorkspaceCleanup;
+  retention_operation_ids?: string[];
+  cleanup_operation_ids?: string[];
+  workspace_cleanup_pending?: boolean;
+  runtime_stop_pending?: boolean;
+};
 
 export async function deleteTask(
   taskId: string,
@@ -259,15 +331,45 @@ export async function deleteTask(
   options?: ApiRequestOptions,
 ) {
   const queryParams = new URLSearchParams();
+  if (params?.allowUnverifiedWorkspaceChanges)
+    queryParams.set("allow_unverified_workspace_changes", "true");
+  if (params?.workspaceCleanup) queryParams.set("workspace_cleanup", params.workspaceCleanup);
   if (params?.cascade) queryParams.set("cascade", "true");
   if (params?.discardWorktreeChanges) {
     queryParams.set("discard_worktree_changes", "true");
   }
   const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
-  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
+  const headers = new Headers(options?.init?.headers);
+  if (params?.confirmationId) {
+    headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
+  }
+  return fetchJson<TaskDeletionResult | undefined>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
-    init: { method: "DELETE", ...(options?.init ?? {}) },
+    init: { method: "DELETE", ...options?.init, headers },
   });
+}
+
+/**
+ * Deletes a task after a native app action has already confirmed that outcome
+ * (for example, closing a quick-chat session). Dialog-driven deletion should
+ * pass its preview ticket directly to `deleteTask` instead.
+ */
+export async function deleteTaskAfterUserAction(
+  taskId: string,
+  params?: DeleteTaskParams,
+  options?: ApiRequestOptions,
+) {
+  const preview = await getTaskDeletePreflight(
+    [taskId],
+    params?.cascade ?? false,
+    params?.discardWorktreeChanges ?? false,
+    options,
+    {
+      workspaceCleanup: params?.workspaceCleanup,
+      allowUnverifiedWorkspaceChanges: params?.allowUnverifiedWorkspaceChanges,
+    },
+  );
+  return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }
 
 /** One-shot values applied when a task enters the destination workflow step. */
@@ -277,12 +379,26 @@ export type WorkflowMoveEntryOptions = {
   skip_step_prompt?: boolean;
 };
 
+export type WorkflowChangePayload = {
+  expected_workflow_id: string;
+  expected_step_id: string;
+  expected_updated_at: string;
+  agent_overrides: Record<string, string>;
+};
+
 export type MoveTaskPayload = {
   workflow_id: string;
   workflow_step_id: string;
   /** @deprecated Server computes arrival position per AC.28; this field is transmitted but ignored. */
   position?: number;
   entry_options?: WorkflowMoveEntryOptions | null;
+  workflow_change?: WorkflowChangePayload | null;
+  completion_override?: TaskCompletionMoveOverride | null;
+};
+
+export type TaskCompletionMoveOverride = {
+  expected_revision: number;
+  reason: string;
 };
 
 /** Move response fields added by the one-shot entry-options transport. */
@@ -422,18 +538,30 @@ export async function reorderStepTasks(
   );
 }
 
-export async function bulkMoveSelectedTasks(
-  payload: { task_ids: string[]; target_workflow_id: string; target_step_id: string },
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ moved_count: number }>("/api/v1/tasks/bulk-move", {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
-}
-
 export async function fetchTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}`, options);
+}
+
+/**
+ * The by-external-id GET route's body: the task plus whether that task's own
+ * required synchronous creation work settled. The route is read-only and
+ * returns archived tasks too, so it is the safe way to ask what holds an
+ * identity without risking a create.
+ */
+export type TaskByExternalIDLookup = Task & {
+  creation_complete: boolean;
+};
+
+export async function fetchTaskByExternalId(
+  workspaceId: string,
+  externalId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ external_id: externalId });
+  return fetchJson<TaskByExternalIDLookup>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/tasks/by-external-id?${query.toString()}`,
+    { ...options, cache: "no-store" },
+  );
 }
 
 export async function archiveTask(
@@ -483,6 +611,7 @@ export async function listTasksByWorkspace(
     query?: string;
     includeArchived?: boolean;
     onlyArchived?: boolean;
+    commandPanelVisible?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -496,8 +625,28 @@ export async function listTasksByWorkspace(
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
   if (params.onlyArchived) url.searchParams.set("only_archived", "true");
+  if (params.commandPanelVisible) url.searchParams.set("command_panel_visible", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);
   return fetchJson<ListTasksResponse>(url.toString(), options);
+}
+
+export async function querySidebarTasks(
+  workspaceId: string,
+  query: SidebarTaskQuery,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SidebarTaskPageResponse>(`/api/v1/workspaces/${workspaceId}/sidebar/query`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(
+        usesSavedSidebarDisclosure(query)
+          ? { ...query, collapsed_group_keys: [] }
+          : { ...query, disclosure_view_id: undefined },
+      ),
+      ...(options?.init ?? {}),
+    },
+  });
 }

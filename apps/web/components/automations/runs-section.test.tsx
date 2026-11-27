@@ -45,6 +45,7 @@ type RunsSectionHook = {
   refresh: () => void;
   deleteRun: (id: string) => void;
   deleteAllRuns: (runIds?: string[]) => void;
+  stopRun: (id: string) => Promise<void>;
 };
 
 function setup(
@@ -58,6 +59,7 @@ function setup(
     refresh: vi.fn(),
     deleteRun: vi.fn(),
     deleteAllRuns: vi.fn(),
+    stopRun: vi.fn(),
     ...overrides,
   });
   const view = render(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
@@ -101,6 +103,25 @@ describe("RunsSection status badges", () => {
     expect(badgeOf(RUN_ARCHIVED)).toBe(ARCHIVED);
     expect(badgeOf(RUN_CANCELLED)).toBe(CANCELLED);
   });
+  it("shows the scheduled retry badge and lets users stop it", () => {
+    const stopRun = vi.fn().mockResolvedValue(undefined);
+    setup(
+      [
+        mkRun({
+          id: "run-retry",
+          status: "scheduled_retry",
+          retry_state: "scheduled",
+          retry_scheduled_at: "2026-01-01T00:05:00Z",
+          attempt_number: 2,
+        }),
+      ],
+      { stopRun },
+    );
+
+    expect(badgeOf("run-retry")).toBe("Retry scheduled");
+    fireEvent.click(screen.getByTestId("stop-retry"));
+    expect(stopRun).toHaveBeenCalledWith("run-retry");
+  });
 });
 
 describe("RunsSection run log", () => {
@@ -135,6 +156,23 @@ describe("RunsSection run log", () => {
     expect(screen.getByTestId(RUN_OUTCOME).textContent).toContain("Sweep complete");
   });
 
+  it("shows delivery acceptance separately from the eventual conversation outcome", () => {
+    setup([
+      mkRun({
+        id: "run-managed-accepted",
+        task_id: "",
+        status: "triggered",
+        delivery_status: "accepted",
+      }),
+    ]);
+
+    expect(screen.getByTestId("run-delivery-status").textContent).toBe("Accepted");
+    expect(
+      screen.getByTestId("run-row-run-managed-accepted").querySelector("[data-slot='badge']")
+        ?.textContent,
+    ).toContain("Triggered");
+  });
+
   it("prefers the error over the summary when a run failed", () => {
     setup([
       mkRun({
@@ -165,6 +203,29 @@ describe("RunsSection run log", () => {
 
     expect(screen.queryByTestId("run-filter-failed")).toBeNull();
     expect(screen.getByTestId("run-filter-succeeded")).toBeTruthy();
+  });
+  it("treats triggered and task-created runs as Running", () => {
+    const deleteAllRuns = vi.fn();
+    setup(
+      [
+        mkRun({ id: "run-triggered", status: "triggered" }),
+        mkRun({ id: "run-task-created", status: "task_created" }),
+        mkRun({ id: "run-succeeded", status: "succeeded" }),
+      ],
+      { deleteAllRuns },
+    );
+
+    const runningFilter = screen.getByTestId("run-filter-task_created");
+    expect(runningFilter.textContent).toContain("2");
+    fireEvent.click(runningFilter);
+
+    expect(screen.getByTestId("run-row-run-triggered")).toBeTruthy();
+    expect(screen.getByTestId("run-row-run-task-created")).toBeTruthy();
+    expect(screen.queryByTestId("run-row-run-succeeded")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("delete-all-runs"));
+    fireEvent.click(screen.getByTestId("delete-all-runs-confirm"));
+    expect(deleteAllRuns).toHaveBeenCalledWith(["run-triggered", "run-task-created"]);
   });
 });
 

@@ -7,7 +7,7 @@ import {
   resolvedAgentErrorAcknowledgementStamp,
 } from "@/lib/task-agent-error";
 import type { TaskSession } from "@/lib/types/http";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 
 type UseAgentErrorAcknowledgementsParams = {
   sessionsById: Record<string, TaskSession>;

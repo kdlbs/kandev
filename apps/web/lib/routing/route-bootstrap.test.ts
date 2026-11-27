@@ -16,6 +16,7 @@ const OFFICE_COOKIE = "office-active-workspace";
 
 import {
   apiOriginPort,
+  mapWorkflowItem,
   mapWorkspaceItem,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
@@ -25,7 +26,13 @@ import {
   resolveSettingsActiveWorkspaceId,
   scopedCookieName,
 } from "./route-bootstrap";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import {
+  agentProfileId,
+  workflowId,
+  workspaceId,
+  type ListWorkspacesResponse,
+  type Workflow,
+} from "@/lib/types/http";
 
 type WorkspaceItem = ListWorkspacesResponse["workspaces"][number];
 
@@ -51,13 +58,81 @@ describe("mapWorkspaceItem", () => {
       name: "Workspace",
       description: null,
       owner_id: "owner-1",
+      unit_id: undefined,
+      viewer_role: undefined,
+      scopes: undefined,
+      member_count: undefined,
       default_executor_id: null,
       default_environment_id: null,
       default_agent_profile_id: null,
       default_config_agent_profile_id: null,
+      acp_idle_suspension_enabled: false,
+      acp_idle_timeout_minutes: 120,
       office_workflow_id: null,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
+    });
+  });
+});
+
+describe("mapWorkflowItem", () => {
+  const listedWorkflow = (overrides: Partial<Workflow> = {}): Workflow => ({
+    id: workflowId("wf-1"),
+    workspace_id: workspaceId("ws-1"),
+    name: "Development",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+    ...overrides,
+  });
+
+  it("keeps the editable workflow fields the settings page saves", () => {
+    expect(
+      mapWorkflowItem(
+        listedWorkflow({
+          description: "Plan, implement, review",
+          prompt: "Shared step-entry instructions",
+          sort_order: 2,
+          agent_profile_id: agentProfileId("profile-1"),
+          hidden: false,
+          style: "kanban",
+        }),
+      ),
+    ).toEqual({
+      id: "wf-1",
+      workspaceId: "ws-1",
+      name: "Development",
+      description: "Plan, implement, review",
+      prompt: "Shared step-entry instructions",
+      sortOrder: 2,
+      agent_profile_id: "profile-1",
+      hidden: false,
+      style: "kanban",
+    });
+  });
+
+  it("maps a prompt the API omitted as empty", () => {
+    expect(mapWorkflowItem(listedWorkflow())).toEqual({
+      id: "wf-1",
+      workspaceId: "ws-1",
+      name: "Development",
+      description: null,
+      prompt: "",
+      sortOrder: 0,
+    });
+  });
+
+  it("preserves provenance for synced workflows", () => {
+    expect(
+      mapWorkflowItem(
+        listedWorkflow({
+          source: "github",
+          source_path: ".kandev/workflows/development.yaml",
+        }),
+      ),
+    ).toMatchObject({
+      id: "wf-1",
+      source: "github",
+      source_path: ".kandev/workflows/development.yaml",
     });
   });
 });
@@ -112,6 +187,18 @@ describe("resolveSettingsActiveWorkspaceId", () => {
 
   it("returns null when no workspaces exist", () => {
     expect(resolveSettingsActiveWorkspaceId([], "k-1", "k-2")).toBeNull();
+  });
+
+  it("prefers the workspace already active in this tab over the shared cookie", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], KANBAN.id, null, OFFICE.id)).toBe(
+      OFFICE.id,
+    );
+  });
+
+  it("ignores a current workspace that no longer exists", () => {
+    expect(resolveSettingsActiveWorkspaceId([OFFICE, KANBAN], KANBAN.id, null, "gone")).toBe(
+      KANBAN.id,
+    );
   });
 });
 
@@ -336,7 +423,7 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
   const readers = [
     "src/office-routes.tsx", // office boot: general then office family
     "src/kanban-route.tsx", // kanban boot: general family
-    "src/settings-routes.tsx", // settings boot: general family
+    "src/settings-routes.initial-state.ts", // settings boot: general family
     "src/spa-routes.tsx", // generic boot re-hydration: general family
   ];
   const writer = "components/app-sidebar/app-sidebar-workspace-navigation.ts";
@@ -381,7 +468,11 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
       "office-routes must read the general family before the office family",
     ).toBeLessThan(office);
     // Kanban and settings boot read only the general family.
-    for (const file of ["src/kanban-route.tsx", "src/settings-routes.tsx", "src/spa-routes.tsx"]) {
+    for (const file of [
+      "src/kanban-route.tsx",
+      "src/settings-routes.initial-state.ts",
+      "src/spa-routes.tsx",
+    ]) {
       const source = compact(file);
       expect(
         source.includes("readActiveWorkspaceCookie()"),

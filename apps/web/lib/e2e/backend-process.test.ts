@@ -1,9 +1,10 @@
+import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, test, vi } from "vitest";
 import { killProcessGroup } from "../../e2e/fixtures/process-group";
 
 function childProcessWithPid(pid: number): ChildProcess {
-  return { pid } as ChildProcess;
+  return Object.assign(new EventEmitter(), { pid }) as ChildProcess;
 }
 
 describe("killProcessGroup", () => {

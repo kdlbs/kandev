@@ -1,5 +1,7 @@
 package orchestrator
 
+import "errors"
+
 const detailsKeyKind = "kind"
 
 // SessionRecoveryGuardError identifies a session launch refused by the
@@ -26,6 +28,11 @@ func (e *SessionRecoveryGuardError) Unwrap() error {
 		return nil
 	}
 	return e.Cause
+}
+
+func isRetryableSessionRecoveryGuardError(err error) bool {
+	var guardErr *SessionRecoveryGuardError
+	return errors.As(err, &guardErr) && guardErr.Retryable
 }
 
 // Details returns the stable WebSocket recovery contract for this error.

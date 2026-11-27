@@ -6,7 +6,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins"
+	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -51,9 +53,23 @@ func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userServi
 	g.TerminalHandler = NewTerminalHandler(lifecycleMgr, userService, scriptService, g.logger)
 }
 
+// SetTerminalService wires persisted ordinary-shell launch metadata into the
+// WebSocket handler after storage services are constructed.
+func (g *Gateway) SetTerminalService(terminals *terminalservice.Service) {
+	if g.TerminalHandler != nil {
+		g.TerminalHandler.SetTerminalService(terminals)
+	}
+}
+
 // SetLSPHandler enables the LSP WebSocket handler.
-func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, configuredMax ...int) {
-	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger, configuredMax...)
+func (g *Gateway) SetLSPHandler(
+	lifecycleMgr *lifecycle.Manager,
+	userService LSPUserService,
+	maxConnections int,
+	sessionFence func(string) func(),
+	eventBus bus.EventBus,
+) {
+	g.LSPHandler = newLSPHandler(lifecycleMgr, userService, g.logger, maxConnections, sessionFence, eventBus)
 }
 
 // SetVscodeProxy enables the VS Code reverse proxy handler.

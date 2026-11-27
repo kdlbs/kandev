@@ -4,15 +4,18 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // EventPublisher handles publishing agent lifecycle and session events to the event bus.
@@ -61,10 +64,54 @@ func (p *EventPublisher) publishAgentEventWithTurnIDAndEvidence(
 	p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
+func (p *EventPublisher) publishAgentEventWithTerminalEvent(
+	ctx context.Context,
+	eventType string,
+	execution *AgentExecution,
+	terminal *streams.AgentEvent,
+	evidence *PromptAttemptEvidence,
+) {
+	if terminal == nil {
+		p.publishAgentEventWithTurnIDAndEvidence(ctx, eventType, execution, execution.promptTurnIDSnapshot(), evidence)
+		return
+	}
+	payload := newAgentEventPayloadWithTurnIDAndEvidence(execution, terminal.TurnID, evidence)
+	copyDeliveryTerminalIdentity(&payload, terminal, execution)
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
+	}
+	_ = p.publishAgentEventPayload(ctx, eventType, payload)
+}
+
+func copyDeliveryTerminalIdentity(
+	payload *AgentEventPayload,
+	terminal *streams.AgentEvent,
+	execution *AgentExecution,
+) {
+	if payload == nil || terminal == nil {
+		return
+	}
+	payload.DeliveryStreamID = terminal.DeliveryStreamID
+	payload.DeliveryIncarnationID = terminal.DeliveryIncarnationID
+	payload.DeliveryHarnessGeneration = terminal.DeliveryHarnessGeneration
+	payload.DeliverySequence = terminal.DeliverySequence
+	payload.DeliverySubmissionID = terminal.DeliverySubmissionID
+	payload.DetachedAtCommit = terminal.DetachedAtCommit
+	payload.CommittedAt = terminal.CommittedAt
+	payload.CancelCause = terminal.CancelCause
+	payload.CancelDecidedAt = terminal.CancelDecidedAt
+	copyTerminalStorageIdentity(payload, terminal, execution)
+	payload.DeliveryOutcome = string(models.DeliverySubmissionCompleted)
+	if isError, _ := terminal.Data["is_error"].(bool); isError {
+		payload.DeliveryOutcome = string(models.DeliverySubmissionFailed)
+	} else if terminal.Data["stop_reason"] == string(models.DeliverySubmissionCancelled) {
+		payload.DeliveryOutcome = string(models.DeliverySubmissionCancelled)
+	}
+}
+
 // PublishAgentStalled publishes one inactivity signal for a prompt.
-// neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, and activityEpoch lets the consumer revalidate that
-// classification before applying a terminal transition.
+// Acceptance and output are independent. The activity epoch lets the consumer
+// reject a stale snapshot before writing an advisory notice.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -73,6 +120,7 @@ func (p *EventPublisher) PublishAgentStalled(
 	stalledFor time.Duration,
 	activityEpoch uint64,
 	neverStarted bool,
+	accepted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -86,6 +134,8 @@ func (p *EventPublisher) PublishAgentStalled(
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,
+		PromptAccepted:   accepted,
+		OutputObserved:   !neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID
@@ -102,9 +152,9 @@ func (p *EventPublisher) PublishAgentStalled(
 }
 
 // publishAgentEventPayload publishes an immutable agent lifecycle snapshot.
-func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) {
+func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) error {
 	if p.eventBus == nil {
-		return
+		return fmt.Errorf("event bus is unavailable")
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -114,15 +164,26 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
+		return err
 	} else {
 		p.logger.Debug("published agent event",
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID))
 	}
+	return nil
 }
 
+// newAgentEventPayload takes execution.promptLifecycleMu to snapshot the turn.
+// Never call it while the execution store lock is held; use
+// ExecutionStore.WithPromptLifecycleLock with newAgentEventPayloadPromptLocked.
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnIDSnapshot())
+}
+
+// newAgentEventPayloadPromptLocked is newAgentEventPayload for callers that
+// already hold execution.promptLifecycleMu.
+func newAgentEventPayloadPromptLocked(execution *AgentExecution) AgentEventPayload {
+	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnID)
 }
 
 func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
@@ -134,40 +195,68 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	turnID string,
 	evidence *PromptAttemptEvidence,
 ) AgentEventPayload {
+	startupFailure := execution.startupFailureMetadataSnapshot()
+	deliverySubmissionID := uncertainFailureSubmissionID(execution)
 	payload := AgentEventPayload{
-		AgentExecutionID:   execution.ID,
-		AttemptID:          execution.currentStartupAttemptID(),
-		OwnerKind:          executionOwnerKind(execution),
-		WorkspaceID:        execution.WorkspaceID,
-		RunID:              execution.RunID,
-		RunSessionID:       execution.RunSessionID,
-		RunAttempt:         execution.RunAttempt,
-		TaskID:             execution.TaskID,
-		SessionID:          execution.SessionID,
-		TaskEnvironmentID:  execution.TaskEnvironmentID,
-		TurnID:             turnID,
-		AgentID:            execution.AgentID,
-		AgentProfileID:     execution.officeProfileID(),
-		ExecutionProfileID: execution.AgentProfileID,
-		ContainerID:        execution.ContainerID,
-		Status:             string(execution.Status),
-		StartedAt:          execution.StartedAt,
-		FinishedAt:         execution.FinishedAt,
-		ErrorMessage:       execution.ErrorMessage,
-		FailureCode:        execution.FailureCode,
-		FailureDetails:     execution.FailureDetails,
-		ProviderError:      execution.ProviderError,
-		ExitCode:           execution.ExitCode,
-		PromptGeneration:   execution.promptGeneration,
+		AgentExecutionID:       execution.ID,
+		AttemptID:              execution.currentStartupAttemptID(),
+		OwnerKind:              executionOwnerKind(execution),
+		WorkspaceID:            execution.WorkspaceID,
+		RunID:                  execution.RunID,
+		CausingRunID:           execution.CausingRunID,
+		TerminalCausingRunID:   execution.TerminalCausingRunID,
+		RunSessionID:           execution.RunSessionID,
+		RunAttempt:             execution.RunAttempt,
+		TaskID:                 execution.TaskID,
+		SessionID:              execution.SessionID,
+		TaskEnvironmentID:      execution.TaskEnvironmentID,
+		TurnID:                 turnID,
+		AgentID:                execution.AgentID,
+		AgentProfileID:         execution.officeProfileID(),
+		ExecutionProfileID:     execution.AgentProfileID,
+		ResourceCircuitKey:     execution.resourceCircuitKey(),
+		ContainerID:            execution.ContainerID,
+		Status:                 string(execution.Status),
+		StartedAt:              execution.StartedAt,
+		FinishedAt:             execution.FinishedAt,
+		ErrorMessage:           execution.ErrorMessage,
+		FailureCode:            execution.FailureCode,
+		FailureDetails:         execution.FailureDetails,
+		DeliverySubmissionID:   deliverySubmissionID,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
+		ProviderError:          execution.ProviderError,
+		SessionSettingsPolicy:  sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy()),
+		ExitCode:               execution.ExitCode,
+		PromptGeneration:       execution.promptGeneration,
 	}
 	if evidence != nil {
 		payload.EvidenceKnown = evidence.EvidenceKnown
 		payload.OutputObserved = evidence.OutputObserved
 		payload.EffectObserved = evidence.EffectObserved
+		if evidence.ContinuationSafety != nil {
+			snapshot := *evidence.ContinuationSafety
+			payload.ContinuationSafety = &snapshot
+		}
+		if evidence.CapacityContinuation != nil {
+			snapshot := *evidence.CapacityContinuation
+			payload.CapacityContinuation = &snapshot
+		}
 		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}
 	return payload
+}
+
+func uncertainFailureSubmissionID(execution *AgentExecution) string {
+	if execution == nil || execution.FailureCode != durableDeliveryUncertainFailureCode || execution.FailureDetails == "" {
+		return ""
+	}
+	if currentDeliverySubmissionID(execution) != execution.FailureDetails {
+		return ""
+	}
+	return execution.FailureDetails
 }
 
 // PublishAgentctlEvent publishes an agentctl lifecycle event (starting, ready, error).
@@ -175,6 +264,51 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	if p.eventBus == nil {
 		return
 	}
+	payload := p.agentctlEventPayload(ctx, execution, errMsg)
+	// Only a ready event confirms the launched execution workspace. A starting
+	// event can carry a prepared path that has not been validated yet.
+	if eventType == events.AgentctlReady {
+		payload.AgentWorkspacePath = execution.WorkspacePath
+	}
+	p.publishAgentctlEventPayload(ctx, eventType, payload)
+}
+
+// PublishAgentctlDeliveryRecovery publishes an immutable reconciliation state
+// captured by the reconciliation owner.
+func (p *EventPublisher) PublishAgentctlDeliveryRecovery(
+	ctx context.Context,
+	execution *AgentExecution,
+	identity DeliveryReconciliationIdentity,
+	phase DeliveryReconciliationPhase,
+) {
+	if p.eventBus == nil || execution == nil {
+		return
+	}
+	message := "reconnecting to the agent delivery stream"
+	switch phase {
+	case DeliveryReconciliationPhaseUncertain:
+		message = ErrUncertainPromptDelivery.Error()
+	case DeliveryReconciliationPhaseRecovered:
+		message = "the original agent delivery stream is reattached"
+	}
+	payload := p.agentctlEventPayload(ctx, execution, message)
+	payload.OriginalRuntime = identity.OriginalRuntime
+	payload.DeliveryRecoveryPhase = string(phase)
+	payload.DeliverySubmissionID = identity.SubmissionID
+	payload.DeliveryStreamID = identity.StreamID
+	payload.DeliveryIncarnationID = identity.IncarnationID
+	payload.DeliveryHarnessGeneration = identity.HarnessGeneration
+	payload.PromptGeneration = identity.PromptGeneration
+	payload.FailureCode = deliveryReconciliationFailureCode(phase)
+	payload.FailureDetails = identity.SubmissionID
+	p.publishAgentctlEventPayload(ctx, events.AgentctlError, payload)
+}
+
+func (p *EventPublisher) agentctlEventPayload(
+	ctx context.Context,
+	execution *AgentExecution,
+	errMsg string,
+) AgentctlEventPayload {
 
 	var worktreeID string
 	var worktreeBranch string
@@ -185,33 +319,40 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		worktreeBranch, _ = branch.(string)
 	}
 
+	startupFailure := execution.startupFailureMetadataSnapshot()
 	payload := AgentctlEventPayload{
-		OwnerKind:         executionOwnerKind(execution),
-		WorkspaceID:       execution.WorkspaceID,
-		RunID:             execution.RunID,
-		RunSessionID:      execution.RunSessionID,
-		RunAttempt:        execution.RunAttempt,
-		TaskID:            execution.TaskID,
-		SessionID:         execution.SessionID,
-		TaskEnvironmentID: execution.TaskEnvironmentID,
-		AgentExecutionID:  execution.ID,
-		AttemptID:         execution.currentStartupAttemptID(),
-		ErrorMessage:      errMsg,
-		FailureCode:       execution.FailureCode,
-		FailureDetails:    execution.FailureDetails,
-		WorktreeID:        worktreeID,
-		WorktreePath:      execution.WorkspacePath,
-		WorktreeBranch:    worktreeBranch,
+		OwnerKind:              executionOwnerKind(execution),
+		WorkspaceID:            execution.WorkspaceID,
+		RunID:                  execution.RunID,
+		RunSessionID:           execution.RunSessionID,
+		RunAttempt:             execution.RunAttempt,
+		TaskID:                 execution.TaskID,
+		SessionID:              execution.SessionID,
+		TaskEnvironmentID:      execution.TaskEnvironmentID,
+		AgentExecutionID:       execution.ID,
+		AttemptID:              execution.currentStartupAttemptID(),
+		ErrorMessage:           errMsg,
+		FailureCode:            execution.FailureCode,
+		FailureDetails:         execution.FailureDetails,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
+		WorktreeID:             worktreeID,
+		WorktreePath:           execution.WorkspacePath,
+		WorktreeBranch:         worktreeBranch,
 	}
 	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
 		payload.AttemptID = attemptID
 	}
+	return payload
+}
 
+func (p *EventPublisher) publishAgentctlEventPayload(ctx context.Context, eventType string, payload AgentctlEventPayload) {
 	event := bus.NewEvent(eventType, "agent-manager", payload)
 	if err := p.eventBus.Publish(ctx, eventType, event); err != nil {
 		p.logger.Error("failed to publish agentctl event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", execution.ID),
+			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
 	}
 }
@@ -233,15 +374,7 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 		attemptID = execution.currentStartupAttemptID()
 	}
 
-	payload := ACPSessionCreatedPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.ID,
-		AgentExecutionID: execution.ID,
-		AttemptID:        attemptID,
-		ACPSessionID:     sessionID,
-	}
-
+	payload := newACPSessionCreatedPayload(execution, sessionID, attemptID)
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
 	if err := p.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
 		p.logger.Error("failed to publish ACP session event",
@@ -251,9 +384,35 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 	}
 }
 
+func newACPSessionCreatedPayload(execution *AgentExecution, sessionID, attemptID string) ACPSessionCreatedPayload {
+	return ACPSessionCreatedPayload{
+		TaskID:                             execution.TaskID,
+		SessionID:                          execution.SessionID,
+		AgentProfileID:                     execution.ID,
+		AgentExecutionID:                   execution.ID,
+		AttemptID:                          attemptID,
+		ACPSessionID:                       sessionID,
+		DeliveryStreamID:                   execution.DeliveryStreamID,
+		DeliveryIncarnationID:              execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:          execution.DeliveryHarnessGeneration,
+		AdapterVersion:                     adapterVersionForExecution(execution),
+		DeliveryReplacesNativeConversation: execution.ReplacesNativeConversation,
+	}
+}
+
+func adapterVersionForExecution(execution *AgentExecution) string {
+	if execution == nil || execution.AuthPolicy == nil {
+		return ""
+	}
+	return execution.AuthPolicy.AdapterVersion
+}
+
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
 // This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
 func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	p.publishAgentStreamEventWithAttempt(execution, event, event.AttemptID)
 }
 
@@ -279,21 +438,24 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		OwnerKind:      executionOwnerKind(execution),
-		WorkspaceID:    execution.WorkspaceID,
-		RunID:          execution.RunID,
-		RunSessionID:   execution.RunSessionID,
-		RunAttempt:     execution.RunAttempt,
-		AgentProfileID: execution.officeProfileID(),
-		AgentType:      execution.AgentID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           eventData,
+		Type:                            "agent/event",
+		Timestamp:                       time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:                         execution.ID,
+		ExecutionID:                     execution.ID,
+		AttemptID:                       attemptID,
+		SessionSettingsSourceGeneration: event.SessionSettingsSourceGeneration,
+		OwnerKind:                       executionOwnerKind(execution),
+		WorkspaceID:                     execution.WorkspaceID,
+		RunID:                           execution.RunID,
+		RunSessionID:                    execution.RunSessionID,
+		RunAttempt:                      execution.RunAttempt,
+		AgentProfileID:                  execution.officeProfileID(),
+		ExecutionProfileID:              execution.AgentProfileID,
+		ResourceCircuitKey:              execution.resourceCircuitKey(),
+		AgentType:                       execution.AgentID,
+		TaskID:                          execution.TaskID,
+		SessionID:                       execution.SessionID,
+		Data:                            eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
@@ -311,52 +473,75 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 }
 
 func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	configurationResult := event.ConfigurationCommandResult
+	if event.Recovered {
+		configurationResult = nil
+	}
 	return &AgentStreamEventData{
-		Type:                        event.Type,
-		ACPSessionID:                event.SessionID,
-		Text:                        event.Text,
-		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
-		ToolCallID:                  event.ToolCallID,
-		ParentToolCallID:            event.ParentToolCallID,
-		PendingID:                   event.PendingID,
-		RequestID:                   event.RequestID,
-		ToolName:                    event.ToolName,
-		ToolTitle:                   event.ToolTitle,
-		ToolStatus:                  event.ToolStatus,
-		Error:                       event.Error,
-		ProviderError:               event.ProviderError,
-		SessionStatus:               event.SessionStatus,
-		PromptGeneration:            event.PromptGeneration,
-		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
-		TurnID:                      event.TurnID,
-		Data:                        event.Data,
-		Normalized:                  event.NormalizedPayload,
-		AvailableCommands:           event.AvailableCommands,
-		ToolCallContents:            event.ToolCallContents,
-		ContentBlocks:               event.ContentBlocks,
-		Role:                        event.Role,
-		CurrentModeID:               event.CurrentModeID,
-		AvailableModes:              event.AvailableModes,
-		SupportsImage:               event.SupportsImage,
-		SupportsAudio:               event.SupportsAudio,
-		SupportsEmbeddedContext:     event.SupportsEmbeddedContext,
-		SupportsPromptQueueing:      event.SupportsPromptQueueing,
-		AuthMethods:                 event.AuthMethods,
-		CurrentModelID:              event.CurrentModelID,
-		FallbackModel:               event.FallbackModel,
-		ModelSelectionWarning:       event.ModelSelectionWarning,
-		SessionModels:               event.SessionModels,
-		ConfigOptions:               event.ConfigOptions,
-		ConfigBaselineCandidate:     event.ConfigBaselineCandidate,
-		OriginalConfigCandidate:     event.OriginalConfigCandidate,
-		SessionTitle:                event.SessionTitle,
-		SessionUpdatedAt:            event.SessionUpdatedAt,
-		SessionMeta:                 event.SessionMeta,
-		Usage:                       event.Usage,
-		PlanEntries:                 event.PlanEntries,
-		PlanContent:                 event.PlanContent,
-		MCPAttachment:               event.MCPAttachment,
-		MCPAttachmentAttempt:        event.MCPAttachmentAttempt,
+		Type:                             event.Type,
+		ACPSessionID:                     event.SessionID,
+		OperationID:                      event.OperationID,
+		ProtocolMessageID:                event.ProtocolMessageID,
+		Text:                             event.Text,
+		ProviderDiagnosticCandidate:      event.ProviderDiagnosticCandidate,
+		ToolCallID:                       event.ToolCallID,
+		ParentToolCallID:                 event.ParentToolCallID,
+		PendingID:                        event.PendingID,
+		RequestID:                        event.RequestID,
+		ToolName:                         event.ToolName,
+		ToolTitle:                        event.ToolTitle,
+		ToolStatus:                       event.ToolStatus,
+		Error:                            event.Error,
+		PromptFailureDisposition:         event.PromptFailureDisposition,
+		ProviderError:                    event.ProviderError,
+		SessionStatus:                    event.SessionStatus,
+		SessionSettingsPolicy:            event.SessionSettingsPolicy,
+		SessionSettingsGeneration:        event.SessionSettingsGeneration,
+		PromptGeneration:                 event.PromptGeneration,
+		ConfigurationCommandResult:       configurationResult,
+		RetractedMessageIDs:              append([]string(nil), event.RetractedMessageIDs...),
+		TurnID:                           event.TurnID,
+		Data:                             event.Data,
+		CanonicalProjection:              event.CanonicalProjection,
+		ShellOutputHasContent:            event.ShellOutputHasContent,
+		MessageID:                        event.CanonicalMessageID,
+		IsAppend:                         event.CanonicalMessageAppend,
+		MessageType:                      canonicalMessageType(event),
+		Normalized:                       event.NormalizedPayload,
+		AvailableCommands:                event.AvailableCommands,
+		ToolCallContents:                 event.ToolCallContents,
+		ContentBlocks:                    event.ContentBlocks,
+		Role:                             event.Role,
+		CurrentModeID:                    event.CurrentModeID,
+		RequestedModeID:                  event.RequestedModeID,
+		AvailableModes:                   event.AvailableModes,
+		SupportsImage:                    event.SupportsImage,
+		SupportsAudio:                    event.SupportsAudio,
+		SupportsEmbeddedContext:          event.SupportsEmbeddedContext,
+		SupportsPromptQueueing:           event.SupportsPromptQueueing,
+		SupportsPromptSuggestions:        event.SupportsPromptSuggestions,
+		NativePromptSuggestionsSupported: event.NativePromptSuggestionsSupported,
+		AuthMethods:                      event.AuthMethods,
+		CurrentModelID:                   event.CurrentModelID,
+		FallbackModel:                    event.FallbackModel,
+		ModelSelectionWarning:            event.ModelSelectionWarning,
+		SessionModels:                    event.SessionModels,
+		ConfigOptions:                    event.ConfigOptions,
+		VerifiedConfigOptionIDs:          event.VerifiedConfigOptionIDs,
+		ConfigBaselineCandidate:          event.ConfigBaselineCandidate,
+		OriginalConfigCandidate:          event.OriginalConfigCandidate,
+		SessionTitle:                     event.SessionTitle,
+		SessionUpdatedAt:                 event.SessionUpdatedAt,
+		SessionMeta:                      event.SessionMeta,
+		Usage:                            event.Usage,
+		UsageObservation:                 event.UsageObservation,
+		PlanEntries:                      event.PlanEntries,
+		PlanContent:                      event.PlanContent,
+		MCPAttachment:                    event.MCPAttachment,
+		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		ContextCompaction:                event.ContextCompaction,
+		BackgroundWork:                   event.BackgroundWork,
+		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
 }
 
@@ -385,6 +570,44 @@ func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID 
 		return runSessionID
 	}
 	return sessionID
+}
+
+// PublishWorktreeInventory publishes one filtered linked-worktree snapshot.
+// Identity comes from the execution, never from the agentctl payload.
+func (p *EventPublisher) PublishWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if p.eventBus == nil || execution == nil || inventory == nil {
+		return
+	}
+	entries := make([]WorktreeInventoryEntryData, 0, len(inventory.Entries))
+	for _, entry := range inventory.Entries {
+		entries = append(entries, WorktreeInventoryEntryData{
+			Path:    entry.Path,
+			Branch:  entry.Branch,
+			HeadSHA: entry.HeadSHA,
+		})
+	}
+	observedAt := inventory.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	payload := &WorktreeInventoryData{
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		ExecutorType:      execution.ExecutorType,
+		RepositoryName:    inventory.RepositoryName,
+		CommonDir:         inventory.CommonDir,
+		Entries:           entries,
+		ObservedAt:        observedAt.Format(time.RFC3339Nano),
+	}
+	event := bus.NewEvent(events.WorkspaceWorktreesObserved, "lifecycle", payload)
+	subject := events.BuildWorkspaceWorktreesSubject(execution.SessionID)
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish worktree inventory",
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.
@@ -418,6 +641,13 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		AgentID:           execution.ID,
 		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
+			StatusState:         update.StatusState,
+			FilesComplete:       update.FilesComplete,
+			DetailState:         update.DetailState,
+			ErrorCode:           update.ErrorCode,
+			TrackerID:           update.TrackerID,
+			TrackerEpoch:        update.TrackerEpoch,
+			SnapshotRevision:    update.SnapshotRevision,
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,
 			HeadCommit:          update.HeadCommit,
@@ -532,9 +762,15 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 }
 
 // PublishPermissionRequest publishes a permission request event to the event bus.
-func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) {
+func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) error {
 	if p.eventBus == nil {
-		return
+		if event.AutoApprovedOptionID != "" {
+			err := fmt.Errorf("event bus unavailable for automatic permission decision")
+			p.logger.Error("failed to publish permission_request event",
+				permissionRequestLogFields(execution, event, err)...)
+			return err
+		}
+		return nil
 	}
 
 	// Convert options to typed format
@@ -558,26 +794,70 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
+
+		AgentExecutionID: execution.ID,
+		OwnerKind:        executionOwnerKind(execution),
+		WorkspaceID:      execution.WorkspaceID,
+		RunID:            execution.RunID,
+		RunSessionID:     execution.RunSessionID,
+		RunAttempt:       execution.RunAttempt,
+		AgentProfileID:   execution.officeProfileID(),
+
+		AutoApprovedOptionID:   event.AutoApprovedOptionID,
+		AutoApprovalPending:    event.AutoApprovalPending,
+		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
+		AutoApprovalSource:     event.AutoApprovalSource,
 	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
-	subject := events.BuildPermissionRequestSubject(execution.SessionID)
+	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(
+		payload.OwnerKind, execution.SessionID, execution.RunSessionID,
+	))
 
-	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
-		p.logger.Error("failed to publish permission_request event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.Error(err))
-	} else {
-		p.logger.Debug("published permission_request event",
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.String("pending_id", event.PendingID),
-			zap.String("title", event.PermissionTitle))
+	const maxAttempts = 3
+	var publishErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		publishErr = p.eventBus.Publish(context.Background(), subject, busEvent)
+		if publishErr == nil {
+			p.logger.Debug("published permission_request event",
+				zap.String("task_id", execution.TaskID),
+				zap.String("session_id", execution.SessionID),
+				zap.String("pending_id", event.PendingID),
+				zap.String("title", event.PermissionTitle),
+				zap.Int("attempt", attempt))
+			return nil
+		}
+		if attempt < maxAttempts {
+			timer := time.NewTimer(time.Duration(attempt) * 50 * time.Millisecond)
+			<-timer.C
+		}
 	}
+	fields := permissionRequestLogFields(execution, event, publishErr)
+	fields = append(fields, zap.Int("attempts", maxAttempts))
+	p.logger.Error("failed to publish permission_request event", fields...)
+	return publishErr
+}
+
+func permissionRequestLogFields(execution *AgentExecution, event agentctl.AgentEvent, err error) []zap.Field {
+	fields := []zap.Field{
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("request_id", event.RequestID),
+		zap.String("pending_id", event.PendingID),
+		zap.Error(err),
+	}
+	if event.AutoApprovedOptionID != "" {
+		fields = append(fields,
+			zap.String("auto_approved_option_id", event.AutoApprovedOptionID),
+			zap.String("auto_approved_option_kind", event.AutoApprovedOptionKind),
+			zap.String("auto_approval_source", event.AutoApprovalSource),
+		)
+	}
+	return fields
 }
 
 // PublishShellOutput publishes a shell output event to the event bus.
@@ -703,14 +983,16 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 	sessionID := execution.SessionID
 
 	payload := ContextWindowEventPayload{
-		TaskID:                 execution.TaskID,
-		SessionID:              sessionID,
-		AgentID:                execution.ID,
-		ContextWindowSize:      size,
-		ContextWindowUsed:      used,
-		ContextWindowRemaining: remaining,
-		ContextEfficiency:      efficiency,
-		Timestamp:              time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:                      execution.TaskID,
+		SessionID:                   sessionID,
+		AgentID:                     execution.ID,
+		ContextWindowSize:           size,
+		ContextWindowUsed:           used,
+		ContextWindowRemaining:      remaining,
+		ContextEfficiency:           efficiency,
+		CompactionInferenceDisabled: compactionInferenceDisabledForProvider(execution.AgentID),
+		CopilotNativeSessionEvents:  execution.CopilotNativeSessionEvents,
+		Timestamp:                   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.ContextWindowUpdated, "agent-manager", payload)
@@ -723,6 +1005,13 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// compactionInferenceDisabledForProvider reports whether usage drops from this
+// provider cannot distinguish a compaction from a switch between mixed agent
+// contexts.
+func compactionInferenceDisabledForProvider(agentID string) bool {
+	return agentID == agents.CopilotACPAgentID
 }
 
 // PublishAvailableCommands publishes an available commands update event to the event bus.

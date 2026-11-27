@@ -85,10 +85,21 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	if err != nil || session == nil || session.RouteGeneration != state.Generation {
 		return
 	}
-	if !isOrphanableDynamicSessionState(session.State) {
+	if !isOrphanableDynamicSessionState(session.State) && !s.dynamicStartingRouteIsStranded(ctx, session) {
 		return
 	}
-	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
+	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, dynamicRouteOrphanedStartingReason)
+}
+
+// dynamicStartingRouteIsStranded reports true only for a WAITING_FOR_INPUT
+// session with no executors_running row. A live row or a read error reports
+// false, so the session keeps its route.
+func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *models.TaskSession) bool {
+	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
+		return false
+	}
+	_, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
 }
 
 // isOrphanableDynamicSessionState reports whether a session's current state
@@ -160,9 +171,13 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if !ok {
 		return
 	}
-	// Serialize route recovery with manual actions through the durable
-	// projection. Release before lifecycle launch because launch takes the
-	// session lifecycle lock.
+	// Explicit recovery and route actions use the same session lock. Keep the
+	// policy claim, session projection, and successor launch in that ownership
+	// window so a timer cannot reset a session owned by explicit recovery.
+	releaseRouteAction := s.acquireRouteActionOperationLock(sessionID)
+	defer releaseRouteAction()
+	// The cancel guard protects projection writes. Release it before launch,
+	// which takes the session lifecycle lock; keep route-operation ownership.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	locked := true
@@ -240,16 +255,47 @@ func (s *Service) handleDynamicPolicyResumeError(
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, dynamicruntime.ErrExecutionProfileHeld) {
+		// The engine returned the route to manual recovery; show it on the
+		// session so the operator can skip or release the held profile.
+		if session, loadErr := s.repo.GetTaskSession(ctx, sessionID); loadErr == nil {
+			s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActionRequired, "execution_profile_held")
+		}
+		return true
+	}
 	if errors.Is(err, dynamicruntime.ErrRecoveryNotDue) {
 		if refreshed, loadErr := loader.LoadRouteState(ctx, sessionID); loadErr == nil && refreshed != nil {
 			s.scheduleDynamicPolicyRecovery(sessionID, generation, refreshed.PolicyStateJSON)
 		}
+	}
+	if errors.Is(err, dynamicruntime.ErrRecoveryPending) {
+		s.mirrorDynamicPolicyRecoveryProjection(ctx, loader, sessionID, generation)
 	}
 	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) && !errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
 		s.logger.Warn("dynamic policy recovery could not resume route",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
 	return true
+}
+
+func (s *Service) mirrorDynamicPolicyRecoveryProjection(
+	ctx context.Context,
+	loader dynamicRouteStateLoader,
+	sessionID string,
+	generation int64,
+) {
+	if loader == nil || s.repo == nil {
+		return
+	}
+	state, err := loader.LoadRouteState(ctx, sessionID)
+	if err != nil || state == nil || state.Generation != generation || state.Status != dynamicRouteStatusActionRequired {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.RouteGeneration != generation {
+		return
+	}
+	s.mirrorDynamicRouteProjection(ctx, session, generation, state.Status, session.RouteReason)
 }
 
 func (s *Service) persistDynamicPolicyRecovery(

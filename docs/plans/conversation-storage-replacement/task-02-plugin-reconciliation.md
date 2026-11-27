@@ -74,7 +74,7 @@ Run from the repository root. Obtain behavioral RED evidence before production e
 (cd apps/backend && go test -race ./internal/plugins ./internal/gateway/websocket -count=1)
 (cd apps/web && pnpm exec vitest run lib/plugins/conversation-host.test.tsx lib/plugins/conversation-host-isolation.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps && pnpm --filter @kandev/plugin-sdk typecheck)
+(cd apps && pnpm --filter @kdlbs/plugin-sdk typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/plugins/conversation-recovery.spec.ts)
 ```
 

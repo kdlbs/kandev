@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/entityrefs"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/messageconstraints"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -56,6 +57,27 @@ type SendNowClaim struct {
 	// Ordinary sources are absent from storage while claimed, so task
 	// generations alone cannot prevent them from being resurrected.
 	SessionGeneration int64 `json:"session_generation"`
+	// Delivery identity is persisted with the replacement claim so a restart
+	// can reconcile the original submission rather than constructing a new one.
+	DeliveryProtocol     string `json:"delivery_protocol,omitempty"`
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+	DeliveryPayloadHash  string `json:"delivery_payload_hash,omitempty"`
+}
+
+func (c *SendNowClaim) DeliverySubmission() (protocol, submissionID, payloadHash string) {
+	if c == nil {
+		return "", "", ""
+	}
+	return c.DeliveryProtocol, c.DeliverySubmissionID, c.DeliveryPayloadHash
+}
+
+func (c *SendNowClaim) setDeliverySubmission(protocol, submissionID, payloadHash string) {
+	if c == nil {
+		return
+	}
+	c.DeliveryProtocol = protocol
+	c.DeliverySubmissionID = submissionID
+	c.DeliveryPayloadHash = payloadHash
 }
 
 // PendingSendNowClaim carries the durable acceptance decision used to choose
@@ -115,6 +137,9 @@ func ValidateSendNowEntries(entries []QueuedMessage) error {
 	seenReferences := make(map[string]struct{})
 	referenceCount := 0
 	for _, entry := range entries {
+		if _, err := builtinintent.FromMetadata(entry.Metadata); err != nil {
+			return err
+		}
 		attachmentCount += len(entry.Attachments)
 		if attachmentCount > messageconstraints.MaxAttachmentCount {
 			return fmt.Errorf("%w: at most %d attachments are allowed", ErrSendNowAttachmentOverflow, messageconstraints.MaxAttachmentCount)
@@ -233,6 +258,15 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 
 	oldest := entries[0]
 	metadata := copyMessageMetadata(oldest.Metadata, 2)
+	for _, entry := range entries {
+		intent, err := builtinintent.FromMetadata(entry.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		if intent != "" {
+			metadata[builtinintent.MetadataKey] = string(intent)
+		}
+	}
 	// A source-level transcript receipt applies only to that source payload.
 	// The combined Send Now envelope gets its own deterministic receipt after
 	// every selected source has been claimed.

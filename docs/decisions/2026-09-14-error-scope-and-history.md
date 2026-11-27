@@ -20,6 +20,11 @@ Error scope comes from the failure owner. An initiating session or the presence 
 Shared task errors have an independent projection, so session failures cannot hide them.
 Existing recovery permissions, stamps, provider identity, and sanitized details remain authoritative.
 
+The [September 20 active recovery decision](2026-09-20-active-session-recovery-owner.md)
+qualifies active control placement: a blocked composer owns recovery controls,
+while the chronological entry remains historical. The scope and persistence
+rules above remain authoritative.
+
 ## Consequences
 
 Users can read the failure followed by resumed agent work. Session errors can scroll out of view as ordinary messages.

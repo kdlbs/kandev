@@ -118,7 +118,9 @@ test.describe("Mobile task status summary", () => {
 
     // The passive PR icon must not steal the row's native touch target.
     await targetRow.tap();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.task_id}$`));
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${targetTask.task_id}\\?sessionId=${targetSession.session_id}$`),
+    );
     await session.waitForLoad();
     await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
     await session.tapPRStatusChip();

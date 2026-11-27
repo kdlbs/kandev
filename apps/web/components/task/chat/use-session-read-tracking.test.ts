@@ -1,12 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, useState, type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
+import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 
 const mockMarkSessionRead = vi.fn();
 const mockUpdateSessionReadCursor = vi.fn();
 
 type MockState = {
-  userSettings: { unreadDivider: boolean };
+  userSettings: { unreadDivider: boolean; unreadTaskDot: boolean };
   taskSessions: { items: Record<string, TaskSession> };
   updateSessionReadCursor: typeof mockUpdateSessionReadCursor;
 };
@@ -42,11 +44,36 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   mockState = {
-    userSettings: { unreadDivider: true },
+    userSettings: { unreadDivider: true, unreadTaskDot: false },
     taskSessions: { items: {} },
     updateSessionReadCursor: mockUpdateSessionReadCursor,
   };
   mockMarkSessionRead.mockResolvedValue({ session_id: "session-1", last_read_message_id: "m2" });
+});
+
+describe("useSessionReadTracking route hydration", () => {
+  it("waits for route session hydration before capturing or marking a read cursor", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    let setRouteReady!: (ready: boolean) => void;
+    function Wrapper({ children }: PropsWithChildren) {
+      const [isReady, setReady] = useState(false);
+      setRouteReady = setReady;
+      return createElement(TaskRouteSessionHydrationProvider, { isReady, children });
+    }
+
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m3"), {
+      wrapper: Wrapper,
+    });
+    expect(result.current).toBeNull();
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+    act(() => setRouteReady(true));
+
+    await waitFor(() => {
+      expect(result.current).toBe("m1");
+      expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3");
+    });
+  });
 });
 
 describe("useSessionReadTracking", () => {
@@ -58,7 +85,7 @@ describe("useSessionReadTracking", () => {
     expect(mockMarkSessionRead).not.toHaveBeenCalled();
   });
 
-  it("returns null and does not mark the session read when the user disables the divider", async () => {
+  it("returns null and does not mark the session read when both unread settings are off", async () => {
     mockState.userSettings.unreadDivider = false;
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
     const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m2"));
@@ -69,6 +96,7 @@ describe("useSessionReadTracking", () => {
     });
     expect(mockMarkSessionRead).not.toHaveBeenCalled();
   });
+
   it("does not capture an anchor before the session record has loaded into the store, capturing correctly once it does", async () => {
     // Session absent entirely (still fetching) — must not treat this the
     // same as "loaded, and legitimately has no prior cursor" (see the
@@ -194,6 +222,38 @@ describe("useSessionReadTracking", () => {
     await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m4"));
     // Divider anchor is unchanged — still the value from when the visit started.
     expect(result.current).toBe("m1");
+  });
+});
+
+describe("useSessionReadTracking unread task dot and page visibility", () => {
+  it("marks the session read without a divider when only the unread task dot is on", async () => {
+    mockState.userSettings = { unreadDivider: false, unreadTaskDot: true };
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+
+    expect(result.current).toBeNull();
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+    expect(result.current).toBeNull();
+  });
+
+  it("does not mark a session read while the browser tab is hidden, and marks it once shown", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+      renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+      visibility.mockReturnValue("visible");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+    } finally {
+      visibility.mockRestore();
+    }
   });
 });
 

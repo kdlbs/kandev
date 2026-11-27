@@ -2,16 +2,24 @@ import type { BackendMessage } from "./backend-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type { ForegroundActivity } from "./activity";
-import type { TaskPendingAction, TaskPendingActionRevision } from "./http";
+import type {
+  RuntimeStorageHealth,
+  TaskPendingAction,
+  TaskPendingActionRevision,
+  WorkspaceRecoveryProjection,
+} from "./http";
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
+  SessionPromptSuggestionPayload,
   SessionModelsPayload,
   SessionModelSelectionWarningPayload,
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
+  SessionUsageUpdatedPayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
+import type { TurnChangeSetSummary } from "./turn-changes";
 
 export type MessageAddedPayload = {
   task_id: string;
@@ -62,6 +70,7 @@ export type TaskSessionStateChangedPayload = {
   downstream_acp_session_id?: string;
   metadata?: Record<string, unknown>;
   session_metadata?: Record<string, unknown>;
+  session_recovery_blocks?: import("./http").SessionRecoveryBlockProjection[];
   is_passthrough?: boolean;
   error_message?: string;
   /** User-supplied session tab label; present (possibly "") on rename broadcasts. */
@@ -112,6 +121,14 @@ export type SessionPendingActionChangedPayload = {
   pending_action_revision: TaskPendingActionRevision;
 };
 
+export type SessionWorkspaceRecoveryChangedPayload = {
+  task_id: string;
+  environment_id: string;
+  session_id: string;
+  session_ids?: string[];
+  workspace_recovery: WorkspaceRecoveryProjection;
+};
+
 export type TaskSessionNotificationPayload = {
   task_id: string;
   session_id: string;
@@ -127,10 +144,14 @@ export type TaskSessionAgentctlPayload = {
   agent_execution_id?: string;
   error_message?: string;
   worktree_id?: string;
+  /** Repository that owns the materialized worktree, when the event carries it. */
+  worktree_repository_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
   /** Effective task workspace root when the agentctl payload carries it. */
   workspace_path?: string;
+  /** Launched execution's confirmed working directory for relative chat links. */
+  agent_workspace_path?: string;
   /** Task root that contains every per-repo worktree as a sibling subdir.
    *  Set only when the event signals a sibling worktree addition (multi-branch
    *  add_branch flow) — the frontend repoints the file browser to it instead of
@@ -149,8 +170,18 @@ export type TurnEventPayload = {
   metadata?: Record<string, unknown>;
   /** Whether the completed turn produced any agent output. Only set on turn.completed. */
   had_output?: boolean;
+  /** Live-only ACP configuration command result. Not part of saved turn history. */
+  configuration_result?: ConfigurationCommandResult;
   created_at: string;
   updated_at: string;
+};
+
+export type ConfigurationCommandResult = {
+  status: "applied" | "clamped" | "unconfirmed";
+  config_id?: string;
+  requested: string;
+  effective?: string;
+  confirmed: boolean;
 };
 
 export type AvailableCommandsPayload = {
@@ -166,6 +197,12 @@ export type SessionModeChangedPayload = {
   session_id: string;
   agent_id: string;
   current_mode_id: string;
+  session_settings_policy?: "strict" | "provider_restored";
+  /**
+   * Set only when the session is not in the mode Kandev asked for. Empty means
+   * the reported mode is exactly the requested one.
+   */
+  requested_mode_id?: string;
   available_modes?: {
     id: string;
     name: string;
@@ -245,6 +282,18 @@ export type AvailableCommandPayload = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
+};
+
+export type SessionRuntimeStorageChangedPayload = RuntimeStorageHealth & {
+  task_id: string;
+  session_id: string;
 };
 
 export type SessionBackendMessageMap = {
@@ -266,10 +315,23 @@ export type SessionBackendMessageMap = {
     "session.pending_action_changed",
     SessionPendingActionChangedPayload
   >;
+  "session.workspace_recovery.changed": BackendMessage<
+    "session.workspace_recovery.changed",
+    SessionWorkspaceRecoveryChangedPayload
+  >;
+  "task_session.runtime_storage_changed": BackendMessage<
+    "task_session.runtime_storage_changed",
+    SessionRuntimeStorageChangedPayload
+  >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",
     TaskSessionNotificationPayload
   >;
+  "session.permission_requested": BackendMessage<
+    "session.permission_requested",
+    TaskSessionNotificationPayload
+  >;
+  "session.failed": BackendMessage<"session.failed", TaskSessionNotificationPayload>;
   "session.agentctl_starting": BackendMessage<
     "session.agentctl_starting",
     TaskSessionAgentctlPayload
@@ -287,6 +349,10 @@ export type SessionBackendMessageMap = {
   >;
   "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
   "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
+  "session.turn.changes.updated": BackendMessage<
+    "session.turn.changes.updated",
+    { task_id: string; session_id: string; change_set: TurnChangeSetSummary }
+  >;
   "session.turn.removed": BackendMessage<
     "session.turn.removed",
     { id: string; session_id: string; task_id: string }
@@ -324,8 +390,13 @@ export type SessionBackendMessageMap = {
     SessionMCPStatusPayload
   >;
   "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
+  "session.prompt_suggestion": BackendMessage<
+    "session.prompt_suggestion",
+    SessionPromptSuggestionPayload
+  >;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
+  "session.usage_updated": BackendMessage<"session.usage_updated", SessionUsageUpdatedPayload>;
   "session.poll_mode_changed": BackendMessage<
     "session.poll_mode_changed",
     { session_id: string; poll_mode: string }
@@ -337,6 +408,14 @@ export type SessionBackendMessageMap = {
   "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
   "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
   "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
+  "session.background_work.updated": BackendMessage<
+    "session.background_work.updated",
+    import("@/lib/types/background-work").WorkloadRunObservation
+  >;
+  "session.background_work.output": BackendMessage<
+    "session.background_work.output",
+    import("@/lib/types/background-work").WorkloadOutputChunk
+  >;
   "message.queue.status_changed": BackendMessage<
     "message.queue.status_changed",
     QueueStatusChangedPayload

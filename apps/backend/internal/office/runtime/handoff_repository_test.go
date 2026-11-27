@@ -25,6 +25,7 @@ func TestValidateHandoffRepository(t *testing.T) {
 		wantErr        bool
 		wantNilRepos   bool
 		wantBaseBranch string
+		wantSource     taskmodels.BaseBranchSelectionSource
 	}{
 		{
 			name:         "no repository_id and no base_branch attaches nothing",
@@ -64,6 +65,7 @@ func TestValidateHandoffRepository(t *testing.T) {
 			baseBranch:     "",
 			tasks:          &fakeHandoffTasks{repository: repo},
 			wantBaseBranch: "main",
+			wantSource:     taskmodels.BaseBranchSelectionSourceRepositoryDefault,
 		},
 		{
 			name:           "explicit base_branch overrides the repository's default branch",
@@ -71,6 +73,7 @@ func TestValidateHandoffRepository(t *testing.T) {
 			baseBranch:     "feature/x",
 			tasks:          &fakeHandoffTasks{repository: repo},
 			wantBaseBranch: "feature/x",
+			wantSource:     taskmodels.BaseBranchSelectionSourceExplicit,
 		},
 	}
 
@@ -114,6 +117,9 @@ func TestValidateHandoffRepository(t *testing.T) {
 			}
 			if repos[0].BaseBranch != tt.wantBaseBranch {
 				t.Errorf("BaseBranch = %q, want %q", repos[0].BaseBranch, tt.wantBaseBranch)
+			}
+			if repos[0].BaseBranchSelectionSource != tt.wantSource {
+				t.Errorf("BaseBranchSelectionSource = %q, want %q", repos[0].BaseBranchSelectionSource, tt.wantSource)
 			}
 		})
 	}

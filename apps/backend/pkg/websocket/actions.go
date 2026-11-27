@@ -26,6 +26,7 @@ const (
 	ActionRepositoryGet                = "repository.get"
 	ActionRepositoryUpdate             = "repository.update"
 	ActionRepositoryDelete             = "repository.delete"
+	ActionRepositoryValidateRemoteURL  = "repository.remote_url.validate"
 	ActionRepositoryCloneSourceInspect = "repository.clone_source.inspect"
 
 	// Repository Set actions
@@ -78,6 +79,7 @@ const (
 	ActionTaskGet                   = "task.get"
 	ActionTaskUpdate                = "task.update"
 	ActionTaskRepoUpdate            = "task.repository.update"
+	ActionTaskRepoDetach            = "task.repository.detach"
 	ActionTaskDelete                = "task.delete"
 	ActionTaskMove                  = "task.move"
 	ActionTaskState                 = "task.state"
@@ -113,21 +115,30 @@ const (
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"
 
+	// ActionCoordinatorUpdated forwards events.CoordinatorUpdated to a
+	// coordinator's workspace subscribers.
+	ActionCoordinatorUpdated = "coordinator.updated"
+
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
 	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
-	ActionSessionLaunch       = "session.launch"
-	ActionSessionEnsure       = "session.ensure"
-	ActionSessionRecover      = "session.recover"
-	ActionSessionResetContext = "session.reset_context"
-	ActionSessionStop         = "session.stop"
-	ActionSessionDelete       = "session.delete"
-	ActionSessionSetPrimary   = "session.set_primary"
-	ActionSessionSetPlanMode  = "session.set_plan_mode"
-	ActionSessionRename       = "session.rename"
-	ActionSessionRouteAction  = "session.route_action"
+	ActionSessionLaunch                   = "session.launch"
+	ActionSessionFork                     = "session.fork"
+	ActionSessionEnsure                   = "session.ensure"
+	ActionSessionRecoverBatch             = "session.recover_batch"
+	ActionSessionRecover                  = "session.recover"
+	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
+	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionRuntimeStorageChanged    = "task_session.runtime_storage_changed"
+	ActionSessionResetContext             = "session.reset_context"
+	ActionSessionStop                     = "session.stop"
+	ActionSessionDelete                   = "session.delete"
+	ActionSessionSetPrimary               = "session.set_primary"
+	ActionSessionSetPlanMode              = "session.set_plan_mode"
+	ActionSessionRename                   = "session.rename"
+	ActionSessionRouteAction              = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -199,10 +210,11 @@ const (
 	ActionSystemMetricsUnsubscribe = "system.metrics.unsubscribe"
 
 	// Message actions
-	ActionMessageAdd    = "message.add"
-	ActionMessageGet    = "message.get"
-	ActionMessageList   = "message.list"
-	ActionMessageSearch = "message.search"
+	ActionMessageAdd                 = "message.add"
+	ActionMessageDismissGitPushError = "message.dismiss_git_push_error"
+	ActionMessageGet                 = "message.get"
+	ActionMessageList                = "message.list"
+	ActionMessageSearch              = "message.search"
 
 	// Notification actions (server -> client)
 	ActionACPProgress                    = "acp.progress"
@@ -274,6 +286,7 @@ const (
 	ActionSessionTurnStarted            = "session.turn.started"
 	ActionSessionTurnCompleted          = "session.turn.completed"
 	ActionSessionTurnRemoved            = "session.turn.removed"
+	ActionSessionTurnChangesUpdated     = "session.turn.changes.updated"
 	ActionSessionAvailableCommands      = "session.available_commands"
 	ActionSessionModeChanged            = "session.mode_changed"
 	ActionSessionAgentCapabilities      = "session.agent_capabilities"
@@ -283,9 +296,11 @@ const (
 	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
+	ActionSessionPromptSuggestion       = "session.prompt_suggestion"
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"
+	ActionSessionUsageUpdated           = "session.usage_updated"
 	ActionSessionPollModeChanged        = "session.poll_mode_changed"
 	ActionSessionRouteChanging          = "session.route_changing"
 	ActionSessionRouteChanged           = "session.route_changed"
@@ -320,9 +335,10 @@ const (
 	ActionSystemMetricsUpdated          = "system.metrics.updated"
 	ActionUpdateAvailable               = "system.update_available"
 
-	ActionAgentProfileDeleted = "agent.profile.deleted"
-	ActionAgentProfileCreated = "agent.profile.created"
-	ActionAgentProfileUpdated = "agent.profile.updated"
+	ActionAgentProfileDeleted    = "agent.profile.deleted"
+	ActionAgentProfileCreated    = "agent.profile.created"
+	ActionAgentProfileUpdated    = "agent.profile.updated"
+	ActionAgentProfilesReordered = "agent.profiles.reordered"
 
 	// ActionAgentSettingsUpdated carries a full agent settings record
 	// (dto.AgentDTO) after a settings-side change such as a custom TUI agent's
@@ -336,6 +352,7 @@ const (
 
 	// Workspace file operations
 	ActionWorkspaceFileTreeGet       = "workspace.tree.get"
+	ActionWorkspaceRootFilesList     = "workspace.root_files.list"
 	ActionWorkspaceFileContentGet    = "workspace.file.get"
 	ActionWorkspaceFileContentGetRef = "workspace.file.get_at_ref"
 	ActionWorkspaceFileContentUpdate = "workspace.file.update"
@@ -385,6 +402,13 @@ const (
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
 
+	// Background work actions
+	ActionSessionBackgroundWorkList    = "session.background_work.list"
+	ActionSessionBackgroundWorkGet     = "session.background_work.get"
+	ActionSessionBackgroundWorkAction  = "session.background_work.action"
+	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
+	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
+	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote
@@ -414,7 +438,8 @@ const (
 	// connections that one of their per-user plugin storage keys changed
 	// (Approach F1). Payload: {pluginId, scope, scopeId, key, updatedAt,
 	// writerId, deleted} — keys only, never the stored value.
-	ActionPluginUserStateUpdated = "plugin.user-state.updated"
+	ActionPluginUserStateUpdated       = "plugin.user-state.updated"
+	ActionPluginSidebarGroupingUpdated = "plugin.sidebar-grouping.updated"
 
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
@@ -495,9 +520,9 @@ const (
 	ActionMCPDeleteWalkthrough                     = "mcp.delete_walkthrough"
 	ActionMCPPublishReviewFindings                 = "mcp.publish_review_findings"
 	ActionMCPClarificationTimeout                  = "mcp.clarification_timeout"
+	ActionMCPCancelNativeClarification             = "mcp.cancel_native_clarification"
 	ActionMCPSetTaskTitle                          = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
-
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
 	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
@@ -535,6 +560,9 @@ const (
 	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionPromptsChanged           = "prompts.changed"
+	ActionMCPCreateSharedPrompt    = "mcp.create_shared_prompt"
+	ActionMCPUpdateSharedPrompt    = "mcp.update_shared_prompt"
 	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
 	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
 	ActionMCPSearchSettings        = "mcp.search_settings"
@@ -550,6 +578,8 @@ const (
 	ActionMCPDeleteExecutorProfile = "mcp.delete_executor_profile"
 
 	ActionMCPMoveTask                    = "mcp.move_task"
+	ActionMCPTransferTask                = "mcp.transfer_task"
+	ActionMCPAuditTaskTransferAttempt    = "mcp.audit_task_transfer_attempt"
 	ActionMCPDeleteTask                  = "mcp.delete_task"
 	ActionMCPArchiveTask                 = "mcp.archive_task"
 	ActionMCPUpdateTaskState             = "mcp.update_task_state"
@@ -557,6 +587,7 @@ const (
 	ActionMCPStopTask                    = "mcp.stop_task"
 	ActionMCPSpawnSession                = "mcp.spawn_session"
 	ActionMCPGetTaskConversation         = "mcp.get_task_conversation"
+	ActionMCPGetTaskMessageOperation     = "mcp.get_task_message_operation"
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
@@ -698,10 +729,14 @@ const (
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationPluginToolOptions   = "automation.plugin_tool_options"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"
 	ActionAutomationRunsDeleteAll       = "automation.runs.delete_all"
+	// ActionAutomationRunCreated is a workspace-scoped notification that a run
+	// was recorded, so open run pages refresh.
+	ActionAutomationRunCreated = "automation.run.created"
 )
 
 // Error codes

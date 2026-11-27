@@ -78,6 +78,7 @@ type DeploymentAppRegistration = AppRegistration
 
 // DeploymentAppRegistrationFlow binds one manifest callback to its initiating operator.
 type DeploymentAppRegistrationFlow struct {
+	GitHubHost       string                    `json:"github_host" db:"github_host"`
 	StateHash        string                    `json:"-" db:"state_hash"`
 	RegistrationID   string                    `json:"registration_id" db:"registration_id"`
 	WorkspaceID      string                    `json:"workspace_id" db:"workspace_id"`
@@ -97,6 +98,7 @@ type DeploymentAppRegistrationFlow struct {
 // AppRegistrationImportPreparation reserves one server-generated registration
 // identity for a short-lived, single-use existing-App import.
 type AppRegistrationImportPreparation struct {
+	GitHubHost     string     `json:"github_host" db:"github_host"`
 	RegistrationID string     `json:"registration_id" db:"registration_id"`
 	WorkspaceID    string     `json:"workspace_id" db:"workspace_id"`
 	UserID         string     `json:"-" db:"user_id"`
@@ -176,7 +178,18 @@ const (
 
 // AuthFlow stores one short-lived, single-use GitHub authorization attempt.
 // StateHash stores a digest rather than the bearer state returned to a browser.
+type OAuthPolicy string
+
+const (
+	OAuthPolicyPKCES256         OAuthPolicy = "pkce_s256"
+	OAuthPolicyConfidentialCode OAuthPolicy = "confidential_code"
+)
+
 type AuthFlow struct {
+	RedirectURI                        string           `json:"redirect_uri" db:"redirect_uri"`
+	ExpectedAppCredentialGeneration    int64            `json:"app_credential_generation" db:"app_credential_generation"`
+	GitHubHost                         string           `json:"github_host" db:"github_host"`
+	OAuthPolicy                        OAuthPolicy      `json:"oauth_policy" db:"oauth_policy"`
 	StateHash                          string           `json:"-" db:"state_hash"`
 	WorkspaceID                        string           `json:"workspace_id" db:"workspace_id"`
 	UserID                             string           `json:"user_id" db:"user_id"`
@@ -269,6 +282,8 @@ const (
 
 // PR represents a GitHub Pull Request.
 type PR struct {
+	GitHubHost          string `json:"github_host,omitempty"`
+	operationFence      *githubOperationFence
 	ID                  int64  `json:"id"`
 	NodeID              string `json:"node_id"`
 	Number              int    `json:"number"`
@@ -297,6 +312,10 @@ type PR struct {
 	Draft               bool   `json:"draft"`
 	Mergeable           bool   `json:"mergeable"`
 	MergeableState      string `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	// HasMergeConflicts is the nullable raw value carried by a status snapshot.
+	HasMergeConflicts *bool `json:"-"`
+	// HasMergeConflictsObserved distinguishes an explicit nil observation from no snapshot override.
+	HasMergeConflictsObserved bool `json:"-"`
 	// The mock provider uses these optional fields to reproduce GraphQL merge
 	// queue observations through its REST-shaped status path. Production REST
 	// payloads leave them empty; GraphQL remains the authoritative queue source.
@@ -312,6 +331,7 @@ type PR struct {
 	Additions                             int                 `json:"additions"`
 	Deletions                             int                 `json:"deletions"`
 	RequestedReviewers                    []RequestedReviewer `json:"requested_reviewers"`
+	Labels                                []string            `json:"labels,omitempty"`
 	CreatedAt                             time.Time           `json:"created_at"`
 	UpdatedAt                             time.Time           `json:"updated_at"`
 	MergedAt                              *time.Time          `json:"merged_at,omitempty"`
@@ -380,14 +400,26 @@ type PRComment struct {
 
 // CheckRun represents a CI check result.
 type CheckRun struct {
-	Name        string     `json:"name"`
-	Source      string     `json:"source"`     // check_run, status_context
-	Status      string     `json:"status"`     // queued, in_progress, completed
-	Conclusion  string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
-	HTMLURL     string     `json:"html_url"`
-	Output      string     `json:"output"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID            int64      `json:"id,omitempty"`
+	AppID         int64      `json:"app_id,omitempty"`
+	AppSlug       string     `json:"app_slug,omitempty"`
+	CheckSuiteID  int64      `json:"check_suite_id,omitempty"`
+	WorkflowID    int64      `json:"workflow_id,omitempty"`
+	WorkflowName  string     `json:"workflow_name,omitempty"`
+	WorkflowRunID int64      `json:"workflow_run_id,omitempty"`
+	WorkflowEvent string     `json:"workflow_event,omitempty"`
+	HeadRepoID    int64      `json:"head_repo_id,omitempty"`
+	HeadRepoOwner string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName  string     `json:"head_repo_name,omitempty"`
+	HeadBranch    string     `json:"head_branch,omitempty"`
+	Name          string     `json:"name"`
+	Source        string     `json:"source"`     // check_run, status_context
+	Status        string     `json:"status"`     // queued, in_progress, completed
+	Conclusion    string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
+	HTMLURL       string     `json:"html_url"`
+	Output        string     `json:"output"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 // WorkflowAttentionState describes an Actions workflow observation that is
@@ -428,6 +460,7 @@ type WorkflowAttention struct {
 // to match a run to one pull-request head and classify action_required.
 type WorkflowRun struct {
 	ID            int64                    `json:"id"`
+	CheckSuiteID  int64                    `json:"check_suite_id,omitempty"`
 	RunAttempt    int                      `json:"run_attempt"`
 	WorkflowID    int64                    `json:"workflow_id"`
 	Name          string                   `json:"name"`
@@ -473,6 +506,7 @@ type PRFeedback struct {
 	Reviews           []PRReview         `json:"reviews"`
 	Comments          []PRComment        `json:"comments"`
 	Checks            []CheckRun         `json:"checks"`
+	ChecksState       *string            `json:"checks_state,omitempty"`
 	HasIssues         bool               `json:"has_issues"`
 	WorkflowAttention *WorkflowAttention `json:"workflow_attention,omitempty"`
 }
@@ -480,8 +514,10 @@ type PRFeedback struct {
 // PRStatus contains lightweight PR state used by the background poller.
 // Unlike PRFeedback, it skips comments to reduce API calls.
 type PRStatus struct {
+	operationFence         *githubOperationFence
 	PR                     *PR                `json:"pr"`
 	WorkflowAttention      *WorkflowAttention `json:"workflow_attention,omitempty"`
+	CheckSummary           *CheckSummary      `json:"check_summary,omitempty"`
 	ReviewState            string             `json:"review_state"`    // "approved", "changes_requested", "pending", ""
 	ChecksState            string             `json:"checks_state"`    // "success", "failure", "pending", ""
 	MergeableState         string             `json:"mergeable_state"` // "clean", "blocked", "behind", "dirty", "has_hooks", "unstable", "draft", "unknown", ""
@@ -542,6 +578,9 @@ type PRStatus struct {
 	// mergeQueueRecoveryPopulated distinguishes a GraphQL observation of the
 	// latest removal event (including no event) from REST and gh CLI reads.
 	mergeQueueRecoveryPopulated bool
+	// feedbackOnly preserves status-sync freshness because feedback does not
+	// observe every aggregate used by automation, including review threads.
+	feedbackOnly bool
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -565,6 +604,7 @@ type IssueSearchPage struct {
 // which task repository the watched PR belongs to (multi-repo support; empty
 // for legacy rows).
 type PRWatch struct {
+	GitHubHost      string     `json:"github_host" db:"github_host"`
 	ID              string     `json:"id" db:"id"`
 	WorkspaceID     string     `json:"workspace_id" db:"workspace_id"`
 	SessionID       string     `json:"session_id" db:"session_id"`
@@ -578,6 +618,7 @@ type PRWatch struct {
 	LastCommentAt   *time.Time `json:"last_comment_at,omitempty" db:"last_comment_at"`
 	LastCheckStatus string     `json:"last_check_status" db:"last_check_status"`
 	LastReviewState string     `json:"last_review_state" db:"last_review_state"`
+	RetiredAt       *time.Time `json:"retired_at,omitempty" db:"retired_at"`
 	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
@@ -597,6 +638,7 @@ const (
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
+	GitHubHost                            string     `json:"github_host" db:"github_host"`
 	ID                                    string     `json:"id" db:"id"`
 	WorkspaceID                           string     `json:"workspace_id" db:"workspace_id"`
 	TaskID                                string     `json:"task_id" db:"task_id"`
@@ -613,6 +655,7 @@ type TaskPR struct {
 	ReviewState                           string     `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
 	ChecksState                           string     `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
 	MergeableState                        string     `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts" db:"has_merge_conflicts"`
 	HeadSHA                               string     `json:"head_sha" db:"head_sha"`
 	MergeQueueState                       string     `json:"merge_queue_state" db:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position" db:"merge_queue_position"`
@@ -650,6 +693,12 @@ type TaskPR struct {
 	// the API-facing decoded form and is hydrated after database reads.
 	WorkflowAttentionJSON string             `json:"-" db:"workflow_attention"`
 	WorkflowAttention     *WorkflowAttention `json:"workflow_attention,omitempty" db:"-"`
+
+	// CheckSummaryJSON is the persisted wire value for the bounded selected
+	// check snapshot. CheckSummary is the API-facing decoded form and is
+	// hydrated after database reads. Empty means the snapshot is unknown.
+	CheckSummaryJSON string        `json:"-" db:"check_summary"`
+	CheckSummary     *CheckSummary `json:"check_summary,omitempty" db:"-"`
 
 	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//
@@ -1037,6 +1086,8 @@ func NormalizeCleanupPolicy(s string) string {
 // ReviewWatch configures periodic polling for PRs needing the user's review.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
+	GitHubHost          string       `json:"github_host" db:"github_host"`
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1063,6 +1114,7 @@ type ReviewWatch struct {
 
 // ReviewPRTask records which PRs have already had tasks created (deduplication).
 type ReviewPRTask struct {
+	GitHubHost    string    `json:"github_host" db:"github_host"`
 	ID            string    `json:"id" db:"id"`
 	ReviewWatchID string    `json:"review_watch_id" db:"review_watch_id"`
 	RepoOwner     string    `json:"repo_owner" db:"repo_owner"`
@@ -1090,6 +1142,8 @@ type GitHubOrg struct {
 // GitHub API returns it on every repo, so it is required. Description is
 // omitempty because GitHub may return null/empty.
 type GitHubRepo struct {
+	GitHubHost    string     `json:"github_host"`
+	HTMLURL       string     `json:"html_url"`
 	FullName      string     `json:"full_name"`
 	Owner         string     `json:"owner"`
 	Name          string     `json:"name"`
@@ -1104,19 +1158,20 @@ type GitHubRepo struct {
 // derived parent and permission fields deliberately do not carry raw API
 // response shapes into task metadata.
 type GitHubRepository struct {
-	ID             int64
-	NodeID         string
-	FullName       string
-	Owner          string
-	Name           string
-	CloneURL       string
-	HTMLURL        string
-	DefaultBranch  string
-	Fork           bool
-	ParentID       int64
-	ParentFullName string
-	PushAccess     bool
-	AdminAccess    bool
+	ID              int64
+	NodeID          string
+	FullName        string
+	Owner           string
+	Name            string
+	CloneURL        string
+	HTMLURL         string
+	DefaultBranch   string
+	Fork            bool
+	ParentID        int64
+	ParentFullName  string
+	PushAccess      bool
+	PushAccessKnown bool
+	AdminAccess     bool
 }
 
 // RepoBranch represents a branch in a GitHub repository.
@@ -1222,14 +1277,17 @@ type PRFeedbackEvent struct {
 
 // NewReviewPREvent is published when a new PR needing review is found.
 type NewReviewPREvent struct {
-	ReviewWatchID     string `json:"review_watch_id"`
-	WorkspaceID       string `json:"workspace_id"`
-	WorkflowID        string `json:"workflow_id"`
-	WorkflowStepID    string `json:"workflow_step_id"`
-	AgentProfileID    string `json:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
-	Prompt            string `json:"prompt"`
-	PR                *PR    `json:"pr"`
+	GitHubHost           string `json:"github_host"`
+	CredentialGeneration int64  `json:"credential_generation"`
+	ReviewWatchID        string `json:"review_watch_id"`
+	WorkspaceID          string `json:"workspace_id"`
+	WorkflowID           string `json:"workflow_id"`
+	WorkflowStepID       string `json:"workflow_step_id"`
+	AgentProfileID       string `json:"agent_profile_id"`
+	ExecutorProfileID    string `json:"executor_profile_id"`
+	Prompt               string `json:"prompt"`
+	PR                   *PR    `json:"pr"`
+	CreatedByUserID      string `json:"created_by_user_id,omitempty"`
 }
 
 // PRStatsRequest defines filters for PR stats queries.
@@ -1306,27 +1364,31 @@ type DailyCount struct {
 
 // Issue represents a GitHub Issue (not a PR).
 type Issue struct {
-	ID          int64      `json:"id"`
-	NodeID      string     `json:"node_id"`
-	Number      int        `json:"number"`
-	Title       string     `json:"title"`
-	Body        string     `json:"body"`
-	URL         string     `json:"url"`
-	HTMLURL     string     `json:"html_url"`
-	State       string     `json:"state"` // open, closed
-	AuthorLogin string     `json:"author_login"`
-	RepoOwner   string     `json:"repo_owner"`
-	RepoName    string     `json:"repo_name"`
-	Labels      []string   `json:"labels"`
-	Assignees   []string   `json:"assignees"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	GitHubHost     string `json:"github_host,omitempty"`
+	operationFence *githubOperationFence
+	ID             int64      `json:"id"`
+	NodeID         string     `json:"node_id"`
+	Number         int        `json:"number"`
+	Title          string     `json:"title"`
+	Body           string     `json:"body"`
+	URL            string     `json:"url"`
+	HTMLURL        string     `json:"html_url"`
+	State          string     `json:"state"` // open, closed
+	AuthorLogin    string     `json:"author_login"`
+	RepoOwner      string     `json:"repo_owner"`
+	RepoName       string     `json:"repo_name"`
+	Labels         []string   `json:"labels"`
+	Assignees      []string   `json:"assignees"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ClosedAt       *time.Time `json:"closed_at,omitempty"`
 }
 
 // IssueWatch configures periodic polling for GitHub issues matching a query.
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type IssueWatch struct {
+	GitHubHost          string       `json:"github_host" db:"github_host"`
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1353,6 +1415,7 @@ type IssueWatch struct {
 
 // IssueWatchTask records which issues have already had tasks created (deduplication).
 type IssueWatchTask struct {
+	GitHubHost   string    `json:"github_host" db:"github_host"`
 	ID           string    `json:"id" db:"id"`
 	IssueWatchID string    `json:"issue_watch_id" db:"issue_watch_id"`
 	RepoOwner    string    `json:"repo_owner" db:"repo_owner"`
@@ -1365,14 +1428,17 @@ type IssueWatchTask struct {
 
 // NewIssueEvent is published when a new issue matching a watch is found.
 type NewIssueEvent struct {
-	IssueWatchID      string `json:"issue_watch_id"`
-	WorkspaceID       string `json:"workspace_id"`
-	WorkflowID        string `json:"workflow_id"`
-	WorkflowStepID    string `json:"workflow_step_id"`
-	AgentProfileID    string `json:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
-	Prompt            string `json:"prompt"`
-	Issue             *Issue `json:"issue"`
+	GitHubHost           string `json:"github_host"`
+	CredentialGeneration int64  `json:"credential_generation"`
+	IssueWatchID         string `json:"issue_watch_id"`
+	WorkspaceID          string `json:"workspace_id"`
+	WorkflowID           string `json:"workflow_id"`
+	WorkflowStepID       string `json:"workflow_step_id"`
+	AgentProfileID       string `json:"agent_profile_id"`
+	ExecutorProfileID    string `json:"executor_profile_id"`
+	Prompt               string `json:"prompt"`
+	Issue                *Issue `json:"issue"`
+	CreatedByUserID      string `json:"created_by_user_id,omitempty"`
 }
 
 // CreateIssueWatchRequest is the request body for creating an issue watch.
@@ -1411,6 +1477,7 @@ const (
 	RepoScopeModeAll               = "all"
 	RepoScopeModeOrgs              = "orgs"
 	RepoScopeModeRepos             = "repos"
+	RepoScopeModeSelected          = "selected"
 	TaskGitCredentialsModeManaged  = "managed"
 	TaskGitCredentialsModeExecutor = "executor"
 )
@@ -1419,6 +1486,7 @@ const (
 // Authentication is stored separately and is intentionally not copied with
 // these operational settings.
 type WorkspaceSettings struct {
+	GitHubHost             string          `json:"github_host" db:"github_host"`
 	WorkspaceID            string          `json:"workspace_id" db:"workspace_id"`
 	TaskGitCredentialsMode string          `json:"task_git_credentials_mode" db:"task_git_credentials_mode"`
 	RepoScopeMode          string          `json:"repo_scope_mode" db:"repo_scope_mode"`

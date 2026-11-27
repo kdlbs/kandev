@@ -1,6 +1,139 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
+import { waitForFiniteAnimations } from "../helpers/animations";
+import { expectControlHeight } from "../helpers/control-sizing";
 import { AutomationsPage } from "../pages/automations-page";
 
+import {
+  ensureManagedConversation,
+  installAndGrantManagedConversationAccess,
+} from "./plugins/managed-automation-helpers";
+import { uninstallFixturePlugin } from "../helpers/plugin-fixture";
+
+test.describe("Automation settings page", () => {
+  test.afterEach(async ({ apiClient }) => {
+    await uninstallFixturePlugin(apiClient);
+  });
+
+  test("managed target resets retry policy and hides task-only sections", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    await installAndGrantManagedConversationAccess(testPage, apiClient, seedData.workspaceId);
+    await ensureManagedConversation(
+      apiClient,
+      seedData.workspaceId,
+      "desktop-retry-target",
+      seedData.agentProfileId,
+    );
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+    const retryModes = testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true });
+    await expect(retryModes).toBeVisible();
+    await expect(testPage.locator("#automation-retry-history")).toHaveCount(0);
+    const finite = retryModes.getByRole("radio", { name: "Fixed number of times" });
+    await finite.click();
+    await expect(finite).toBeChecked();
+    await expect(retryModes.getByRole("radio", { name: "Don't retry" })).not.toBeChecked();
+    await expect(testPage.locator("#automation-retry-description")).toHaveText(
+      "Stop after the configured number of additional attempts.",
+    );
+    await testPage.locator("#automation-retry-max").fill("5");
+    await expect(testPage.locator("#automation-retry-history")).toBeVisible();
+
+    await testPage.getByRole("radio", { name: "Managed conversation" }).click();
+    await expect(testPage.locator("#automation-retry-finite")).toHaveCount(0);
+    await expect(testPage.getByRole("radiogroup", { name: "Task for each run" })).toHaveCount(0);
+    await expect(testPage.getByTestId("automation-agent-section")).toHaveCount(0);
+    await expect(testPage.getByTestId("automation-failure-section")).toHaveCount(0);
+    await expect(testPage.getByText("Workflow", { exact: true })).toHaveCount(0);
+    await testPage.getByRole("radio", { name: "Normal task" }).click();
+    await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
+    await testPage.getByRole("radio", { name: "Automation history" }).click();
+    await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
+  });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  test("returns a chosen schedule to No schedule", async ({ testPage, seedData }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+    await automations.selectFrequency("every day");
+    await expect(automations.timeInput).toBeVisible();
+    await automations.selectFrequency("No schedule");
+    await expect(automations.frequencySelector).toHaveText("No schedule");
+    await expect(automations.timeInput).toHaveCount(0);
+    await expect(automations.nextRun).toHaveText(
+      "No schedule; this automation won't run on its own.",
+    );
+  });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  test("removes a saved schedule when No schedule is saved", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Scheduled cleanup",
+    });
+    await apiClient.seedTrigger({
+      automationId: automation.id,
+      type: "scheduled",
+      config: { cron_expression: "0 9 * * *", timezone: "UTC" },
+      enabled: true,
+    });
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
+    await expect(automations.frequencySelector).toHaveText("every day");
+
+    await automations.selectFrequency("No schedule");
+    await automations.saveButton.click();
+    await automations.waitForSaved();
+    const saved = await apiClient.wsRequest<{ triggers?: { type: string }[] }>("automation.get", {
+      id: automation.id,
+    });
+    expect((saved.triggers ?? []).map((trigger) => trigger.type)).not.toContain("scheduled");
+
+    await testPage.reload();
+    await expect(automations.frequencySelector).toHaveText("No schedule");
+  });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3
+  test("marks the selected option with a fill and outline in both themes", async ({
+    testPage,
+    seedData,
+  }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+    const group = testPage.getByRole("radiogroup", { name: "Run destination" });
+    const selected = group.getByRole("radio", { name: "Automation history" });
+    const other = group.getByRole("radio", { name: "Normal task" });
+    await expect(selected).toBeChecked();
+    const style = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const computed = getComputedStyle(element);
+        return { background: computed.backgroundColor, shadow: computed.boxShadow };
+      });
+    for (const colorScheme of ["light", "dark"] as const) {
+      await testPage.emulateMedia({ colorScheme });
+      if (colorScheme === "dark") await expect(testPage.locator("html")).toHaveClass(/dark/);
+      else await expect(testPage.locator("html")).not.toHaveClass(/dark/);
+      await testPage.mouse.move(0, 0);
+      await waitForFiniteAnimations(group);
+      const [groupBackground, on, off] = await Promise.all([
+        group.evaluate((element) => getComputedStyle(element).backgroundColor),
+        style(selected),
+        style(other),
+      ]);
+      expect(on.background).not.toBe(groupBackground);
+      expect(on.background).not.toBe(off.background);
+      expect(on.shadow).toContain("inset");
+      expect(off.shadow).not.toContain("inset");
+    }
+  });
+});
 test.describe("Automations settings page", () => {
   test("list page shows empty state", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
@@ -46,34 +179,47 @@ test.describe("Automations settings page", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
-    await expect(
-      testPage.getByText(
-        "Choose whether each run starts fresh or continues the same conversation and files.",
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(
-      testPage.getByText(
-        "Each run starts with a separate conversation and files. These tasks do not appear in Kanban or the sidebar. Use this option for independent jobs and concurrent runs.",
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(
-      testPage.getByText(
-        "Runs continue the same conversation and files, so the agent keeps prior context and changes. Runs execute one at a time.",
-        { exact: true },
-      ),
-    ).toBeVisible();
+    const taskChoice = testPage.getByRole("radiogroup", { name: "Task for each run" });
+    await expect(taskChoice).toBeVisible();
+    await expect(testPage.locator("#automation-continuation-description")).toHaveText(
+      "Each run starts with its own conversation and files. Runs can overlap.",
+    );
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.1, AC-OFFICE-AUTOMATIONS-SETTINGS-002.2
+    // Each choice sits above the fields it changes.
+    const top = async (locator: Locator) => (await locator.boundingBox())?.y ?? Number.NaN;
+    const heading = (name: string) => testPage.getByRole("heading", { name, exact: true });
+    const order = [
+      heading("When"),
+      heading("Where runs go"),
+      testPage.getByRole("radiogroup", { name: "Run destination" }),
+      testPage.getByText("Workflow", { exact: true }),
+      heading("Repeat runs"),
+      taskChoice,
+      testPage.getByRole("spinbutton", { name: "Max concurrent runs" }),
+      heading("Instructions"),
+      testPage.getByLabel("Task title", { exact: true }),
+      testPage.getByTestId("automation-prompt-editor"),
+      heading("Agent"),
+      testPage.getByTestId("automation-agent-tools-toggle"),
+      heading("If a run fails"),
+    ];
+    const tops: number[] = [];
+    for (const locator of order) tops.push(await top(locator));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    expect(new Set(tops).size).toBe(tops.length);
 
-    const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
+    const reuse = taskChoice.getByRole("radio", { name: "One shared task" });
     await expect(reuse).not.toBeChecked();
-    await reuse.check();
+    await reuse.click();
     await expect(reuse).toBeChecked();
-    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
-    await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+    await expect(testPage.locator("#automation-continuation-description")).toHaveText(
+      "Every run continues the same task and its files, whatever triggered it. Runs execute one at a time.",
+    );
+    const maxRuns = testPage.getByRole("spinbutton", { name: "Max concurrent runs" });
+    await expect(maxRuns).toHaveValue("1");
+    await expect(maxRuns).toBeDisabled();
     await expect(
-      testPage.getByText("This option supports one active run at a time."),
+      testPage.getByText("Locked to 1 while every run uses one shared task."),
     ).toBeVisible();
 
     await testPage.getByTestId("automation-name-input").fill("Reusable Context");
@@ -85,10 +231,34 @@ test.describe("Automations settings page", () => {
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
     await automations.openByName("Reusable Context");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
-    await expect(
-      testPage.getByRole("radio", { name: "Continue the previous session" }),
-    ).toBeChecked();
-    await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
+    await expect(testPage.getByRole("radio", { name: "One shared task" })).toBeChecked();
+    await expect(testPage.getByRole("spinbutton", { name: "Max concurrent runs" })).toHaveValue(
+      "1",
+    );
+  });
+
+  test("persists retry policy and history mode", async ({ testPage, seedData }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await automations.nameInput.fill("Retry Settings");
+    await automations.selectFrequency("every day");
+    await automations.selectWorkflow("E2E Workflow");
+    await testPage.getByRole("radio", { name: "Fixed number of times" }).click();
+    await testPage.locator("#automation-retry-max").fill("3");
+    await testPage.locator("#automation-retry-delay").fill("12");
+    await testPage.locator("#automation-retry-backoff").click();
+    await testPage.getByRole("option", { name: "Exponential delay", exact: true }).click();
+    await testPage.locator("#automation-retry-history").click();
+    await testPage.getByRole("option", { name: "Retry timeline", exact: true }).click();
+    await automations.saveButton.click();
+
+    await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
+    await automations.openByName("Retry Settings");
+    await expect(testPage.locator("#automation-retry-max")).toHaveValue("3");
+    await expect(testPage.locator("#automation-retry-delay")).toHaveValue("12");
+    await expect(testPage.locator("#automation-retry-backoff")).toContainText("Exponential delay");
+    await expect(testPage.locator("#automation-retry-history")).toContainText("Retry timeline");
   });
 
   test("create automation with custom schedule expression", async ({ testPage, seedData }) => {
@@ -173,13 +343,21 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Unsaved Draft Name");
     await automations.deleteButton.click();
     await expect(automations.deleteConfirmation).toBeVisible();
+    await waitForFiniteAnimations(automations.deleteConfirmation);
+    const cancel = automations.deleteConfirmation.getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancel, 28);
+    await expectControlHeight(automations.deleteConfirmButton, 28);
     await expect(automations.deleteConfirmation).toContainText(
       "This will permanently delete To Be Deleted. This action cannot be undone.",
     );
     await expect(automations.deleteConfirmation).not.toContainText("Unsaved Draft Name");
 
     // Cancelling must leave the editor and the automation untouched.
-    await automations.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await cancel.click();
     await expect(automations.deleteConfirmation).not.toBeVisible();
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 5_000 });
     await expect(automations.deleteButton).toBeVisible();
@@ -337,13 +515,21 @@ test.describe("Automations settings page", () => {
     await automations.workflowSelector.click();
     await expect(testPage.getByText(seedData.steps[0].name, { exact: true })).toBeVisible();
     await testPage.keyboard.press("Escape");
+    await expect(automations.workflowSelector).toBeFocused();
 
     const { repositories } = await apiClient.listRepositories(seedData.workspaceId);
     const repository = repositories[0];
     expect(repository).toBeTruthy();
     await testPage.getByRole("button", { name: "Add repository" }).click();
     await testPage.getByTestId("repo-chip-trigger").click();
-    await testPage.getByText(repository!.name, { exact: true }).last().click();
+    const repositoryOption = testPage.getByRole("option").filter({
+      has: testPage.getByText(repository!.name, { exact: true }),
+    });
+    await expect(repositoryOption).toBeVisible();
+    await waitForFiniteAnimations(
+      testPage.locator('[data-slot="popover-content"][data-state="open"]'),
+    );
+    await repositoryOption.click();
 
     await expect(testPage.getByTestId("repo-chip")).toHaveAttribute(
       "data-repository-id",

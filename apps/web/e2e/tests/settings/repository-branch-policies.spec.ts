@@ -3,6 +3,22 @@ import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("Repository branch policies on desktop", () => {
+  let baselinePolicyIds = new Set<string>();
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    const response = await apiClient.listRepositoryBranchPolicies(seedData.repositoryId);
+    baselinePolicyIds = new Set(response.repository_branch_policies.map((policy) => policy.id));
+  });
+  test.afterEach(async ({ apiClient, seedData }) => {
+    const response = await apiClient.listRepositoryBranchPolicies(seedData.repositoryId);
+    const created = response.repository_branch_policies.filter(
+      (policy) => !baselinePolicyIds.has(policy.id),
+    );
+    const results = await Promise.allSettled(
+      created.map((policy) => apiClient.deleteRepositoryBranchPolicy(policy.id)),
+    );
+    expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+  });
+
   test("shows field help on hover and keyboard focus", async ({ testPage, seedData }) => {
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     const repositoryCard = testPage.locator('[data-slot="card"]', { hasText: "E2E Repo" });

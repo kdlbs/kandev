@@ -120,8 +120,17 @@ func (h *Handler) costsByProvider(c *gin.Context) {
 // by-project / by-model / by-provider) in a single response so the costs
 // page renders in one round-trip (Stream D of office optimization).
 func (h *Handler) costsBreakdown(c *gin.Context) {
-	total, byAgent, byProject, byModel, byProvider, err := h.svc.GetCostsBreakdown(
-		c.Request.Context(), c.Param("wsId"),
+	ranges, supplied := c.Request.URL.Query()["range"]
+	rangeValue := ""
+	if supplied {
+		if len(ranges) != 1 || !validCostRange(ranges[0]) {
+			c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: ErrInvalidCostRange.Error()})
+			return
+		}
+		rangeValue = ranges[0]
+	}
+	total, byAgent, byProject, byModel, byProvider, err := h.svc.GetCostsBreakdownForRange(
+		c.Request.Context(), c.Param("wsId"), rangeValue,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -5,11 +5,21 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+const (
+	acpSessionUpdateToolCall       = "tool_call"
+	acpSessionUpdateToolCallUpdate = "tool_call_update"
+	acpToolCallKindOther           = "other"
+)
+
 // acpDialect contains pure compatibility decisions for an agent's observed
 // ACP implementation. The Adapter remains responsible for RPC execution,
 // session state, serialization, and event delivery.
 type acpDialect struct {
-	normalizeSessionConfig func(
+	continuationSupport         streams.ContinuationSupport
+	continuationSupportForError func(error) streams.ContinuationSupport
+	capacityContinuationSupport streams.CapacityContinuationSupport
+	continuationError           func(error) bool
+	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,
@@ -18,7 +28,7 @@ type acpDialect struct {
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,
-	) []streams.ConfigOption
+	) ([]streams.ConfigOption, []string)
 	modelChangeRequest   func(dialectConfigChange) (*dialectRPC, error)
 	configChangeRequest  func(dialectConfigChange) (*dialectRPC, error)
 	suppressNotification func(acp.SessionNotification) bool
@@ -26,9 +36,13 @@ type acpDialect struct {
 	normalizePromptUsage func(*streams.PromptUsage, map[string]any) *streams.PromptUsage
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
+	cursorShellWatch     func(acp.SessionUpdate) (cursorShellWatchFrame, bool)
 	mcpToolResult        func(any) (any, bool)
 	responseAttemptReset func(map[string]any) bool
 	permissionToolName   func(*string, map[string]any, string, string) *string
+	subagentControl      func(string, map[string]any, any) streams.SubagentControl
+	subagentResult       func(any) (SubagentTaskResult, bool)
+	configurationCommand func(string, []modelInfo, []streams.ConfigOption, []streams.AvailableCommand) *configurationCommandSpec
 }
 
 type mcpToolCallFrame struct {
@@ -60,12 +74,18 @@ func newACPDialect(agentID string) acpDialect {
 		return newGrokACPDialect()
 	case codexAgentID:
 		return newCodexACPDialect()
+	case cursorAgentID:
+		return newCursorACPDialect()
 	case claudeAgentID:
 		return newClaudeACPDialect()
+	case copilotAgentID:
+		return newCopilotACPDialect()
+	case openCodeAgentID:
+		return newOpenCodeACPDialect()
 	case mockAgentID:
 		return newMockACPDialect()
 	}
-	return acpDialect{}
+	return acpDialect{configurationCommand: modelConfigurationCommand}
 }
 
 func (d acpDialect) parseSubagentFrame(meta map[string]any, title string, rawInput any) (subagentFrame, bool) {
@@ -109,9 +129,9 @@ func (d acpDialect) modelConfigAfterChange(
 	config []streams.ConfigOption,
 	models []modelInfo,
 	modelID string,
-) []streams.ConfigOption {
+) ([]streams.ConfigOption, []string) {
 	if d.configAfterModelChange == nil {
-		return config
+		return config, nil
 	}
 	return d.configAfterModelChange(config, models, modelID)
 }
@@ -169,4 +189,22 @@ func (d acpDialect) normalizePermissionToolName(
 		return name
 	}
 	return d.permissionToolName(name, meta, title, actionType)
+}
+
+func (d acpDialect) parseSubagentControl(
+	toolName string,
+	meta map[string]any,
+	rawInput any,
+) streams.SubagentControl {
+	if d.subagentControl == nil {
+		return ""
+	}
+	return d.subagentControl(toolName, meta, rawInput)
+}
+
+func (d acpDialect) parseSubagentResult(rawOutput any) (SubagentTaskResult, bool) {
+	if d.subagentResult == nil {
+		return SubagentTaskResult{}, false
+	}
+	return d.subagentResult(rawOutput)
 }

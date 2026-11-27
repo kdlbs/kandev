@@ -9,30 +9,33 @@ import {
   isPendingClarificationMessage,
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
+import { isDismissedGitPushErrorMessage } from "@/lib/utils/git-push-error-message";
+import {
+  isAutomaticPermissionPresentation,
+  permissionPresentationFromMetadata,
+} from "@/lib/permissions/presentation";
+import visibleMessageTypes from "@kandev/types/unread-message-visible-types.json";
 
-const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
-  "message",
-  "content",
-  "tool_call",
-  "tool_read",
-  "tool_edit",
-  "tool_execute",
-  "tool_search",
-  "progress",
-  "status",
-  "error",
-  "thinking",
-  "todo",
-  "script_execution",
-  "agent_plan",
-]);
+/** Transcript-visible message types. The backend unread predicate requires the
+ *  same set, so both sides read the shared manifest. */
+const VISIBLE_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>(visibleMessageTypes);
+
+/** A notice rendered after the transcript with its action buttons, such as a
+ *  git-failure, stall, or transient-retry notice. Recovery cards stay inline. */
+export function isFooterActionMessage(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  return Array.isArray(metadata?.actions) && !metadata?.recovery_actions;
+}
 
 function isVisibleMessageType(type: MessageType | undefined): boolean {
   return !type || VISIBLE_MESSAGE_TYPES.has(type);
 }
 
 function isPermissionVisible(message: Message, toolCallIds: Set<string>): boolean {
-  const metadata = message.metadata as { tool_call_id?: string; status?: string } | undefined;
+  const metadata = message.metadata as
+    | { tool_call_id?: string; status?: string; permission_presentation?: unknown }
+    | undefined;
+  if (isAutomaticPermissionPresentation(permissionPresentationFromMetadata(metadata))) return false;
   const toolCallId = metadata?.tool_call_id;
   if (toolCallId && toolCallIds.has(toolCallId)) return false;
   const status = metadata?.status;
@@ -181,6 +184,32 @@ export function isSuccessfulScriptExecutionMetadata(
   );
 }
 
+const SELECTION_FAILURE_CODES = new Set([
+  "model_unavailable",
+  "model_selection_failed",
+  "permission_mode_failed",
+  "permission_mode_unconfirmed",
+  "permission_mode_mismatch",
+  "thinking_level_unavailable",
+  "thinking_level_failed",
+  "thinking_level_mismatch",
+  "thinking_level_unconfirmed",
+]);
+
+export function isSelectionFailureRecoveryMetadata(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Record<string, unknown>;
+  const causes = Array.isArray(metadata.causes) ? metadata.causes : [];
+  return [metadata.failure_code, metadata.code, ...causes.map(selectionCauseCode)].some(
+    (code) => typeof code === "string" && SELECTION_FAILURE_CODES.has(code),
+  );
+}
+
+function selectionCauseCode(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as Record<string, unknown>).code;
+}
+
 /** True when a script_execution row reports an agent that finished booting
  *  successfully, whether resumed or freshly started. Mirrors the success rule
  *  the boot header renders with (script-execution-message.tsx): an "exited"
@@ -223,7 +252,14 @@ export function hasFailedAgentBootAfter(
 export function hasSuccessfulAgentBootAfter(
   messages: Message[] | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  requireExactStamp = false,
+  sessionMetadata?: Record<string, unknown> | null,
 ): boolean {
+  if (errorStamp) {
+    return hasSessionRecoveryResolutionAfter(sessionMetadata, afterCreatedAt, errorStamp);
+  }
+  if (requireExactStamp) return false;
   const failedAt = Date.parse(afterCreatedAt ?? "");
   if (Number.isNaN(failedAt) || !messages?.length) return false;
   return messages.some((message) => {
@@ -237,12 +273,57 @@ export function hasSuccessfulAgentBootAfter(
 export function hasSessionRecoveryResolutionAfter(
   metadata: Record<string, unknown> | null | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  messages?: readonly {
+    type?: string;
+    metadata?: Record<string, unknown> | null;
+  }[],
+  requireExactStamp = false,
 ): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt)) return false;
+  if (errorStamp) {
+    const entries = Array.isArray(metadata?.recovery_resolutions)
+      ? metadata.recovery_resolutions.slice(-16)
+      : [];
+    return entries.some((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+      const resolution = entry as Record<string, unknown>;
+      const resolvedStamp = resolution.error_stamp;
+      const resolvedAt = Date.parse(
+        typeof resolution.resolved_at === "string" ? resolution.resolved_at : "",
+      );
+      return (
+        isSafeRecoveryStamp(resolvedStamp) &&
+        resolvedStamp === errorStamp &&
+        isHostResumeAttemptID(resolution.attempt_id) &&
+        !Number.isNaN(resolvedAt) &&
+        resolvedAt > failedAt
+      );
+    });
+  }
+  if (requireExactStamp) return false;
   const resolvedAt = Date.parse(
     typeof metadata?.recovery_resolved_at === "string" ? metadata.recovery_resolved_at : "",
   );
-  const failedAt = Date.parse(afterCreatedAt ?? "");
   return !Number.isNaN(resolvedAt) && !Number.isNaN(failedAt) && resolvedAt > failedAt;
+}
+
+function isSafeRecoveryStamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isHostResumeAttemptID(value: unknown): value is string {
+  const match = typeof value === "string" ? /^resume-(0|[1-9][0-9]{0,19})$/u.exec(value) : null;
+  if (!match) return false;
+  const sequence = match[1];
+  return sequence.length < 20 || sequence <= "18446744073709551615";
 }
 
 export function isSetupScriptMessage(message: Message): boolean {
@@ -388,9 +469,12 @@ export function filterVisibleMessages(
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   scope?: PendingClarificationScope,
+  isPassthrough = false,
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
+    if (isPassthrough && isEmptyTurnNotice(message)) return false;
+    if (isDismissedGitPushErrorMessage(message)) return false;
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       return isClarificationVisible(message, activeClarification);

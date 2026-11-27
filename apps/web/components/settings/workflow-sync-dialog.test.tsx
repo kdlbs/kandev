@@ -18,6 +18,7 @@ const REMOVE_CONFIRMATION_TEST_ID = "workflow-sync-remove-confirmation";
 const REMOVE_CONFIRM_TEST_ID = "workflow-sync-remove-confirm";
 
 const EMPTY_FORM: WorkflowSyncFormState = {
+  github_host: "github.com",
   provider: "github",
   repo_owner: "",
   repo_name: "",
@@ -50,6 +51,8 @@ function formForConfig(currentConfig: WorkflowSyncConfig | null): WorkflowSyncFo
   if (!currentConfig) return { ...EMPTY_FORM };
   return {
     provider: currentConfig.provider,
+    github_host:
+      currentConfig.provider === "gitlab" ? "" : (currentConfig.github_host ?? "github.com"),
     repo_owner: currentConfig.repo_owner,
     repo_name: currentConfig.repo_name,
     project_path: currentConfig.project_path,
@@ -63,6 +66,7 @@ function formForConfig(currentConfig: WorkflowSyncConfig | null): WorkflowSyncFo
 function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSyncController {
   const currentConfig = overrides.config === undefined ? config() : overrides.config;
   return {
+    lifetime: Symbol(),
     config: currentConfig,
     form: formForConfig(currentConfig),
     url: currentConfig ? "https://github.com/acme/flows" : "",
@@ -73,7 +77,10 @@ function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSy
     update: vi.fn(),
     setUrlInput: vi.fn(),
     setProvider: vi.fn(),
-    handleSave: vi.fn().mockResolvedValue(true),
+    handleSave: vi.fn(async (onDraftAccepted?: () => void) => {
+      onDraftAccepted?.();
+      return true;
+    }),
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
     ...overrides,

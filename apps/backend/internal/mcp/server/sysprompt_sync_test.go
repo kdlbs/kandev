@@ -194,13 +194,13 @@ func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
 			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
 			if name == "task" {
 				for _, phrase := range []string{
-					"For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now",
-					"Do not implement it as ASCII, SVG, HTML, or another app",
-					"Get the schema and examples from tool discovery",
-					"workspace-relative",
+					"For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now",
+					"No ASCII/SVG/HTML/separate app",
+					"discover schema/examples",
+					"Workspace-relative",
 					"Label series with units",
-					"Otherwise use prose or a small Markdown table",
-					"Kandev owns layout, axes, legends, and tooltips",
+					"Otherwise prose or small Markdown tables",
+					"Kandev owns layout/styling",
 				} {
 					assert.Contains(t, richOutputLine, phrase)
 				}
@@ -211,23 +211,18 @@ func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
 				return
 			}
 			for _, phrase := range []string{
-				"When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now",
-				"Do not implement the display as ASCII/SVG/HTML or with another app",
-				"version=1,title,blocks (1-4)",
-				"x_column",
-				"workspace-relative",
-				"Label series with units",
-				"small text table: Markdown",
-				"Inline:",
-				"CSV line:",
-				"Metrics:",
-				"Kandev owns axes/legends/tooltips/layout",
+				"structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now",
+				"version=2,catalog_version=1,spec.root/spec.elements",
+				"workspace CSV charts", "tool discovery", "No ASCII/SVG/HTML/separate app",
+				"small Markdown tables", "Kandev owns axes, legends, tooltips, layout", "Label series with units",
 			} {
 				assert.Contains(t, richOutputLine, phrase)
 			}
-			assert.Equal(t, 1, strings.Count(richOutputLine, inlineRecipe))
-			assert.Equal(t, 1, strings.Count(richOutputLine, csvRecipe))
-			assert.Equal(t, 1, strings.Count(richOutputLine, metricsRecipe))
+			assert.NotContains(t, richOutputLine, " version=1")
+			for _, recipe := range []string{inlineRecipe, csvRecipe, metricsRecipe} {
+				assert.NotContains(t, richOutputLine, recipe)
+			}
+
 		})
 	}
 }
@@ -274,7 +269,7 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
-	assert.Len(t, registered, 15, "Office MCP must expose the complete 15-tool catalog")
+	assert.Len(t, registered, 16, "Office MCP must expose the complete transfer-enabled 16-tool catalog")
 }
 
 func TestDecisionMCPTransportIsAbsentFromOfficeAndKanban(t *testing.T) {
@@ -541,5 +536,22 @@ func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 	for _, field := range requiredFields {
 		assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
 			"ChangesWalkthrough must identify required walkthrough step field %q", field)
+	}
+}
+
+func TestRichOutputEvidenceDiscoveryGuidance(t *testing.T) {
+	for _, prompt := range []string{sysprompt.KandevContext(), sysprompt.OfficeContext()} {
+		assert.Contains(t, prompt, "For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now")
+		for _, component := range []string{"Table", "StatusList", "Callout"} {
+			assert.Contains(t, prompt, component)
+		}
+	}
+	s := newTaskModeServer(t, &testBackend{}, "task-current")
+	tool := s.mcpServer.ListTools()[richOutputToolName]
+	assert.Contains(t, tool.Tool.Description, "For structured comparisons, recorded checks")
+	assert.Contains(t, tool.Tool.Description, "Each element: {type,props,children}")
+	assert.Contains(t, tool.Tool.Description, "Table columns:{key,label}[]; rows:string[][]")
+	for _, component := range []string{"Table", "StatusList", "Callout"} {
+		assert.Contains(t, tool.Tool.Description, component)
 	}
 }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { Executor } from "@/lib/types/http";
 import { useDialogHandlers } from "@/components/task-create-dialog-handlers";
+import { StateProvider } from "@/components/state-provider";
 import { useSubtaskFormState } from "./new-subtask-form-state";
 
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
@@ -58,7 +59,7 @@ function useSubtaskFormWithDialogHandlers() {
 
 describe("useSubtaskFormState — remoteRepos seed", () => {
   it("keeps local and remote additions in one ordered selection list", () => {
-    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"), { wrapper: StateProvider });
 
     act(() => {
       result.current.appendRepositorySelection({
@@ -92,7 +93,7 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
   });
 
   it("seeds one empty remoteRepos row when useRemote toggles on with an empty list", () => {
-    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"), { wrapper: StateProvider });
     expect(result.current.remoteRepos).toHaveLength(0);
 
     act(() => {
@@ -105,7 +106,7 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
 
   it("preserves remoteRepos rows when toggling Remote → off → on", () => {
     const PASTED_URL = "github.com/owner/repo";
-    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"), { wrapper: StateProvider });
 
     act(() => {
       result.current.setUseRemote(true);
@@ -129,7 +130,7 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
   });
 
   it("keeps fresh-branch state writable for local policy branches", () => {
-    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"), { wrapper: StateProvider });
 
     expect(result.current.freshBranchEnabled).toBe(false);
     act(() => {
@@ -139,7 +140,7 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
   });
 
   it("supports the shared folder-only executor transition and restoration", () => {
-    const { result } = renderHook(useSubtaskFormWithDialogHandlers);
+    const { result } = renderHook(useSubtaskFormWithDialogHandlers, { wrapper: StateProvider });
 
     act(() => result.current.fs.setExecutorProfileId(WORKTREE_PROFILE_ID));
     act(() => result.current.handlers.onFolderSelectionAdded?.(true));

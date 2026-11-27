@@ -113,6 +113,10 @@ vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
 
 import { SettingsTree } from "./settings-tree";
 
+vi.mock("@/components/settings/prompt-conflict-indicator", () => ({
+  PromptConflictIndicator: () => null,
+}));
+
 function setMenuMode(mode: SettingsMenuMode, expandedKeys: string[] = []) {
   state.settingsMenu.mode = mode;
   state.settingsMenu.savedMode = mode;

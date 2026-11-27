@@ -9,6 +9,20 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestBuildTaskEnvironmentReposLeavesSourceClonePathEmptyWithoutGitDir(t *testing.T) {
+	repos := buildTaskEnvironmentRepos([]RepoWorktreeResult{{
+		RepositoryID: "repo-failed", WorktreeID: "wt-failed", WorktreePath: "/tasks/task-1/repo",
+		ErrorMessage: "repository preparation failed",
+	}})
+	if len(repos) != 1 {
+		t.Fatalf("buildTaskEnvironmentRepos() returned %d rows, want 1", len(repos))
+	}
+	if repos[0].WorktreeSourceClonePath != "" || repos[0].WorktreeSourceCommonDir != "" {
+		t.Fatalf("failed repository source identity = (%q, %q), want both empty",
+			repos[0].WorktreeSourceClonePath, repos[0].WorktreeSourceCommonDir)
+	}
+}
+
 // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.1
 // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.2
 // @covers AC-TASKS-RUNTIME-CLEANUP-001.2

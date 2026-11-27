@@ -9,6 +9,23 @@ export async function requireBox(locator: Locator, label: string): Promise<Eleme
   return box;
 }
 
+export async function assertVerticalCentersAligned(
+  first: Locator,
+  second: Locator,
+  label: string,
+): Promise<void> {
+  const [firstBox, secondBox] = await Promise.all([
+    requireBox(first, `${label} first element`),
+    requireBox(second, `${label} second element`),
+  ]);
+  const firstCenter = firstBox.y + firstBox.height / 2;
+  const secondCenter = secondBox.y + secondBox.height / 2;
+  expect(
+    Math.abs(firstCenter - secondCenter),
+    `${label}: vertical centers differ by more than 1 CSS pixel`,
+  ).toBeLessThanOrEqual(1);
+}
+
 /**
  * Returns descendant text in the order Chromium paints its glyphs from left to
  * right. DOM text remains in logical order when bidi layout moves punctuation,
@@ -260,4 +277,28 @@ export async function expectElementsNotToIntersect(first: Locator, second: Locat
     firstBox!.y < secondBox!.y + secondBox!.height &&
     firstBox!.y + firstBox!.height > secondBox!.y;
   expect(intersects).toBe(false);
+}
+
+/**
+ * Asserts that a control's rendered box sits inside its action group or row.
+ * One pixel of tolerance absorbs subpixel rounding on scaled surfaces.
+ */
+export async function expectLocatorContainedBy(
+  control: Locator,
+  group: Locator,
+  label: string,
+): Promise<void> {
+  const [controlBox, groupBox] = await Promise.all([control.boundingBox(), group.boundingBox()]);
+  expect(controlBox, `${label}: control has geometry`).not.toBeNull();
+  expect(groupBox, `${label}: group has geometry`).not.toBeNull();
+  if (!controlBox || !groupBox) return;
+  const tolerance = 1;
+  expect(controlBox.x, `${label}: left edge`).toBeGreaterThanOrEqual(groupBox.x - tolerance);
+  expect(controlBox.x + controlBox.width, `${label}: right edge`).toBeLessThanOrEqual(
+    groupBox.x + groupBox.width + tolerance,
+  );
+  expect(controlBox.y, `${label}: top edge`).toBeGreaterThanOrEqual(groupBox.y - tolerance);
+  expect(controlBox.y + controlBox.height, `${label}: bottom edge`).toBeLessThanOrEqual(
+    groupBox.y + groupBox.height + tolerance,
+  );
 }

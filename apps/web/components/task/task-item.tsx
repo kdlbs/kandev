@@ -24,7 +24,11 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,
@@ -32,9 +36,11 @@ import {
 } from "./task-row-presentation";
 import { TaskItemTrailing, type DiffStats } from "./task-item-trailing";
 import { TaskStateIcon } from "./task-state-icon";
+import { useIsTitleTruncated } from "@/hooks/use-is-title-truncated";
 
 type TaskItemProps = {
   title: string;
+  flag?: ReactNode;
   autopilot?: boolean;
   priority?: TaskPriority;
   state?: TaskState;
@@ -55,7 +61,7 @@ type TaskItemProps = {
    */
   parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
-  isPendingArchive?: boolean;
+  isPendingRemoval?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
   isMultiSelected?: boolean;
@@ -120,9 +126,13 @@ type TaskItemProps = {
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  /** Show the unread dot; the shared row resolves setting and selection. */
+  hasUnreadMessages?: boolean;
   automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
@@ -131,9 +141,15 @@ function handleTaskItemKeyDown(
   e: React.KeyboardEvent<HTMLDivElement>,
   onSelect: ((e: React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target instanceof Element) {
+    const button = e.target.closest("button");
+    if (button && e.currentTarget.contains(button)) return;
+  }
   e.preventDefault();
+  if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
   // Enter/Space toggles/extends the selection just like a click would.
   if (onSelect) onSelect(e);
@@ -158,11 +174,11 @@ function taskItemRowClassName(
   hasDetails: boolean,
 ): string {
   const rowSurfaceClass = isSelected
-    ? "border-y border-primary/50 bg-primary/15 hover:bg-primary/20"
-    : "hover:bg-foreground/[0.05]";
+    ? "bg-primary/15 hover:bg-primary/20"
+    : "bg-transparent hover:bg-foreground/[0.05]";
 
   return cn(
-    "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    "group relative mx-2 my-0.5 flex w-[calc(100%-1rem)] gap-2 rounded-md py-2 pr-2 text-left text-sm outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-ring",
     hasDetails ? "items-start" : "items-center",
     "transition-colors duration-75",
     rowSurfaceClass,
@@ -170,7 +186,7 @@ function taskItemRowClassName(
     // and add only the existing selection ring for the multi-selection state.
     isMultiSelected && !isSelected && "bg-primary/5",
     isMultiSelected && "ring-1 ring-inset ring-primary/40",
-    isRoot && "pl-3",
+    isRoot && "pl-2",
   );
 }
 
@@ -178,12 +194,17 @@ function taskItemRowClassName(
 function taskItemRowClick(
   onSelect: ((e: React.MouseEvent | React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): (e: React.MouseEvent) => void {
-  return (e) => (onSelect ? onSelect(e) : onClick?.());
+  return (e) => {
+    if (isPendingRemoval) return;
+    if (onSelect) onSelect(e);
+    else onClick?.();
+  };
 }
 
-function pendingArchiveRowProps(isPendingArchive?: boolean) {
-  if (!isPendingArchive) return {};
+function pendingRemovalRowProps(isPendingRemoval?: boolean) {
+  if (!isPendingRemoval) return {};
   return {
     "aria-busy": true as const,
     "aria-disabled": true as const,
@@ -192,11 +213,22 @@ function pendingArchiveRowProps(isPendingArchive?: boolean) {
 }
 
 function TaskItemTitle({ title }: { title: string }) {
-  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
+  const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>(title);
+  return (
+    <ScrollOnOverflow
+      ref={ref}
+      className="sidebar-task-title min-w-0"
+      data-testid="task-item-title"
+      data-truncated={isTruncated}
+    >
+      {title}
+    </ScrollOnOverflow>
+  );
 }
 
 type TaskItemContentProps = {
   title: string;
+  flag?: ReactNode;
   autopilot?: boolean;
   priority?: TaskPriority;
   taskId?: string;
@@ -215,6 +247,7 @@ type TaskItemContentProps = {
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
@@ -222,6 +255,7 @@ type TaskItemContentProps = {
 
 function TaskItemContent({
   title,
+  flag,
   autopilot,
   priority,
   taskId,
@@ -240,6 +274,7 @@ function TaskItemContent({
   launchQueue,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
   comparisonUnavailable,
   resolvedTaskRow,
   relativeTime,
@@ -249,15 +284,20 @@ function TaskItemContent({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <TaskItemTitle title={title} />
+        {flag}
         <TaskItemLeadingBadges
           autopilot={autopilot}
           priority={priority}
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
-          showChangeRequestStatus={resolvedTaskRow.trailing !== "change_request_status"}
+          showChangeRequestStatus={
+            resolvedTaskRow.trailing !== "change_request_status" &&
+            resolvedTaskRow.trailing !== "none"
+          }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
+          hasUnreadMessages={hasUnreadMessages}
         />
         <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
@@ -342,6 +382,7 @@ function TaskItemActions({
 // eslint-disable-next-line max-lines-per-function
 export const TaskItem = memo(function TaskItem({
   title,
+  flag,
   autopilot,
   priority,
   state,
@@ -349,7 +390,7 @@ export const TaskItem = memo(function TaskItem({
   foregroundActivity,
   parkedOnBackgroundWork,
   isArchived,
-  isPendingArchive,
+  isPendingRemoval,
   isSelected = false,
   isMultiSelected = false,
   onClick,
@@ -386,12 +427,15 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  hasUnreadMessages,
   automaticColor,
+  quotaWait,
+  waitReason,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const pendingProps = pendingArchiveRowProps(isPendingArchive);
+  const pendingProps = pendingRemovalRowProps(isPendingRemoval);
   const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
   const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
@@ -406,8 +450,8 @@ export const TaskItem = memo(function TaskItem({
       data-task-row-id={taskId}
       {...pendingProps}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(onSelect, onClick, isPendingRemoval)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick, isPendingRemoval)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         taskItemRowClassName(
@@ -430,15 +474,19 @@ export const TaskItem = memo(function TaskItem({
         state={state}
         foregroundActivity={foregroundActivity}
         parkedOnBackgroundWork={parkedOnBackgroundWork}
+        waitReason={waitReason}
+        launchQueue={launchQueue}
+        quotaWait={quotaWait}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
-        isPendingArchive={isPendingArchive}
+        isPendingRemoval={isPendingRemoval}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
         showBackgroundTooltip
       />
       <TaskItemContent
         title={title}
+        flag={flag}
         autopilot={autopilot}
         priority={priority}
         taskId={taskId}
@@ -457,6 +505,7 @@ export const TaskItem = memo(function TaskItem({
         launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        hasUnreadMessages={hasUnreadMessages}
         comparisonUnavailable={comparisonUnavailable}
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}
@@ -488,8 +537,9 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
   if (depth === 0) return null;
   return (
     <span
+      aria-hidden="true"
       style={{ left: leftPx }}
-      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/30"
+      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/60"
     >
       ↳
     </span>

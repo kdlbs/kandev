@@ -62,6 +62,29 @@ It implements the user's explicit one-pod-per-task expectation.
   Operators shall trust every agent attached to a task and manage provider-side
   credential revocation after suspected exposure.
 
+- **AC-EXECUTORS-KUBERNETES-TASK-POD-001.9:** With managed task Git access selected,
+  each fresh or resumed agent session shall be able to read and fetch its authorized
+  private repositories from its actual command subprocesses. Successful preparation
+  alone is insufficient. Retained-pod Stop/Resume shall preserve pod and workspace
+  identity while delivering the current session's credentials.
+- **AC-EXECUTORS-KUBERNETES-TASK-POD-001.10:** Credential replacement, revocation,
+  logout, or a switch away from managed access shall not retain stale managed
+  credentials or generated credential routing in subsequently started processes.
+  Managed access shall preserve repository-scoped redemption and verified TLS,
+  without placing raw Git tokens in the agent environment, profile, or image.
+- **AC-EXECUTORS-KUBERNETES-TASK-POD-001.11:** Package-manager and tool caches
+  written by a session's agent or preparation processes shall default to
+  disk-backed pod storage shared by the task's sessions, not to the
+  memory-backed session home. Additional sessions shall reuse that cache rather
+  than duplicating it. A cache location set in the executor profile
+  environment shall take precedence. Session configuration and credential files shall keep their
+  current location, so CLI login, credential refresh, and resume are unchanged.
+
+## Implementation plans
+
+- [Managed Git handoff repair](../../../plans/kubernetes-managed-git-handoff/plan.md).
+- [Disk-backed session caches](../../../plans/kubernetes-session-cache-storage/plan.md).
+
 ## Related contracts
 
 - [Additional-session workspace reuse](../../tasks/requirements/additional-session-workspace-reuse.md).

@@ -6,8 +6,9 @@ Browse** inside Kandev.
 
 It is deliberately minimal. It records *which repositories* are in the official
 catalog and registry-owned preview images. Release metadata (display name,
-description, author, version, tarball URL, package digest, stars) is read from
-the package and GitHub release when the catalog index is built.
+description, version, tarball URL, package digest, stars) is read from the
+package and GitHub release when the catalog index is built. Catalog attribution
+comes from the curated repository owner, not the package manifest.
 
 ## Files
 
@@ -15,8 +16,9 @@ the package and GitHub release when the catalog index is built.
 | --- | --- |
 | `plugins.yaml` | The curated pointer list — one entry per plugin or canvas repo. Human-edited via PR. |
 | `schema.json` | JSON Schema (draft 2020-12) that `plugins.yaml` MUST validate against. Enforced in CI. |
-| `build-index.mjs` | Build script (zero-dependency Node) that resolves each entry to a full catalog record and emits `index.json`. |
-| `build-index.test.mjs` | `node --test` coverage for the build script's parser and enrichment. |
+| `build-index.mjs` | Node builder that resolves releases, calls the repository package verifier, and emits `index.json`. |
+| `check-releases.mjs` | Central allowlist-only detector for newer curated releases. |
+| `*.test.mjs` | `node --test` coverage for detection, package/index construction, fallback, and workflow contracts. |
 
 The generated `index.json` is published to GitHub Pages by the
 [`plugin-registry-index`](../.github/workflows/plugin-registry-index.yml)
@@ -32,7 +34,9 @@ asset in the standard Kandev package format:
 - `<id>-<version>.tar.gz` — the required plugin package. The archive contains
   its own generated `checksums.txt`, which the install pipeline verifies.
 - `checksums.txt` — an optional release asset containing the tarball digest.
-  The catalog does not currently populate or enforce it.
+  When present, the registry builder requires its digest for the exact package
+  to match. Every newly accepted package also receives a computed
+  `package_sha256` in the index.
 
 The `kdlbs/kandev-plugin-template` starter repo is the recommended way to
 bootstrap a new plugin with the right layout and a release workflow.
@@ -75,18 +79,68 @@ usage telemetry** — there is no "most installed" metric, by design.
    The `id` **MUST match the `id` in your plugin manifest** and be unique across
    the file. `repo` is `owner/name`. `featured` is a maintainer-only pin and
    should be left out of submissions.
+
+   Catalog categories combine the release manifest categories with the
+   categories in the registry entry. The builder removes duplicate values,
+   so maintainers can add catalog labels without changing the release.
+
 4. **Open a pull request.** The index-build workflow runs on your PR (build +
-   tests, no Pages deploy) and resolves your entry against the GitHub API — your
-   repo must have a latest release that publishes a `.tar.gz` package; an entry
-   whose repo has no release or no package is skipped. Name the package
-   `<id>-<version>.tar.gz` and keep your entry `id` equal to your manifest `id`
-   so the index resolves the right asset. `plugins.yaml` must also follow the
-   `schema.json` pointer-list contract.
+   tests, no Pages deploy) and resolves your entry against the GitHub API. The
+   latest release must contain the exact `<id>-<version>.tar.gz` package. The
+   builder verifies the archive's internal checksums and managed manifest, and
+   requires the verified manifest ID/version to match the curated entry and
+   release tag. `plugins.yaml` must also follow the `schema.json` pointer-list
+   contract.
 5. **A maintainer reviews and merges** — maintainer approval is what gates the
-   official catalog. Once merged, the index-build workflow picks up your entry
-   and your plugin or canvas appears in the in-app catalog on the next build.
-   The canvas inspector validates the exact release asset, identity, source mode,
-   permissions, and archive digest without executing package code.
+   official catalog. Once listed, a central read-only poll checks curated
+   repositories every three hours and targets publication within four hours
+   under normal GitHub Actions scheduling. GitHub schedules can be delayed or
+   dropped, so this is an operational SLO rather than a hard wall-clock
+   guarantee. The daily 06:00 UTC rebuild remains the fallback and refreshes
+   star counts. The canvas inspector validates the exact release asset,
+   identity, source mode, permissions, and archive digest without executing
+   package code.
+
+## Catalog attribution
+
+The catalog attributes a native plugin to the **owner of its curated
+repository** in `plugins.yaml`, not to the `author` field in its manifest. A
+plugin curated under `Fclem/kandev-plugin-prompt-history` shows **by Fclem**
+even when its manifest declares `author: "kandev"`, and first-party
+`kdlbs/kandev-plugin-*` entries show **by kdlbs**.
+
+The manifest `author` is declared package data. An installed plugin's Manifest
+card shows it as **Declared author**. That label does not make the author a
+verified publisher: trust still comes from the marketplace source you enabled,
+and a custom source's metadata is only as trustworthy as its maintainer.
+
+The curated owner is a listing identity. It changes through a reviewed pointer
+update, not through a plugin release, and a successful rebuild applies it to a
+retained record without changing that record's package version, URL, or digest.
+After the index workflow publishes, readers see the new identity when the
+catalog refreshes or its five-minute cache expires. A failed build publishes
+nothing, so the previous catalog keeps its existing attribution until a later
+build succeeds.
+
+## Publication security and failure behavior
+
+The checked-out `plugins.yaml` is the only repository allowlist. The poll
+accepts no repository or release payload from plugin repositories, and those
+repositories receive no Kandev credential. Its token is read-only; Pages write
+and OIDC permissions exist only on the central deployment-capable workflow.
+
+All push, manual, daily, and release-poll builds share the static
+`plugin-registry-pages` concurrency group. An active deployment finishes and
+pending requests coalesce, preventing Pages races while every retained build
+resolves current releases when it starts.
+
+If one latest release is missing or invalid, the builder retains the prior
+record for that same still-curated repository and reports an Actions warning
+and step summary; other valid releases may advance. Delisted repositories are
+never restored from prior output. A provider-wide failure or an invalid release
+without a trusted prior fails before artifact upload, so the published Pages
+site stays at its last known-good catalog. The failed poll/build run and its
+annotations are the operator-visible evidence.
 
 ## Teams and corporates: host your own source instead
 
@@ -96,9 +150,10 @@ document of the same shape can be added under **Settings > Plugins** as an extra
 source, and its plugins are merged into the catalog alongside the official ones.
 
 This is the recommended path for a team or corporate registry — host your own
-`index.json` (for example by copying this directory's `plugins.yaml` +
-`build-index.mjs` + workflow into your own repo and pointing Kandev at your Pages
-URL). Adding a source is an explicit act of trust in that source's maintainer,
+`index.json` (for example by adapting this repository's registry workflows,
+pointer list, builder, and Go package verifier, then pointing Kandev at the
+resulting Pages URL). Adding a source is an explicit act of trust in that
+source's maintainer,
 much like `brew tap`-ing a third-party tap. When the same `id` appears in more
 than one source, the official source wins and later duplicates are hidden.
 

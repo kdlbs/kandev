@@ -2,10 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -20,6 +23,9 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	session *models.TaskSession,
 	env *models.TaskEnvironment,
 	executorType string,
+	allowBranchReplacement bool,
+	inspectionWait time.Duration,
+	sessionPersisted bool,
 ) (*worktree.RecoveryAdmission, error) {
 	if e.selectedWorktreeRecoveryAdmission == nil || taskID == "" || session == nil || env == nil ||
 		env.ID == "" || executorType != string(models.ExecutorTypeWorktree) ||
@@ -29,25 +35,33 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	if env.TaskID == "" || env.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
+	var inspectionDeadline time.Time
+	if inspectionWait > 0 {
+		ctx, inspectionDeadline = worktree.WithRecoveryInspectionWait(ctx, inspectionWait)
+	}
 
-	slots := make([]worktree.RecoverySlot, 0, len(env.Repos))
-	for _, row := range env.Repos {
-		if row == nil || row.RepositoryID == "" || row.DeletedAt != nil ||
-			(row.Status != "" && row.Status != "active") {
-			continue
-		}
+	selectionSnapshot, selectedRepositories, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
+	if err != nil {
+		return nil, err
+	}
+	activeRows := models.SelectedWorkspaceRecoveryRows(env)
+	slots := make([]worktree.RecoverySlot, 0, len(activeRows))
+	for _, row := range activeRows {
 		if row.WorktreeID == "" {
 			continue
 		}
-		repositoryPath, err := e.repositoryLocalPath(ctx, row.RepositoryID)
-		if err != nil {
-			return nil, err
+		repository := selectedRepositories[row.RepositoryID]
+		if strings.TrimSpace(repository.LocalPath) == "" {
+			return nil, fmt.Errorf("load repository %q for worktree recovery: local path is missing", row.RepositoryID)
 		}
+		repositoryPath := repository.LocalPath
+		cloneRelocation := managedCloneRelocationProof(e.repoCloner, repository, row.WorktreeSourceClonePath, row.WorktreeSourceCommonDir)
 		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:     row.WorktreeID,
-			RepositoryID:   row.RepositoryID,
-			BranchSlug:     row.BranchSlug,
-			RepositoryPath: repositoryPath,
+			WorktreeID:      row.WorktreeID,
+			RepositoryID:    row.RepositoryID,
+			BranchSlug:      row.BranchSlug,
+			RepositoryPath:  repositoryPath,
+			CloneRelocation: cloneRelocation,
 			Worktree: &worktree.Worktree{
 				ID:                row.WorktreeID,
 				TaskID:            env.TaskID,
@@ -56,6 +70,8 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 				RepositoryID:      row.RepositoryID,
 				BranchSlug:        row.BranchSlug,
 				RepositoryPath:    repositoryPath,
+				SourceClonePath:   row.WorktreeSourceClonePath,
+				SourceCommonDir:   row.WorktreeSourceCommonDir,
 				Path:              row.WorktreePath,
 				Branch:            row.WorktreeBranch,
 				BaseBranch:        session.BaseBranch,
@@ -68,13 +84,17 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	}
 
 	admission, err := e.selectedWorktreeRecoveryAdmission(ctx, worktree.RecoveryAdmissionRequest{
-		TaskID:              taskID,
-		SessionID:           session.ID,
-		TaskEnvironmentID:   env.ID,
-		OwnerTaskID:         env.TaskID,
-		OwnershipGeneration: env.OwnershipGeneration,
-		ExecutorType:        executorType,
-		Slots:               slots,
+		TaskID:                 taskID,
+		SessionID:              session.ID,
+		TaskEnvironmentID:      env.ID,
+		OwnerTaskID:            env.TaskID,
+		OwnershipGeneration:    env.OwnershipGeneration,
+		ExecutorType:           executorType,
+		SelectionSnapshot:      selectionSnapshot,
+		AllowBranchReplacement: allowBranchReplacement,
+		InspectionWait:         inspectionWait,
+		InspectionDeadline:     inspectionDeadline,
+		Slots:                  slots,
 	})
 	if err != nil {
 		return nil, err
@@ -96,21 +116,135 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 			row.WorktreeID = slot.Worktree.ID
 			row.WorktreePath = slot.Worktree.Path
 			row.WorktreeBranch = slot.Worktree.Branch
+			row.WorktreeSourceClonePath = slot.Worktree.SourceClonePath
+			row.WorktreeSourceCommonDir = slot.Worktree.SourceCommonDir
 			break
 		}
 	}
 	return admission, nil
 }
 
-func (e *Executor) repositoryLocalPath(ctx context.Context, repositoryID string) (string, error) {
-	repository, err := e.repo.GetRepository(ctx, repositoryID)
+func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	sessionPersisted bool,
+) (models.WorkspaceRecoverySelectionSnapshot, map[string]*models.Repository, error) {
+	if session == nil || env == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, nil
+	}
+	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
+	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if repository != nil {
+			selectedRepositories[repositoryID] = repository
+		}
+		return repository, err
+	})
 	if err != nil {
-		return "", fmt.Errorf("load repository %q for worktree recovery: %w", repositoryID, err)
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, err
 	}
-	if repository == nil || strings.TrimSpace(repository.LocalPath) == "" {
-		return "", fmt.Errorf("load repository %q for worktree recovery: local path is missing", repositoryID)
+	selectionSnapshot.SessionPersisted = sessionPersisted
+	return selectionSnapshot, selectedRepositories, nil
+}
+
+// PreflightSessionWorktreeRecovery performs selected-environment recovery
+// before a recovery action mutates provider state such as its resume token.
+// Hold the admission through LaunchSession. Call the returned replacement release
+// after launch or any earlier exit, including errors and nil admissions.
+func (e *Executor) PreflightSessionWorktreeRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowBranchReplacement bool,
+) (*worktree.RecoveryAdmission, func(context.Context) error, error) {
+	if e == nil || e.repo == nil || session == nil || taskID == "" || session.TaskID != taskID {
+		return nil, nil, nil
 	}
-	return repository.LocalPath, nil
+	previousEnvironmentID := session.TaskEnvironmentID
+	retiredBinding, selected, err := e.prepareRetiredEnvironmentReplacementForRecovery(ctx, taskID, session, allowBranchReplacement)
+	release := e.recoveryReplacementRelease(selected, session.ID)
+	if err != nil {
+		return nil, release, err
+	}
+	if retiredBinding && session.TaskEnvironmentID == previousEnvironmentID {
+		return nil, release, nil
+	}
+	env, err := e.resolveEnvironmentForAdmission(ctx, taskID, session.TaskEnvironmentID)
+	if err != nil || env == nil {
+		return nil, release, err
+	}
+	admission, err := e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
+	return admission, release, err
+}
+
+func (e *Executor) prepareRetiredEnvironmentReplacementForRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	allowBranchReplacement bool,
+) (bool, *models.TaskEnvironment, error) {
+	if session.TaskEnvironmentID == "" {
+		return false, nil, nil
+	}
+	retained, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return false, nil, fmt.Errorf("load selected task environment %q: %w", session.TaskEnvironmentID, err)
+	}
+	if !retained.IsRetired() {
+		return false, nil, nil
+	}
+	if !isTerminalSessionState(session.State) && session.State != models.TaskSessionStateCompleted {
+		return true, nil, fmt.Errorf("%w: retired environment is bound to a live session", models.ErrWorkspaceReuseUnsafe)
+	}
+	if _, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID); errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+		return true, nil, nil
+	} else if err != nil {
+		return true, nil, fmt.Errorf("load active replacement environment: %w", err)
+	}
+	if err := e.cleanupStaleExecutionBeforeResume(ctx, session.ID); err != nil {
+		return true, nil, err
+	}
+	task, err := e.loadResumeTask(ctx, session)
+	if err != nil {
+		return true, nil, err
+	}
+	options := ResumeOptions{
+		AllowCompletedSessionResume: session.State == models.TaskSessionStateCompleted,
+		AllowBranchReplacement:      allowBranchReplacement,
+	}
+	executorType, err := e.requestedResumeExecutorType(ctx, task, session, true, options)
+	if err != nil {
+		return true, nil, err
+	}
+	selected, err := e.replaceFailedEnvironmentForResume(ctx, task, session, executorType)
+	return true, selected, err
+}
+
+type managedClonePathResolver interface {
+	ManagedCloneRelocationPaths(
+		*models.Repository,
+	) (root, providerSource, ownerNameSource, destination string, ok bool, err error)
+}
+
+func managedCloneRelocationProof(cloner any, repository *models.Repository, recordedPath, recordedCommonDir string) *worktree.ManagedCloneRelocationProof {
+	paths, ok := cloner.(managedClonePathResolver)
+	if !ok || repository == nil {
+		return nil
+	}
+	root, source, ownerNameSource, destination, managed, err := paths.ManagedCloneRelocationPaths(repository)
+	if err != nil || !managed {
+		return nil
+	}
+	return &worktree.ManagedCloneRelocationProof{
+		ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
+		ExpectedDestinationPath: destination,
+		RecordedSourcePath:      recordedPath, RecordedSourceCommonDir: recordedCommonDir,
+		Identity: worktree.ManagedRepositoryIdentity{
+			Provider: repository.Provider, Host: repository.ProviderHost,
+			Owner: repository.ProviderOwner, Name: repository.ProviderName,
+		},
+	}
 }
 
 func (e *Executor) resolveEnvironmentForAdmission(
@@ -121,6 +255,9 @@ func (e *Executor) resolveEnvironmentForAdmission(
 		env, err := e.repo.GetTaskEnvironment(ctx, environmentID)
 		if err != nil {
 			return nil, fmt.Errorf("load selected task environment %q: %w", environmentID, err)
+		}
+		if env.IsRetired() {
+			return nil, fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
 		}
 		return env, nil
 	}

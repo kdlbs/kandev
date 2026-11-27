@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,36 @@ func TestExecutor_Prompt_PassthroughWithClaimedAttachmentStreamsFileAndReference
 	}
 	if string(contents) != body {
 		t.Fatalf("streamed attachment contents = %q, want %q", contents, body)
+	}
+}
+
+func TestExecutor_Prompt_PassthroughCommentFileRendersBelowComment(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	workDir := t.TempDir()
+	repo.sessions["sess-1"].WorkspacePath = workDir
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetAttachmentReader(passthroughAttachmentReader{})
+
+	const prompt = "> Check this file\n\n<!-- kandev-comment-files:review-1 -->\n\nThen run tests."
+	atts := []v1.MessageAttachment{{
+		AttachmentID: "attachment-1", CommentID: "review-1",
+		Type: "resource", MimeType: "text/plain",
+		Name: "untrusted.txt", DeliveryMode: "path",
+	}}
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", prompt, atts, false); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(workDir, ".kandev", "attachments", "sess-1", "passthrough-upload.txt")
+	want := "> Check this file\n\n- \"passthrough-upload.txt\": " + strconv.Quote(path) + "\n\nThen run tests."
+	if got := agentManager.writePassthroughStdinCalls[0].Data; !strings.Contains(got, want) {
+		t.Fatalf("PTY input = %q, want %q", got, want)
+	}
+	if bytes, err := os.ReadFile(path); err != nil || string(bytes) != "descriptor attachment body" {
+		t.Fatalf("materialized %q: %v", bytes, err)
 	}
 }
 
@@ -660,6 +691,35 @@ func TestExecutor_PromptWithDispatchCallback_RequiresCapableManager(t *testing.T
 	}
 	if called {
 		t.Fatal("callback must not run after a fallback PromptAgent completion")
+	}
+	if agentManager.promptAgentCallCount != 0 {
+		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)
+	}
+}
+
+func TestExecutor_PromptWithAdmissionCallback_RequiresCapableManager(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return false },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	beforeAdmissionCalled := false
+	onDispatchedCalled := false
+	_, err := exec.PromptWithAdmissionCallback(
+		context.Background(), "task-1", "sess-1", "hello", nil, false,
+		func(context.Context, string, []v1.MessageAttachment) error {
+			beforeAdmissionCalled = true
+			return nil
+		},
+		func() { onDispatchedCalled = true },
+	)
+	if !errors.Is(err, ErrPromptAdmissionCallbackUnsupported) {
+		t.Fatalf("expected explicit prompt admission capability error, got: %v", err)
+	}
+	if beforeAdmissionCalled || onDispatchedCalled {
+		t.Fatal("callbacks must not run when the agent manager cannot revalidate admission")
 	}
 	if agentManager.promptAgentCallCount != 0 {
 		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)

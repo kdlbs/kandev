@@ -6,10 +6,12 @@ import { TaskActionsMenuTrigger } from "@/components/task/task-actions-menu-trig
 import { TaskActionsMenuDialogs } from "@/components/task/task-actions-menu-dialogs";
 import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useArchiveAndSwitchTask, useDeleteAndSwitchTask } from "@/hooks/use-task-actions";
+import { useWorkspaceCollaborationMenu } from "@/hooks/use-workspace-collaboration-menu";
+import { WorkspaceCollaborationDialog } from "./workspace-collaboration-dialog";
 
 /**
  * The detail surface has no board of its own to lean on, so a workflow move
- * (Move to / Send to workflow) landing the subject in a workflow this client
+ * (Move to / Change workflow) landing the subject in a workflow this client
  * has never tracked would otherwise leave it absent from every board
  * collection even though it still exists. Subscribing to the task directly
  * guarantees its `task.updated` reaches this client regardless of workflow
@@ -128,6 +130,7 @@ export function TaskTopBarActionsMenu({
   subjectPrimaryExecutorType,
 }: TaskTopBarActionsMenuProps) {
   const [open, setOpen] = useState(false);
+  const collaboration = useWorkspaceCollaborationMenu(isArchived ? null : taskId, workspaceId);
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const deleteAndSwitch = useDeleteAndSwitchTask();
   const archiving = useTrackedSwitchAfterAction(archiveAndSwitch);
@@ -145,19 +148,36 @@ export function TaskTopBarActionsMenu({
     onDelete: (opts) => (taskId ? deleting.invoke(taskId, opts) : undefined),
     subjectWorkflowStepId,
   });
-  useCloseMenuOnTaskGone(taskId, setOpen, menu.closeDialogs);
+  const closeDialogs = useCallback(() => {
+    menu.closeDialogs();
+    collaboration.close();
+  }, [menu.closeDialogs, collaboration.close]);
+  useCloseMenuOnTaskGone(taskId, setOpen, closeDialogs);
 
   if (!taskId) return null;
 
   return (
     <>
       <TaskActionsMenuTrigger
-        entries={menu.entries}
+        entries={[...menu.entries, ...collaboration.entries]}
         testId="task-topbar-actions-menu"
         triggerRef={menu.triggerRef}
         open={open}
         onOpenChange={setOpen}
       />
+      {collaboration.open && collaboration.taskId && collaboration.sourceId && (
+        <WorkspaceCollaborationDialog
+          key={`${collaboration.taskId}:${collaboration.sourceId}`}
+          taskId={collaboration.taskId}
+          workspaceId={collaboration.sourceId}
+          title={taskTitle}
+          sourceName={collaboration.sourceName}
+          open
+          onOpenChange={(next) => {
+            if (!next) collaboration.close();
+          }}
+        />
+      )}
       <TaskActionsMenuDialogs
         taskId={taskId}
         taskTitle={taskTitle}

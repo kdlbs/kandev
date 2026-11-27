@@ -73,6 +73,7 @@ describe("resolveDateLocale", () => {
     ["zh-tw", "zh-TW"],
     ["zh-hk", "zh-HK"],
     ["ja", "ja"],
+    ["ko", "ko"],
   ])("maps %j to the %j date-fns locale", async (locale, code) => {
     const resolved = await resolveDateLocale(locale as "en");
     expect(resolved.code).toBe(code);
@@ -126,5 +127,16 @@ describe("dateLocale", () => {
     expect(dateLocale().code).toBe("ja");
     expect(formatTimeDistance(ago(HOUR))).toBe("約1時間前");
     expect(formatTimeDistance(ago(3 * DAY))).toBe("3日前");
+  });
+
+  it("renders Korean distances once ko is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    await activateLocale("ko");
+    await primeDateLocale("ko");
+
+    expect(dateLocale().code).toBe("ko");
+    expect(formatTimeDistance(ago(HOUR))).toBe("약 1시간 전");
+    expect(formatTimeDistance(ago(3 * DAY))).toBe("3일 전");
   });
 });

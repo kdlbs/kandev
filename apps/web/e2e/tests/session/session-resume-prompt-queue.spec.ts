@@ -3,11 +3,18 @@ import { test } from "../../fixtures/test-base";
 import {
   cleanupDelayedResumeFixture,
   seedDelayedResumeFixture,
+  waitForSessionStarting,
   waitForSessionReady,
   waitForQueuedCount,
 } from "../../helpers/session-resume-prompt-queue";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { openQuickChatSetup, selectAgentIfNeeded } from "../chat/quick-chat-helpers";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
+import {
+  openQuickChatSetup,
+  startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
+} from "../chat/quick-chat-helpers";
 
 test.describe("Send during session resume", () => {
   test.describe.configure({ retries: 0 });
@@ -20,13 +27,9 @@ test.describe("Send during session resume", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Resume prompt queue Auto-run test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Resume prompt queue Auto-run test",
+    });
     const marker = "resume queue paused marker";
 
     try {
@@ -66,40 +69,124 @@ test.describe("Send during session resume", () => {
     }
   });
 
-  test("uses the shared startup composer in Quick Chat", async ({ testPage, apiClient }) => {
+  test("shows a Codex MCP startup warning and delivers a queued prompt after resume", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Codex MCP startup warning resume queue",
+      resumeDelay: "20s",
+      agentId: "codex-acp",
+      mcpStartupReport: true,
+      resumeEnvOverrides: { KANDEV_MOCK_PROVIDERS: "codex-acp" },
+      reloadDuringResume: false,
+    });
+    const marker = "Codex startup warning queued prompt";
+
+    try {
+      const chat = fixture.session.activeChat();
+      const warning = testPage.getByText(/MCP server.*failed to start: e2e startup report/);
+      await waitForSessionStarting(
+        testPage,
+        apiClient,
+        fixture.task.id,
+        fixture.identity.sessionId,
+      );
+      await expect(apiClient.setQueueAutoRun(fixture.identity, false)).resolves.toMatchObject({
+        auto_run: false,
+      });
+
+      const editor = chat.getByTestId("chat-input-editor");
+      const submit = fixture.session.submitButton();
+      await editor.fill(`e2e:message("${marker}")`);
+      await expect(submit).toBeEnabled();
+      await submit.click();
+      await expect(editor).toHaveText("");
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expect(warning).toBeVisible({ timeout: 30_000 });
+
+      await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+      await expect(apiClient.setQueueAutoRun(fixture.identity, true)).resolves.toMatchObject({
+        auto_run: true,
+      });
+      await expect
+        .poll(() => apiClient.getQueueStatus(fixture.identity).then((status) => status.count), {
+          timeout: 30_000,
+        })
+        .toBe(0);
+      await expect(
+        chat.locator("[data-agent-message-body][data-message-id]").filter({ hasText: marker }),
+      ).toHaveCount(1, { timeout: 60_000 });
+      await expect(warning).toBeVisible();
+    } finally {
+      try {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      } finally {
+        await backend.restart();
+      }
+    }
+  });
+
+  test("holds a follow-up Quick Chat prompt when Auto-run is off", async ({
+    testPage,
+    apiClient,
+  }) => {
     test.setTimeout(120_000);
 
     const dialog = await openQuickChatSetup(testPage);
-    await selectAgentIfNeeded(dialog, testPage);
-    const started = testPage.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname.endsWith("/quick-chat"),
+    const { task_id: taskId, session_id: sessionId } = await startQuickChatFromSetup(
+      dialog,
+      testPage,
     );
-    await dialog.getByTestId("quick-chat-start").click();
-    const startResponse = await started;
-    const { task_id: taskId, session_id: sessionId } = (await startResponse.json()) as {
-      task_id: string;
-      session_id: string;
-    };
 
     const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await waitForSessionSettledBaseline(apiClient, taskId, sessionId);
+    await waitForQuickChatDirectInput(dialog);
     await expect(apiClient.setQueueAutoRun(identity, false)).resolves.toMatchObject({
       auto_run: false,
     });
     const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
     const submit = dialog.getByTestId("submit-message-button");
-    const marker = "quick chat startup marker";
-    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
-    await editor.fill(`e2e:message("${marker}")`);
+    await editor.fill('e2e:delay(15000)\ne2e:message("active turn complete")');
     await expect(submit).toBeEnabled({ timeout: 30_000 });
     await submit.click();
+    await expect(editor).toHaveText("");
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          return sessions.find((session) => session.id === sessionId)?.state;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe("RUNNING");
+    const marker = "quick chat startup marker";
+    await waitForComposerQueueMode(dialog);
+    await typeWhileBusy(testPage, editor, `e2e:message("${marker}")`);
+    await expect(submit).toBeVisible();
+    await expect(submit).toBeEnabled({ timeout: 30_000 });
+    await submit.click();
+    await expect(editor).toHaveText("");
 
     await expect
       .poll(() => apiClient.getQueueStatus(identity).then((status) => status.count), {
         timeout: 30_000,
       })
       .toBe(1);
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          return sessions.find((session) => session.id === sessionId)?.state;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe("WAITING_FOR_INPUT");
+    await waitForQueuedCount(apiClient, identity, 1);
     await expect(apiClient.setQueueAutoRun(identity, true)).resolves.toMatchObject({
       auto_run: true,
     });
@@ -120,13 +207,9 @@ test.describe("Send during session resume", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Resume prompt queue layout test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Resume prompt queue layout test",
+    });
 
     try {
       await assertNoDocumentHorizontalOverflow(testPage, "desktop resume prompt queue");

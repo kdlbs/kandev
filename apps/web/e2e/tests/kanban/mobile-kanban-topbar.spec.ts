@@ -4,12 +4,18 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Shared phone listing topbar", () => {
   test("returns focus to the menu button when search is hidden", async ({ testPage }) => {
     await testPage.goto("/tasks");
     const opener = testPage.getByTestId("mobile-topbar-page-context");
     const menu = testPage.getByRole("dialog", { name: "View options", exact: true });
     const search = testPage.getByPlaceholder("Search tasks...");
+    await opener.tap();
+    await menu.getByRole("radio", { name: "Kanban", exact: true }).tap();
+    await expect(menu).toBeHidden();
+    await expect(testPage.getByTestId("kanban-board")).toBeVisible();
     await opener.tap();
     await menu.getByTestId("mobile-search-toggle").tap();
     await expect(menu).toBeHidden();
@@ -106,9 +112,8 @@ test.describe("Shared phone listing topbar", () => {
 
     await trigger.tap();
     for (const id of ["threads-view-sync-retry", "threads-view-sync-dismiss"]) {
-      expect(
-        (await requireBox(recovery.getByTestId(id), "recovery action")).height,
-      ).toBeGreaterThanOrEqual(44);
+      const height = (await requireBox(recovery.getByTestId(id), "recovery action")).height;
+      expect(Math.round(height * 100) / 100).toBeGreaterThanOrEqual(44);
     }
     await recovery.getByTestId("threads-view-sync-dismiss").tap();
     await expect(recovery).toHaveCount(0);

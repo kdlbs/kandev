@@ -11,6 +11,7 @@ import {
   recoverRetentionStatusPolling,
   reloadRetentionWithFakeClock,
   resetRetention,
+  seedRetentionAnalysis,
   retentionStatus,
   RETENTION_ROUTE,
   runRetention,
@@ -21,6 +22,7 @@ import {
 test.describe("Tool payload retention", () => {
   test("recovers a status polling error without manual refresh", async ({ testPage: page }) => {
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);
@@ -33,6 +35,7 @@ test.describe("Tool payload retention", () => {
 
   test("preserves an action failure after status recovery", async ({ testPage: page }) => {
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);
@@ -158,4 +161,54 @@ test.describe("Tool payload retention", () => {
       }
     });
   }
+});
+
+test.describe("History compaction categories", () => {
+  test("shows one control set with separate tool and history analysis details", async ({
+    testPage: page,
+  }) => {
+    const status = {
+      supported: true,
+      policy: { enabled: true, age: { value: 3, unit: "months" }, revision: 4 },
+      preparation: { state: "ready", choice: "skip" },
+      last_analysis: {
+        id: "mixed-analysis",
+        kind: "analysis",
+        state: "succeeded",
+        scanned: 4,
+        eligible_tasks: 2,
+        eligible_messages: 3,
+        removed_messages: 0,
+        payload_bytes: 2048,
+        history_tasks: 2,
+        history_snapshots: 5,
+        history_sql_bytes: 1024,
+        history_git_bytes: 4096,
+        expired_change_sets: 0,
+        deleted_archive_refs: 0,
+        archive_failures: 0,
+        skipped: {},
+        cutoff: "2026-01-01T00:00:00.000Z",
+        started_at: "2026-01-01T00:00:00.000Z",
+        finished_at: "2026-01-01T00:01:00.000Z",
+        age: { value: 3, unit: "months" },
+      },
+    };
+    await page.route("**/api/v1/system/database/tool-payload-retention", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(status) }),
+    );
+    await page.goto(RETENTION_ROUTE);
+    await expect(page.getByTestId("tool-payload-retention-card")).toContainText(
+      "History compaction",
+    );
+    await expect(page.getByTestId("tool-payload-retention-card")).toContainText(
+      "Historical snapshots: 5 across 2 tasks",
+    );
+    await expect(page.getByTestId("tool-payload-retention-card")).toContainText("1.0 KB in SQL");
+    await expect(page.getByTestId("tool-payload-retention-card")).toContainText(
+      "4.0 KB in Git checkpoints",
+    );
+    await expect(page.getByTestId("tool-payload-run")).toContainText("Compact history now");
+    await expect(page.getByTestId("tool-payload-enabled")).toHaveCount(1);
+  });
 });

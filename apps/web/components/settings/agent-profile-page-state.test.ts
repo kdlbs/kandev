@@ -1,9 +1,16 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
+import { ApiError } from "@/lib/api/client";
 import type { Agent } from "@/lib/types/http";
+import { createAppStore } from "@/lib/state/store";
+import { useAppStoreApi } from "@/components/state-provider";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import {
   reconcileAgentProfileOptions,
   shouldSyncProfileSaveResponse,
+  useProfileDelete,
+  useProfileSave,
 } from "./agent-profile-page-state";
 
 vi.mock("@/app/actions/agents", () => ({
@@ -141,5 +148,147 @@ describe("shouldSyncProfileSaveResponse", () => {
     const baseline = { ...current, name: "websocket update", updatedAt: "2026-01-01T01:00:00Z" };
 
     expect(shouldSyncProfileSaveResponse(response, baseline)).toBe(false);
+  });
+});
+
+describe("useProfileDelete dynamic profile conflicts", () => {
+  const conflictResult = {
+    status: "conflict" as const,
+    activeSessions: [],
+    watchers: [],
+    routingTiers: [],
+    automations: [],
+    utilityAgents: [],
+    dynamicProfiles: [{ id: "d1", name: "Balanced selector" }],
+  };
+
+  it("keeps dynamic profiles in the conflict and re-requests with force", async () => {
+    vi.mocked(deleteAgentProfileAction).mockResolvedValue(conflictResult);
+    const owner = agent("a1", "p1");
+    const { result } = renderHook(() =>
+      useProfileDelete(owner, owner.profiles[0], [owner], vi.fn(), vi.fn()),
+    );
+
+    await act(async () => {
+      await result.current.handleDeleteProfile();
+    });
+    expect(result.current.conflict?.dynamicProfiles).toEqual([
+      { id: "d1", name: "Balanced selector" },
+    ]);
+
+    await act(async () => {
+      await result.current.handleForceDelete();
+    });
+    expect(deleteAgentProfileAction).toHaveBeenLastCalledWith("p1", true);
+  });
+});
+
+describe("useProfileSave conflict handling", () => {
+  it("opens the conflict dialog without also showing the generic toast", async () => {
+    const savedProfile = agent("a1", "p1").profiles[0];
+    const draft = { ...savedProfile, name: "renamed profile" };
+    vi.mocked(updateAgentProfileAction).mockRejectedValue(
+      new ApiError("agent profile is used by 1 utility agent(s)", 409, {
+        utility_agents: [{ id: "u1", name: "Reviewer" }],
+      }),
+    );
+    const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+    vi.mocked(useAppStoreApi).mockReturnValue(
+      createAppStore({ settingsAgents: { items: agents } }),
+    );
+    const toast = vi.fn();
+    const onProfileConflict = vi.fn();
+
+    const { result } = renderHook(() =>
+      useProfileSave({
+        agent: agents[0],
+        draft,
+        savedProfile,
+        setSaveStatus: vi.fn(),
+        markProfileSubmitted: vi.fn(),
+        acceptProfileSaveResponse: () => true,
+        toast,
+        onProfileConflict,
+      }),
+    );
+
+    await act(async () => {
+      await expect(result.current()).rejects.toBeInstanceOf(ApiError);
+    });
+
+    expect(onProfileConflict).toHaveBeenCalledWith({
+      utilityAgents: [{ id: "u1", name: "Reviewer" }],
+      dynamicProfiles: [],
+    });
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe("useProfileSave Cursor MCP auth preference", () => {
+  it("sends the changed preference when saving the profile editor", async () => {
+    const savedProfile = { ...agent("a1", "p1").profiles[0], cursorMcpAuthEnabled: true };
+    const draft = { ...savedProfile, cursorMcpAuthEnabled: false };
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
+    const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+    vi.mocked(useAppStoreApi).mockReturnValue(
+      createAppStore({ settingsAgents: { items: agents } }),
+    );
+
+    const { result } = renderHook(() =>
+      useProfileSave({
+        agent: agents[0],
+        draft,
+        savedProfile,
+        setSaveStatus: vi.fn(),
+        markProfileSubmitted: vi.fn(),
+        acceptProfileSaveResponse: () => true,
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current());
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ cursor_mcp_auth_enabled: false }),
+      false,
+    );
+  });
+
+  it("omits an unchanged preference from the stale profile draft", async () => {
+    const savedProfile = {
+      ...agent("a1", "p1").profiles[0],
+      cursorMcpAuthEnabled: false,
+      cursorPluginsMcpEnabled: false,
+    };
+    const draft = { ...savedProfile, name: "renamed profile" };
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
+    const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
+    vi.mocked(useAppStoreApi).mockReturnValue(
+      createAppStore({ settingsAgents: { items: agents } }),
+    );
+
+    const { result } = renderHook(() =>
+      useProfileSave({
+        agent: agents[0],
+        draft,
+        savedProfile,
+        setSaveStatus: vi.fn(),
+        markProfileSubmitted: vi.fn(),
+        acceptProfileSaveResponse: () => true,
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => result.current());
+
+    expect(updateAgentProfileAction).toHaveBeenLastCalledWith(
+      "p1",
+      expect.objectContaining({
+        cursor_mcp_auth_enabled: undefined,
+        cursor_plugins_mcp_enabled: undefined,
+      }),
+      false,
+    );
   });
 });

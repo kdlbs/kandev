@@ -32,6 +32,18 @@ function bundle(overrides: Partial<ClarificationInboxBundle> = {}): Clarificatio
   };
 }
 
+describe("needs-you-inbox slice retry signals", () => {
+  it("keeps explicit retry requests separate from WebSocket refresh ticks", () => {
+    const store = newStore();
+
+    store.getState().bumpNeedsYouInboxRefreshTick();
+    store.getState().requestNeedsYouInboxRetry();
+
+    expect(store.getState().needsYouInbox.refreshTick).toBe(1);
+    expect(store.getState().needsYouInbox.manualRetryTick).toBe(1);
+  });
+});
+
 describe("needs-you-inbox slice", () => {
   it("has no rows or count for a workspace before any read (AC .13: absent is not zero)", () => {
     const store = newStore();

@@ -36,14 +36,17 @@ type E2EStoreWindow = Window & {
   };
 };
 
-async function getBrowserSessionState(page: Page, sessionId: string): Promise<string | null> {
+export async function getBrowserSessionState(
+  page: Page,
+  sessionId: string,
+): Promise<string | null> {
   return page.evaluate((id) => {
     const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
     return state?.taskSessions.items[id]?.state ?? null;
   }, sessionId);
 }
 
-async function getSessionState(
+export async function getSessionState(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,
@@ -98,10 +101,25 @@ export async function waitForSessionReady(
     .toEqual({ api: true, browser: true });
 }
 
-async function createDelayedResumeProfile(apiClient: ApiClient, delay = "30s"): Promise<string> {
+export async function createDelayedResumeProfile(
+  apiClient: ApiClient,
+  delay = "30s",
+  options: { agentId?: string; mcpStartupReport?: boolean } = {},
+): Promise<string> {
   const { agents } = await apiClient.listAgents();
-  const mockAgent = agents.find((agent) => agent.name === "mock-agent");
-  if (!mockAgent) throw new Error("mock-agent not found while creating delayed resume profile");
+  const mockAgent = options.agentId
+    ? agents.find((agent) => agent.name === options.agentId)
+    : agents.find((agent) => agent.name === "mock-agent");
+  if (!mockAgent) {
+    throw new Error(
+      `${options.agentId ?? "mock-agent"} not found while creating delayed resume profile`,
+    );
+  }
+
+  const envVars = [{ key: "E2E_MOCK_AGENT_RESUME_DELAY", value: delay }];
+  if (options.mcpStartupReport) {
+    envVars.push({ key: "E2E_MOCK_AGENT_MCP_STARTUP_REPORT", value: "true" });
+  }
 
   const profile = await apiClient.createAgentProfile(
     mockAgent.id,
@@ -109,7 +127,7 @@ async function createDelayedResumeProfile(apiClient: ApiClient, delay = "30s"): 
     {
       model: "mock-fast",
       cli_passthrough: false,
-      env_vars: [{ key: "E2E_MOCK_AGENT_RESUME_DELAY", value: delay }],
+      env_vars: envVars,
     },
   );
   return profile.id;
@@ -121,13 +139,25 @@ export async function seedDelayedResumeFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   backend: BackendContext,
-  title: string,
+  options: {
+    title: string;
+    resumeDelay?: string;
+    agentId?: string;
+    mcpStartupReport?: boolean;
+    resumeEnvOverrides?: Record<string, string>;
+    reloadDuringResume?: boolean;
+  },
 ): Promise<DelayedResumeFixture> {
-  const delayedProfileId = await createDelayedResumeProfile(apiClient);
+  let delayedProfileId = "";
   try {
+    if (options.resumeEnvOverrides) await backend.restart(options.resumeEnvOverrides);
+    delayedProfileId = await createDelayedResumeProfile(apiClient, options.resumeDelay, {
+      agentId: options.agentId,
+      mcpStartupReport: options.mcpStartupReport,
+    });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      title,
+      options.title,
       delayedProfileId,
       {
         description: "/e2e:simple-message",
@@ -142,7 +172,7 @@ export async function seedDelayedResumeFixture(
     const session = new SessionPage(page);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 60_000 });
-    await backend.restart();
+    await backend.restart(options.resumeEnvOverrides);
     await page.reload();
     await session.waitForLoad();
     await expect
@@ -151,13 +181,18 @@ export async function seedDelayedResumeFixture(
         message: `session ${task.session_id} should enter startup after restart`,
       })
       .toBe("STARTING");
-    await page.reload();
-    await session.waitForLoad();
+    if (options.reloadDuringResume !== false) {
+      await page.reload();
+      await session.waitForLoad();
+    }
     await waitForSessionStarting(page, apiClient, task.id, task.session_id, 30_000);
     const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
     return { task, session, identity, delayedProfileId };
   } catch (error) {
-    await apiClient.deleteAgentProfile(delayedProfileId, true).catch(() => undefined);
+    if (delayedProfileId) {
+      await apiClient.deleteAgentProfile(delayedProfileId, true).catch(() => undefined);
+    }
+    if (options.resumeEnvOverrides) await backend.restart().catch(() => undefined);
     throw error;
   }
 }
@@ -220,11 +255,13 @@ export async function readSessionMessageIdsContaining(
 ): Promise<Set<string>> {
   const { messages } = await apiClient.listSessionMessages(sessionId);
   return new Set(
-    messages.filter((message) => message.content.includes(marker)).map((message) => message.id),
+    messages
+      .filter((message) => message.author_type === "agent" && message.content.includes(marker))
+      .map((message) => message.id),
   );
 }
 
-/** Wait until a new persisted message contains the marker. */
+/** Wait until a new persisted agent message contains the marker. */
 export async function waitForNewSessionMessage(
   apiClient: ApiClient,
   sessionId: string,
@@ -237,7 +274,10 @@ export async function waitForNewSessionMessage(
       async () => {
         const { messages } = await apiClient.listSessionMessages(sessionId);
         return messages.some(
-          (message) => !previousMessageIds.has(message.id) && message.content.includes(marker),
+          (message) =>
+            message.author_type === "agent" &&
+            !previousMessageIds.has(message.id) &&
+            message.content.includes(marker),
         );
       },
       {

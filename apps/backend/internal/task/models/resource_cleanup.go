@@ -2,10 +2,19 @@ package models
 
 import "time"
 
+type TaskArchiveReclaimCandidate struct {
+	TaskID         string
+	ArchivedAt     time.Time
+	WorktreeID     string
+	WorktreePath   string
+	RepositoryPath string
+}
+
 type TaskResourceCleanupTrigger string
 
 const (
 	TaskResourceCleanupTriggerArchive         TaskResourceCleanupTrigger = "archive"
+	TaskResourceCleanupTriggerArchiveReclaim  TaskResourceCleanupTrigger = "archive_reclaim"
 	TaskResourceCleanupTriggerDelete          TaskResourceCleanupTrigger = "delete"
 	TaskResourceCleanupTriggerCascadeArchive  TaskResourceCleanupTrigger = "cascade_archive"
 	TaskResourceCleanupTriggerCascadeDelete   TaskResourceCleanupTrigger = "cascade_delete"
@@ -17,13 +26,14 @@ const (
 type TaskResourceCleanupState string
 
 const (
-	TaskResourceCleanupStatePrepared  TaskResourceCleanupState = "prepared"
-	TaskResourceCleanupStatePending   TaskResourceCleanupState = "pending"
-	TaskResourceCleanupStateRunning   TaskResourceCleanupState = "running"
-	TaskResourceCleanupStateRetryWait TaskResourceCleanupState = "retry_wait"
-	TaskResourceCleanupStateSucceeded TaskResourceCleanupState = "succeeded"
-	TaskResourceCleanupStateFailed    TaskResourceCleanupState = "failed"
-	TaskResourceCleanupStateCancelled TaskResourceCleanupState = "cancelled"
+	TaskResourceCleanupStatePrepared        TaskResourceCleanupState = "prepared"
+	TaskResourceCleanupStatePending         TaskResourceCleanupState = "pending"
+	TaskResourceCleanupStateRunning         TaskResourceCleanupState = "running"
+	TaskResourceCleanupStateRetryWait       TaskResourceCleanupState = "retry_wait"
+	TaskResourceCleanupStateWaitingForClean TaskResourceCleanupState = "waiting_for_clean"
+	TaskResourceCleanupStateSucceeded       TaskResourceCleanupState = "succeeded"
+	TaskResourceCleanupStateFailed          TaskResourceCleanupState = "failed"
+	TaskResourceCleanupStateCancelled       TaskResourceCleanupState = "cancelled"
 )
 
 // TaskResourceCleanupJob is a durable task-lifecycle cleanup intent. TaskID is
@@ -46,5 +56,10 @@ type TaskResourceCleanupJob struct {
 
 func (j *TaskResourceCleanupJob) IsArchive() bool {
 	return j != nil && (j.Trigger == TaskResourceCleanupTriggerArchive ||
-		j.Trigger == TaskResourceCleanupTriggerCascadeArchive)
+		j.Trigger == TaskResourceCleanupTriggerCascadeArchive ||
+		j.Trigger == TaskResourceCleanupTriggerArchiveReclaim)
+}
+
+func (j *TaskResourceCleanupJob) IsArchiveReclaim() bool {
+	return j != nil && j.Trigger == TaskResourceCleanupTriggerArchiveReclaim
 }

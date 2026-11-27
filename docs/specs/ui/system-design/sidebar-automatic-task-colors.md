@@ -282,6 +282,10 @@ Each disclosure has a label, summary, chevron, stable content ID, and `aria-expa
 
 Sort, Group by, and Task row each own their bottom separator. The shared disclosure padding is `px-2 pb-1 pt-1`, so each collapsed toggle has the same compact inset before and after its separator. The desktop popover overrides its primitive flex gap so adjacent editor sections remain contiguous. Automatic colors follows Task row without adding a second adjacent separator.
 
+The View row owns the divider above Filters. `FilterSection` gives its header a positive top inset in both the desktop popover and touch drawer. Neither the desktop header nor Add button uses negative vertical margins, so neither overlaps the divider. Filter clauses remain below the header in the same section.
+
+The Filters Add action keeps its compact desktop height and has a minimum 44px height in the phone and tablet drawer, following `AC-UI-CONTROL-SIZING-001.4`.
+
 The Sort summary shows the selected field and direction. Its expanded content keeps the current `SortPicker`.
 
 The Group by summary shows the selected group. Its expanded content keeps the current `GroupPicker`.

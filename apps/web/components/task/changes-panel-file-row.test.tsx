@@ -124,6 +124,33 @@ describe("FileRow copy path", () => {
   );
 });
 
+describe("FileRow selection focus", () => {
+  it("focuses a selected row so Escape can clear selection", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "selected.ts" }}
+            isPending={false}
+            onSelect={() => true}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const row = container.querySelector("[data-changes-file='selected.ts']") as HTMLElement;
+    fireEvent.click(row, { ctrlKey: true });
+
+    expect(row.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(row);
+  });
+});
+
 describe("FileRow truncation (regression: path overlaps diff stats in narrow panel)", () => {
   it("file name span allows truncation so a long name does not overflow visually", () => {
     // Bug: when the panel is narrow, a long file name renders past its container
@@ -241,6 +268,34 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
 });
 
 describe("FileRow status marker", () => {
+  it("does not repeat pending diff text or show unknown line counts", () => {
+    const { container, queryByText } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{
+              ...baseFile,
+              path: "src/pending.ts",
+              plus: undefined,
+              minus: undefined,
+              diffState: "pending",
+            }}
+            isPending={false}
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    expect(queryByText("Diff is loading")).toBeNull();
+    expect(container.querySelector("[data-file-status='modified']")).not.toBeNull();
+  });
+
   it("shows previous-path context for a moved file", () => {
     const { container } = render(
       <TooltipProvider>

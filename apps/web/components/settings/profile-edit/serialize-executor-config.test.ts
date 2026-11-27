@@ -29,6 +29,15 @@ function form(overrides: Partial<ExecutorProfileConfigForm> = {}): ExecutorProfi
     isSSH: false,
     sshShell: "",
     sshReclaimTaskDir: false,
+    primaryNetwork: "",
+    primaryGwPriority: "",
+    additionalNetworks: [],
+    dockerTmpSize: "",
+    dockerTmpSizeDirty: false,
+    dockerLogMaxSize: "",
+    dockerLogMaxSizeDirty: false,
+    dockerLogMaxFiles: "",
+    dockerLogMaxFilesDirty: false,
     ...overrides,
   };
 }
@@ -137,5 +146,147 @@ describe("buildSaveConfig ssh_reclaim_task_dir", () => {
     });
 
     expect(config.ssh_reclaim_task_dir).toBeUndefined();
+  });
+});
+
+const DOCKER_PRIMARY_NETWORK = "lab-bridge";
+
+describe("buildSaveConfig docker networks", () => {
+  it("persists the primary network and its gateway priority", () => {
+    const config = buildSaveConfig(
+      form({
+        isDocker: true,
+        primaryNetwork: ` ${DOCKER_PRIMARY_NETWORK} `,
+        primaryGwPriority: " 0 ",
+      }),
+    );
+
+    expect(config.docker_network).toBe(DOCKER_PRIMARY_NETWORK);
+    expect(config.docker_network_gw_priority).toBe("0");
+  });
+
+  it("persists additional networks in order, omitting an unset priority", () => {
+    const config = buildSaveConfig(
+      form({
+        isDocker: true,
+        additionalNetworks: [
+          { name: " lan-macvlan ", gwPriority: "-10" },
+          { name: "metrics-internal", gwPriority: "" },
+        ],
+      }),
+    );
+
+    expect(JSON.parse(config.docker_additional_networks)).toEqual([
+      { name: "lan-macvlan", gw_priority: -10 },
+      { name: "metrics-internal" },
+    ]);
+  });
+
+  it("drops a row the operator added but never named", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: true, additionalNetworks: [{ name: "  ", gwPriority: "3" }] }),
+    );
+
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  it("persists nothing for a profile that configures no network", () => {
+    const config = buildSaveConfig(form({ isDocker: true }));
+
+    expect(config.docker_network).toBeUndefined();
+    expect(config.docker_network_gw_priority).toBeUndefined();
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  it("clears stored network keys when the profile is not a Docker profile", () => {
+    const config = buildSaveConfig(
+      form({ isDocker: false, primaryNetwork: DOCKER_PRIMARY_NETWORK }),
+      {
+        docker_network: DOCKER_PRIMARY_NETWORK,
+        docker_network_gw_priority: "0",
+        docker_additional_networks: '[{"name":"lan-macvlan"}]',
+      },
+    );
+
+    expect(config.docker_network).toBeUndefined();
+    expect(config.docker_network_gw_priority).toBeUndefined();
+    expect(config.docker_additional_networks).toBeUndefined();
+  });
+
+  // A priority with no network is refused by the backend, so the editor must
+  // not save one: the operator would get a launch failure for a field the
+  // editor let them leave in an impossible state.
+  it("drops a gateway priority left behind without a primary network", () => {
+    const config = buildSaveConfig(form({ isDocker: true, primaryGwPriority: "5" }));
+
+    expect(config.docker_network_gw_priority).toBeUndefined();
+  });
+});
+
+describe("buildSaveConfig docker storage limits", () => {
+  it("trims and preserves independent limits for both Docker profiles", () => {
+    for (const isLocalDocker of [true, false]) {
+      const config = buildSaveConfig(
+        {
+          ...form({ isDocker: true, isLocalDocker }),
+          dockerTmpSize: " 2g ",
+          dockerTmpSizeDirty: true,
+          dockerLogMaxSize: " 100m ",
+          dockerLogMaxSizeDirty: true,
+          dockerLogMaxFiles: " 3 ",
+          dockerLogMaxFilesDirty: true,
+        } as ExecutorProfileConfigForm,
+        { custom_key: "keep" },
+      );
+
+      expect(config).toMatchObject({
+        docker_tmp_size: "2g",
+        docker_log_max_size: "100m",
+        docker_log_max_files: "3",
+        custom_key: "keep",
+      });
+    }
+  });
+
+  it("omits each cleared limit without removing unrelated profile values", () => {
+    const config = buildSaveConfig(
+      {
+        ...form({ isDocker: true }),
+        dockerTmpSize: " ",
+        dockerTmpSizeDirty: true,
+        dockerLogMaxSize: " 100m ",
+        dockerLogMaxSizeDirty: true,
+        dockerLogMaxFiles: "",
+        dockerLogMaxFilesDirty: true,
+      } as ExecutorProfileConfigForm,
+      {
+        docker_tmp_size: "2g",
+        docker_log_max_size: "50m",
+        docker_log_max_files: "5",
+        custom_key: "keep",
+      },
+    );
+
+    expect(config).toEqual({ docker_log_max_size: "100m", custom_key: "keep" });
+  });
+
+  it("clears Docker storage values from a non-Docker profile", () => {
+    const config = buildSaveConfig(
+      {
+        ...form({ isDocker: false }),
+        dockerTmpSize: "4g",
+        dockerLogMaxSize: "200m",
+        dockerLogMaxFiles: "7",
+      } as ExecutorProfileConfigForm,
+      {
+        docker_tmp_size: "2g",
+        docker_log_max_size: "50m",
+        docker_log_max_files: "5",
+      },
+    );
+
+    expect(config.docker_tmp_size).toBeUndefined();
+    expect(config.docker_log_max_size).toBeUndefined();
+    expect(config.docker_log_max_files).toBeUndefined();
   });
 });

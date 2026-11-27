@@ -1,68 +1,14 @@
 # mock-agent — scenario library for reproducing agent output locally
 
-Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the same ACP surface a real agent does, so the rest of the stack (orchestrator, lifecycle manager, agentctl, web UI) sees it as an ordinary agent. It runs in dev/e2e mode behind `KANDEV_MOCK_AGENT=true` (set automatically by the `dev` and `e2e` profiles — see `profiles.yaml`).
+Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent exposes an ACP surface to the rest of the stack. The `dev` profile sets `KANDEV_MOCK_AGENT=true`; the `e2e` profile sets it to `only` to isolate tests to the mock agent. See `profiles.yaml`.
 
 ## Two ways to drive it
 
-**1. Predefined scenarios — `/e2e:<name>`**
-
-`handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
-
-Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/slow [duration]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
-
-`/slow [duration]` uses seconds for positive bare numbers and accepts explicit
-Go duration units. Omitted, invalid, or non-positive values use the 5-second
-fallback. Handler-path tests should use a short explicit duration such as
-`50ms`; parser tests should cover long bare values without making the handler
-wait for seconds.
-
-The four `background`/`async-subagent` aliases emit the foreground-yield and detached-workload frame shapes behind the fine-grained busy signal (ADR-0049): `/background` spawns a subagent while the foreground goes idle, `/detached-background` launches work that outlives the turn, and the `async-subagent-*` pair replays Claude's async Agent lifecycle with and without its completion frame.
-
-`/bulk` (default 120, e.g. `/bulk:300`) emits N short agent messages, each followed by a tiny tool call. The tool-call boundary flushes the buffered text into its own message row — consecutive agent text chunks otherwise coalesce into a single message (`manager_streaming.flushMessageBuffer` only fires on a tool-call/turn boundary) — so the result is a long, paginated conversation. Use it to manually exercise chat scrollback and the "Load older messages" pagination in dev/preview.
-
-**2. Inline scripts — `e2e:<directive>(...)`**
-
-`script.go` parses prompts starting with `e2e:` (no leading slash) as multi-line scripts. Supported directives include `e2e:message(...)`, `e2e:thinking(...)`, `e2e:tool_use("Name", {...})`, `e2e:tool_result(...)`, `e2e:delay(ms)`, the Monitor-flavoured `e2e:monitor_start/event/end`, and the MCP-flavoured `e2e:mcp:kandev:<tool>({...})`. Comments start with `#`, blank lines are ignored. Tests live in `script_test.go`.
-
-Use predefined scenarios for anything you want to trigger from the slash menu or replay across sessions; use inline scripts for ad-hoc shapes inside a single E2E spec or manual session.
-
-## Adding a scenario to reproduce a UI rendering bug
-
-When a real-agent message renders poorly (markdown table, tool card, diff panel, plan summary, etc.), the cheapest reliable repro is a mock scenario that emits a representative payload. Pattern:
-
-1. Add `"<your-name>": scenario<YourName>` to `scenarioRegistry` in `scenarios.go`.
-2. Implement `scenario<YourName>(e *emitter)` using the helpers in `emitter.go` — `e.text`, `e.thought`, `e.startTool` / `e.completeTool`, `e.plan`, etc. Keep delays modest (`fixedDelay(100)`) so manual repro feels live but tests stay fast.
-3. Trigger from any task in dev/mock mode by typing `/e2e:<your-name>` as the prompt.
-
-This avoids burning real-agent tokens, gives you a deterministic payload to iterate against, and the scenario stays around as a permanent regression hook — anyone can re-trigger it after the fix.
-
-## Special case: emitting a real prompt-time ACP *error*
-
-Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — they cannot make the prompt itself fail. When you need a real JSON-RPC error response (the kind the backend turns into `agent.failed` with a populated `data.ErrorMessage`), intercept the command in the `Prompt` method (`main.go`) and return a non-nil `error` — typically `&acp.RequestError{Code, Message, Data}`, whose `Error()` serializes the exact `{"code":...,"message":...,"data":...}` envelope a real agent sends.
-
-`/overloaded[:N]` is the reference example (`handler.go: handleOverloaded`): it returns the production `529 Overloaded` error for the first `N` prompts of a session (default 1), then recovers with a normal text response. The orchestrator's backoff retry tears the agent process down and relaunches it between attempts, so the fail-count is persisted in a **temp file** keyed by the session id (`overloadedCounterPath`) rather than an in-memory map — it survives the relaunch (and is cleaned up on recovery and in `CloseSession`). Use `/overloaded` to demo the yellow retry status, or a large `N` like `/overloaded:9` to keep failing so the retry loop stays visible / exhausts to the red recovery banner.
-
-`/transport-lost[:N]` (`handler.go: handleTransportLost`) follows the same shape for the ACP wire-level transport-death signature (`peer disconnected before response` — the acp-go-sdk's own `ErrPeerDisconnected` payload shape), carried only in the error's `Data` the same way the SDK itself constructs it. The generic prompt-error projection classifies on `Message` alone, so `routingerr`'s `acp.transport_lost.v1` rule never sees it here: the failure presents as terminal and exposes manual recovery on the first occurrence, not the short-retry ladder. `N` still controls how many consecutive prompts fail before the mock recovers, but no automatic retry drives through them on this command.
-
-## Emitter helpers worth knowing
-
-`emitter.go` wraps the ACP `sessionUpdater` with helpers that shield scenarios from SDK plumbing:
-
-- `e.text(s)` / `e.thought(s)` — plain agent message vs reasoning channel.
-- `e.startTool(id, title, kind, input, locs...)` / `e.completeTool(id, output)` — paired tool-call lifecycle.
-- `e.plan(entries)` — ACP plan updates.
-- `e.startMonitorTool(id, taskID, command)` / `e.emitMonitorEvent(taskID, body)` / `e.endMonitorTool(id)` — reproduces the two-frame Monitor wire pattern the kandev ACP adapter recognises.
-- `e.startSubagentTool(...)` / `e.completeSubagentTool(...)` — claude-style subagent (Task) frames with the `_meta.claudeCode` Agent marker and result metrics.
-- `e.foregroundIdle()` / `e.launchAsyncSubagentTool(...)` / `e.completeDetachedWork()` — the ADR-0049 busy-signal shapes: the human-origin usage boundary that yields the foreground, Claude's detached Agent launch, and the task-notification boundary that closes detached work.
-- `e.requestPermission(...)` — interactive permission flow for scenarios that need an Allow/Reject decision.
-
-### Emitting `_meta`-tagged tool calls
-
-The acp-go-sdk has no `WithStartMeta`/`WithUpdateMeta`. To reproduce claude-agent-acp's `_meta.claudeCode.*` wire shape (`Monitor`, `Agent`-subagent), set `tc.Meta` via a local option closure — see `startMonitorTool` / `startSubagentTool` in `emitter.go`. Use these instead of building raw `SessionNotification`s when you need to exercise the adapter's `_meta` recognisers.
+For mock-agent scenario creation, directives, emitters, and failure fixtures, read [scenario guidance](SCENARIOS.md).
 
 ## Rebuild before running e2e (easy to miss)
 
-The web e2e suite runs the **prebuilt host binary** `apps/backend/bin/mock-agent` (resolved via `PATH`). The `containers` project also uses `bin/mock-agent-linux-amd64`. `global-setup.ts` checks that each required artifact exists and is newer than the backend source tree. After changing anything under `cmd/mock-agent`:
+The web e2e suite runs the **prebuilt host binary** `apps/backend/bin/mock-agent` (resolved via `PATH`). The `containers` project also uses `bin/mock-agent-linux-amd64`. `global-setup.ts` checks required artifacts against backend sources or a validated immutable build identity. After changing anything under `cmd/mock-agent`:
 
 ```bash
 make -C apps/backend build                     # host backend and mock agent

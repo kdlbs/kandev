@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  cloneWorkspaceAction,
   createWorkflowStepAction,
   deleteWorkspaceAction,
   exportAllWorkflowsAction,
@@ -15,6 +16,32 @@ import {
 const REVIEW_STEP_NAME = "Review";
 const STEP_COLOR = "bg-blue-500";
 const WORKSPACE_NAME = "My Workspace";
+
+describe("cloneWorkspaceAction", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("posts only the name and preserves access metadata", async () => {
+    const created = {
+      id: "copy",
+      name: "Copy",
+      scopes: ["workspace.manage"],
+      viewer_role: "owner",
+    };
+    const request = vi.fn(async () => new Response(JSON.stringify(created), { status: 201 }));
+    vi.stubGlobal("fetch", request);
+    expect(await cloneWorkspaceAction("source/id", { name: "Copy" })).toEqual(created);
+    expect(request).toHaveBeenCalledOnce();
+    const [url, options] = request.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/v1/workspaces/source%2Fid/clone");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({ name: "Copy" });
+  });
+  it("does not retry an uncertain mutation", async () => {
+    const request = vi.fn().mockRejectedValue(new TypeError("Network error"));
+    vi.stubGlobal("fetch", request);
+    await expect(cloneWorkspaceAction("source", { name: "Copy" })).rejects.toThrow();
+    expect(request).toHaveBeenCalledOnce();
+  });
+});
 
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {
@@ -184,6 +211,18 @@ describe("workflow step WIP fields", () => {
       wip_limit: 3,
       pull_from_step_id: "",
     });
+  });
+
+  it("preserves omitted and explicit workflow fallback veto updates", async () => {
+    await updateWorkflowStepAction("step-1", { name: "Review" });
+    await updateWorkflowStepAction("step-1", { disable_unclassified_fallback: false });
+    await updateWorkflowStepAction("step-1", { disable_unclassified_fallback: true });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string));
+    expect("disable_unclassified_fallback" in bodies[0]).toBe(false);
+    expect(bodies[1]).toMatchObject({ disable_unclassified_fallback: false });
+    expect(bodies[2]).toMatchObject({ disable_unclassified_fallback: true });
   });
 });
 

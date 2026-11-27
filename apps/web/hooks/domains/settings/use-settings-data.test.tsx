@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
@@ -37,6 +37,96 @@ beforeEach(() => {
   mocks.listAgents.mockReset();
   mocks.listAvailableAgents.mockReset().mockReturnValue(new Promise(() => {}));
   mocks.listExecutors.mockReset().mockResolvedValue({ executors: [] });
+});
+
+it("lets three mounts share one discovery sequence", async () => {
+  let resolveAgents!: (response: { agents: unknown[]; total: number }) => void;
+  mocks.listAgents.mockReturnValue(
+    new Promise((resolve) => {
+      resolveAgents = resolve;
+    }),
+  );
+
+  const { unmount } = renderHook(
+    () => {
+      useSettingsData();
+      useSettingsData();
+      useSettingsData();
+    },
+    { wrapper },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(mocks.listAgents).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    resolveAgents({
+      agents: [
+        {
+          id: "agent-shared",
+          name: MOCK_AGENT_NAME,
+          profiles: [{ id: "profile-shared", agentDisplayName: MOCK_AGENT_NAME, name: "Shared" }],
+        },
+      ],
+      total: 1,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  unmount();
+});
+
+it("starts agent discovery only while an enabled settings consumer is mounted", async () => {
+  let resolveAgents!: (response: { agents: unknown[]; total: number }) => void;
+  mocks.listAgents.mockReturnValue(
+    new Promise((resolve) => {
+      resolveAgents = resolve;
+    }),
+  );
+
+  const { result, rerender, unmount } = renderHook(
+    ({ enabled }) => {
+      useSettingsData(enabled);
+      return useAppStoreApi();
+    },
+    { initialProps: { enabled: false }, wrapper },
+  );
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(mocks.listAgents).not.toHaveBeenCalled();
+
+  rerender({ enabled: true });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(mocks.listAgents).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    resolveAgents({
+      agents: [
+        {
+          id: "agent-enabled",
+          name: "Enabled Agent",
+          profiles: [{ id: "profile-enabled", name: "Shared", agentDisplayName: "Enabled Agent" }],
+        },
+      ],
+      total: 1,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  rerender({ enabled: false });
+  act(() => result.current.getState().bumpAgentProfilesVersion());
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(mocks.listAgents).toHaveBeenCalledTimes(1);
+  unmount();
 });
 
 afterEach(() => {

@@ -26,6 +26,12 @@ Server-launched backends retain configured-root discovery and the Home fallback.
 Desktop-launched backends retain operator-configured roots. They also use roots
 that a user selects through the native folder picker or HTTP folder browser.
 
+For an existing implicit-Home installation, Continue Home Discovery is a
+separate explicit action. The backend checks its pending migration state and
+resolves its own Home path. This action does not require another picker
+selection. The ordinary picker opens in an existing local workspace folder
+when possible. It does not force Home as its initial directory.
+
 A desktop backend without an effective root does not scan Home. An existing
 implicit-Home installation receives a confirmation action during upgrade.
 

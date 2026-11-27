@@ -142,3 +142,29 @@ describe("deriveMultiRepoSummary", () => {
     ]);
   });
 });
+
+describe("deriveMultiRepoSummary pending details", () => {
+  it("hides remote action counts while repository details are pending", () => {
+    const result = deriveMultiRepoSummary(
+      [
+        repoStatus("frontend", {
+          detail_state: "pending",
+          ahead: 4,
+          behind: 2,
+          remote_ahead: 3,
+          remote_behind: 1,
+        }),
+      ],
+      [],
+      ["frontend"],
+    );
+
+    expect(result.perRepoStatus[0]).toMatchObject({
+      detailsReady: false,
+      ahead: 0,
+      behind: 0,
+      pushAhead: 0,
+      pullBehind: 0,
+    });
+  });
+});

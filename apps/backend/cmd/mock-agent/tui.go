@@ -13,6 +13,7 @@ import (
 // The idle timeout in InteractiveRunner triggers turn completion when output stops.
 // When resumed is true (--resume or -c flag was passed), the header shows "(RESUMED)".
 func runTUI(model, initialPrompt string, resumed bool) {
+	recordTUITrace("start", "")
 	// Print header
 	if resumed {
 		fmt.Print("\033[1;36m╭─ Mock Agent (RESUMED) ─╮\033[0m\r\n")
@@ -50,6 +51,15 @@ func runTUI(model, initialPrompt string, resumed bool) {
 
 // processTUIPrompt simulates agent processing: shows thinking, then a response.
 func processTUIPrompt(prompt, model string) {
+	recordTUITrace("prompt", prompt)
+	if prompt == "/e2e:mcp-context" {
+		result, err := callTUIMCPContext()
+		if err != nil {
+			fmt.Printf("Remote MCP failed: %s\r\n", err)
+		} else {
+			fmt.Printf("Remote MCP: %s\r\n", result)
+		}
+	}
 	// Show thinking state
 	fmt.Print("\033[33m⠋ Thinking...\033[0m\r\n")
 	fixedDelay(tuiDelay(model))

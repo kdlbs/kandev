@@ -3,65 +3,9 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { activateLocale } from "@/lib/i18n";
-import type { StorageAnalysisState, StorageOverviewResponse } from "@/lib/types/system";
+import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
-
-const degradedOverview = {
-  settings: {
-    enabled: false,
-    check_interval_hours: 24,
-    idle_for_minutes: 10,
-    orphan_grace_hours: 168,
-    quarantine_retention_hours: 168,
-    workspaces: { enabled: true, dependency_cleanup_enabled: false },
-    kandev_containers: { enabled: true },
-    go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
-    docker: {
-      dedicated_daemon_acknowledged: false,
-      build_cache_enabled: false,
-      build_cache_keep_bytes: 10737418240,
-      build_cache_unused_hours: 168,
-      unused_images_enabled: false,
-      unused_images_hours: 168,
-    },
-  },
-  capabilities: {
-    managed_go_cache_path: "/data/cache/go-build",
-    go_cache_adoption_available: true,
-    temporary_artifacts_available: false,
-    docker_available: false,
-    docker_host: "",
-    host_global_docker_cleanup_allowed: false,
-  },
-  summary: {
-    workspaces: { active_bytes: 0, candidate_bytes: 0 },
-    go_cache: { path: "/data/cache/go-build", size_bytes: 0, owned: true, enabled: false },
-    quarantine: { available: false, warning: "quarantine database unavailable" },
-    temporary_artifacts: { available: false, warning: "temporary artifact registry unavailable" },
-    docker: {
-      available: false,
-      build_cache_bytes: 0,
-      unused_image_bytes: 0,
-      managed_container_count: 0,
-      managed_container_bytes: 0,
-    },
-  },
-  analysis: {
-    generation: 1,
-    state: "ready",
-    started_at: "2026-07-23T11:59:00Z",
-    completed_at: "2026-07-23T12:00:00Z",
-    duration_ms: 60000,
-    cache_ttl_seconds: 900,
-    refresh_due_at: "2099-07-23T12:15:00Z",
-    stale: false,
-    error: null,
-    progress: { completed_sources: 8, total_sources: 8, sources: {} },
-    partial_summary: null,
-  } satisfies StorageAnalysisState,
-  analyzed_at: "2026-07-23T12:00:00Z",
-  last_run: null,
-} satisfies StorageOverviewResponse;
+import { degradedOverview } from "./storage-overview-card.test-fixtures";
 
 const DATABASE_PATH = "/data/kandev.db";
 const DATABASE_BACKUP_PATH = "/data/backups";
@@ -270,6 +214,79 @@ describe("StorageOverviewCard system temporary resources", () => {
   });
 });
 
+describe("StorageOverviewCard temporary entry breakdown", () => {
+  it("renders bounded entry sizes and ownership without starting cleanup", () => {
+    const onReviewTemporaryArtifacts = vi.fn();
+    const onRunTemporaryArtifacts = vi.fn();
+    const overview = {
+      ...degradedOverview,
+      capabilities: { ...degradedOverview.capabilities, temporary_artifacts_available: true },
+      summary: {
+        ...degradedOverview.summary,
+        temporary_artifacts: {
+          available: true,
+          stale_count: 2,
+          stale_bytes: 128,
+        },
+        system_temporary: {
+          status: "partial",
+          included_in_total: false,
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              breakdown: {
+                status: "partial",
+                entries: [
+                  {
+                    name: "build-output",
+                    kind: "directory",
+                    size_bytes: 900,
+                    completeness: "measured",
+                    ownership: "untracked",
+                  },
+                  {
+                    name: "active-profile",
+                    kind: "directory",
+                    completeness: "partial",
+                    ownership: "unknown",
+                  },
+                ],
+                other_observed_bytes: 12,
+                other_observed_count: 3,
+              },
+            },
+          ],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(
+      <StorageOverviewCard
+        overview={overview}
+        onRunGoCache={vi.fn()}
+        onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
+    const entries = screen.getByTestId("storage-temporary-entries");
+    expect(entries.textContent).toContain("build-output");
+    expect(entries.textContent).toContain("900 B");
+    expect(entries.textContent).toContain("Not tracked by Kandev");
+    expect(entries.textContent).toContain("active-profile");
+    expect(entries.textContent).toContain("Unavailable");
+    expect(entries.textContent).toContain("Ownership unknown");
+    expect(entries.textContent).toContain("3 other observed entries");
+    expect(entries.textContent).toContain("2 stale candidates");
+    fireEvent.click(screen.getByTestId("storage-temporary-review-cleanup"));
+    expect(onReviewTemporaryArtifacts).toHaveBeenCalledTimes(1);
+    expect(onRunTemporaryArtifacts).not.toHaveBeenCalled();
+  });
+});
+
 describe("StorageOverviewCard database footprint", () => {
   it("renders database rows with paths, scope details, and total contribution", () => {
     const overview = {
@@ -468,6 +485,7 @@ describe("StorageOverviewCard refresh and policy state", () => {
         go_cache: {
           ...degradedOverview.summary.go_cache,
           size_bytes: 15 * 1024 ** 3,
+          cleanup_eligible_size_bytes: 15 * 1024 ** 3,
         },
       },
     } satisfies StorageOverviewResponse;
@@ -487,6 +505,35 @@ describe("StorageOverviewCard refresh and policy state", () => {
     );
   });
 
+  it("does not treat preserved fuzz bytes as cleanup-eligible cache size", () => {
+    const overview = {
+      ...degradedOverview,
+      settings: {
+        ...degradedOverview.settings,
+        go_cache: { ...degradedOverview.settings.go_cache, max_bytes: 10 * 1024 ** 3 },
+      },
+      summary: {
+        ...degradedOverview.summary,
+        go_cache: {
+          ...degradedOverview.summary.go_cache,
+          size_bytes: 20 * 1024 ** 3,
+          cleanup_eligible_size_bytes: 5 * 1024 ** 3,
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />, {
+      wrapper: TooltipProvider,
+    });
+
+    const resource = screen.getByTestId("storage-resource-go-cache-trigger");
+    expect(resource.textContent).toContain("20 GB");
+    fireEvent.click(resource);
+    expect((screen.getByTestId("storage-go-cache-clean") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("StorageOverviewCard analysis progress", () => {
   it("shows refresh progress while a cached snapshot is loading", () => {
     render(<StorageOverviewCard overview={degradedOverview} loading onRunGoCache={vi.fn()} />);
 

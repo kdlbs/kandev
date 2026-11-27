@@ -9,11 +9,13 @@ requirements:
 
 ## Purpose and boundaries
 
-This design defines how the web transcript selects a Kandev MCP result for
-native rendering. It does not change tool execution, transport, or storage.
+This design defines how ACP adapters preserve Kandev MCP tool identity and
+arguments, and how the web transcript selects those calls and their results for
+native rendering. It does not change tool execution or storage.
 
-The ACP adapter removes provider wrappers and keeps the standard MCP
-`CallToolResult`. The UI then selects one usable payload from that result.
+The ACP adapter removes recognized provider wrappers and keeps a
+provider-neutral tool name, arguments, and standard MCP `CallToolResult`. The UI
+then identifies the renderer and selects one usable payload from that result.
 
 ## Requirement mapping
 
@@ -21,16 +23,98 @@ The ACP adapter removes provider wrappers and keeps the standard MCP
 | --- | --- |
 | `REQ-UI-KANDEV-MCP-TOOL-RESULTS-001` | [Result selection](#result-selection), [Responsive behavior](#responsive-behavior) |
 
+The Agents-owned
+[native rich-output contract](../../agents/requirements/agent-rich-output.md)
+and its
+[ACP identity design](../../agents/system-design/agent-rich-output.md)
+consume this shared identity, argument, result-selection, and replay path.
+
 ## Components and responsibilities
 
 - `normalizeCodexMCPToolResult` removes the Codex `{error, result}` wrapper.
   It keeps the complete standard MCP result.
+- Provider dialects recognize their explicit MCP envelopes and persist the
+  provider plus actual tool name instead of the broad ACP category.
 - Persisted tool-message metadata stores that result at
   `metadata.normalized.generic.output`.
+- Persisted generic input stores the unwrapped tool arguments.
+- `kandevToolStemOf` identifies registered Kandev renderers from normalized
+  identity or a compatible historic title.
 - `KandevToolMessage` sends the stored output to `extractMcpResult`.
 - `extractMcpResult` selects and parses the payload for all native Kandev tool
   renderers.
 - Each renderer reads its fields and shows the native transcript row.
+
+## Identity and argument normalization
+
+Provider dialects normalize only envelopes with explicit MCP identity:
+
+- Codex uses `_meta.is_mcp_tool_call` plus
+  `{server, tool, arguments}`.
+- Cursor and Grok use `{providerIdentifier, toolName, args}`.
+
+Both become a generic MCP payload named `<provider>/<tool>` whose input is the
+unwrapped argument object. The provider identity is retained so a foreign tool
+whose name resembles a Kandev tool cannot select a native Kandev renderer.
+
+Historic messages are not migrated. For replay, the frontend also accepts the
+observed Cursor title `kandev: <tool>_kandev` and unwraps
+`input.raw_input.args`. The prefix establishes Kandev identity only when the
+remainder is a valid suffixed tool name. Bare categories, foreign namespaces,
+and unrelated tools remain generic activity.
+
+### Copilot ACP title compatibility
+
+The observed Copilot message retains `generic.name: "other"`, the title
+`kandev-<tool>_kandev`, and direct report arguments in `input.raw_input`.
+The shared frontend parser recognizes the exact `kandev-` prefix with the
+existing non-empty stem, suffix, and namespace-separator checks. It does not
+split arbitrary hyphenated names or infer a provider from the tool suffix.
+Only a registered stem selects a native renderer.
+
+`kandevToolStemOf` remains the shared scanner for renderer dispatch and
+rich-output grouping. Explicit foreign normalized identities and foreign
+`raw_input.providerIdentifier` values continue to block title fallback.
+Existing `extractKandevArgs` already handles direct `raw_input` objects.
+Live messages and stored history use this same path without a database rewrite.
+
+This compatibility path repairs the observed serialized shape. It does not
+establish a Copilot wire-envelope contract. Adapter normalization requires a
+verified explicit provider envelope; a display title alone is insufficient.
+The [Copilot fix package](../../../plans/copilot-rich-output-identity/plan.md)
+records the reproduction and planned regression coverage.
+
+### Built-in package namespaces
+
+The shared identity parser must also recognize the exact runtime server names
+declared by `internal/mcp/profile/builtin_descriptors.go`: `kandev`,
+`kandev-configuration`, `kandev-rich-output`, `kandev-walkthroughs`, and
+`kandev-diagnostics`. The package split changes the server name, not the tool
+stem, arguments, result, or renderer. Existing bare and monolithic identities
+remain compatible.
+
+Apply this finite server set to the already supported slash, dotted,
+double-underscore, colon-space, and hyphenated identity formats. Match a full
+server name and delimiter before removing the tool suffix. Match longer server
+names before `kandev-` so package names cannot become part of the tool stem.
+Qualified namespaces use the exact server inventory. The legacy
+`kandev-<tool>_kandev` format still permits hyphens in the tool stem; such a stem
+selects native rendering only if it has a registered renderer. This parser is a
+presentation selector, not proof of built-in authorization or execution origin.
+
+Preserve the historical provider fallback guard for both
+`raw_input.providerIdentifier` and Codex `raw_input.server`: only `kandev`
+permits title fallback. A legacy imported external definition can retain
+one of the new reserved package names, so that name alone must not relax this
+guard. Current package calls use the normalized qualified identity. An explicit
+foreign normalized identity still prevents fallback to a trusted-looking title.
+
+Both renderer dispatch and rich-output grouping continue through
+`kandevToolStemOf`. Existing package-qualified messages recover on replay
+without a database rewrite, tool retry, or package enablement. Normal file
+preview reads retain session authorization and existing image visibility rules.
+The [repair plan](../../../plans/builtin-rich-output-identity/plan.md) records
+the observed Codex message, supported serialized formats, and negative controls.
 
 ## Result selection
 
@@ -48,18 +132,22 @@ must not suppress a valid text fallback.
 
 ## Control flow
 
-1. The agent completes a Kandev MCP tool call.
-2. The ACP adapter stores the standard result in normalized message metadata.
-3. The transcript passes the result to the shared parser.
-4. The parser applies the result-selection precedence.
-5. The registered renderer shows the parsed values.
+1. The agent emits a Kandev MCP tool call.
+2. The ACP dialect stores provider-neutral identity and arguments in normalized
+   message metadata.
+3. The agent completes the call and the adapter stores the standard result.
+4. The transcript selects the registered renderer from normalized or compatible
+   historic identity.
+5. The parser applies the result-selection precedence.
+6. The registered renderer shows the parsed values.
 
 Live updates and replay use the same stored message shape and parser.
 
 ## Failure and recovery
 
-Malformed JSON text remains plain text. A result with no usable payload keeps
-the existing renderer fallback and does not break adjacent transcript rows.
+Malformed JSON text remains plain text. An unrecognized or foreign tool keeps
+the generic activity path. A recognized result with no usable payload keeps the
+existing renderer fallback and does not break adjacent transcript rows.
 
 The repair must preserve non-null structured results and historic wrapper
 support. These paths protect rich-output results and older persisted messages.
@@ -67,7 +155,9 @@ support. These paths protect rich-output results and older persisted messages.
 ## Persistence
 
 The repair adds no table or migration. Existing message metadata remains the
-only persisted source.
+only persisted source. Corrected adapters normalize new messages at ingestion;
+the frontend compatibility path makes already-persisted Cursor envelopes
+replayable without rewriting history.
 
 ## Responsive behavior
 

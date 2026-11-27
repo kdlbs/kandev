@@ -100,6 +100,7 @@ func RegisterRoutes(
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	g.POST("/tasks", seedTaskHandler(repo, log))
+	g.POST("/tasks/:id/management-claim", seedTaskManagementClaimHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.DELETE("/task-sessions/:id", deleteTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, taskSvc, eventBus, log))
@@ -115,6 +116,9 @@ func RegisterRoutes(
 		orchestratorSvc.SetBackgroundProbe(probe)
 		g.POST("/background-probe", scriptBackgroundProbeHandler(probe))
 		g.GET("/background-probe/:session_id/calls", backgroundProbeCallCountHandler(probe))
+	}
+	if taskSvc != nil {
+		g.POST("/background-work", recordBackgroundWorkHandler(repo, taskSvc, eventBus, log))
 	}
 	if officeRepo != nil {
 		g.POST("/comments", seedCommentHandler(officeRepo, eventBus, log))

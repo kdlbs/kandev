@@ -88,7 +88,7 @@ function HeaderDates({ detail }: { detail: ChangeRequestDetailModel }) {
       </span>
       {detail.createdAt ? (
         <>
-          <span>&middot;</span>
+          <span>·</span>
           <span className={getTimeAgoColor(detail.createdAt)}>
             {t("integrations:openedRelative", { relative: formatTimeAgo(detail.createdAt) })}
           </span>
@@ -96,7 +96,7 @@ function HeaderDates({ detail }: { detail: ChangeRequestDetailModel }) {
       ) : null}
       {detail.mergedAt ? (
         <>
-          <span>&middot;</span>
+          <span>·</span>
           <span className="flex items-center gap-0.5">
             <IconGitMerge className="h-3 w-3 text-purple-500" />
             {t("integrations:mergedRelative", { relative: formatTimeAgo(detail.mergedAt) })}
@@ -105,7 +105,7 @@ function HeaderDates({ detail }: { detail: ChangeRequestDetailModel }) {
       ) : null}
       {detail.closedAt && !detail.mergedAt ? (
         <>
-          <span>&middot;</span>
+          <span>·</span>
           <span>
             {t("integrations:closedRelative", { relative: formatTimeAgo(detail.closedAt) })}
           </span>
@@ -128,7 +128,7 @@ function HeaderStats({ detail }: { detail: ChangeRequestDetailModel }) {
         <IconMinus className="h-3 w-3 text-red-500" />
         {detail.deletions}
       </span>
-      <span>&middot;</span>
+      <span>·</span>
       <span>
         {t("integrations:reviewCount", { count: reviewCount })}
         {pendingCount ? (
@@ -137,7 +137,7 @@ function HeaderStats({ detail }: { detail: ChangeRequestDetailModel }) {
           </span>
         ) : null}
       </span>
-      <span>&middot;</span>
+      <span>·</span>
       <span>{t("integrations:commentCount", { count: detail.comments.length })}</span>
       {detail.reviewState ? (
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
@@ -213,7 +213,7 @@ export function ChangeRequestDetailHeader({
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {detail.sourceBranch}
         </code>
-        <span className="mx-0.5 text-muted-foreground">&rarr;</span>
+        <span className="mx-0.5 text-muted-foreground">→</span>
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {detail.targetBranch}
         </code>

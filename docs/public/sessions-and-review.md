@@ -13,6 +13,62 @@ A session is one agent conversation on a task. Use it to direct work, inspect ch
 2. Watch chat and tool activity; answer clarification or permission requests.
 3. Inspect the diff, run required checks, and send focused feedback until the change is ready.
 
+## Answer clarification questions
+
+After Copilot resumes a session with an interrupted tool call, Kandev adds a
+status row to the transcript. Select **Details** to read Copilot's warning.
+If the call was the pending Kandev question, skip it and send a prompt. For
+another or uncertain call, check its effects before retrying.
+
+Questions support links, bold, italic, strikethrough, inline code, paragraphs, and simple lists.
+Select an HTTP or HTTPS reference in question text to open it in another tab.
+Links inside answer choices select the choice.
+
+To read an older question, open **Inbox > History** and expand its row.
+The expanded question supports the same formatting and reference links.
+Selecting a reference label in the collapsed summary expands the row.
+Opening a reference does not answer the question or change its status.
+
+Select **Open task** on an Inbox row for an available Quick Chat to open that
+conversation. Close Quick Chat to return to the same Inbox tab.
+
+Pending shared context supports paragraphs, line breaks, links, bold, italic,
+strikethrough, inline code, simple lists, and tables. Table overflow stays
+inside the table area. HTTP and HTTPS references open in another tab. Resolved
+context in History, permission requests, and custom answers remain literal text.
+Clarification questions do not display embedded HTML, images, headings,
+blockquotes, or code panels. Tables are supported only in pending shared context.
+File references remain labels rather than opening workspace files.
+
+Long context starts at its content height, up to an initial limit. Select
+**Expand** to fill the available space. Select **Restore** to return to the
+previous height, including a height you set by dragging the panel's top edge.
+Drag the panel's top edge to resize it, or double-click the drag handle to
+return to content sizing. The panel keeps space for the chat input and, in
+Threads, a minimum transcript area.
+
+### Attach files to an answer
+
+Use the paperclip beside the custom answer, or in the question header when
+custom text is disabled, to add screenshots or other evidence. You can also
+paste an image directly into the custom answer. A bundle accepts up to 10 files
+and 100 MiB in total. Each file is limited to 100 MiB.
+
+Selecting an option records a draft. For one question, select **Send** to submit
+the answer. For several questions, select **Submit answers** after answering
+each question. An image-only paste keeps the selected option, typed text, and
+focus. Ordinary text paste behaves as before.
+
+The paperclip badge shows the file count, upload progress, or failure. Open the
+paperclip to view, retry, or remove files without losing the answer. A submission
+waits while a file is uploading or has failed. If delivery fails, Kandev keeps
+the answer and its files for a retry.
+
+Kandev delivers each file as a readable path in the agent's execution. It does
+not add a native image block to the tool result, so the agent inspects images
+with its file-reading tools. If an upload or the runtime cannot deliver a file,
+the answer fails visibly instead of reaching the agent with a missing file.
+
 ## Start a parallel session
 
 You need a task with an environment and at least one agent profile compatible with that environment's executor.
@@ -30,6 +86,18 @@ The New Session dialog does not accept a session name. Rename the session from i
 
 The empty-panel watermark has the same **New Agent** action. On mobile, open the **Sessions** picker and select **New session**.
 
+To add MCP servers before launch, expand **Advanced settings** below the prompt.
+Select the count beside **MCP servers** to open the picker. On phones and touch
+tablets, the picker opens as a bottom sheet. The count includes only your session
+additions. Servers inherited from the profile, repositories, and task remain
+included. Closing the picker or collapsing Advanced settings preserves the draft.
+Handoff uses the same controls.
+
+If simultaneous starts are still preparing the shared workspace, the later
+start waits for that preparation and tries to attach once. Failed or unfinished
+preparation leaves the start retryable without creating another workspace.
+Later sessions preserve the existing primary session and its initial settings.
+
 The profile picker shows only profiles compatible with the task executor. If none are available, use the link in the dialog to configure an executor or agent profile. See [Agents and profiles](agents-and-profiles.md).
 
 ### Choose starting context
@@ -44,49 +112,319 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
+When you start a prepared session with an explicit brief, Kandev keeps that brief in the first stored message and in the agent input. A destination step prompt without `{{task_prompt}}` runs before the brief instead of replacing it; a step that uses the placeholder inserts the brief where the placeholder sits. The brief is instruction text, not a permission mode. Use the profile, executor, and workflow controls to restrict what the agent can change.
+
 ## Manage session state
 
-Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
+Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, then select the session row's **Session actions** button. Available actions depend on the session's current state.
 
-| Action             | Effect                                                                                                                                                                     |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rename**         | Changes the session's display name                                                                                                                                         |
-| **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
-| **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
-| **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
-| **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
-| **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
-| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
-| **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
+| Action              | Effect                                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rename**          | Desktop: changes the session's display name, up to 120 Unicode code points                                                                                                 |
+| **Set as Primary**  | Makes a stoppable session the task's primary target                                                                                                                        |
+| **Stop**            | Cancels the active agent turn for this session                                                                                                                             |
+| **Restart session** | Stops and resumes the same active session. Keeps its history and workspace without sending a prompt.                                                                       |
+| **Resume**          | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
+| **Delete**          | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
+| **Share**           | Opens the publishing preview for an eligible session                                                                                                                       |
+| **Handoff**         | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
+| **Close Others**    | Closes other visible agent panels without deleting their sessions                                                                                                          |
+
+Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
+
+If Restart's Resume returns a history-continuation action, the selected
+session's recovery card keeps that action available after the menu closes.
+Select **Continue from saved history** to start a new native conversation
+from Kandev history. The interrupted prompt's outcome remains unknown, and
+Restart never starts this continuation automatically. A failed continuation
+keeps the action available for the same recovery incident.
+
+Restart keeps the selected conversation open throughout the attempt. If you select another conversation
+while restart is pending, Kandev keeps your later selection.
+
+While a session restarts, you can edit its draft, but you cannot send it.
+**Restarting session...** appears above the composer until the restart requests
+finish. Other sessions remain usable. Sending becomes available under the normal
+readiness rules. If restart requires recovery, use the recovery actions first.
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
-When startup or resume fails:
+If the runtime is already gone, stopping a session that is waiting for input or
+has finished closes its stale open turn and preserves its session state. A
+session that is still launching can return a stop error; retry after the launch
+has settled.
 
-- Kandev adds one recovery entry to the selected session's chat.
-- The current unresolved failure shows recovery controls. Older entries keep their message and technical details without stale controls.
+When a turn, startup, or resume fails:
+
+- When an ACP agent returns a prompt error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same process, connection, and native conversation available when it can confirm that runtime is still usable. This covers generic internal, database, authentication, quota, and invalid-model errors, not only classified capacity, overload, or rate-limit failures. Kandev does not replay the failed prompt. Automatic retries still apply only to existing supported classifications. For model capacity, confirmed tool results do not stop automatic continuation, but a pending permission, a pending or uncertain tool outcome, or a non-command tool failure does. A confirmed nonzero terminal command exit on a supported Codex conversation stays failed in history and does not stop continuation by itself. Other failures require your next message. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
+- When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
+- After a backend restart, Kandev restores eligible interrupted sessions in the background when it can verify the saved workspace owner, native conversation, and delivery journal. The transcript gets one informational message and the normal composer returns. The interrupted prompt keeps its unknown outcome and is never sent again. If identity or delivery proof is missing, or another recovery block remains open, use the recovery controls shown for that session.
+- When the agent process exits before initialization completes, the recovery card reports the observed exit status. If mise refused the workspace configuration, the card says **Agent startup blocked by mise** and asks you to review the configuration on the execution host. Kandev never trusts a repository or runs `mise trust` for you. If you trust the configuration, run `mise trust` on that host before retrying. Other ordinary exits show the status without guessing a toolchain cause.
+- If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. The retry also receives the task's current workflow and step instructions. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
+- When **Start fresh session** replaces an existing conversation, it opens a new native conversation and delivery stream. Unresolved work from the previous conversation stays in history and is not sent to the provider again.
+- **Restore read-only workspace** does not send the pending prompt or dismiss its startup warning. The warning is resolved only after the provider confirms readiness for the matching recovery attempt.
+- For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Every error entry keeps its summary and expandable technical details in the chat history, even while the recovery card is visible. Recovery buttons appear only on the current card.
+- In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
+- A failed interactive turn also adds a durable error badge to the task row. Focusing, reading, or opening the task does not clear it. For the current retained-turn error, when ordinary manual input is available, select **Dismiss and continue** in the error alert to send one visible `continue` message to that same conversation and acknowledge the observed failure after acceptance. The action keeps your composer draft and attachments and is unavailable while another turn or automatic recovery owns the session. Select **Dismiss turn error** to dismiss without sending, use the task menu dismissal, or send a new prompt after the error appears. A newer failure restores the badge. A runtime recovery error shown at the same time keeps its own separate control.
 - History loading and new messages keep the normal chat scroll behavior.
+
+For eligible failed Auggie ACP task sessions, the recovery card explains that
+**Resume** keeps the same conversation and skips saved mode and model overrides
+for that attempt. A success notice reports the provider-confirmed model name or
+ID when available. If the provider does not confirm a model, the notice makes no
+model claim. The notice confirms that the previous conversation was preserved,
+that saved selections remain unchanged for future launches, and that the
+restored permission mode may differ. A recovered failure remains in chat history
+with a **Resolved** label. A manually dismissed failure is labeled **Dismissed**
+and does not report a successful recovery. The matching failure remains
+**Resolved** even when a separate success notice is missing from the loaded chat.
+A later failure keeps its own recovery controls.
+
+<a id="experimental-interruption-continuation"></a>
+
+### Background workload cleanup
+
+Kandev marks open background workloads as **Ended** once it confirms that their
+owning agent process is gone. This also cleans up stale entries after a backend
+restart. Ended means that the process stopped without a reported outcome; it does
+not mean the work succeeded.
+
+A live process, failed liveness probe, or unresolved retained-agent recovery keeps
+work open. A terminal session state alone does not prove that teardown finished.
+If a delayed provider completion arrives, Kandev retains its actual outcome.
+
+### Interruption continuation
+
+Interrupted conversation continuation is supported by default for eligible
+transient Cursor ACP failures. It can continue the unfinished request in the
+same saved conversation after output or completed foreground tools. Kandev sends
+a hidden internal continue instruction, preserves the transcript, and keeps
+previous results. It does not resend the original request or create a replacement
+conversation automatically.
+
+Recovery shares the existing five-attempt budget and paced backoff. One notice
+shows waiting, reconnecting, or continuing. Once actual output or attributable
+foreground tool activity confirms that the agent resumed, the notice changes to
+neutral **Agent resumed** feedback. **Cancel** stays available while the
+continued turn runs, and the change does not extend or reset the attempt budget.
+Cancellation returns control to Chat when the ACP runtime is still usable; normal
+recovery actions remain available if it is not. An exhaustion message reports
+attempts that actually started; a refused recovery does not claim retries ran.
+Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
+prevent automatic continuation. So do subagents, background work, unresolved,
+denied or cancelled permissions, and overlapping work after a turn handoff. If the
+runtime remains usable, send a follow-up in the same conversation. If it is
+unavailable, use the manual recovery actions. Missing saved identity and
+unsupported agents also require manual recovery. New human work takes priority.
+Backend restart retires the old automatic notice without launching a
+continuation or interrupting adopted live work.
+
+No exactly-once execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
+If automatic resume restores the workspace in read-only mode, select **Resume session** in the notice to continue the saved conversation. The action stays visible while **Recovery details** is collapsed. Resume does not resend an interrupted instruction; send your next instruction after recovery succeeds. If a recovery card is already shown in Chat, use its Resume action.
+
+The recovery card places the recommended action first and shows every available alternative as an individual button, including **Restore read-only workspace** and **Start fresh session** when eligible. Buttons wrap on desktop and stack at touch size on phones. Runtime installation failures offer **Retry**; provider quota failures show reset guidance, while Archive and Delete remain in the task menu. Restoring the workspace does not restart the agent. Expand **Technical details** for wrapped, bounded diagnostics; **Copy details** copies the same redacted text you see. When a workspace pane can identify the same failure and its visible recovery entry, **View recovery** opens Chat and focuses the recovery card. Independent workspace failures retain their own retry.
+
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
+
+If Kandev cannot prove that the native conversation is available, it keeps the
+session blocked and shows **Continue from saved context** when that action is
+safe. This action starts a new native conversation from bounded Kandev history.
+It does not restore private harness state, running tools, or old provider paths.
+This option applies to other recovery paths. Automatic restart recovery does
+not replace missing or unverified native state with a new conversation.
+Kandev does not resend a prompt when its outcome is uncertain. Resolve the
+recovery notice before sending new work.
+
+When a compatible agentctl process survives a backend restart, Kandev first
+checks its delivery identity and durable cursor, then replays committed events
+before it accepts new work. This delivery recovery is automatic and separate
+from the executor setting that controls whether the agent process survives.
+If the delivery evidence is missing or inconsistent, Kandev keeps the session
+blocked and preserves Stop and the available recovery action.
+
+After a restart, confirmed evidence that the exact Remote Docker or Sprites
+instance is absent ends attachment so the existing recovery actions can check
+the saved state. An unreachable host or control endpoint does not prove that
+the instance stopped, so Kandev keeps that owner protected. Missing native
+conversation or delivery evidence can still block Resume. Kandev does not resend
+an instruction whose outcome is uncertain.
+
+If Kandev can prove that a request failed before it was sent, it records a failed
+submission without creating an uncertain-delivery block. A lost reply does not
+prove non-delivery. Resolve any unknown-outcome recovery notice before sending
+new work; blocked messages do not create another delivery submission.
+
+If delivery is interrupted and the prompt outcome is uncertain, the recovery
+card shows **Retry connection** and **Stop**. Retry connection reconnects the
+original stream and replays committed output from its durable cursor. It does
+not resend the prompt or start a replacement conversation. Legacy streams use
+bounded intake and can show the same uncertain state when their missing output
+cannot be replayed.
+
+Kandev prepares large tool output before it enters the delivery stream. A tool
+result that is too large for direct display keeps its category, status, and
+identity, together with a bounded preview and an explicit truncation notice. A
+failed delivery write causes Kandev to request cancellation of the current turn.
+Kandev keeps reading, commits the real terminal when storage permits, and
+otherwise preserves the uncertain outcome. Delivery health is checked in the background,
+so the recovery card can appear promptly even when the agent is quiet or the
+browser is closed. A live agent process does not prove that output delivery
+still works.
+
+An older session can already have its conversation loaded while a delivery block
+still prevents new messages. For an empty historical delivery block, the card
+also offers **Resume**. Resume checks and reconciles the saved delivery against
+the same native conversation without resending the old prompt. **Retry connection**
+and **Stop** remain available. A successful load alone cannot replace missing
+proof about the original process, so automatic recovery may leave this action
+to you. If Resume cannot verify the saved evidence, it keeps the session blocked
+and reports the cause. If the saved delivery already has a fully recorded
+terminal result, Kandev reconciles the matching stale block when the idle native
+conversation is restored. This also applies when shutdown interrupted final
+bookkeeping after the result was saved. The old result remains unchanged, and
+no previous prompt is sent again.
+
+Some older sessions saved a completion label before the matching terminal event
+was retained. Kandev can still recover the saved conversation when it verifies
+that the original process stopped and every delivery record stays consistent.
+Resume keeps the historical label and payload, clears only the matching recovery
+notice, and does not resend the instruction. A live owner, a later terminal, or
+an unverified record keeps the session blocked with the cause. Do not edit the
+database to bypass this check.
+
+A resumed runtime checks delivery recovery before enabling new work. If the saved
+evidence needs explicit recovery, the Resume controls appear before you send a
+new instruction. An existing draft is retained while recovery runs; send it once
+after the conversation is ready.
+
+After a backend restart, Kandev uses durable evidence to verify the saved owner
+and native conversation. If they match, Kandev restores the same task session
+when its agentctl process has terminated. It does not send another prompt, add
+a user message, or create a new turn. Send your next message when the composer
+is ready. If queued messages remain, restoration turns **Auto-run** off and
+keeps those messages. You can turn **Auto-run** on when you want them to run.
+
+If the saved prompt record is missing, **Retry connection** checks the retained
+delivery record. Kandev restores it only when one saved user message matches one
+retained record. The original message stays in the conversation with a blocked
+delivery label. Retry does not send that message again, and the prompt outcome
+stays unknown. If the original agent process cannot be verified, Kandev keeps
+the session blocked and shows the reason. Record repair alone does not allow
+continuation.
+
+Automatic restoration stays blocked when Kandev cannot verify the saved owner,
+native conversation, generation, or journal. A missing native conversation,
+unknown or changed owner, or locked or corrupt journal does not start a
+replacement conversation. The session keeps its safe recovery controls, such
+as **Stop**, while other eligible sessions can recover independently.
+
+**Stop** remains available while Retry is pending. The card reports a failed
+Stop request or an unconfirmed cancellation. Retry reconnects and reconciles
+the saved delivery state; it does not create a new instruction.
+
+Agentctl saves output in a journal on the executor's disk until the backend
+confirms that it saved the output. The journal also operates while the backend
+is connected. During a disconnect, the journal grows as the agent produces
+output. After reconnection, Kandev replays the output and acknowledges saved
+records, including when the agent has no new output.
+
+The journal has no default 256 MiB stream limit or 2 GiB total limit.
+Unacknowledged output does not expire after a week or another fixed interval.
+The agent can continue independent work while usable disk space remains.
+Requests that need the Kandev backend, such as backend tools, can wait or fail
+during the outage.
+
+Memory buffers and replay batches remain bounded. Agentctl reserves disk space
+for control and recovery records. If usable space approaches that reserve,
+agentctl blocks new prompts and requests cancellation of the affected turn.
+Committed output remains available for replay. A failed cancellation does not
+prove that the agent stopped. The journal never discards unacknowledged output
+to make room.
+
+Backend delivery cleanup preserves saved conversation output on desktop and phones.
+It removes redundant transport payloads after safe projection and settlement.
+If an ACK was lost after cleanup, **Retry connection** uses the persisted cursor without resending the prompt.
+Uncertain work remains protected. **Stop** and the existing recovery actions remain available.
+See [delivery retention operations](operations.md#backend-delivery-retention) for expiry, deletion, and rollback limits.
+
+Kandev can replace the local agent runtime while the backend and browser
+connection stay active. This restores runtime service only. A session with an
+uncertain prompt outcome remains blocked until a safe recovery action or the
+next backend restart restores it. Runtime replacement does not resend that
+prompt or resolve its external effects.
+
+If the session limit delays your message, chat shows a yellow warning above the queue count. The warning includes the current session limit when available. Your message is saved. With **Auto-run** on, it can run when capacity becomes available. With **Auto-run** off, open the queue and turn it on to resume automatic delivery.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
-The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+The expanded queue also lets you pause or discard stale work. Its compact header places **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
 Use **Auto-run** for queue processing:
 
-| Setting | Queue behavior |
-| --- | --- |
-| **On** | Runs one eligible row per turn in FIFO order. |
+| Setting | Queue behavior                                         |
+| ------- | ------------------------------------------------------ |
+| **On**  | Runs one eligible row per turn in FIFO order.          |
 | **Off** | Lets the current response finish and holds later rows. |
 
 - The setting belongs to the session and survives an empty queue, reload, and backend restart.
 - A pending clarification or another lifecycle guard can hold the queue while Auto-run is on.
 
-**Auto-merge** folds later compatible messages. It follows the install-wide setting until you change the session's pill. That change creates a session override that stays active for the session's lifetime.
+**Auto-merge** combines compatible adjacent messages and folds agent sub-task messages into their sender task's latest queued entry, even across other ordinary messages. User messages never move. It follows the install-wide setting, ON by default, until you change the session's pill; that change creates an override for the session's lifetime.
+
+Turning a session's Auto-merge from OFF to ON immediately compacts pending rows using both rules. OFF disables automatic folds without splitting prior content. Auto-run is unchanged, and global changes affect later messages only, never compacting the backlog. See [queue grouping rules](coordination.md#coordinate-with-targeted-messages).
+
+### Recover from low disk space
+
+Kandev reads capacity from the executor that runs the agent. A warning row
+appears above the chat composer at 90% disk usage and clears below 85%. Work
+continues while the warning is shown. Open **Details** for measurements, or
+**Storage** for a local session. A remote warning names the executor and does
+not link to local cleanup.
+
+Select **Dismiss** (the × button) to hide the Storage row for this task until
+the browser tab session ends. The dismissal survives reloads and task switching.
+Later storage observations do not show the row again in that tab session.
+Dismissal does not stop monitoring, clear a storage problem, or remove session
+recovery controls.
+
+Capacity and delivery pressure keep separate observation times. A fresh disk
+measurement does not make an old delivery failure current. If no delivery
+status arrives for 90 seconds, the headline changes to **Last reported** and
+**Details** shows the pressure and capacity observation times separately. A
+healthy delivery status clears the blocked-output headline without another
+prompt. A disk warning can remain after that headline clears. An older backend
+that does not report pressure freshness continues to show **Last reported**
+instead of treating capacity time as pressure time.
+
+Delivery pressure shows the cause when the runtime reports one. **Details**
+gives guidance for that cause. If the cause is unknown, the row says **Delivery
+is blocked**. Open **Details** for guidance to inspect runtime logs or use
+session recovery. The pressure headline shows disk usage only for a low-space
+guard. When the delivery cause is not a low-space guard, storage health is in
+the warning state, and a usage value is available, **Details** labels that
+usage as a separate high-usage sample. It can appear below 90%, such as at 88%,
+while the warning remains active. Its free and total values come from the
+capacity sample, not the failed write.
+
+A session that stops because storage is full shows **Session interrupted by low
+disk space**. Free space on the executor filesystem, then use **Resume
+session**. Do not delete delivery data or start a fresh conversation to fix
+physical capacity. A journal limit, delivery limit, or oversized output uses its
+own cause and guidance, and technical details stay collapsed.
+
+After a cancelled turn settles, Kandev can also correct a stale running
+indication from the saved terminal record. The conversation, the interruption
+history, and the saved terminal identity remain unchanged. The correction does
+not resend the cancelled instruction or start a replacement turn. An
+independent recovery block, a live successor prompt, or a foreground tool keeps
+the session state unchanged until that work settles.
+
+These controls do not clean up storage automatically. Cleanup policy remains in
+**Settings > System > Storage**.
 
 ### Send while a session resumes
 
@@ -134,6 +472,22 @@ Each conversation scrolls independently, and the deck scrolls sideways when
 needed. Short windows temporarily show Columns with an explanation in Display; Grid
 returns when there is enough height, without changing the saved choice.
 
+### Keep chosen tasks in a fixed order
+
+1. In **View settings**, set **Task scope** to **Selected tasks**.
+2. Under **Sort**, choose **Selection order**.
+3. Open **Choose tasks** and select the tasks in the order you want the
+   columns. Each selected task shows its position.
+4. Select **Save**.
+
+The deck keeps that order after a reload and while the agents work. A selected
+task that only becomes active while the page is open joins at the end; reload or
+select **Reapply sort** to move it into its selected position. To move a task to
+the end, clear it and select it again. **Select all** adds the visible
+tasks in list order. Use the direction button to reverse the order. Selection
+order is available only for selected tasks; switching the scope to **All
+eligible tasks** changes the sort to **Attention**.
+
 With auto-hide enabled on a mouse or trackpad, the whole composer and its
 controls hide when idle. Only the existing CI popover remains, when available.
 Hover over a chat or focus its tile with the keyboard to reveal the composer.
@@ -171,13 +525,14 @@ Select **Open task** in a tile when you need the complete task workbench. To lin
 To manage the task without leaving Threads, select **Task actions** (the three
 dots beside **Open task**). On desktop, you can also right-click the task
 header; conversation text and editors keep their normal context menus.
-The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+The menu offers **Priority**, **Move to**, **Change workflow...**, supported
 **Link** choices, **Archive**, and **Delete**, according to availability.
 
-On a phone, the choices open in an inset bottom sheet. Choose a workflow and
-then a step in the same sheet; **Back** returns to the previous choices.
-Actions apply to the task whose menu you opened, even if its selected session
-changes. Canceling a confirmation leaves the task unchanged. See
+Choose **Change workflow...** to select a workflow and destination step, review
+the entry preview, and optionally map fixed workflow profiles for this task.
+On a phone, the form uses a full-height sheet with a scrollable body. Actions
+apply to the task whose menu you opened, even if its selected session changes.
+Canceling a form or confirmation leaves the task unchanged. See
 [archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
 for confirmation preferences and cleanup consequences.
 
@@ -213,7 +568,7 @@ Without an explicit session ID the message goes to the primary session, and fall
 
 The default pending-message limit is 10 per session. An admin can change it live under **Settings > Preferences > Task Behavior > Runtime**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. An eligible direct automatic fold may still succeed at or above capacity because it does not add a row; other admissions are rejected, and staged attachments are rejected before any fold or claim.
 
-The same card enables **Automatically merge consecutive messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an explicit override for that session's lifetime. Compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate when capacity permits. The earlier entry's ID survives, and only admissions after the effective setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
+The same card enables **Automatically merge queued messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an override for that session's lifetime. Compatible adjacent messages from the same strict source fold into the earlier pending entry; agent messages also try their sender task's latest queued entry across ordinary intervening rows. Incompatible messages remain separate when capacity permits. Turning session Auto-merge from OFF to ON immediately compacts pending rows, while global changes affect later messages only. The target's ID survives. Automatic folding remains independent from manual **Enable queued message merging**. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -224,6 +579,14 @@ Messages show peer attribution, and Kandev gives the receiving agent hidden repl
 ## Use the workbench
 
 Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets. On a phone, the hamburger opens the same app menu from Home, listings, and the workbench. Tap the task title and chevron to switch tasks; the picker opens as an inset bottom card. Tap the **Kanban**, **Threads**, or **List** title dropdown for view options, search, filters, and display settings. The app menu uses **Home** for all listing modes, with **Quick Chat** and **Quick terminal** directly below it. Its collapsible **Tasks** section contains saved views, filters, and task actions; the adjacent **+** creates a task even when the section is collapsed. **Automations** and **Integrations** start collapsed; expand their headings to browse automations or connected providers. Integrations includes settings even before a provider is connected. **Utilities** follows these sections, with Settings before Stats. The current-session control shows the active agent's icon and name.
+
+In the main **Plan** panel, select **Download** to save the current draft as
+`plan.md`, including edits that have not yet been saved. Download is disabled
+when the draft is empty.
+
+In **Files**, right-click a file or folder and select **Copy path**. On a phone, use the row's visible actions menu. Filename search results offer the same action. The copied path is the node's workspace-relative path, including its repository prefix in a multi-repository task. Copy path is unavailable for a multiple selection.
+
+In multi-select view filters, selected options appear first when search is empty. Workflow-step options keep their workflow headings. Typing a search filters and ranks the matching options as usual.
 
 The phone menu groups plugin controls in one **Plugins** section. When both workspace and task controls are available, **Workspace** and **Task** labels distinguish them. Optional **System metrics** appear after navigation, before Utilities, when the app status bar is disabled.
 
@@ -241,7 +604,28 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
+Content search retries briefly while repositories become available. If polling
+finishes successfully with no collected matches, it shows **No content matches found.**
+If the final attempt fails and no matches were collected, it shows a retryable
+failure instead. Matches already found remain available during retries.
+
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+In **Chat Input**, enable **Escape pauses the agent** to pause a running agent
+by pressing Escape while the chat input has focus. This option is off by default.
+Use **Search shortcuts** to filter core and integration actions by name. Clear
+the search to restore the full list; unsaved shortcut changes remain in the draft.
+
+In the **Integrations** group, click **Unbound** beside an integration, press a
+key combination, then select **Save changes**. The shortcut opens its Kandev
+dashboard from any app page; Sentry opens its connection settings. Active
+plugin links in the Integrations navigation group also appear here. These
+personal shortcuts start unassigned and follow your user settings across devices.
+Use the row's **Reset** action and save to remove a binding. Conflict indicators
+identify combinations shared with other actions; existing Kandev shortcuts take
+precedence. On a phone, recording a combination requires an attached keyboard.
+Tab and Shift+Tab remain available for moving keyboard focus, including while
+recording an integration shortcut. Ctrl/Cmd+Shift+P remains reserved for the
+command panel.
 
 ![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
 
@@ -256,18 +640,61 @@ and reset desktop tasks and scales them to the available workbench.
 
 Each desktop split's **+** menu lists a linked review only while that exact review panel is missing from the live layout. Select a missing review there to open it in the split whose **+** you used. To move an open review to another split, drag its Dockview tab. Use **Layouts** only to change the default placement for new or reset task layouts.
 
+**Plugin panels in a layout.** **Add panel** in the Layouts editor also lists every task panel from your installed and enabled [plugins](plugins.md), such as Prompt History, by its plugin-provided name. Select a split first to add the panel there; otherwise Kandev uses the active split. A panel that is already in the layout is not listed again, and **Add panel** stays available when plugin panels are the only ones left to add.
+
+- **Preview:** the editor shows a labelled placeholder for a plugin panel and never runs the plugin, so you can arrange it without opening a task.
+- **Save and apply:** a built-in override or custom profile saves the panel's placement, tab order, selected tab, nested splits, and proportions. Fresh tasks and **Reset Layout** open the real plugin panel in that place when the plugin is available.
+- **Availability:** if the plugin is disabled, uninstalled, or still loading, the profile stays editable and keeps the saved placement with its saved title. Its row is absent from **Add panel** while unregistered. Already-open task panels are retained while registration is loading or has failed; definitive removal closes them without automatically reopening them later. Re-enable the plugin and reselect the profile or **Reset Layout** to restore the placement.
+
+Existing task-specific layouts keep their saved panels until you reselect a profile or use **Reset Layout**. Phone settings edit the same desktop profiles; choose a row with a separate tap after opening **Add panel**.
+
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
+
+When an agent creates a linked Git worktree inside the task workspace, Kandev attaches it as a repository root within about 30 seconds, or immediately when the agent reports it with `add_branch_to_task_kandev` and `worktree_path`. Each root gets its own Changes group and Files folder with the existing stage, commit, push, and pull-request actions. Right-click a root group or folder, or long-press it on touch layouts, to open the root menu: open in the editor, open a terminal at that root, jump between Files and Changes, copy the full path, relative path, or branch, push, create or open a pull request, and remove the root from the task. Remove from task is available for every non-primary root. It keeps the folder, branch, and pull requests, and passive detection does not add the same path again until the agent reports it.
 
 When the repository defines a dev script, the desktop header shows a dev server control. Starting it runs the script in the task workspace, opens the browser preview, and opens a read-only **Dev Server** panel with the script's output. While the script runs, the same control becomes **Stop dev server preview** and terminates the process and its children. Kandev also stops a running dev script when its task is archived or deleted, so a preview cannot outlive the task that started it. A script that detaches itself from Kandev, for example by daemonizing or calling `setsid`, escapes that cleanup and must be stopped by hand.
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
+Large generic tool arguments or results can be shortened in Kandev history.
+Their JSON includes `truncated: true` and a bounded `preview`; the agent still
+receives its original tool result and continues running. Kandev does not retain
+the omitted data for download.
+
+For foreground ACP commands, consecutive output-only updates are grouped into
+periodic snapshots, normally no more frequently than once every 250 ms while
+delivery is available. Ordered boundaries can flush sooner.
+The first output and final result remain immediate. With delivery protocol v2,
+Kandev saves incremental changes and bounded checkpoints instead of repeatedly
+saving the accumulated tail. This also bounds repeated output writes for slow,
+hours-long commands after the retained tail fills. Each supported output field
+keeps up to 256 KiB of UTF-8 text; truncation and authoritative final results keep
+their existing meaning. Command state changes, conversation text and committed
+replay records keep their normal ordering.
+
+An already-running v1 runtime remains supported and continues saving full
+snapshots until it is safely replaced through normal session handling. Its
+storage cost does not gain the v2 bound merely because the backend was upgraded.
+See [incremental shell delivery](operations.md#incremental-shell-delivery) for
+upgrade and recovery limits.
+
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
 tokens; it focuses on the active session's context window. The hover also shows
-a session compaction count inferred from observed drops in used tokens. ACP does
-not report compaction events, so missing samples or provider resets can make the
-count approximate. For account-wide
+a session compaction count inferred from drops in used tokens. Copilot ACP
+sessions, which can mix parent and subagent usage, are excluded from that
+inference. On a supported Copilot runtime, new increments instead use successful
+parent compaction events with an explicit applied outcome. Child and subagent
+events do not add to the parent total. Older runtimes and retained agentctl
+processes without this collection show **Unavailable** and keep their previous
+totals. A zero count on an unavailable runtime does not prove that no compaction
+occurred. If evidence was omitted or lost, the row shows **Partial** for the rest
+of the session. Later events do not repair the missing history. Historical
+estimated increments remain in the total, and Kandev does not relabel them as
+confirmed native events or backfill old compactions. Missing samples or provider
+resets can make eligible inferred counts approximate. Existing sessions keep
+their previously inferred totals because Kandev cannot attribute old increments.
+For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global
@@ -316,6 +743,14 @@ and leaves the session's auto-scroll preference unchanged. Scroll up to read
 history without being pulled back by incoming content. Rich-output chart
 animations have their own Appearance setting.
 
+The device preference also makes Kandev's grid, rotating, and pulsing status
+indicators static. Their labels and status updates remain visible. Changes to
+the preference apply while the page is open; no reload is needed.
+
+Select **Jump to latest** above the composer to return to the newest message,
+including agent replies. The action appears only when newer content is below
+the transcript. It does not change the session's auto-scroll preference.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
@@ -334,13 +769,27 @@ Changes are grouped by repository and then by state:
 - **Staged** changes selected for the next commit;
 - **Commits** on the task branch.
 
+Focus a Changes row control. Press Arrow Up or Arrow Down to move between rows.
+Press Home to move to the first row. Press End to move to the last row.
+On an inline commit file row, press Enter or Space to open its diff.
+
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
+
+Kandev lists changed files before it finishes loading their diffs. Select a listed file to open its diff while it loads; the panel fills in the details automatically, without another file edit. If the diff cannot be loaded, Kandev shows **Diff is unavailable**.
+
+While the first status check runs, the panel shows **Checking changed files...** and waits before showing an empty state. If status cannot be refreshed, select **Retry**; when earlier status exists, Kandev keeps those rows and shows **Refresh failed. Showing last observed changes.** The clean empty state appears only after a complete status check finds no changed files; pull-request changes and commits remain available when workspace status fails.
 
 On phones and touch devices, working-tree rows give filenames the main space.
 Tap a filename to open its diff, or tap the row's **Show more actions** menu to
 stage or unstage, edit, or discard that file. The menu shows the full path, and
 discarding still requires confirmation. In list view, the folder appears below
 the filename; long filenames wrap.
+
+In **Commits**, each row starts collapsed. Select a row to inspect its files
+inline; the saved flat or tree Changes layout applies to this list. Select
+the icon labeled **Open commit** to open the historical commit detail. Its flat file index can
+be collapsed independently of the file sections, and selecting an index entry
+opens that file's diff. Use **Copy identifier** beside the short identifier in the commit detail to copy the full identifier. These controls also work on phones.
 
 Changes-panel Git operations use Kandev's control path, not the agent's shell. They can work when a restricted agent mode blocks shell writes to Git metadata. If the error says that `.git/index.lock` already exists or is held, stop other Git operations and inspect the lock before retrying. Remove a stale lock only after you confirm that no Git process owns it. The Changes panel uses the same worktree, so it does not bypass an active lock. If the agent cannot create `.git/index.lock` because of its permission mode, use the Changes panel. Read [Git operations](git-operations.md#prerequisites-and-trust-boundary) before you change the agent mode.
 
@@ -355,9 +804,9 @@ available.
 
 ### Open a file in its external repository
 
-When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
+When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub** or **Open file in GitLab**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
 
-The link uses the published source branch from a linked pull or merge request for that repository when available; otherwise it uses the task repository's base branch. Added or untracked files do not show the action until they exist on a published source branch. Deleted files open their base-branch version, while renamed files open the new path on a published source branch or the previous path on the base branch.
+The link uses the published source branch from a linked pull or merge request for that repository when available. For a merged GitHub pull request, Kandev uses its saved head commit so the link survives source-branch deletion and opens the reviewed task snapshot. Without a saved revision, the link falls back to the task repository's base branch. Added or untracked files require a published branch or saved head commit. Deleted files open their base-branch version, while renamed files open the new path at the published revision or the previous path on the base branch.
 
 Kandev hides the action instead of guessing when a repository is local-only, unsupported, incompletely configured, or ambiguous. If a colleague cannot open the resulting page, check their permissions on the external repository; opening a link does not change provider access.
 
@@ -369,7 +818,11 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
-When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Right-click the top-bar PR control on desktop to open **Edit** and remove a selected association. Each PR tab also has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+
+For GitHub pull requests, select **Open PR** in the status header to open the selected pull request on GitHub. The header stays visible while check results load or refresh. Scroll the details below it to reach reviews, automation, and merge controls. The phone status drawer keeps the same action visible above its scrolling details.
+
+Task rows and Kanban cards also let you remove an association. Open the menu, select **Edit**, then select `Remove owner/repo #number from task`. On a phone, open row actions or the card dots, then make the same selections. This action removes only that association. It does not change the GitHub pull request, its branch, or commits.
 
 An automatic-merge error shows **Retry** in the selected PR tab on desktop and mobile. This action requests one new evaluation for that pull request. Kandev applies all current readiness rules before it sends another merge request. Other automation and state-loading errors show **Refresh**. Refresh loads the current state and does not authorize a merge.
 
@@ -390,11 +843,17 @@ During review you can:
 - discard a file or revert a supported diff block after confirmation;
 - attach a pending comment to a changed line.
 
-Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
+Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Clear a reviewed checkbox to leave that file unreviewed at your current reading position. Scrolling back to the file and then past it again marks it reviewed again. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
 
 **Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
 
-Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent. If the agent is busy, normal session queuing applies.
+
+While delivery is pending, **Fix comments** is disabled and your notes remain available. After acknowledgement, Kandev removes only unchanged submitted notes and closes Review if no pending review notes remain. Notes you edit or add while waiting stay available for your next send.
+
+If sending fails or the connection is unavailable, Kandev shows an error and preserves your notes so you can retry. A connection error or timeout can leave delivery uncertain; Kandev does not resend automatically. Inspect the conversation before resending to see whether your feedback already arrived.
+
+You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 
@@ -408,13 +867,32 @@ Select **Walkthrough** from Changes or Review. Kandev sends the built-in `change
   caption="A guided walkthrough moves from an explanation to the exact file and lines it describes."
 />
 
+The walkthrough shows when the agent last published it, using your selected language and local time. Hover over the timestamp to see its timezone. Publishing a replacement updates this timestamp.
+
 When the agent publishes the walkthrough:
 
 1. Open the fixed walkthrough launcher.
-2. Use **Previous** and **Next** to move through its steps.
+2. Use **Previous** and **Next**, or choose a step from the step picker. Each option shows its comment count.
 3. Kandev opens and highlights the referenced file range. On mobile, the explanation appears in a bottom sheet.
-4. Add feedback as pending context, or select **Run** to send that step's explanation, anchor, and your feedback to the active agent.
+4. Select **Comment** to open the composer. **Add** saves pending feedback. **Run** sends the explanation, anchor, and feedback to the active agent.
 5. Close the walkthrough to keep it, or select **Discard** and confirm to delete it.
+
+Pending and submitted comments appear beneath their step. **Submitted** means
+Kandev accepted the comment for delivery or queueing, not that the agent finished
+processing it. Submitted comments stay visible and do not enter pending context again.
+
+Drafts stay with their step when you navigate, select **Cancel**, or close and
+reopen the walkthrough. Reloading can clear unsaved drafts.
+
+Saved comments have these limits:
+
+- They survive reloads in the same browser tab and active session.
+- They are not shared across sessions or devices.
+- A replacement walkthrough does not inherit comments from an older revision.
+
+The walkthrough window fits its content. Long steps scroll within the window,
+while comment actions and navigation stay visible. The step picker uses the
+shared styled dropdown on desktop and a bottom sheet on mobile.
 
 A task stores one walkthrough. Publishing another replaces the current one. Kandev validates that each step has text, a file, and a positive line range, but it does not verify that the file exists or that the explanation matches current code. Anchors can drift as files change, and a PR-only file may be available only in the review diff. A walkthrough is an explanation, not test or review evidence.
 
@@ -422,11 +900,13 @@ A task stores one walkthrough. Publishing another replaces the current one. Kand
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
 
+If a commit fails, the dialog keeps your title, body, repository and Stage all choice for correction and retry. You can dismiss and reopen it for the same repository without losing that draft. A successful commit clears the submitted draft; edits made while it was pending remain available. Drafts are local to the current session and environment and do not survive reloads. In a multi-repository commit, completed Git writes remain completed even if another repository fails.
+
 The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then selects the provider from the repository's `origin`:
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
 - GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, resolves an omitted target from the project default, and attempts to link the resulting MR back to the task repository.
-- Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
+- Plugin-owned providers, such as Bitbucket and Azure DevOps, create pull requests through their plugin after Kandev pushes the branch.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 
 GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. On an open PR, use the reviews list to re-request a reviewer whose review was dismissed. On a phone, open **Review** from the task bottom navigation to reach the same PR detail. GitHub permissions and repository policy remain authoritative; merge is enabled only when required checks, review state, and mergeability are ready.
@@ -483,7 +963,7 @@ For an eligible structured-chat session, right-click its tab and select **Share*
 
 Kandev creates a preview, applies heuristic redaction, and publishes the snapshot as a secret GitHub Gist after you confirm. GitHub authentication with Gist permission is required. The maximum snapshot size is 10 MiB. The returned viewing URL uses `gist.githack.com` to render the Gist through a third-party, Cloudflare-backed CDN and shows an anti-phishing interstitial on first visit. Publishing therefore exposes the snapshot not only to anyone with the unlisted URL but also to that rendering service.
 
-Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, but it cannot recognize every credential or proprietary value. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
+Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, including matching values in the task title and session agent, model, and executor metadata. It cannot recognize every credential or proprietary value. Published snapshots remain frozen; later redaction changes apply only to new previews and publications. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
 
 Use the same dialog to revoke a share. Revocation deletes the Gist and records it as revoked in Kandev.
 
@@ -506,6 +986,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
+- **Delivery outcome is uncertain:** use **Retry connection** on the session card. It reconnects to the accepted work and does not send the prompt again. A Stop request can remain unconfirmed while the original process is unreachable, so wait for Kandev to receive terminal evidence before sending the same work again.
 - **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. Expand the queue chip and check Auto-run: turn it ON for normal FIFO processing, use a row's Send Now for targeted priority, or remove stale work. For a full queue, remove or clear pending rows before retrying; an admin can also review the install-wide limit under **Settings > Preferences > Task Behavior > Runtime**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.
@@ -515,3 +996,15 @@ Before moving a task to done:
 - **Share is unavailable:** wait until the session leaves `CREATED`/`STARTING` and configure GitHub Gist access. CLI-passthrough conversations do not have the structured snapshot used by this feature.
 
 Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), and [Developer tools](developer-tools.md).
+
+## Agent tab close behavior
+
+On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
+
+Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.

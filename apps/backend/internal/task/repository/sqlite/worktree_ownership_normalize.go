@@ -49,6 +49,7 @@ type legacyEnv struct {
 	containerID, containerBootstrapNonceSecretID, containerControlAuthTokenSecretID string
 	sandboxID, taskDirName                                                          string
 	createdAt, updatedAt                                                            time.Time
+	retiredAt                                                                       *time.Time
 }
 
 type legacySession struct {
@@ -64,6 +65,7 @@ type legacyEnvRepo struct {
 	id, envID, repositoryID, branchSlug                                  string
 	worktreeID, worktreePath, worktreeBranch                             string
 	worktreeBranchOwner, worktreeIntegrationRef, worktreeRecoveryHeadSHA string
+	worktreeSourceClonePath, worktreeSourceCommonDir                     string
 	worktreeBranchCompactedAt                                            *time.Time
 	position                                                             int
 	errorMessage, status                                                 string
@@ -95,6 +97,10 @@ func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns, legacyRepoCo
 }
 
 func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) error {
+	retiredAtExpr := "NULL"
+	if columns["retired_at"] {
+		retiredAtExpr = "retired_at"
+	}
 	// Every interpolated expression comes from the fixed deprecated-column allowlist.
 	//nolint:gosec
 	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
@@ -102,26 +108,31 @@ func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) e
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
 			COALESCE(container_id, ''), %s, %s, COALESCE(sandbox_id, ''),
-			COALESCE(task_dir_name, ''), created_at, updated_at
+			COALESCE(task_dir_name, ''), created_at, updated_at, %s
 		FROM task_environments`,
 		legacyEnvColumnExpr(columns, "repository_id"),
 		legacyEnvColumnExpr(columns, "worktree_id"),
 		legacyEnvColumnExpr(columns, "worktree_path"),
 		legacyEnvColumnExpr(columns, "worktree_branch"),
 		legacyEnvColumnExpr(columns, "container_bootstrap_nonce_secret_id"),
-		legacyEnvColumnExpr(columns, "container_control_auth_token_secret_id")))
+		legacyEnvColumnExpr(columns, "container_control_auth_token_secret_id"),
+		retiredAtExpr))
 	if err != nil {
 		return fmt.Errorf("cutover: read legacy environments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		env := &legacyEnv{}
+		var retiredAt sql.NullTime
 		if err := rows.Scan(&env.id, &env.taskID, &env.repositoryID, &env.executorType,
 			&env.executorID, &env.executorProfileID, &env.controlPort, &env.status,
 			&env.worktreeID, &env.worktreePath, &env.worktreeBranch, &env.workspacePath,
 			&env.containerID, &env.containerBootstrapNonceSecretID, &env.containerControlAuthTokenSecretID,
-			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt); err != nil {
+			&env.sandboxID, &env.taskDirName, &env.createdAt, &env.updatedAt, &retiredAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment: %w", err)
+		}
+		if retiredAt.Valid {
+			env.retiredAt = &retiredAt.Time
 		}
 		c.envs[env.id] = env
 		c.taskEnvs[env.taskID] = append(c.taskEnvs[env.taskID], env)
@@ -193,12 +204,14 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
-		COALESCE(worktree_branch, ''), %s, %s, %s, %s, position, COALESCE(error_message, ''),
+		COALESCE(worktree_branch, ''), %s, %s, %s, %s, %s, %s, position, COALESCE(error_message, ''),
 		%s, created_at, updated_at, %s, %s
 		FROM task_environment_repos`,
 		legacyRepoColumnExpr(columns, "worktree_branch_owner", "CAST('unknown' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_integration_ref", "CAST('' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_recovery_head_sha", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_source_clone_path", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_source_common_dir", "CAST('' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_branch_compacted_at", "NULL"),
 		legacyRepoColumnExpr(columns, "status", "CAST('active' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "merged_at", "NULL"),
@@ -213,6 +226,7 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 		if err := rows.Scan(&row.id, &row.envID, &row.repositoryID, &row.branchSlug,
 			&row.worktreeID, &row.worktreePath, &row.worktreeBranch,
 			&row.worktreeBranchOwner, &row.worktreeIntegrationRef, &row.worktreeRecoveryHeadSHA,
+			&row.worktreeSourceClonePath, &row.worktreeSourceCommonDir,
 			&compactedAt, &row.position, &row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment repo: %w", err)
 		}
@@ -294,6 +308,8 @@ type envRepoTarget struct {
 	worktreeBranchOwner       string
 	worktreeIntegrationRef    string
 	worktreeRecoveryHeadSHA   string
+	worktreeSourceClonePath   string
+	worktreeSourceCommonDir   string
 	worktreeBranchCompactedAt *time.Time
 	position                  int
 	errorMessage              string

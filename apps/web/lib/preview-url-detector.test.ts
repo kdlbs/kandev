@@ -12,6 +12,13 @@ vi.mock("@/lib/config", () => ({
 }));
 
 const LOCALHOST_3000_URL = "http://localhost:3000/";
+const BARE_LOCALHOST_3000_URL = "http://localhost:3000";
+const LOCAL_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"];
+const INVALID_PORTS = [65536, 70000, 123456];
+const INVALID_LOCALHOST_CANDIDATES = INVALID_PORTS.flatMap((port) => [
+  `localhost:${port}`,
+  `http://localhost:${port}`,
+]);
 
 describe("detectPreviewUrl - full URL patterns", () => {
   it("detects localhost URL with port", () => {
@@ -55,7 +62,7 @@ describe("detectPreviewUrl - full URL patterns", () => {
 describe("detectPreviewUrl - host:port patterns", () => {
   it("detects localhost:port pattern", () => {
     const result = detectPreviewUrl("Server started on localhost:3000");
-    expect(result).toEqual({ url: "http://localhost:3000", port: 3000, scheme: "http" });
+    expect(result).toEqual({ url: BARE_LOCALHOST_3000_URL, port: 3000, scheme: "http" });
   });
 
   it("detects 127.0.0.1:port pattern", () => {
@@ -108,6 +115,64 @@ describe("detectPreviewUrl - edge cases", () => {
   });
 });
 
+describe("detectPreviewUrl - numeric port validation", () => {
+  it.each(
+    LOCAL_HOSTS.flatMap((host) =>
+      INVALID_PORTS.flatMap((port) => [`${host}:${port}`, `http://${host}:${port}`]),
+    ),
+  )("rejects overflow and overlong numeric port tokens: %s", (candidate) => {
+    expect(detectPreviewUrl(candidate)).toBeNull();
+  });
+
+  it.each(LOCAL_HOSTS)("accepts the upper numeric boundary for %s", (host) => {
+    expect(detectPreviewUrl(`${host}:65535`)).toEqual({
+      url: `http://${host}:65535`,
+      port: 65535,
+      scheme: "http",
+    });
+    expect(detectPreviewUrl(`http://${host}:65535`)).toEqual({
+      url: `http://${host}:65535/`,
+      port: 65535,
+      scheme: "http",
+    });
+  });
+
+  it.each([
+    ["http://localhost:0", "http://localhost:0/", 0],
+    ["localhost:00", "http://localhost:00", 0],
+    ["http://localhost:1", "http://localhost:1/", 1],
+    ["localhost:10", "http://localhost:10", 10],
+    ["localhost:03000", "http://localhost:03000", 3000],
+    ["http://localhost:0065535", "http://localhost:65535/", 65535],
+    ["http://localhost:80", "http://localhost:80", 80],
+    ["https://localhost:443", "https://localhost:443", 443],
+  ])("preserves existing lower-bound and normalization behavior: %s", (input, url, port) => {
+    expect(detectPreviewUrl(input as string)).toMatchObject({ url, port });
+  });
+
+  it.each(["localhost:1", "localhost:0065535", "localhost:000000"])(
+    "does not accept a partial bare token: %s",
+    (candidate) => {
+      expect(detectPreviewUrl(candidate)).toBeNull();
+    },
+  );
+
+  it.each([
+    ["localhost:3000 localhost:70000", BARE_LOCALHOST_3000_URL],
+    ["localhost:70000 localhost:3000 localhost:3001", "http://localhost:3001"],
+    ["localhost:3000 localhost:3001 localhost:70000", "http://localhost:3001"],
+    ["localhost:3001 http://localhost:3000 localhost:70000", LOCALHOST_3000_URL],
+    ["http://localhost:3000 localhost:3001 localhost:70000", LOCALHOST_3000_URL],
+    ["http://localhost:65536 http://localhost:3000 http://localhost:3001", LOCALHOST_3000_URL],
+    ["http://localhost:3000 http://localhost:3001 http://localhost:65536", LOCALHOST_3000_URL],
+    ["http://localhost:70000 localhost:3000 localhost:123456", BARE_LOCALHOST_3000_URL],
+    ["localhost:3000 http://localhost:70000", BARE_LOCALHOST_3000_URL],
+    ["HTTPS localhost:3000 localhost:70000", "https://localhost:3000"],
+  ])("preserves full-first and last-valid-bare preference: %s", (input, expected) => {
+    expect(detectPreviewUrl(input)?.url).toBe(expected);
+  });
+});
+
 describe("detectPreviewUrl - real-world examples", () => {
   it("detects Next.js dev server", () => {
     expect(detectPreviewUrl("  ▲ Local:        http://localhost:3000")?.url).toBe(
@@ -141,7 +206,7 @@ describe("detectPreviewUrl - real-world examples", () => {
 
   it("detects Express server", () => {
     expect(detectPreviewUrl("Server listening on localhost:3000")?.url).toBe(
-      "http://localhost:3000",
+      BARE_LOCALHOST_3000_URL,
     );
   });
 
@@ -153,6 +218,35 @@ describe("detectPreviewUrl - real-world examples", () => {
 });
 
 describe("detectPreviewUrlFromOutput", () => {
+  it.each(INVALID_LOCALHOST_CANDIDATES)(
+    "retains the working proxy after invalid later output: %s",
+    (invalidCandidate) => {
+      const workingUrl = "http://localhost:3000/app?debug=true#route";
+      const detected = detectPreviewUrlFromOutput(
+        `Ready: ${workingUrl}\nRetry: ${invalidCandidate}`,
+      );
+      expect(detected).toBe(workingUrl);
+      expect(rewritePreviewUrlForProxy(detected!, "test-session-123")).toBe(
+        "http://localhost:8080/port-proxy/test-session-123/3000/app?debug=true#route",
+      );
+    },
+  );
+
+  it.each(["localhost:65535", "http://localhost:65535"])(
+    "rewrites an upper-bound output candidate through the real pipeline: %s",
+    (candidate) => {
+      const detected = detectPreviewUrlFromOutput(`Ready: ${candidate}`);
+      expect(detected).not.toBeNull();
+      expect(rewritePreviewUrlForProxy(detected!, "test-session-123")).toBe(
+        "http://localhost:8080/port-proxy/test-session-123/65535/",
+      );
+    },
+  );
+
+  it.each(INVALID_LOCALHOST_CANDIDATES)("returns null for invalid-only output: %s", (candidate) => {
+    expect(detectPreviewUrlFromOutput(`Starting...\nListening: ${candidate}\nReady!`)).toBeNull();
+  });
+
   it("returns null for empty output", () => {
     expect(detectPreviewUrlFromOutput("")).toBeNull();
   });
@@ -224,7 +318,7 @@ Port available
 Starting on localhost:3000
 Ready!
     `;
-    expect(detectPreviewUrlFromOutput(output)).toBe("http://localhost:3000");
+    expect(detectPreviewUrlFromOutput(output)).toBe(BARE_LOCALHOST_3000_URL);
   });
 });
 

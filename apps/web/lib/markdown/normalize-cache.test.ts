@@ -964,11 +964,22 @@ describe("normalizeCached", () => {
     }
   });
 
-  it("evicts oldest entries past the cap (bounded LRU)", () => {
-    for (let i = 0; i < __MAX_CACHE_ENTRIES + 50; i++) {
+  it("evicts the least recently used entry while retaining a refreshed entry at the cap", () => {
+    normalizeCached("refreshed-entry");
+    normalizeCached("oldest-entry");
+    for (let i = 0; i < __MAX_CACHE_ENTRIES - 2; i++) {
       normalizeCached(`unique-content-${i}`);
     }
-    expect(__lruSize()).toBeLessThanOrEqual(__MAX_CACHE_ENTRIES);
+    normalizeCached("refreshed-entry");
+    normalizeCached("overflow-entry");
+
+    expect(__lruSize()).toBe(__MAX_CACHE_ENTRIES);
+    const before = __markdownParseCount();
+    normalizeCached("refreshed-entry");
+    expect(__markdownParseCount()).toBe(before);
+    normalizeCached("oldest-entry");
+    expect(__markdownParseCount()).toBe(before + 1);
+    expect(__lruSize()).toBe(__MAX_CACHE_ENTRIES);
   });
 
   it("keeps a recently-used entry warm despite overflow", () => {

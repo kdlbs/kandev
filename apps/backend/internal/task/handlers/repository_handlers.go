@@ -42,12 +42,14 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces/:id/repository-checkout-capabilities", h.httpRepositoryCheckoutCapabilities)
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
+	api.POST("/workspaces/:id/repositories/remote", h.httpRegisterRemoteRepository)
 	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
 	api.GET("/workspaces/:id/repositories/discovery", h.httpGetDiscoverySnapshot)
 	api.POST("/workspaces/:id/repositories/discovery/refresh", h.httpRefreshDiscovery)
 	api.GET("/repositories/discovery/roots", h.httpListDiscoveryRoots)
 	api.POST("/repositories/discovery/roots", h.httpAddDiscoveryRoot)
+	api.POST("/repositories/discovery/roots/confirm-home", h.httpConfirmHomeDiscovery)
 	api.POST("/repositories/discovery/roots/reconnect", h.httpReconnectDiscoveryRoot)
 	api.DELETE("/repositories/discovery/roots", h.httpRemoveDiscoveryRoot)
 	// Unified branch listing — accepts either ?repository_id= for an imported
@@ -65,6 +67,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.GET("/repositories/:id/active-session-count", h.httpGetRepositoryActiveSessionCount)
+	api.POST("/repositories/:id/remote-url/validate", h.httpValidateRepositoryRemoteURL)
 	api.PATCH("/repositories/:id", h.httpUpdateRepository)
 	api.DELETE("/repositories/:id", h.httpDeleteRepository)
 	api.GET("/repositories/:id/scripts", h.httpListRepositoryScripts)
@@ -79,6 +82,7 @@ func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionRepositoryCreate, h.wsCreateRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryGet, h.wsGetRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryUpdate, h.wsUpdateRepository)
+	dispatcher.RegisterFunc(ws.ActionRepositoryValidateRemoteURL, h.wsValidateRepositoryRemoteURL)
 	dispatcher.RegisterFunc(ws.ActionRepositoryDelete, h.wsDeleteRepository)
 	dispatcher.RegisterFunc(ws.ActionRepositoryCloneSourceInspect, h.wsRepositoryCloneSource)
 	dispatcher.RegisterFunc(ws.ActionRepositoryScriptList, h.wsListRepositoryScripts)
@@ -198,6 +202,8 @@ func (h *RepositoryHandlers) writeDiscoveryError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrDesktopDiscoveryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrHomeDiscoveryConfirmationStale):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		h.logger.Error("failed to load repository discovery", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load repository discovery"})
@@ -243,6 +249,20 @@ func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
 	c.JSON(http.StatusCreated, dto.FromDesktopDiscoveryRoot(*root))
 }
 
+func (h *RepositoryHandlers) httpConfirmHomeDiscovery(c *gin.Context) {
+	root, err := h.service.ConfirmHomeDesktopDiscovery(c.Request.Context())
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop Home discovery root was not returned after confirmation")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm Home discovery"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromDesktopDiscoveryRoot(*root))
+}
+
 func (h *RepositoryHandlers) httpReconnectDiscoveryRoot(c *gin.Context) {
 	var body discoveryRootRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -274,10 +294,12 @@ func (h *RepositoryHandlers) httpRemoveDiscoveryRoot(c *gin.Context) {
 // to $HOME). The picker deliberately allows browsing any directory the
 // kandev process has read access to — kandev runs locally on the user's
 // own machine, and the repo-less starting-folder flow legitimately wants
-// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded unless
+// ?include_hidden is exactly "true"; any other value keeps the current
+// contract, so a display-only setting can never turn into a request error.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
-	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	result, err := h.service.ListDirectory(c.Request.Context(), path, includeHiddenRequested(c))
 	if err != nil {
 		// Log the raw OS error for debugging but return a generic message —
 		// otherwise we leak host paths and access patterns to the client (e.g.
@@ -292,6 +314,14 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
+}
+
+// includeHiddenRequested reports whether the caller asked to reveal hidden
+// (".") directories. Only the exact value "true" activates it: a total
+// comparison cannot fail, so an absent or mis-spelled value falls back to the
+// default listing instead of rejecting a display-only request.
+func includeHiddenRequested(c *gin.Context) bool {
+	return c.Query("include_hidden") == "true"
 }
 
 func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {
@@ -709,6 +739,7 @@ type httpUpdateRepositoryRequest struct {
 	ProviderScope          *string                                 `json:"provider_scope"`
 	ProviderOwner          *string                                 `json:"provider_owner"`
 	ProviderName           *string                                 `json:"provider_name"`
+	RemoteURL              *string                                 `json:"remote_url"`
 	DefaultBranch          *string                                 `json:"default_branch"`
 	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template"`
@@ -739,6 +770,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		ProviderScope:          body.ProviderScope,
 		ProviderOwner:          body.ProviderOwner,
 		ProviderName:           body.ProviderName,
+		RemoteURL:              body.RemoteURL,
 		DefaultBranch:          body.DefaultBranch,
 		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
@@ -750,11 +782,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		SecretBindings:         body.SecretBindings,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidRepositorySettings) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repository settings"})
-			return
-		}
-		handleNotFound(c, h.logger, err, "repository not found")
+		h.writeRepositoryMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.FromRepository(repository))
@@ -939,6 +967,7 @@ type wsUpdateRepositoryRequest struct {
 	ProviderScope          *string                                 `json:"provider_scope,omitempty"`
 	ProviderOwner          *string                                 `json:"provider_owner,omitempty"`
 	ProviderName           *string                                 `json:"provider_name,omitempty"`
+	RemoteURL              *string                                 `json:"remote_url,omitempty"`
 	DefaultBranch          *string                                 `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template,omitempty"`
@@ -970,6 +999,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		ProviderScope:          req.ProviderScope,
 		ProviderOwner:          req.ProviderOwner,
 		ProviderName:           req.ProviderName,
+		RemoteURL:              req.RemoteURL,
 		DefaultBranch:          req.DefaultBranch,
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -980,11 +1010,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		SecretBindings:         req.SecretBindings,
 	})
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidRepositorySettings) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid repository settings", nil)
-		}
-		h.logger.Error("failed to update repository", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update repository", nil)
+		return h.repositoryMutationWSError(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromRepository(repository))
 }

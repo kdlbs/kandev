@@ -80,6 +80,20 @@ test.describe("executor-authoritative model selection", () => {
   test("keeps a host-mismatched profile selectable", async ({ testPage, apiClient }) => {
     const profile = await createMismatchedProfile(apiClient, "Host mismatch selectable profile");
     try {
+      const { agents } = await apiClient.listAgents();
+      const agent = agents.find((item) => item.name === "mock-agent");
+      if (!agent) throw new Error("The E2E fixture must provide a mock agent");
+      await expect
+        .poll(async () => {
+          const { agents: available } = await apiClient.listAvailableAgents();
+          return available.find((item) => item.name === agent.name)?.model_config.status;
+        })
+        .toBe("ok");
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const modelSelector = testPage.getByRole("button", { name: "Profile start model settings" });
+      await expect(modelSelector).toBeVisible({ timeout: 15_000 });
+      await expect(modelSelector).toContainText(UNADVERTISED_MODEL);
+
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
       await testPage.reload({ waitUntil: "networkidle" });
@@ -106,6 +120,11 @@ test.describe("executor-authoritative model selection", () => {
           .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
           .filter({ hasText: warningText }),
       ).toBeVisible();
+      await expect(
+        testPage
+          .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+          .filter({ hasText: warningText }),
+      ).toHaveCSS("opacity", "1");
       expect(
         await testPage
           .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')

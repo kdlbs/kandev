@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -24,8 +25,33 @@ const instanceNotFoundMessage = "instance not found"
 // primary worktree". When empty, the manager rescans its current WorkDir
 // in place.
 type RescanWorkspaceRequest struct {
-	WorkDir              string   `json:"work_dir"`
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkDir                string   `json:"work_dir"`
+	WorkspaceSourceRoots   []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+}
+
+type WorkspaceRecoveryExclusionsRequest struct {
+	Paths []string `json:"paths"`
+}
+
+func (s *Server) handleSetWorkspaceRecoveryExclusions(c *gin.Context) {
+	var req WorkspaceRecoveryExclusionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
+		return
+	}
+	if len(req.Paths) > 4096 {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "too many workspace exclusions"})
+		return
+	}
+	for _, path := range req.Paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == string(filepath.Separator) {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace exclusions must be canonical absolute paths"})
+			return
+		}
+	}
+	s.procMgr.SetWorkspaceFileExclusions(req.Paths)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // handleRescanWorkspace re-runs repo discovery and reconciles trackers.
@@ -48,6 +74,7 @@ func (s *Server) handleRescanWorkspace(c *gin.Context) {
 			return
 		}
 	}
+	s.procMgr.SetWorkspaceExcludedRoots(req.WorkspaceExcludedRoots)
 	if err := s.procMgr.RescanRepositoriesWithSourceRoots(c.Request.Context(), req.WorkDir, req.WorkspaceSourceRoots); err != nil {
 		s.logger.Warn("workspace rescan failed", zap.Error(err), zap.String("work_dir", req.WorkDir))
 		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
@@ -77,6 +104,7 @@ func (s *Server) handleReconcileWorkspace(c *gin.Context) {
 	if req.WorkspaceSourceRoots != nil {
 		s.procMgr.SetWorkspaceSourceRoots(req.WorkspaceSourceRoots)
 	}
+	s.procMgr.SetWorkspaceExcludedRoots(req.WorkspaceExcludedRoots)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -88,6 +116,7 @@ func (s *Server) handleRebindWorkspace(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{errKey: "work_dir is required"})
 		return
 	}
+	s.procMgr.SetWorkspaceExcludedRoots(req.WorkspaceExcludedRoots)
 	if err := s.procMgr.RebindWorkspaceWithSourceRoots(c.Request.Context(), req.WorkDir, req.WorkspaceSourceRoots); err != nil {
 		s.logger.Warn("workspace rebind failed", zap.Error(err), zap.String("work_dir", req.WorkDir))
 		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})

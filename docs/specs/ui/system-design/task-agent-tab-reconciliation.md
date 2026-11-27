@@ -62,6 +62,39 @@ handler remains unchanged and continues to own double-clicks that originate
 outside the editor. This boundary also protects the shared task terminal rename
 editor without changing terminal naming behavior.
 
+The shared `SessionContextMenuItems` records a pending Rename selection and
+starts the inline editor after the menu's close-autofocus boundary. It prevents
+focus restoration for that handoff and queues the rename callback after the
+menu scope closes. This keeps restored menu focus from blurring and immediately
+committing the new editor. Ordinary menu dismissal retains normal focus return.
+The same boundary serves task Agent tabs and kanban preview session tabs;
+terminal tabs retain their equivalent existing handoff.
+
+## Session rename length boundary
+
+The backend `orchestrator.Service.RenameSession` remains authoritative: trim
+whitespace and cap names at 120 Go runes. Session-tab editing counts Unicode
+code points, preserving non-BMP characters without redefining the limit as
+user-perceived grapheme clusters. `use-session-rename.ts` owns a session-only
+code-point limiter. The committer trims, applies that limiter, then compares
+with the current name before calling the real session API and updating the
+existing store entry with the same value.
+
+Both `SessionTab` and `PreviewSessionTabs` pass the limiter to
+`TabRenameInput` instead of a DOM `maxLength`, which counts UTF-16 code units.
+The shared input accepts an optional value limiter on change; its ordinary
+`maxLength` and unbounded defaults remain intact for terminal/custom consumers.
+Loaded legal names remain intact at edit entry. Length limiting does not trim
+the editing draft. At the limit, inserted text is constrained without removing
+the existing prefix or suffix outside the edit. Existing focus classification, Enter/blur completion,
+Escape cancellation, and error handling remain as defined in
+[inline edit focus continuity](inline-edit-focus-continuity.md).
+
+Phone and coarse-pointer tablet task layouts use `MobileSessionsPicker`, not
+these desktop rename controls. Its current session actions do not expose
+rename. They continue to display canonical session names and select sessions;
+this repair adds no mobile rename entry point or new composition.
+
 ## Data and contracts
 
 No new API, persisted value, or store field is required. The existing
@@ -138,7 +171,20 @@ and verifies that native text selection remains active while the Dockview group
 stays unmaximized. Mobile coverage is unchanged because phone and tablet do not
 mount the affected Dockview tab surface.
 
+A component regression uses the real menu and rename editor, drains the menu
+focus-restoration timers, and requires focused rename without a premature blur
+commit. A separate dismissal case requires ordinary focus return without rename.
+The preview session-tab component suite covers the shared menu consumer.
+
 A restoration unit test covers a valid secondary Agent selection, invalid
 saved selections, mixed stale and valid selections, and delayed environment
 layout restoration. A desktop Playwright regression selects the secondary
 Agent tab, reloads the task, and verifies that the same session remains active.
+
+The Unicode rename regression exercises the real input, committer, API wrapper,
+and store with only the transport mocked: unchanged legal Unicode names,
+edited overlong names, trimming/reset, blur/Enter, cancel and failed writes.
+Desktop browser coverage uses the shipped SessionTab context menu and input,
+checks persisted names after reload, and observes rename payloads. Phone
+coverage verifies canonical Unicode labels and native session selection in the
+existing picker, without claiming a mobile rename flow.

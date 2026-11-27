@@ -246,7 +246,7 @@ func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*mode
 		if attachment.OwnerID != ownerID {
 			return nil, nil, ErrAttachmentForbidden
 		}
-	case models.AttachmentStateClaimed:
+	case models.AttachmentStateClaimed, models.AttachmentStatePlanComment:
 		if attachment.TaskID == "" || s.authorizeTask == nil {
 			return nil, nil, ErrAttachmentForbidden
 		}
@@ -378,6 +378,31 @@ func (s *AttachmentService) OpenClaimed(ctx context.Context, id, taskID, session
 	return file, attachment.Name, attachment.MimeType, attachment.SizeBytes, nil
 }
 
+// ResolveClaimed returns the canonical registry record for one task-owned
+// attachment. A session-scoped claim may be unbound until the task's first
+// session is created, but a claim for another task or session is rejected.
+func (s *AttachmentService) ResolveClaimed(
+	ctx context.Context,
+	id, taskID, sessionID string,
+) (*models.TaskMessageAttachment, error) {
+	attachment, err := s.repo.GetMessageAttachment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if attachment == nil || attachment.State != models.AttachmentStateClaimed ||
+		attachment.TaskID != taskID || (attachment.SessionID != "" && attachment.SessionID != sessionID) {
+		return nil, ErrAttachmentForbidden
+	}
+	if strings.TrimSpace(attachment.WorkspaceID) == "" ||
+		ValidateAttachmentMetadata(attachment.Name, attachment.MimeType, attachment.Kind, attachment.DeliveryMode) != nil ||
+		attachment.SizeBytes < 0 || attachment.SizeBytes > MaxAttachmentBytes ||
+		attachment.StorageKey == "" || filepath.Base(attachment.StorageKey) != attachment.StorageKey {
+		return nil, ErrAttachmentInvalid
+	}
+	canonical := *attachment
+	return &canonical, nil
+}
+
 func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -388,10 +413,22 @@ func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) erro
 	if attachment.State != models.AttachmentStateStaged {
 		return ErrAttachmentClaimConflict
 	}
+	if err := s.repo.ExpireStagedMessageAttachment(ctx, id, ownerID); err != nil {
+		return err
+	}
 	if err := s.removeBytes(attachment); err != nil {
 		return err
 	}
 	return s.repo.DeleteMessageAttachment(ctx, id, ownerID)
+}
+
+// withClaimAdmission serializes a task-insert attachment claim with staged-row
+// deletion and expiry, the same fence Claim and Delete use. Callers must not
+// hold it across event publication or other external work.
+func (s *AttachmentService) withClaimAdmission(fn func() error) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return fn()
 }
 
 func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, taskID, sessionID string, ids []string) error {
@@ -437,6 +474,27 @@ func (s *AttachmentService) RestoreQueued(
 		return errors.New("queued attachment admission is unavailable")
 	}
 	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
+}
+
+// RestoreLaunchClaim returns unreferenced launch attachments to staging after
+// synchronous launch admission fails, so an explicit retry can reuse the files.
+func (s *AttachmentService) RestoreLaunchClaim(
+	ctx context.Context,
+	ownerID, taskID, sessionID string,
+	ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	repo, ok := s.repo.(repository.LaunchAttachmentRollbackRepository)
+	if !ok {
+		return errors.New("launch attachment rollback is unavailable")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return repo.RestoreLaunchMessageAttachments(
+		ctx, ids, ownerID, taskID, sessionID, time.Now().UTC().Add(AttachmentStagedTTL),
+	)
 }
 
 // Release removes claimed descriptors that are no longer referenced by a

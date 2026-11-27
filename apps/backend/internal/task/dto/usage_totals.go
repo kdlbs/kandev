@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -29,6 +30,7 @@ type TaskUsageTotalsDTO struct {
 	TokensThought        int64                `json:"tokens_thought"`
 	TokensTotal          int64                `json:"tokens_total"`
 	CostSubcents         int64                `json:"cost_subcents"`
+	CostSubcentsDecimal  string               `json:"cost_subcents_decimal"`
 	EventCount           int64                `json:"event_count"`
 	EstimatedEventCount  int64                `json:"estimated_event_count"`
 	UnpricedEventCount   int64                `json:"unpriced_event_count"`
@@ -50,6 +52,7 @@ func ToTaskUsageTotalsDTO(scope TaskUsageTotalsScope, scopeID string, totals *mo
 		TokensThought:        totals.TokensThought,
 		TokensTotal:          totals.TokensTotal,
 		CostSubcents:         totals.CostSubcents,
+		CostSubcentsDecimal:  strconv.FormatInt(totals.CostSubcents, 10),
 		EventCount:           totals.EventCount,
 		EstimatedEventCount:  totals.EstimatedEventCount,
 		UnpricedEventCount:   totals.UnpricedEventCount,

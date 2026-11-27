@@ -3,6 +3,8 @@ import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { setSettingsMenuMode } from "../../helpers/settings-menu";
 
+test.use({ trace: "retain-on-failure" });
+
 const INITIAL_IMAGE_TAG = "kandev/e2e:routing-initial";
 const EDITED_IMAGE_TAG = "kandev/e2e:routing-edited";
 const DRAFT_IMAGE_TAG = "kandev/e2e:routing-draft";
@@ -67,7 +69,9 @@ test.describe("executor profile routing", () => {
       );
       await floatingSave.getByRole("button", { name: "Save changes" }).click();
       await saveResponse;
-      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible();
       await expect
         .poll(
           async () =>
@@ -80,19 +84,27 @@ test.describe("executor profile routing", () => {
 
       await setSettingsMenuMode(testPage, "accordion");
       const settingsTree = testPage.getByTestId("app-sidebar-settings-mode");
-      const expandExecutors = settingsTree.getByRole("button", { name: /Expand Executors/i });
-      if (await expandExecutors.count()) await expandExecutors.click();
-      const expandExecutor = settingsTree.getByRole("button", {
-        name: `Expand ${executor.name}`,
+      const executorsToggle = settingsTree.getByRole("button", {
+        name: /^(Expand|Collapse) Executors$/,
       });
-      if (await expandExecutor.count()) await expandExecutor.click();
+      await expect(executorsToggle).toBeVisible();
+      if ((await executorsToggle.getAttribute("aria-expanded")) === "false") {
+        await executorsToggle.click();
+      }
+      const executorToggle = settingsTree.getByRole("button", {
+        name: new RegExp(`^(Expand|Collapse) ${executor.name}$`),
+      });
+      await expect(executorToggle).toBeVisible();
+      if ((await executorToggle.getAttribute("aria-expanded")) === "false") {
+        await executorToggle.click();
+      }
       const profileLink = settingsTree.locator(`a[href="${canonicalProfilePath(profile.id)}"]`);
       await expect(profileLink).toBeVisible({ timeout: 10_000 });
       await profileLink.click();
       await expectDockerProfileEditor(testPage, profile.id);
 
       await testPage.goto(`/settings/executor/${encodeURIComponent(executor.id)}`);
-      await testPage.getByText(profile.name, { exact: true }).click();
+      await profileCard.click();
       await expectDockerProfileEditor(testPage, profile.id);
 
       const legacyBookmark =

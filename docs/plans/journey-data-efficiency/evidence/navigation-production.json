@@ -1,0 +1,1597 @@
+[
+  {
+    "label": "select sibling tab",
+    "url": "http://localhost:48429/tasks/journey-task-0001?sessionId=journey-task-0001-session-3",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 358
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 27.799999237060547
+        }
+      ]
+    },
+    "tabs": [
+      {
+        "text": "5\nAgent 4",
+        "active": true
+      },
+      {
+        "text": "1\nAgent 8",
+        "active": false
+      },
+      {
+        "text": "2\nAgent 7",
+        "active": false
+      },
+      {
+        "text": "3\nAgent 6",
+        "active": false
+      },
+      {
+        "text": "4\nAgent 5",
+        "active": false
+      },
+      {
+        "text": "6\nAgent 3",
+        "active": false
+      },
+      {
+        "text": "7\nAgent 2",
+        "active": false
+      },
+      {
+        "text": "8\nAgent 1",
+        "active": false
+      },
+      {
+        "text": "Files",
+        "active": true
+      },
+      {
+        "text": "Changes",
+        "active": false
+      },
+      {
+        "text": "Terminal",
+        "active": true
+      }
+    ]
+  },
+  {
+    "label": "navigate to different task",
+    "url": "http://localhost:48429/t/journey-task-0010",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 358
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.unfocus",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 144
+        },
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0010",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0010",
+          "bytes": 130
+        },
+        {
+          "direction": "out",
+          "action": "task.plan.get",
+          "task_id": "journey-task-0010",
+          "bytes": 129
+        },
+        {
+          "direction": "in",
+          "action": "session.unfocus",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 204
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 177
+        },
+        {
+          "direction": "in",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0010",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "task.plan.get",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.walkthrough.get",
+          "task_id": "journey-task-0010",
+          "bytes": 136
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "task.session.status",
+          "session_id": "journey-task-0010-session-0",
+          "task_id": "journey-task-0010",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.focus",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "task.unsubscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 132
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 243
+        },
+        {
+          "direction": "out",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0010-session-0",
+          "task_id": "journey-task-0010",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0010",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0010-session-1",
+          "task_id": "journey-task-0010",
+          "bytes": 240
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0010-session-0",
+          "task_id": "journey-task-0010",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 362
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 213
+        },
+        {
+          "direction": "in",
+          "action": "task.walkthrough.get",
+          "bytes": 153
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.focus",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 203
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "task.session.status",
+          "session_id": "journey-task-0010-session-0",
+          "task_id": "journey-task-0010",
+          "bytes": 572
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 208
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 299
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "task.unsubscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.unsubscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 302
+        },
+        {
+          "direction": "in",
+          "action": "session.unsubscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 209
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0010-session-0",
+          "task_id": "journey-task-0010",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0010",
+          "bytes": 212
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 361
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0010-session-1",
+          "task_id": "journey-task-0010",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0010-session-1",
+          "task_id": "journey-task-0010",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 197
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 196
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0010-session-0",
+          "bytes": 353
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0010-session-1",
+          "bytes": 354
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 27.799999237060547
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions",
+          "status": 200,
+          "ms": 79.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions",
+          "status": 200,
+          "ms": 77.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions",
+          "status": 200,
+          "ms": 53.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions",
+          "status": 200,
+          "ms": 44.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010",
+          "status": 200,
+          "ms": 45.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0/processes",
+          "status": 200,
+          "ms": 296.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0",
+          "status": 200,
+          "ms": 296.6000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 145.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010",
+          "status": 200,
+          "ms": 145.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0010/ci-options",
+          "status": 200,
+          "ms": 142.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 141.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions/journey-task-0010-session-0/usage",
+          "status": 200,
+          "ms": 141.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions/journey-task-0010-session-0/usage/turns?limit=1",
+          "status": 200,
+          "ms": 140.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/environment/live",
+          "status": 404,
+          "ms": 135.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 135.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 126.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-1",
+          "status": 200,
+          "ms": 127.40000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions/journey-task-0010-session-1/usage",
+          "status": 200,
+          "ms": 125.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0010/ci-options",
+          "status": 200,
+          "ms": 125.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/sessions/journey-task-0010-session-1/usage/turns?limit=1",
+          "status": 200,
+          "ms": 124.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010",
+          "status": 200,
+          "ms": 126.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 119.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0/turns",
+          "status": 200,
+          "ms": 55.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 56.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-1/turns",
+          "status": 200,
+          "ms": 43.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories?include_scripts=true",
+          "status": 200,
+          "ms": 13.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0/turns",
+          "status": 200,
+          "ms": 13.600000381469727
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0",
+          "status": 200,
+          "ms": 14.200000762939453
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces",
+          "status": 200,
+          "ms": 13.90000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 13.899999618530273
+        },
+        {
+          "path": "http://localhost:48429/api/v1/user/settings",
+          "status": 200,
+          "ms": 13.90000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0010-session-0/messages?limit=50&sort=desc",
+          "status": 200,
+          "ms": 13.899999618530273
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 116
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 2.8000001907348633
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0010/environment/live",
+          "status": 404,
+          "ms": 9
+        }
+      ]
+    },
+    "tabs": [
+      {
+        "text": "2\nAgent 1",
+        "active": true
+      },
+      {
+        "text": "1\nAgent 2",
+        "active": false
+      },
+      {
+        "text": "Files",
+        "active": true
+      },
+      {
+        "text": "Changes",
+        "active": false
+      },
+      {
+        "text": "Terminal",
+        "active": true
+      }
+    ]
+  },
+  {
+    "sameDocument": true
+  },
+  {
+    "label": "phone multi-session task",
+    "url": "http://localhost:48429/tasks/journey-task-0001",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 130
+        },
+        {
+          "direction": "out",
+          "action": "user.subscribe",
+          "bytes": 101
+        },
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "task.walkthrough.get",
+          "task_id": "journey-task-0001",
+          "bytes": 136
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "task.plan.get",
+          "task_id": "journey-task-0001",
+          "bytes": 129
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 213
+        },
+        {
+          "direction": "in",
+          "action": "system.agent_runtime.status_changed",
+          "bytes": 224
+        },
+        {
+          "direction": "in",
+          "action": "user.subscribe",
+          "bytes": 185
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 212
+        },
+        {
+          "direction": "in",
+          "action": "task.walkthrough.get",
+          "bytes": 153
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 203
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 573
+        },
+        {
+          "direction": "in",
+          "action": "task.plan.get",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88938
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 181
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/v1/agent-update/status",
+          "status": 200,
+          "ms": 64.5
+        },
+        {
+          "path": "http://localhost:48429/api/plugins",
+          "status": 200,
+          "ms": 62.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 59.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 60.40000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 56.90000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 57.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 56.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 56.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 55.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 22.600000381469727
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 21.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 19.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 18.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 18
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 16.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 15
+        },
+        {
+          "path": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 186.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 191.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 195.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 195.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 283.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/health",
+          "status": 200,
+          "ms": 173.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 172
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 296
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 159.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+          "status": 200,
+          "ms": 156
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 156.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 149.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 149.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 154.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 153.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 153.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 152.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/prompts",
+          "status": 200,
+          "ms": 125.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 134.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage",
+          "status": 200,
+          "ms": 128.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage/turns?limit=1",
+          "status": 200,
+          "ms": 128.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0",
+          "status": 200,
+          "ms": 129.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/info",
+          "status": 200,
+          "ms": 112.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 112.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 116.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+          "status": 200,
+          "ms": 112.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 117
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 356.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 215
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 215.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 213.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 196.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 137.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/turns",
+          "status": 200,
+          "ms": 107.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/prompts",
+          "status": 200,
+          "ms": 218.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 45
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 5.299999237060547
+        }
+      ]
+    },
+    "tabs": []
+  }
+]

@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { toast } from "@/lib/toast/sonner";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { triggerBlobDownload } from "@/lib/utils/file-download";
 import { useTranslation } from "react-i18next";
 
 type MemoryEntry = {
@@ -79,12 +80,7 @@ function useMemoryActions(agent: AgentProfile) {
     const res = await officeApi.exportMemory(agent.id);
     const data = (res as { memory?: MemoryEntry[] }).memory ?? [];
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${agent.name}-memory.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `${agent.name}-memory.json`);
   }, [agent.id, agent.name]);
 
   return { entries, handleDelete, handleClearAll, handleExport };

@@ -48,10 +48,19 @@ export type SSHLiveStatus = {
   fingerprint?: string;
 };
 
+export type PluginExecutorLiveStatus = {
+  state: string;
+  retention: string;
+  expires_at?: string;
+  deadline_passed: boolean;
+  reason?: string;
+};
+
 export type TaskEnvironmentLiveResponse = {
   environment: TaskEnvironment;
   container?: ContainerLiveStatus;
   ssh?: SSHLiveStatus;
+  plugin_executor?: PluginExecutorLiveStatus;
 };
 
 export async function fetchTaskEnvironment(taskId: string, options?: ApiRequestOptions) {

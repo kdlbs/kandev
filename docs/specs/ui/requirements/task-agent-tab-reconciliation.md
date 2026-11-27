@@ -69,16 +69,29 @@ workbench commands attached to the surrounding tab.
   controls shall retain their existing rename and navigation behavior without
   exposing desktop Dockview maximize gestures.
 
+- **AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.5:** Desktop task and preview
+  session rename controls shall accept up to 120 Unicode code points, matching
+  the server session-name limit. Opening a legal existing name and submitting
+  it unchanged shall preserve it without a rename request. Truncation of edited
+  names shall preserve complete surrogate pairs; the limit counts code points,
+  not grapheme clusters. Insertions at the limit shall preserve existing text
+  outside the edited range.
+- **AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.6:** Session rename shall retain
+  trimming, empty-name reset, Enter and internal-blur commit, Escape cancel,
+  at-most-once completion, and failure behavior. The submitted name and local
+  store update shall agree. Terminal-tab name limits shall remain unchanged.
+
 ## Out of scope
 
 - Changing session creation, lifecycle, ordering, or backend APIs.
 - Changing saved desktop layout geometry or the active-panel rules for valid
   non-Agent panels.
-- Changing session-name persistence or the rename commit, cancel, and failure
-  behavior.
+- Changing server session-name authority or rename delivery ordering.
 - Redesigning phone or tablet task navigation and session controls.
 
 ## Implementation plan
 
 - [Command-center task focus repair](../../../plans/command-center-task-focus/plan.md)
 - [Agent tab rename double-click isolation](../../../plans/agent-tab-rename-double-click/plan.md)
+
+- [Unicode session rename parity](../../../plans/unicode-session-rename/plan.md)

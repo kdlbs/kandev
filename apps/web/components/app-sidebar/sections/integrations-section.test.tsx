@@ -1,13 +1,13 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { IconBrandGithub, IconBrandGitlab, IconChartBar, IconHexagon } from "@tabler/icons-react";
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { ResolvedDestination } from "@/lib/navigation/types";
 
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",
+  isFinePointer: true,
 }));
 
 const collapsibleMock = vi.hoisted(() => ({
@@ -17,6 +17,8 @@ const collapsibleMock = vi.hoisted(() => ({
 const destinationsMock = vi.hoisted(() => vi.fn());
 
 const storeState = {
+  userSettings: { sidebarFastActionsEnabled: true },
+  workspaces: { activeId: "ws-1" as string | null },
   appSidebar: {
     sectionExpanded: {
       integrations: false,
@@ -41,13 +43,20 @@ vi.mock("@/hooks/use-app-destinations", () => ({
   useAppDestinations: destinationsMock,
 }));
 
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isFinePointer: navigationMock.isFinePointer }),
+}));
+
 vi.mock("@kandev/ui/collapsible", () => ({
   Collapsible: ({ children, open }: { children: ReactNode; open?: boolean }) => {
     collapsibleMock.open = !!open;
     return <div>{children}</div>;
   },
-  CollapsibleContent: ({ children }: { children: ReactNode }) =>
-    collapsibleMock.open ? <div>{children}</div> : null,
+  CollapsibleContent: ({
+    children,
+    ...props
+  }: HTMLAttributes<HTMLDivElement> & { children: ReactNode }) =>
+    collapsibleMock.open ? <div {...props}>{children}</div> : null,
 }));
 
 import { IntegrationsSection } from "./integrations-section";
@@ -77,7 +86,6 @@ function pluginDestination(
   };
 }
 
-const AZURE = destination("azure-devops", "Azure DevOps", AzureDevOpsIcon);
 const GITHUB = destination("github", "GitHub", IconBrandGithub);
 const GITLAB = destination("gitlab", "GitLab", IconBrandGitlab);
 const JIRA = destination("jira", "Jira", IconHexagon);
@@ -93,55 +101,42 @@ function renderSection() {
   );
 }
 
+function resetIntegrationState() {
+  storeState.userSettings.sidebarFastActionsEnabled = true;
+  navigationMock.pathname = "/";
+  navigationMock.isFinePointer = true;
+  storeState.appSidebar.sectionExpanded.integrations = false;
+  storeState.toggleAppSidebarSection.mockClear();
+  storeState.setAppSidebarCollapsed.mockClear();
+  destinationsMock.mockReturnValue([GITHUB, JIRA]);
+}
+
+const INTEGRATIONS_BODY_TEST_ID = "sidebar-section-integrations";
+
 describe("IntegrationsSection", () => {
-  beforeEach(() => {
-    navigationMock.pathname = "/";
-    storeState.appSidebar.sectionExpanded.integrations = false;
-    storeState.toggleAppSidebarSection.mockClear();
-    storeState.setAppSidebarCollapsed.mockClear();
-    destinationsMock.mockReturnValue([GITHUB, JIRA]);
-  });
+  beforeEach(resetIntegrationState);
 
   afterEach(() => cleanup());
 
-  it("keeps integration shortcuts visible while the section accordion is closed", () => {
-    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
-
+  it("keeps destinations behind a disclosure while collapsed", () => {
     renderSection();
-
-    const shortcuts = screen.getAllByTestId("integration-header-shortcut");
-    expect(shortcuts.map((shortcut) => shortcut.getAttribute("aria-label"))).toEqual([
-      "Azure DevOps",
-      "GitHub",
-      "GitLab",
-      "Jira",
-    ]);
-    expect(shortcuts.map((shortcut) => shortcut.getAttribute("href"))).toEqual([
-      "/azure-devops",
-      "/github",
-      "/gitlab",
-      "/jira",
-    ]);
-    expect(screen.queryByRole("link", { name: "Linear" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Integrations" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(screen.getByTestId("integration-header-shortcut-github")).toBeTruthy();
+    expect(screen.queryByTestId(INTEGRATIONS_BODY_TEST_ID)).toBeNull();
+    screen.getByRole("button", { name: "Integrations" }).click();
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("integrations", false);
   });
 
-  it("limits shortcuts to four integrations and leaves the full list in the expanded section", () => {
+  it("shows every resolved integration once when expanded", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
-
+    destinationsMock.mockReturnValue([GITHUB, GITLAB, JIRA, LINEAR]);
     renderSection();
-
-    expect(screen.getAllByTestId("integration-header-shortcut")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "Linear" })).toBeTruthy();
-  });
-
-  it("uses the Azure DevOps product mark for Azure links", () => {
-    storeState.appSidebar.sectionExpanded.integrations = true;
-    destinationsMock.mockReturnValue([AZURE]);
-
-    renderSection();
-
-    expect(screen.getAllByTestId("azure-devops-icon")).toHaveLength(2);
+    const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
+    for (const destination of [GITHUB, GITLAB, JIRA, LINEAR]) {
+      expect(within(body).getAllByRole("link", { name: destination.label })).toHaveLength(1);
+    }
   });
 
   it("renders plugin nav items after the first-party links, with their own test id", () => {
@@ -176,12 +171,91 @@ describe("IntegrationsSection", () => {
     expect(screen.getByTestId(PLUGIN_TEST_ID)).toBeTruthy();
   });
 
-  it("hides the section entirely when the manifest resolves no destinations", () => {
+  it("offers integration settings even with no configured providers", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     destinationsMock.mockReturnValue([]);
+    renderSection();
+    expect(screen.getByRole("link", { name: "Integration settings" }).getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1/integrations",
+    );
+    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
+  });
+});
 
-    const { container } = renderSection();
+describe("IntegrationsSection header shortcuts", () => {
+  beforeEach(resetIntegrationState);
+  afterEach(() => cleanup());
 
-    expect(container.textContent).toBe("");
+  it("hides optional header icons while retaining integration destinations", () => {
+    storeState.userSettings.sidebarFastActionsEnabled = false;
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    renderSection();
+    expect(screen.queryByTestId("integration-header-shortcut-github")).toBeNull();
+    const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
+    expect(within(body).getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      GITHUB.href,
+    );
+  });
+
+  it("shows first-party shortcuts in manifest order while closed and keeps the action independent", () => {
+    destinationsMock.mockReturnValue([GITHUB, PLUGIN_PAGE, JIRA, GITLAB]);
+    renderSection();
+
+    const shortcuts = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid^="integration-header-shortcut-"]'),
+    );
+    expect(shortcuts.map((shortcut) => shortcut.dataset.destinationId)).toEqual([
+      "github",
+      "jira",
+      "gitlab",
+    ]);
+    expect(shortcuts.every((shortcut) => shortcut.getAttribute("aria-label"))).toBe(true);
+    expect(screen.getByRole("button", { name: "Integrations" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(screen.queryByTestId(PLUGIN_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("integration-header-shortcut-plugin:cost-per-model")).toBeNull();
+
+    shortcuts[0].click();
+
+    expect(storeState.toggleAppSidebarSection).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Integrations" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
+  it.each([
+    { finePointer: true, expectedIds: ["github", "gitlab", "jira", "linear"] },
+    { finePointer: false, expectedIds: ["github", "gitlab"] },
+  ])(
+    "limits header shortcuts by pointer capacity: $finePointer",
+    ({ finePointer, expectedIds }) => {
+      navigationMock.isFinePointer = finePointer;
+      storeState.appSidebar.sectionExpanded.integrations = true;
+      destinationsMock.mockReturnValue([GITHUB, GITLAB, JIRA, LINEAR, PLUGIN_PAGE]);
+      renderSection();
+
+      const shortcuts = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-testid^="integration-header-shortcut-"]'),
+      );
+      expect(shortcuts.map((shortcut) => shortcut.dataset.destinationId)).toEqual(expectedIds);
+      const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
+      expect(within(body).getByRole("link", { name: "Linear" })).toBeTruthy();
+      expect(within(body).getByTestId(PLUGIN_TEST_ID)).toBeTruthy();
+      if (!finePointer) {
+        for (const shortcut of shortcuts) {
+          expect(shortcut.className).toContain("[@media(pointer:coarse)]:size-11");
+        }
+      }
+    },
+  );
+
+  it("marks the active integration destination on nested routes", () => {
+    navigationMock.pathname = "/github/issues";
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    renderSection();
+    expect(
+      screen.getByTestId("integration-header-shortcut-github").getAttribute("aria-current"),
+    ).toBe("page");
   });
 });

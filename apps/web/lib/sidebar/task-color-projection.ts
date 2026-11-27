@@ -21,6 +21,20 @@ export type TaskColorProjectionContext = {
   stepColorById: ReadonlyMap<string, string>;
 };
 
+export type SidebarTaskColorDisplayContext = Pick<
+  TaskColorProjectionContext,
+  "workspaceId" | "repositoriesById" | "stepColorById"
+> & {
+  settings?: SidebarTaskColorAutomation;
+  manualColor?: string | null;
+};
+
+export type SidebarTaskColorDisplay = {
+  facts: TaskColorFacts;
+  automaticColor: AutomaticTaskColorResult | null;
+  effectiveColorToken: string | null;
+};
+
 export function taskColorFacts(
   task: ProjectedTask,
   context: Pick<TaskColorProjectionContext, "workspaceId" | "repositoriesById" | "stepColorById">,
@@ -45,6 +59,21 @@ export function taskColorProjection(
   context: TaskColorProjectionContext,
 ): AutomaticTaskColorResult | null {
   return resolveAutomaticTaskColor(context.settings, taskColorFacts(task, context));
+}
+
+export function sidebarTaskColorDisplay(
+  task: ProjectedTask,
+  context: SidebarTaskColorDisplayContext,
+): SidebarTaskColorDisplay {
+  const facts = taskColorFacts(task, context);
+  const automaticColor = context.settings
+    ? resolveAutomaticTaskColor(context.settings, facts)
+    : null;
+  return {
+    facts,
+    automaticColor,
+    effectiveColorToken: automaticColor?.color.token ?? context.manualColor ?? null,
+  };
 }
 
 function taskRepositoryIdentities(

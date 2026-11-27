@@ -17,7 +17,9 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+import type { ModelCatalog } from "@kandev/types/model-catalog";
 
 /**
  * How kandev drives a custom agent's command. Absent means terminal
@@ -58,6 +60,12 @@ export type MCPStrategyOption = {
   description: string;
 };
 
+export type AgentProfilesReorderedPayload = {
+  agent_id: string;
+  profile_ids: string[];
+  revision: number;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -66,6 +74,7 @@ export type Agent = {
   mcp_config_path?: string | null;
   tui_config?: TUIConfig | null;
   profiles: AgentProfile[];
+  profile_order_revision?: number;
   /**
    * Host utility probe status for this agent type — mirrors
    * `ModelConfig.status`. Populated by the backend from the host utility
@@ -105,11 +114,18 @@ export type AgentProfileMcpConfig = {
 export type AgentDiscovery = {
   name: string;
   supports_mcp: boolean;
+  supports_local_install?: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
   available: boolean;
   matched_path?: string | null;
   login_command?: LoginCommand;
+  /**
+   * Vendor CLI version state. Present only for agent types that declare a
+   * host CLI (Claude, Codex); every other agent omits both fields.
+   */
+  cli_version?: string;
+  cli_version_error?: string;
 };
 
 export type AgentCapabilities = {
@@ -118,6 +134,8 @@ export type AgentCapabilities = {
   supports_workspace_only: boolean;
 };
 
+export type AntigravityRuntimeVariant = "cli" | "standalone";
+
 export type ModelEntry = {
   id: string;
   name: string;
@@ -125,7 +143,8 @@ export type ModelEntry = {
   provider?: string;
   context_window?: number;
   is_default?: boolean;
-  source?: "static" | "dynamic";
+  /** "cli" for a vendor-CLI-discovered entry, "acp" for a bridge-advertised one. */
+  source?: "static" | "dynamic" | "cli" | "acp";
   /**
    * Agent-specific extras from ACP's `_meta` field. GitHub Copilot exposes
    * `copilotUsage` (e.g. "1x", "0.33x", "0x" — premium-request multiplier)
@@ -154,6 +173,8 @@ export type ConfigOptionEntry = {
   current_value: string;
   category?: string;
   options?: { value: string; name: string; description?: string }[];
+  /** Bounded provider group structure and verified composition bindings. */
+  catalog?: ModelCatalog;
 };
 
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
@@ -165,10 +186,45 @@ export type CapabilityStatus =
   | "auth_required"
   | "not_installed"
   | "failed"
-  | "not_configured";
+  | "not_configured"
+  | "unsupported";
+
+export type ProfileLaunchSettingsRequest = {
+  env_vars: { key: string; value?: string; secret_id?: string }[];
+  cli_flags: CLIFlag[];
+  command_prefix: string;
+  /** Draft ACP mode. Omission keeps the saved value for an older client. */
+  mode?: string;
+  /** Draft selection for a capability or model probe. Omit to use the saved value. */
+  copilot_selected_plugins?: string[];
+};
+
+export type ProfileCapabilityRequest = {
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
+  refresh?: boolean;
+};
+
+export type ProfileRuntimeComponent = {
+  role: "bridge" | "provider";
+  name: string;
+  package?: string;
+  source: "managed" | "bundled" | "external" | "unknown";
+  owner: "kandev" | "external" | "unknown";
+  effective_version?: string;
+  observed_version?: string;
+  guidance_url?: string;
+};
+
+export type ProfileRuntimeInfo = {
+  scope: "host";
+  observed_at: string;
+  components: ProfileRuntimeComponent[];
+};
 
 export type ModelConfig = {
   default_model: string;
+  runtime_variant?: AntigravityRuntimeVariant;
   available_models: ModelEntry[];
   current_model_id?: string;
   available_modes?: ModeEntry[];
@@ -178,17 +234,40 @@ export type ModelConfig = {
   supports_dynamic_models: boolean;
   status?: CapabilityStatus;
   error?: string;
+  /** How the model list was assembled. Absent for agent types without a vendor CLI. */
+  discovery?: ModelDiscovery;
+};
+
+// ModelDiscovery reports how Kandev assembled an agent type's model list and
+// whether the operator may type a model identifier that is not in it.
+export type ModelDiscovery = {
+  /** "cli_command" when the vendor CLI supplied models, "acp_probe" otherwise. */
+  source: "cli_command" | "acp_probe";
+  executable?: string;
+  cli_version?: string;
+  /** "ok", "skipped" (the CLI publishes no list), "pending", or a failure reason. */
+  status: string;
+  error?: string;
+  checked_at?: string;
+  allows_custom_model: boolean;
 };
 
 export type DynamicModelsResponse = {
   agent_name: string;
+  runtime_variant?: AntigravityRuntimeVariant;
   status: CapabilityStatus;
+  reason_code?: string;
   models: ModelEntry[];
   current_model_id?: string;
   modes?: ModeEntry[];
   current_mode_id?: string;
   commands?: CommandEntry[];
   error: string | null;
+  /** Mirrors ModelConfig.discovery for the models endpoint. */
+  discovery?: ModelDiscovery;
+  context_revision?: string;
+  /** Ephemeral host-scoped runtime evidence for this exact profile probe. */
+  runtime_info?: ProfileRuntimeInfo;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -196,14 +275,18 @@ export type ResolveAgentModelConfigRequest = {
   mode?: string;
   config_options?: Record<string, string>;
   refresh?: boolean;
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
 };
 
 export type AgentModelConfigResponse = {
   agent_name: string;
   model: string;
   status: CapabilityStatus;
+  reason_code?: string;
   config_options: ConfigOptionEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type PermissionSetting = {
@@ -242,11 +325,14 @@ export type ToolStatus = {
 
 export type LoginCommand = {
   cmd: string[];
+  variants?: Record<string, string[]>;
   description?: string;
 };
 
 export type RuntimeUpdate = {
+  managed_fallback?: boolean;
   supported: boolean;
+  update_mode: "pinned" | "self_update";
   package: string;
   current_version?: string;
   default_version?: string;
@@ -259,6 +345,7 @@ export type AvailableAgent = {
   display_name: string;
   description?: string;
   install_script?: string;
+  supports_local_install?: boolean;
   supports_mcp: boolean;
   mcp_config_path?: string | null;
   installation_paths: string[];
@@ -291,16 +378,46 @@ export type ListAvailableAgentsResponse = {
 
 // Clarification request types (for ask_user_question feature)
 export type ClarificationOption = {
+  images?: QuestionImage[];
   option_id: string;
   label: string;
   description: string;
 };
 
+export type QuestionImage = {
+  id: string;
+  path: string;
+  repo?: string;
+  alt: string;
+  /** Optional one-word name the agent chose for pickers, such as "before". */
+  label?: string;
+};
+
+/** An agent-declared review group: a pair is compared, a single is shown alone. */
+export type QuestionImageGroup = {
+  kind: "pair" | "single";
+  image_ids: string[];
+};
+
 export type ClarificationQuestion = {
+  images?: QuestionImage[];
+  /** Omitted groups show the question's images as a gallery. */
+  image_groups?: QuestionImageGroup[];
   id: string;
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
+};
+
+export type ClarificationAnswerAttachment = {
+  attachment_id: string;
+  type: "image" | "audio" | "resource";
+  name: string;
+  mime_type: string;
+  size_bytes: number;
+  delivery_mode: "prompt" | "path";
 };
 
 // Each per-question chat message carries its own metadata. For multi-question
@@ -318,13 +435,29 @@ export type ClarificationRequestMetadata = {
   context?: string;
   status?: "pending" | "answered" | "rejected" | "expired" | "cancelled";
   response?: ClarificationAnswer;
+  /** Server-retained answer files, present after a retryable delivery failure. */
+  attachments?: ClarificationAnswerAttachment[];
   agent_disconnected?: boolean;
+};
+
+/** A rectangle the operator marked on a question image, in that image's pixels. */
+export type ClarificationAnswerAnnotation = {
+  image_id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image_width: number;
+  image_height: number;
+  comment: string;
 };
 
 export type ClarificationAnswer = {
   question_id: string;
   selected_options?: string[];
   custom_text?: string;
+  attachments?: ClarificationAnswerAttachment[];
+  annotations?: ClarificationAnswerAnnotation[];
 };
 
 export type ClarificationResponse = {
@@ -361,6 +494,7 @@ export type TaskPlanComment = {
   selected_text: string;
   anchor_from: number;
   anchor_to: number;
+  attachments?: import("@/lib/services/session-launch-service").MessageAttachment[];
   version: number;
   created_at: string;
   updated_at: string;
@@ -387,6 +521,18 @@ export type PreviewCaptureRect = {
   viewport_width?: number;
   viewport_height?: number;
   device_pixel_ratio?: number;
+  /** Nearest scrollable ancestor when a region was drawn; absent for the document. */
+  scroll_container_selector?: string;
+  container_scroll_x?: number;
+  container_scroll_y?: number;
+  /** Smallest element containing a region, which its outline follows when the layout changes. */
+  anchor_selector?: string;
+  /** Region top-left minus the anchor's top-left, in CSS pixels. */
+  anchor_offset_x?: number;
+  anchor_offset_y?: number;
+  /** The anchor's size at capture; a different size means its content may have reflowed. */
+  anchor_width?: number;
+  anchor_height?: number;
 };
 
 export type PreviewElementSnapshot = {

@@ -15,7 +15,11 @@ export function buildMobileTaskSwitcherProps(
     onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
     pinnedTaskIds: string[];
     showActivityTime: boolean;
+    groupIndent: boolean;
     taskRowPresentation: TaskSwitcherProps["taskRowPresentation"];
+    unreadMessagesEnabled: boolean;
+    unreadDotHideDelayMs: number;
+    displayedSessionId: string | null;
   },
 ): TaskSwitcherProps {
   return {
@@ -30,7 +34,11 @@ export function buildMobileTaskSwitcherProps(
     onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     collapsedGroupKeys: helpers.collapsedGroupKeys,
     showActivityTime: helpers.showActivityTime,
+    groupIndent: helpers.groupIndent,
     taskRowPresentation: helpers.taskRowPresentation,
+    unreadMessagesEnabled: helpers.unreadMessagesEnabled,
+    unreadDotHideDelayMs: helpers.unreadDotHideDelayMs,
+    displayedSessionId: helpers.displayedSessionId,
     onToggleGroup: helpers.onToggleGroup,
     collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
     onToggleSubtasks: helpers.onToggleSubtasks,
@@ -53,12 +61,10 @@ export function buildMobileTaskSwitcherProps(
     onReorderSubtasks: helpers.onReorderSubtasks,
     pinnedTaskIds: helpers.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
-    archivingTaskId: props.archivingTaskId,
-    isArchiving: props.isArchiving,
     isLoading: props.isLoading,
     loadError: props.loadError,
     onRetryLoad: props.onRetryLoad,
     retryLabel: props.retryLabel,
-    totalTaskCount: props.tasks.length,
+    totalTaskCount: props.page?.total_tasks ?? props.tasks.length,
   };
 }

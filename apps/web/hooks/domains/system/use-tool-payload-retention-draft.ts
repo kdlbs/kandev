@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type {
@@ -68,6 +68,13 @@ export function useToolPayloadRetentionDraft(
   const [choice, setChoice] = useState<ToolPayloadBackupChoice | "">("");
   const saved = remote.status?.policy;
   const baseline = useRef<ToolPayloadPolicy | null>(null);
+  const scope = remote.captureScope();
+  const scopeKey = JSON.stringify([scope.identityKey, scope.generation]);
+  useLayoutEffect(() => {
+    baseline.current = null;
+    setDraft(null);
+    setChoice("");
+  }, [scopeKey]);
   useEffect(() => {
     if (!saved) return;
     setDraft((current) =>
@@ -91,10 +98,15 @@ export function useToolPayloadRetentionDraft(
     save: async () => {
       if (!draft || invalid || !canEdit || (needsChoice && !choice)) return;
       const submitted = draft;
-      const next = await remote.save({
-        ...submitted,
-        ...(needsChoice && choice ? { backup_choice: choice } : {}),
-      });
+      const writerScope = remote.captureScope();
+      const next = await remote.save(
+        {
+          ...submitted,
+          ...(needsChoice && choice ? { backup_choice: choice } : {}),
+        },
+        { backupChoiceAttempt: needsChoice && choice === "backup" },
+      );
+      if (!remote.isCurrentScope(writerScope)) return;
       setDraft((current) => acceptSavedDraft(current, submitted, next.policy));
       setChoice("");
     },

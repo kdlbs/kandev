@@ -27,6 +27,11 @@ The Office cost dashboard shows `$0` for every agent running on a subscription p
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.6:** Reads `access_token` from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`).
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.7:** Calls `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.8:** Parses `five_hour.utilization` and `seven_day.utilization` from the response body.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.9:** When a provider usage request returns a non-OK status, the usage client returns a failure carrying that HTTP status and any `Retry-After` hint, so the cache can classify and pace the retry instead of reading an opaque message.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.10:** When a usage read is refused with 429, the cache holds the key in backoff for the provider's `Retry-After` hint when present, otherwise an exponential window starting at 15 seconds and capped at 15 minutes, so a refused read is not retried on every poll.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.11:** When a refresh fails while a preserved success is younger than 30 minutes, the cache serves that reading with `ProviderUsage.Stale` set; once the preserved success is at least 30 minutes old, the cache reports the provider error instead.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.12:** A failed usage refresh never returns a nil reading as success; when no bounded stale reading is available, the cache returns the provider error to the caller.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.13:** A decoded TeamClaude status response containing no usable accounts remains an error even when the cache holds a recent success. This authoritative no-capacity result takes precedence over stale fallback; ordinary transient provider failures retain the bounded stale policy.
 
 ## Migrated source detail
 

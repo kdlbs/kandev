@@ -1,0 +1,166 @@
+{
+  "head": "b381612f3ca8e19d454a60de318ae355fd924872",
+  "recorded_at_utc": "2026-10-10T18:05:10.334243+00:00",
+  "ci_failure": {
+    "failed_head": "b381612f3ca8e19d454a60de318ae355fd924872",
+    "workflow_run_id": 38058965767,
+    "job_id": 114233211580,
+    "reproduced_failed_assertions": 18,
+    "failed_test_files": 4,
+    "final_tests": 198,
+    "final_test_files": 12,
+    "eslint": "passed: four corrected fixtures",
+    "typecheck": "passed",
+    "production_changes": 0,
+    "contract_mutations_detected": 4
+  },
+  "mutations": [
+    {
+      "mutation": "compact-tab",
+      "source": "components/task/dockview-session-tabs.ts",
+      "test": "components/task/dockview-session-tab-sync.test.ts",
+      "exit_code": 1,
+      "intended_assertion_failed": true
+    },
+    {
+      "mutation": "removed-tab",
+      "source": "components/task/dockview-session-tabs.ts",
+      "test": "components/task/dockview-session-tab-sync.test.ts",
+      "exit_code": 1,
+      "intended_assertion_failed": true
+    },
+    {
+      "mutation": "window-recovery",
+      "source": "hooks/domains/session/use-session-messages.ts",
+      "test": "hooks/domains/session/use-session-recovery.test.tsx",
+      "exit_code": 1,
+      "intended_assertion_failed": true
+    },
+    {
+      "mutation": "older-turn-context",
+      "source": "hooks/domains/session/older-message-pagination.ts",
+      "test": "hooks/use-lazy-load-messages.test.ts",
+      "exit_code": 1,
+      "intended_assertion_failed": true
+    }
+  ],
+  "phase": "Historical initial fixture-only CI remediation",
+  "superseded_source_sha256": "84c5ef0f4c863eb4feb447dc0063dcc6f183c95f9f6d7f43d0d6565e723003d5",
+  "superseded_source_files": 198,
+  "latest_remediation": {
+    "base_sha": "3fb026365239bbc893fa4a5272d926640c7ef1f9",
+    "scope": "Bounded navigation and action authority, nested boot normalization, narrow model identity, shared step metadata, direct sibling hydration, and full-detail E2E inspection. No live data or configuration changes.",
+    "postgres_parity": "Three exact race-enabled regressions passed with PostgreSQL 18; the owned fixture was removed.",
+    "superseded_full_frontend_run": "Stopped after a known corrected fixture failure to rebase; not counted as passing.",
+    "fresh_full_frontend_run": {
+      "exit_code": 1,
+      "passed_files": 2831,
+      "failed_files": 3,
+      "passed_tests": 25343,
+      "failed_tests": 12,
+      "skipped_tests": 4,
+      "duration_seconds": 1995.21,
+      "selection": "Before final optional-store mock, destination request expectation, and stable mobile-target edits. Every failing assertion subsequently passed in the 14-test focused correction run; this full run is not reported as green.",
+      "base_sha": "43f55a6aad38c7f53c4b7eb56682016639f74405"
+    },
+    "historical_limits": "Eight of ten write-loaded persistence probes exceeded two seconds; historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.",
+    "source_sha256": "a466bb9ac39bab99a5a924fb52ab087c9d84d8b4ce975641f47357ca4705cc99",
+    "source_files": 263,
+    "touch_target": {
+      "red": "Real tooltip readiness transition replaced the mobile submit button.",
+      "focused_green_tests": 84,
+      "focused_green_files": 5,
+      "uninstrumented_phone_samples": 3,
+      "retries": 0,
+      "instrumentation": "None in final samples. Trace/passive-listener samples remain diagnostic only.",
+      "causality_limit": "Wrapper remount is independently proven; later admission diagnostics show native click and draft followed by an authoritative busy rejection. Stable target alone did not retire every browser failure."
+    },
+    "local_browser": {
+      "desktop_before_rebase": "48/50 initially; both live move regressions subsequently passed, including 15/15 final path checks.",
+      "phone_before_rebase": "35/37 initially; sibling membership repaired and recovery follow-up subsequently covered by the stable touch correction.",
+      "rebased_desktop": "Quick Chat and both live moves passed; read-only fixture metadata failure corrected and its full flow passed.",
+      "rebased_phone": "Quick Chat, sibling repository context, and read-only Resume passed. Recovered follow-up initially failed, then three uninstrumented independent flows passed after stable-target correction.",
+      "container_sources": "Three SSH/Docker source checks passed.",
+      "superseded_runs": "Failed and diagnostic runs are retained as historical results, not reported as green suites."
+    },
+    "additional_fixture_regressions": {
+      "red_assertions": 12,
+      "files": 3,
+      "green_tests": 14,
+      "cause": "Optional store exports absent from task-list step and automation-selector mocks; destination-menu expectation omitted abortable shared-read options. Existing assertions retained, with request cancellation additionally verified.",
+      "eslint": "passed"
+    },
+    "metadata_extraction": "Behavior-preserving extraction after normal-hook function-size rejection; SQLite summary race regressions passed.",
+    "metadata_revision_repair": {
+      "red_producers": 2,
+      "green_tests": 33,
+      "green_files": 6,
+      "original_binding_preserved": true,
+      "requests_overlap": false
+    },
+    "browser_demo_rebase": {
+      "base_sha": "8d2246e323eef5764e428b73b948818d5437e1cc",
+      "conflicts": 0,
+      "preserved_tracked_fixups": 78,
+      "preserved_untracked_fixups": 11,
+      "integration_tests": 125,
+      "integration_files": 13,
+      "typecheck": "passed",
+      "production_build": "passed"
+    },
+    "final_rebase": {
+      "base_sha": "3fb026365239bbc893fa4a5272d926640c7ef1f9",
+      "conflicts": 0,
+      "metadata_tests": 33,
+      "metadata_files": 6,
+      "runtime_ownership_race": "passed"
+    },
+    "draft_submit_ordering": {
+      "baseline_head": "f0d03cc90bf19bb105a16010819dca4e48fdbe21",
+      "regression": "Passive draft synchronization overwrites an editor change before a layout submit; zero submit calls on original source, one exact payload after correction.",
+      "unit_tests": 57,
+      "unit_files": 4,
+      "phone": "First flow passed, then 1/3 passed before causal fixture completion correction; final 3/3 passed.",
+      "historical_phone_failure": "/tmp/kandev-run.e2e.MYI63uSC.log",
+      "causality_limit": "Does not identify the browser event path behind every historical missed tap.",
+      "fixture_gate": "The exact first message turn_id must refer to a turn with completed_at before reload and follow-up.",
+      "diagnostic_result": "Native click and correct draft reached backend, which rejected an active turn. No production admission bypass.",
+      "diagnostic_instrumentation": "Removed byte-for-byte before final ordinary samples.",
+      "desktop": "2/2 passed: recovered brief follow-up and read-only Resume, retries disabled."
+    },
+    "final_hosted_e2e_remediation": {
+      "failed_head": "ced72219ad00b4cf3282d7c0aee8e434fd11a342",
+      "workflow_run_id": 38068936135,
+      "failed_job_ids": [
+        114263234544,
+        114263234374,
+        114263234437,
+        114263234545,
+        114263234356,
+        114263234510
+      ],
+      "failed_cases": 14,
+      "desktop_red_cases": 13,
+      "desktop_red_control_passes": 2,
+      "phone_first_reproduction": "passed; independent bounded-query sort regression failed",
+      "phone_intermediate_cases": "3/3 failed after correct destination because valid sessionId query was excluded by the fixture URL assertion",
+      "desktop_green_cases": 15,
+      "phone_green_cases": 3,
+      "retries": 0,
+      "changed_web_lint": "passed",
+      "typescript": "passed",
+      "removal_unit_tests": 44,
+      "scope": "Explicit rich fixture reads; hidden transcript activation catch-up; actual message-window turn context; canonical board-list fallback order; exact pathname with session query preserved; visible disjoint sibling reconciliation; exact restored session model catalog",
+      "hosted_status": "Pending delivery and exact-head verification",
+      "browser_logs": [
+        "/tmp/kandev-run.e2e.Td623LX1.log",
+        "/tmp/kandev-run.e2e.1xN22We6.log",
+        "/tmp/kandev-run.e2e.gexasCr9.log",
+        "/tmp/kandev-run.e2e.3JuY9O09.log"
+      ],
+      "cancelled_job_id": 114263234422,
+      "cancelled_job_observed_failures": 2,
+      "cancelled_job_red_log": "/tmp/kandev-run.e2e.FTvCrkso.log"
+    }
+  }
+}

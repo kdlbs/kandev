@@ -73,12 +73,9 @@ export function prepareLocalBaseScenario(
 export async function openDesktopVcsMenu(session: SessionPage, page: Page): Promise<Locator> {
   await session.clickTab("Changes");
   const changes = page.getByTestId("changes-panel");
-  await expect(changes.getByRole("button", { name: "Review" })).toBeVisible({ timeout: 15_000 });
-  await changes.getByRole("button", { name: "Review" }).click();
-
-  const reviewDialog = page.getByRole("dialog", { name: "Review Changes" });
-  await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
-  await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
+  const pullMenuTrigger = changes.getByRole("button", { name: /^Pull/ });
+  await expect(pullMenuTrigger).toBeVisible({ timeout: 15_000 });
+  await pullMenuTrigger.click();
 
   const menu = page.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
   await expect(menu).toBeVisible();

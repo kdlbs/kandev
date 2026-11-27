@@ -33,6 +33,23 @@ type MeasureOptions struct {
 	TolerateEntryErrors bool
 	CountSkipped        bool
 	MaxWarnings         int
+	ChildSummaryLimit   int
+}
+
+type ChildSummaryStatus string
+
+const (
+	ChildSummaryMeasured    ChildSummaryStatus = "measured"
+	ChildSummaryPartial     ChildSummaryStatus = "partial"
+	ChildSummaryUnavailable ChildSummaryStatus = "unavailable"
+	maxChildSummaryEntries                     = 20
+)
+
+type ChildEntry struct {
+	Name         string             `json:"name"`
+	Kind         string             `json:"kind"`
+	SizeBytes    *int64             `json:"size_bytes,omitempty"`
+	Completeness ChildSummaryStatus `json:"completeness"`
 }
 
 type ProgressPhase string
@@ -55,12 +72,16 @@ type Progress struct {
 }
 
 type Result struct {
-	Bytes           int64
-	OverlappedBytes int64
-	Err             error
-	Partial         bool
-	SkippedCount    int
-	Warnings        []string
+	Bytes              int64
+	OverlappedBytes    int64
+	Err                error
+	Partial            bool
+	SkippedCount       int
+	Warnings           []string
+	Children           []ChildEntry
+	OtherObservedBytes int64
+	OtherObservedCount int
+	ChildSummaryStatus ChildSummaryStatus
 }
 
 type Limiter struct {
@@ -81,6 +102,8 @@ type partition struct {
 	root           Root
 	path           string
 	skip           bool
+	childName      string
+	childKind      string
 }
 
 type rootPlan struct {
@@ -127,6 +150,9 @@ func (l *Limiter) MeasureWithOptions(
 	if options.MaxWarnings <= 0 {
 		options.MaxWarnings = 10
 	}
+	if options.ChildSummaryLimit > maxChildSummaryEntries {
+		options.ChildSummaryLimit = maxChildSummaryEntries
+	}
 	plans := make([]rootPlan, len(roots))
 	partitions := make([]partition, 0)
 	rootPartitionCounts := make([]int, len(roots))
@@ -151,6 +177,9 @@ func (l *Limiter) MeasureWithOptions(
 		partitionResults[index] = make([]partitionResult, len(plan.partitions))
 		if plan.err != nil {
 			results[index].Err = plan.err
+			if options.ChildSummaryLimit > 0 {
+				results[index].ChildSummaryStatus = ChildSummaryUnavailable
+			}
 			tracker.completeRoot(index)
 		} else if len(plan.partitions) == 0 {
 			tracker.completeRoot(index)
@@ -187,6 +216,15 @@ func (l *Limiter) MeasureWithOptions(
 			)
 		}
 		results[index].Err = errors.Join(errs...)
+		if options.ChildSummaryLimit > 0 {
+			results[index].Children,
+				results[index].OtherObservedBytes,
+				results[index].OtherObservedCount,
+				results[index].ChildSummaryStatus = summarizeChildren(
+				plan, partitionResults[index], options.ChildSummaryLimit,
+				results[index].Partial, results[index].Err,
+			)
+		}
 	}
 	return results
 }
@@ -303,29 +341,175 @@ func planDirectory(
 			return nil, err
 		}
 		if skip {
-			if options.CountSkipped {
+			if options.CountSkipped || options.ChildSummaryLimit > 0 {
 				partitions = append(partitions, partition{
 					rootIndex: rootIndex, partitionIndex: len(partitions), root: root, path: path, skip: true,
+					childName: childName(options, entry.Name()), childKind: childKind(options, entry),
 				})
 			}
 			continue
 		}
 		if entry.Type()&os.ModeSymlink != 0 && root.SymlinkPolicy == SkipSymlinks {
-			if options.CountSkipped {
+			if options.CountSkipped || options.ChildSummaryLimit > 0 {
 				partitions = append(partitions, partition{
 					rootIndex: rootIndex, partitionIndex: len(partitions), root: root, path: path, skip: true,
+					childName: childName(options, entry.Name()), childKind: childKind(options, entry),
 				})
 			}
 			continue
 		}
 		partitions = append(partitions, partition{
 			rootIndex: rootIndex, partitionIndex: len(partitions), root: root, path: path,
+			childName: childName(options, entry.Name()), childKind: childKind(options, entry),
 		})
 	}
 	if len(partitions) == 0 {
 		partitions = append(partitions, partition{rootIndex: rootIndex, root: root, path: root.Path})
 	}
 	return partitions, nil
+}
+
+func childName(options MeasureOptions, name string) string {
+	if options.ChildSummaryLimit <= 0 {
+		return ""
+	}
+	return name
+}
+
+func childKind(options MeasureOptions, entry fs.DirEntry) string {
+	if options.ChildSummaryLimit <= 0 {
+		return ""
+	}
+	switch {
+	case entry.Type()&os.ModeSymlink != 0:
+		return "symlink"
+	case entry.IsDir():
+		return "directory"
+	case entry.Type().IsRegular() || entry.Type() == 0:
+		return "file"
+	default:
+		return "other"
+	}
+}
+
+func summarizeChildren(
+	plan rootPlan,
+	measured []partitionResult,
+	limit int,
+	rootPartial bool,
+	rootErr error,
+) ([]ChildEntry, int64, int, ChildSummaryStatus) {
+	if rootErr != nil && len(plan.partitions) == 0 {
+		return nil, 0, 0, ChildSummaryUnavailable
+	}
+	children, totalObservedBytes, totalCount, partial := summarizeChildPartitions(plan, measured, limit)
+	status := ChildSummaryMeasured
+	if rootPartial || partial {
+		status = ChildSummaryPartial
+	}
+	otherBytes, otherCount := unsummarizedChildTotals(totalObservedBytes, totalCount, children)
+	return children, otherBytes, otherCount, status
+}
+
+func summarizeChildPartitions(
+	plan rootPlan,
+	measured []partitionResult,
+	limit int,
+) ([]ChildEntry, int64, int, bool) {
+	children := make([]ChildEntry, 0, limit)
+	var totalObservedBytes int64
+	totalCount := 0
+	partial := false
+	for index, item := range plan.partitions {
+		if item.childName == "" {
+			continue
+		}
+		totalCount++
+		child, observedBytes, hasObservedBytes, childPartial := summarizeChild(item, childMeasurementAt(measured, index))
+		if hasObservedBytes {
+			totalObservedBytes = saturatedAdd(totalObservedBytes, observedBytes)
+		}
+		partial = partial || childPartial
+		children = insertBoundedChild(children, child, limit)
+	}
+	return children, totalObservedBytes, totalCount, partial
+}
+
+func childMeasurementAt(measured []partitionResult, index int) partitionResult {
+	if index < len(measured) {
+		return measured[index]
+	}
+	return partitionResult{err: errors.New("child measurement result is unavailable")}
+}
+
+func summarizeChild(item partition, measured partitionResult) (ChildEntry, int64, bool, bool) {
+	child := ChildEntry{Name: item.childName, Kind: item.childKind, Completeness: ChildSummaryMeasured}
+	knownBytes := !item.skip && measured.err == nil && !measured.partial
+	if !item.skip && measured.bytes > 0 {
+		knownBytes = true
+	}
+	if knownBytes {
+		observed := measured.bytes
+		child.SizeBytes = &observed
+	}
+	partial := item.skip || measured.err != nil || measured.partial
+	if partial {
+		child.Completeness = ChildSummaryPartial
+	}
+	return child, measured.bytes, knownBytes, partial
+}
+
+func unsummarizedChildTotals(totalObservedBytes int64, totalCount int, children []ChildEntry) (int64, int) {
+	var listedBytes int64
+	for _, child := range children {
+		if child.SizeBytes != nil {
+			listedBytes = saturatedAdd(listedBytes, *child.SizeBytes)
+		}
+	}
+	otherBytes := totalObservedBytes - listedBytes
+	if otherBytes < 0 {
+		otherBytes = 0
+	}
+	otherCount := totalCount - len(children)
+	return otherBytes, otherCount
+}
+
+func insertBoundedChild(children []ChildEntry, child ChildEntry, limit int) []ChildEntry {
+	index := len(children)
+	for i, existing := range children {
+		if childLess(child, existing) {
+			index = i
+			break
+		}
+	}
+	if index >= limit {
+		return children
+	}
+	children = append(children, ChildEntry{})
+	copy(children[index+1:], children[index:])
+	children[index] = child
+	if len(children) > limit {
+		children = children[:limit]
+	}
+	return children
+}
+
+func childLess(left, right ChildEntry) bool {
+	if (left.SizeBytes == nil) != (right.SizeBytes == nil) {
+		return left.SizeBytes != nil
+	}
+	if left.SizeBytes != nil && *left.SizeBytes != *right.SizeBytes {
+		return *left.SizeBytes > *right.SizeBytes
+	}
+	return left.Name < right.Name
+}
+
+func saturatedAdd(left, right int64) int64 {
+	maxInt64 := int64(^uint64(0) >> 1)
+	if right > 0 && left > maxInt64-right {
+		return maxInt64
+	}
+	return left + right
 }
 
 func walkPartition(

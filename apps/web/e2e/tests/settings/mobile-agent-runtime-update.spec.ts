@@ -1,5 +1,9 @@
+import { expectRuntimeVersions } from "./agent-runtime-settings-helpers";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { settledBoundingBox } from "../../helpers/settled-box";
+import { expectTouchDimension } from "../../helpers/touch-targets";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
@@ -23,17 +27,17 @@ test.describe("managed agent runtime updates on mobile", () => {
 
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText("0.62.0 → 0.63.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.63.0");
     const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
     await expect
-      .poll(() => body.evaluate((element) => element.scrollHeight <= element.clientHeight))
+      .poll(() => body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
       .toBe(true);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("mobile-update-preview", {
       caption: "Mobile update preview before approval",
     });
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
-    expect(runtime.postCount()).toBe(1);
+    await expect.poll(() => runtime.postCount()).toBe(1);
     expect(runtime.postTargets()).toEqual(["0.63.0"]);
 
     await runtime.emitUpdate(
@@ -49,9 +53,9 @@ test.describe("managed agent runtime updates on mobile", () => {
       "Updating runtime",
     );
     await body.scrollIntoViewIfNeeded();
-    await expect(
-      body.evaluate((element) => element.scrollHeight > element.clientHeight),
-    ).resolves.toBe(true);
+    await expect
+      .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .toBe(true);
     await expect(testPage.locator("html")).toHaveJSProperty(
       "scrollWidth",
       await testPage.locator("html").evaluate((element) => element.clientWidth),
@@ -65,6 +69,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
@@ -84,8 +89,8 @@ test.describe("managed agent runtime updates on mobile", () => {
       }),
     ).toBeVisible();
     await expect(drawer.getByRole("status").filter({ hasText: "Up to date" })).toBeVisible();
-    await expect(drawer).not.toContainText("0.64.0 → 0.64.0");
-    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveCount(0);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("mobile-update-up-to-date", {
       caption: "Mobile update preview when the managed runtime is up to date",
@@ -94,19 +99,22 @@ test.describe("managed agent runtime updates on mobile", () => {
 
   test("selects an older stable version for rollback in the drawer", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
+    await testPage.setViewportSize({ width: 700, height: 900 });
 
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
     const selector = drawer.getByTestId(`agent-update-version-${runtime.agentName}`);
-    const selectorBox = await selector.boundingBox();
-    expect(selectorBox).not.toBeNull();
-    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    const selectorBox = await settledBoundingBox(selector);
+    expectTouchDimension(selectorBox.height);
     const drawerBefore = await settledBoundingBox(drawer);
     await selector.tap();
     const browser = testPage.getByTestId(`agent-update-version-browser-${runtime.agentName}`);
     await expect(browser).toBeVisible();
     await expect(browser).toHaveAttribute("data-slot", "popover-content");
+    const defaultOption = browser.getByTestId(`agent-update-version-default-${runtime.agentName}`);
+    const defaultOptionBox = await settledBoundingBox(defaultOption);
+    expectTouchDimension(defaultOptionBox.height);
     const browserBox = await settledBoundingBox(browser);
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
@@ -128,7 +136,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     expect(optionBox!.height).toBeGreaterThanOrEqual(44);
     await option.tap();
 
-    await expect(drawer).toContainText("0.62.0 → 0.61.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.61.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(
       "Roll back runtime",
     );
@@ -141,6 +149,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.62.0",
         default_version: "0.64.0",
@@ -173,7 +182,7 @@ test.describe("managed agent runtime updates on mobile", () => {
       .poll(async () => Math.round((await option.boundingBox())?.height ?? 0))
       .toBeGreaterThanOrEqual(44);
     await option.tap();
-    await expect(drawer).toContainText("0.62.0 → 0.70.0");
+    await expectRuntimeVersions(drawer, "0.62.0", "0.70.0");
     expect(runtime.previewTargets()).toEqual(["", "0.70.0"]);
   });
 
@@ -198,4 +207,173 @@ test.describe("managed agent runtime updates on mobile", () => {
     await retryUpdate.tap();
     expect(runtime.postCount()).toBe(2);
   });
+
+  test("presents OpenCode migration choices as touch-safe controls in the drawer", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 600 });
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      agentName: "opencode-acp",
+      displayName: "OpenCode",
+      packageName: "opencode-ai",
+      currentVersion: "1.18.32",
+      defaultVersion: "1.18.32",
+      latestVersion: "1.18.32",
+      previewResponse: {
+        agent_name: "opencode-acp",
+        package: "opencode-ai",
+        current_version: "1.18.32",
+        default_version: "1.18.32",
+        active_version: "1.18.32",
+        effective_version: "1.18.32",
+        target_version: "1.18.32",
+        family: "v1",
+        source: "managed",
+        target_family: "v1",
+        runtime_revision: 7,
+        migration_available: true,
+        operation: "up_to_date",
+        command: ["npm", "exec"],
+        command_string: "npm exec --package=opencode-ai@1.18.32 -- opencode acp",
+      },
+      migrationPreviewResponse: {
+        agent_name: "opencode-acp",
+        package: "@opencode/cli",
+        current_version: "1.18.32",
+        default_version: "2.0.18",
+        active_version: "1.18.32",
+        effective_version: "1.18.32",
+        target_version: "2.0.18",
+        family: "v1",
+        source: "managed",
+        target_family: "v2",
+        runtime_revision: 7,
+        migration_available: true,
+        operation: "migrate",
+        command: ["npm", "exec", "--package=@opencode/cli@2.0.18"],
+        command_string:
+          "npm exec --yes --prefer-online --package=@opencode/cli@2.0.18 -- opencode acp --print-logs --log-level ERROR",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await expect(drawer).toBeVisible();
+    const migrationChoice = drawer.getByTestId(`agent-update-migrate-family-${runtime.agentName}`);
+    await expect(migrationChoice).toHaveCSS("min-height", "44px");
+    const choiceBox = await settledBoundingBox(migrationChoice);
+    expect(choiceBox).not.toBeNull();
+    expect(Math.round(choiceBox!.height)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(choiceBox!.width)).toBeGreaterThanOrEqual(44);
+    expect(runtime.postCount()).toBe(0);
+    await migrationChoice.tap();
+    await expectRuntimeVersions(drawer, "1.18.32", "2.0.18");
+    const info = drawer.getByTestId(`agent-update-info-${runtime.agentName}`);
+    await expect(info).toHaveCSS("height", "44px");
+    await expect(info).toHaveCSS("width", "44px");
+    const infoBox = await info.boundingBox();
+    expect(Math.round(infoBox!.height)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(infoBox!.width)).toBeGreaterThanOrEqual(44);
+    await info.tap();
+    const information = testPage.getByRole("dialog", { name: "Upgrade to managed OpenCode v2" });
+    await expect(information).toBeVisible();
+    await expect(information).toContainText("The standalone CLI remains unchanged.");
+    await information.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(information).toBeHidden();
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText("Stop standalone OpenCode v1 processes");
+    const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+    await expect(body).toHaveCSS("overflow-y", "auto");
+    const commandDetails = drawer.getByTestId(`agent-update-command-${runtime.agentName}`);
+    await expect(commandDetails).not.toHaveAttribute("open");
+    if (prCapture.capturing) {
+      await drawer.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+            .map((animation) => animation.finished),
+        ),
+      );
+      await prCapture.screenshot("mobile-opencode-migration-preview", {
+        caption: "Mobile OpenCode v1-to-v2 migration preview with details available on demand",
+      });
+    }
+    await drawer.getByText("Runtime details", { exact: true }).tap();
+    await commandDetails.locator("summary").tap();
+    await expect(commandDetails).toHaveAttribute("open", "");
+    const command = body.locator("pre");
+    await command.scrollIntoViewIfNeeded();
+    await expect(command).toBeInViewport();
+    const confirm = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await expect(confirm).toBeVisible();
+    const confirmBox = await confirm.boundingBox();
+    expect(confirmBox).not.toBeNull();
+    expect(confirmBox!.height).toBeGreaterThanOrEqual(44);
+    expect(runtime.previewFamilies()).toEqual(["", "v2"]);
+    await confirm.tap();
+    expect(runtime.postBodies()).toEqual([
+      {
+        target_version: "2.0.18",
+        target_family: "v2",
+        expected_runtime_revision: 7,
+      },
+    ]);
+    await expect(testPage.locator("html")).toHaveJSProperty(
+      "scrollWidth",
+      await testPage.locator("html").evaluate((element) => element.clientWidth),
+    );
+  });
+});
+
+test("keeps policy detail and fixed actions reachable in a short phone viewport", async ({
+  testPage,
+}) => {
+  await testPage.setViewportSize({ width: 390, height: 390 });
+  const runtime = await installRuntimeUpdateFixture(testPage);
+  await testPage.goto("/settings/agents");
+  await testPage.getByTestId("runtime-updates-button").tap();
+  await testPage.getByTestId("runtime-manage-versions-claude-acp").tap();
+
+  const drawer = testPage.getByTestId("agent-update-drawer-claude-acp");
+  await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
+  const body = drawer.getByTestId("agent-update-dialog-body-claude-acp");
+  await expect(drawer.getByTestId("runtime-policy-detail-claude-acp")).toBeAttached();
+  await drawer.getByText("Runtime details", { exact: true }).tap();
+  await drawer.getByTestId("agent-update-command-claude-acp").locator("summary").tap();
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
+    .toBe(true);
+  const bodyBox = await body.boundingBox();
+  expect(bodyBox).not.toBeNull();
+  const touch = await testPage.context().newCDPSession(testPage);
+  const touchX = bodyBox!.x + bodyBox!.width / 2;
+  const touchStartY = bodyBox!.y + bodyBox!.height - 24;
+  const touchEndY = Math.max(bodyBox!.y + 24, touchStartY - 140);
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ id: 1, x: touchX, y: touchStartY, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ id: 1, x: touchX, y: touchEndY, radiusX: 1, radiusY: 1, force: 1 }],
+  });
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touch.detach();
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const command = drawer.getByTestId("agent-update-command-claude-acp").locator("pre");
+  await expect(command).toBeVisible();
+  await expect(command).toBeInViewport();
+
+  const confirm = drawer.getByTestId("agent-update-confirm-claude-acp");
+  await expect(confirm).toBeInViewport();
+  const box = (await confirm.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(testPage.viewportSize()!.height);
+  const postResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/claude-acp$/);
+  await confirm.tap();
+  await postResponse;
+  expect(runtime.postBodies()).toHaveLength(1);
 });

@@ -13,10 +13,15 @@ import {
   DockerContainersCard,
   UserNamespacesCard,
 } from "@/components/settings/profile-edit/docker-sections";
+import { DockerNetworkCard } from "@/components/settings/profile-edit/docker-network-card";
+import { DockerStorageLimitsCard } from "@/components/settings/profile-edit/docker-storage-limits-card";
+import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-sections";
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
 
 type DockerSectionsProps = {
+  // Present for a remote Docker profile: the daemon the build targets.
+  remoteExecutorId?: string;
   profile: ExecutorProfile;
   dockerfile: string;
   onDockerfileChange: (v: string) => void;
@@ -25,6 +30,35 @@ type DockerSectionsProps = {
   allowsUserNamespaces: boolean;
   allowUserNamespaces: boolean;
   onAllowUserNamespacesChange: (v: boolean) => void;
+  networks: DockerNetworksFormSlice;
+  storage: DockerStorageFormSlice;
+};
+
+/** The network form slice the card needs, as the profile form exposes it. */
+type DockerNetworksFormSlice = {
+  primaryNetwork: string;
+  setPrimaryNetwork: (v: string) => void;
+  primaryGwPriority: string;
+  setPrimaryGwPriority: (v: string) => void;
+  additionalNetworks: AdditionalNetworkRow[];
+  addAdditionalNetwork: () => void;
+  updateAdditionalNetwork: (index: number, patch: Partial<AdditionalNetworkRow>) => void;
+  removeAdditionalNetwork: (index: number) => void;
+  baselinePrimaryNetwork: string;
+  baselinePrimaryGwPriority: string;
+  baselineAdditionalNetworks: AdditionalNetworkRow[];
+};
+
+type DockerStorageFormSlice = {
+  dockerTmpSize: string;
+  setDockerTmpSize: (value: string) => void;
+  baselineDockerTmpSize: string;
+  dockerLogMaxSize: string;
+  setDockerLogMaxSize: (value: string) => void;
+  baselineDockerLogMaxSize: string;
+  dockerLogMaxFiles: string;
+  setDockerLogMaxFiles: (value: string) => void;
+  baselineDockerLogMaxFiles: string;
 };
 
 export function DockerSections({
@@ -36,6 +70,9 @@ export function DockerSections({
   allowsUserNamespaces,
   allowUserNamespaces,
   onAllowUserNamespacesChange,
+  remoteExecutorId,
+  networks,
+  storage,
 }: DockerSectionsProps) {
   return (
     <>
@@ -46,7 +83,22 @@ export function DockerSections({
         imageTag={imageTag}
         baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
+        remoteExecutorId={remoteExecutorId}
       />
+      <DockerNetworkCard
+        primaryNetwork={networks.primaryNetwork}
+        onPrimaryNetworkChange={networks.setPrimaryNetwork}
+        primaryGwPriority={networks.primaryGwPriority}
+        onPrimaryGwPriorityChange={networks.setPrimaryGwPriority}
+        additionalNetworks={networks.additionalNetworks}
+        onAddAdditionalNetwork={networks.addAdditionalNetwork}
+        onUpdateAdditionalNetwork={networks.updateAdditionalNetwork}
+        onRemoveAdditionalNetwork={networks.removeAdditionalNetwork}
+        baselinePrimaryNetwork={networks.baselinePrimaryNetwork}
+        baselinePrimaryGwPriority={networks.baselinePrimaryGwPriority}
+        baselineAdditionalNetworks={networks.baselineAdditionalNetworks}
+      />
+      <DockerStorageLimitsCard {...storage} />
       {allowsUserNamespaces && (
         <UserNamespacesCard
           enabled={allowUserNamespaces}
@@ -54,7 +106,7 @@ export function DockerSections({
           onChange={onAllowUserNamespacesChange}
         />
       )}
-      <DockerContainersCard profileId={profile.id} />
+      {!remoteExecutorId && <DockerContainersCard profileId={profile.id} />}
     </>
   );
 }

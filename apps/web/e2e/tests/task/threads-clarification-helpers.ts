@@ -17,9 +17,10 @@ export async function attachQuestionRecord(info: TestInfo, name: string, record:
 
 export async function seedLongThreadQuestion(api: ApiClient, seed: SeedData) {
   const tasks = [];
+  // Start the question under test last so neighboring startup cannot consume its MCP deadline.
   for (const [title, scenario] of [
-    ["A long required question", "clarification-multi"],
     ["B neighboring question", "clarification"],
+    ["A long required question", "clarification-multi"],
   ]) {
     const task = await api.createTaskWithAgent(seed.workspaceId, title, seed.agentProfileId, {
       description: `/e2e:${scenario}`,
@@ -38,7 +39,7 @@ export async function seedLongThreadQuestion(api: ApiClient, seed: SeedData) {
     });
     tasks.push(task);
   }
-  return { task: tasks[0], sibling: tasks[1] };
+  return { task: tasks[1], sibling: tasks[0] };
 }
 
 /** Native tab zoom, with neither viewport/device-scale emulation nor CSS zoom. */
@@ -169,6 +170,9 @@ export function questionTargetGeometry(target: Locator) {
         box.left >= clip.left - 1 &&
         box.right <= clip.right + 1,
       hit: !!hit && element.contains(hit),
+      hitTag: hit?.tagName ?? null,
+      hitTestId: hit?.getAttribute("data-testid") ?? null,
+      hitText: hit?.textContent?.trim().slice(0, 80) ?? null,
       footerScrollTop: footer.scrollTop,
       innerScrollTop: inner.scrollTop,
     };
@@ -179,10 +183,12 @@ type QuestionInput = "wheel" | "touch" | "keyboard";
 
 async function scrollQuestion(page: Page, tile: Locator, direction: number, touch: boolean) {
   const area = await tile.getByTestId("clarification-scroll-region").evaluate((inner) => {
-    const box = inner.getBoundingClientRect();
-    const footer = inner
-      .closest('[data-testid="thread-footer-allocation"]')!
-      .getBoundingClientRect();
+    const footerElement = inner.closest('[data-testid="thread-footer-allocation"]')!;
+    const scrollOwner = inner.closest('[data-scroll-owner="thread-footer"]')
+      ? footerElement
+      : inner;
+    const box = scrollOwner.getBoundingClientRect();
+    const footer = footerElement.getBoundingClientRect();
     const top = Math.max(box.top, footer.top, 0);
     const bottom = Math.min(box.bottom, footer.bottom, innerHeight);
     return { x: box.x + box.width / 2, y: (top + bottom) / 2, height: bottom - top };
@@ -212,6 +218,20 @@ async function scrollQuestion(page: Page, tile: Locator, direction: number, touc
       await client.detach();
     }
   }
+  await expect
+    .poll(() =>
+      tile.evaluate(async (element) => {
+        const areas = element.querySelectorAll(
+          '[data-testid="thread-footer-allocation"], [data-testid="clarification-scroll-region"]',
+        );
+        const before = Array.from(areas, (area) => area.scrollTop);
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        return Array.from(areas).every((area, index) => area.scrollTop === before[index]);
+      }),
+    )
+    .toBe(true);
 }
 
 export async function reachQuestionTarget(
@@ -282,7 +302,7 @@ export async function answerLongThreadQuestion(
       await capture.screenshot("submit-reachable");
     }
     if (input === "keyboard") await page.keyboard.press(key);
-    else if (input === "touch") await page.touchscreen.tap(geometry.x, geometry.y);
+    else if (input === "touch") await target.tap();
     else await page.mouse.click(geometry.x, geometry.y);
   };
   try {
@@ -304,12 +324,14 @@ export async function answerLongThreadQuestion(
       "true",
     );
     for (const [index, label] of ["SQLite", "Rust", "Bare metal"].entries()) {
-      await activate(option(label), index === 1 ? "Enter" : "Space");
+      // Return upward from the footer to the first question's options.
+      await activate(option(label), index === 1 ? "Enter" : "Space", index === 0);
       await expect(tile.getByTestId("clarification-step").nth(index)).toHaveAttribute(
         "data-answered",
         "true",
       );
     }
+    await capture.screenshot("all-answers-selected");
     await activate(tile.getByTestId("clarification-submit"), "Enter", true);
   } finally {
     await attachQuestionRecord(info, `${input}-question-hit-targets`, records);
@@ -332,13 +354,17 @@ export async function expectThreadQuestionSubmitted(
 ) {
   await waitForAgentMessage(api, sessionId, "You answered:");
   const { messages } = await api.listSessionMessages(sessionId);
-  const receipt = messages
-    .filter((message) => message.author_type === "agent")
-    .map((message) => message.content)
-    .join("\n");
-  expect(receipt).toMatch(/"db":\s*{\s*"selected_option":\s*"q1_opt3"/);
-  expect(receipt).toMatch(/"language":\s*{\s*"selected_option":\s*"q2_opt3"/);
-  expect(receipt).toMatch(/"deploy":\s*{\s*"selected_option":\s*"q3_opt2"/);
+  const receipts = messages
+    .filter(
+      (message) => message.author_type === "agent" && message.content.includes("You answered:"),
+    )
+    .map((message) => message.content.split("You answered:")[1]);
+  expect(receipts).toHaveLength(1);
+  expect(JSON.parse(receipts[0])).toMatchObject({
+    db: { selected_option: "q1_opt3", selected_label: "SQLite" },
+    language: { selected_option: "q2_opt3", selected_label: "Rust" },
+    deploy: { selected_option: "q3_opt2", selected_label: "Bare metal" },
+  });
   await expect(tile.getByTestId("clarification-overlay-container")).toHaveCount(0);
   await expect(tile.locator(".chat-message-list")).toContainText("You answered:");
 }

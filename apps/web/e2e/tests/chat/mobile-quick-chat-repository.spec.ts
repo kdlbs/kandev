@@ -1,7 +1,19 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
+import { assertDirtyQuickChatDeletion } from "./quick-chat-dirty-delete-helpers";
 
 test.describe("Quick Chat repository context on mobile", () => {
+  // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.12 AC-UI-TASK-CLEANUP-CONFIRMATION-001.14
+  test("deletes dirty repository quick chat with consent", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await assertDirtyQuickChatDeletion(testPage, apiClient, seedData.repositoryId, true, prCapture);
+  });
+
   test("selects an agent and repository branch without hidden actions", async ({ testPage }) => {
     test.setTimeout(90_000);
     await testPage.goto("/");
@@ -23,14 +35,13 @@ test.describe("Quick Chat repository context on mobile", () => {
       await testPage.getByRole("option").first().click();
     }
     await dialog.getByTestId("add-repository").click();
-    await dialog.getByTestId("repo-chip-trigger").click();
     await testPage.getByRole("option").first().click();
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main", {
       timeout: 10_000,
     });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByTestId("quick-chat-start").click();
+    await startQuickChatFromSetup(dialog, testPage);
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -42,7 +53,7 @@ test.describe("Quick Chat repository context on mobile", () => {
       await secondAgentSelector.click();
       await testPage.getByRole("option").first().click();
     }
-    await dialog.getByTestId("quick-chat-start").click();
+    await startQuickChatFromSetup(dialog, testPage);
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
 
     const originalTabs = dialog.getByTestId("quick-chat-tab");

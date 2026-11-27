@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   getEnvironmentStatusSnapshot,
   resolveExecutorEnvironmentStatus,
+  resolvePluginExecutorEnvironmentStatus,
+  resolvePluginExecutorRetention,
 } from "./executor-environment-status";
-import type { ContainerLiveStatus, TaskEnvironment } from "@/lib/api/domains/task-environment-api";
+import type {
+  ContainerLiveStatus,
+  PluginExecutorLiveStatus,
+  TaskEnvironment,
+} from "@/lib/api/domains/task-environment-api";
 import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 
 const baseEnv: TaskEnvironment = {
@@ -127,5 +133,43 @@ describe("getEnvironmentStatusSnapshot", () => {
       label: "not created",
       tone: "neutral",
     });
+  });
+});
+
+describe("plugin executor status", () => {
+  it.each([
+    ["expired", "Expired", "error"],
+    ["unknown", "Unknown", "warn"],
+    ["unavailable", "Unavailable", "warn"],
+    ["cleanup_pending", "Cleanup pending", "warn"],
+  ] as const)("projects %s without implying a false expiry", (state, label, tone) => {
+    const status: PluginExecutorLiveStatus = {
+      state,
+      retention: "unknown",
+      deadline_passed: state !== "expired",
+    };
+    expect(resolvePluginExecutorEnvironmentStatus(status)).toEqual({ label, tone });
+  });
+
+  it("keeps retention consequence and exact expiry explicit", () => {
+    expect(resolvePluginExecutorRetention("persistent")).toBe("Workspace data is retained.");
+    expect(resolvePluginExecutorRetention("bounded")).toBe(
+      "Workspace data may be lost when compute expires.",
+    );
+    expect(resolvePluginExecutorRetention("unknown")).toBe("Workspace retention is unknown.");
+    const pluginStatus: PluginExecutorLiveStatus = {
+      state: "running",
+      retention: "bounded",
+      expires_at: "2026-09-26T18:00:00Z",
+      deadline_passed: false,
+    };
+    expect(
+      resolveExecutorEnvironmentStatus(
+        { ...baseEnv, executor_type: "plugin_remote" },
+        null,
+        undefined,
+        pluginStatus,
+      ),
+    ).toEqual({ label: "Running", tone: "running" });
   });
 });

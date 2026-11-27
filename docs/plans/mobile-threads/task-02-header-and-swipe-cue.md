@@ -72,3 +72,43 @@ Visually inspect dark phone layouts and a multi-agent thread in the demo.
   HTTPS health and the TLS-verified WebSocket upgrade (101) passed after the
   UI refresh. No personal instance, credentials, commit, or publication used.
 - Physical-device keyboard and Safari behavior remain unverified.
+
+CI follow-up corrects the phone picker/swipe regression's creation-order
+assumption. Threads rank by attention and recency, then retain their rendered
+slots. The failing CI screenshot placed the selected thread at position 3/3;
+the test attempted a left swipe beyond the final column. It now reads the
+rendered order, performs one native touch swipe toward an existing neighbor,
+and requires that exact neighbor's chat to activate. The shared gesture helper
+also supports right swipes without changing held-touch or cleanup semantics.
+
+The directional unit assertion failed with the original helper (start x=306
+instead of 54), then passed after the change. The initial local browser run was
+discarded after a confirmed test-server port collision with another worktree.
+Its picker failure is not evidence of a product defect. The isolated rerun
+uses an explicit free port offset, with no retries or increased timeouts.
+
+Local follow-up checks passed from `apps/web`:
+
+- `pnpm exec vitest run e2e/helpers/mobile-threads-swipe-helpers.test.ts`:
+  three tests passed, including both failure-cleanup cases.
+- `E2E_PORT_OFFSET=0 pnpm e2e:run --host --no-build --project mobile-chrome
+  -- tests/task/mobile-threads-view.spec.ts
+  tests/task/mobile-threads-swipe.spec.ts --retries=0 --repeat-each=3`:
+  all 30 browser runs passed. This includes exact-neighbor activation, held
+  swipe pagination, session picker, phone/tablet transitions, and saved views.
+- `pnpm run typecheck`, scoped zero-warning ESLint, and Prettier checks passed.
+
+Repository catalog validation, full specification lint, and whitespace checks
+passed. Fresh hosted CI and current-base compatibility remain external delivery
+gates; these local results do not mark them complete. Physical-device keyboard,
+Safari, and the feature's previously documented manual gates remain unverified.
+
+
+Final no-retry phone integration check:
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-threads-view.spec.ts tests/task/mobile-threads-swipe.spec.ts tests/task/mobile-create-task-workflow-agent-overrides.spec.ts tests/session/mobile-port-forwarding.spec.ts tests/pr/mobile-pr-watcher-missing-branch.spec.ts tests/task/mobile-launch-failure-recovery.spec.ts tests/session/mobile-transient-turn-runtime-continuity.spec.ts --retries=0 --trace=retain-on-failure`
+passed all 21 cases in 10.7 minutes. This covers the shared seed-origin fixture,
+phone cancellation before any retry dispatch, continuation across viewers,
+retry exhaustion, launch recovery, port actions and native thread navigation.
+Web typecheck, full web ESLint, all twelve changed TypeScript files' Prettier
+checks, and the five seed-origin/swipe unit regressions passed on this source.
+These results do not close manual release gates or substitute for pushed-head CI.

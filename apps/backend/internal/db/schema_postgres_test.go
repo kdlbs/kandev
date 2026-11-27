@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kandev/kandev/internal/db"
@@ -14,6 +15,9 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		created_at TIMESTAMPTZ NOT NULL
 	)`); err != nil {
 		t.Fatalf("create table: %v", err)
+	}
+	if _, err := database.Exec(`CREATE INDEX sample_schema_id_idx ON sample_schema(id)`); err != nil {
+		t.Fatalf("create index: %v", err)
 	}
 
 	exists, err := db.TableExists(database, "sample_schema")
@@ -54,5 +58,20 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 	}
 	if len(missingColumns) != 0 {
 		t.Fatalf("missing table columns = %#v, want empty", missingColumns)
+	}
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{name: "sample_schema_id_idx", want: true},
+		{name: "missing_schema_idx", want: false},
+	} {
+		got, err := db.IndexExistsContext(context.Background(), database, test.name)
+		if err != nil {
+			t.Fatalf("index %s exists: %v", test.name, err)
+		}
+		if got != test.want {
+			t.Errorf("IndexExistsContext(%q) = %v, want %v", test.name, got, test.want)
+		}
 	}
 }

@@ -1,12 +1,11 @@
 ---
 created: 2026-09-10
-updated: 2026-09-23
+updated: 2026-09-26
 status: done
 requirements:
   - REQ-CI-PR-DOCS-001
   - REQ-CI-PR-DOCS-002
   - REQ-CI-PR-DOCS-003
-  - REQ-CI-PR-DOCS-004
 system_design:
   - ../../specs/ci/system-design/pull-request-documentation-coverage.md
 legacy_specs: []
@@ -29,7 +28,6 @@ Public user documentation remains governed by the existing contribution checklis
 ## Technical approach
 
 Use the proposed `.github/scripts/pr-docs.cjs` module for pure policy functions and bounded GitHub reads.
-On code-search rate limits, scan all direct Markdown requirements at the exact head within document and byte limits.
 Use `.github/workflows/pr-docs.yml` for base-controlled execution and the `PR documentation coverage` commit status.
 Reuse the existing Node runtime from GitHub-hosted runners and the built-in test runner; no pnpm dependency installation is needed.
 Register Node and workflow contract tests in `.github/workflows/lint-action-pinning.yml`.
@@ -50,7 +48,6 @@ All named test suites below are proposed files.
 | AC-CI-PR-DOCS-001.1; AC-CI-PR-DOCS-002.1 through .4 | Fake GitHub adapter exercises draft/fork events and label transitions |
 | AC-CI-PR-DOCS-003.1 through .3 | API failures, pagination caps, stale head/label reads, path and content restrictions |
 | AC-CI-PR-DOCS-003.4 through .5 | Per-member queue evaluation, active prefix reevaluation, mismatched queue boundaries, override removal, and rollout checklist |
-| AC-CI-PR-DOCS-004.3 | Rate-limited code search falls back to a complete bounded exact-head requirements scan; duplicates and missing definitions remain visible |
 
 Use a representative #3137 fixture: `fix(worktree)` with runtime recovery paths and no artifacts fails.
 Do not fetch the live PR in unit tests.
@@ -69,6 +66,7 @@ Live smoke tests and required-check activation are deployment steps, not complet
 - [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
 - [x] [Task 04: Exempt the canonical plugin registry source](task-04-exempt-plugin-registry-source.md)
 - [x] [Task 05: Exempt CI infrastructure paths](task-05-exempt-ci-paths.md)
+- [x] [Task 06: Exempt architecture-lint tooling](task-06-exempt-architecture-lint-tooling.md)
 
 Execute sequentially. No subagents are authorized.
 
@@ -140,22 +138,30 @@ Task 05 verification completed on 2026-09-21:
 - `zizmor .github/workflows/pr-docs.yml` reported no findings.
 - The specification catalog and linter passed; `git diff --check` passed.
 
-## Amendment: exact-head fallback for code-search rate limits
+## Amendment: architecture-lint tooling
 
-Task 01 now scans every direct Markdown requirement in the exact-head system
-directory when GitHub Code Search returns a rate-limit response. The scan is
-bounded by 200 documents and 4 MiB, reuses the directory listing and file cache,
-and preserves missing and duplicate definition failures. An unavailable
-listing or exceeded bound fails closed.
+The accepted architecture-lint decision places shared linter implementation
+under `scripts/` and reviewed baselines under `config/`, where local Make,
+pre-commit, and GitHub Actions use the same repository tooling. The existing CI
+infrastructure exemption covers only `.github/`, so architecture-lint paths
+otherwise require a delivery package because of location alone.
 
-Verification on 2026-09-23:
+Task 06 adds exact exemptions for `scripts/architecture_lint/**`,
+`scripts/architecture_lint_tests/**`, and `config/architecture-lint/**`, plus
+`scripts/lint-architecture.py` and `scripts/lint-architecture.test.py`. Other
+scripts and configuration remain covered, and any mixed change with a
+non-exempt path still requires linked delivery context. Renames continue to
+classify both old and new paths, and merge-group members remain independent.
 
-- 85 validator tests, including HTTP 403/429 fallback, duplicate definitions,
-  missing listings, and exceeded document bounds.
-- 7 PR documentation workflow contract tests and 9 action-pinning tests passed.
-- All 24 workflow files passed action-pinning lint; `zizmor .github/workflows/pr-docs.yml` reported no findings.
-- The specification catalog and full specification lint passed; `git diff --check` passed.
-- A local replay of the changed PR tree with Code Search forced to rate-limit returned covered for 9 work orders using one directory scan.
+Task 06 verification completed on 2026-09-26:
+
+- 87 validator tests and 7 workflow contract tests passed.
+- The specification catalog validated 309 decisions and 1183 specifications;
+  the specification linter and `git diff --check` passed.
+- A read-only fixture from PR #2234 head
+  `ada835c937ed6e57822ba5b8a7fa7239be0834fa` classified all 21 changed paths
+  as exempt. GitHub reported the PR as merged during this check. The fixture
+  does not publish a GitHub status.
 
 ## Risks
 
@@ -172,3 +178,4 @@ Verification on 2026-09-23:
 - [Requirements](../../specs/ci/requirements/pull-request-documentation-coverage.md)
 - [System design](../../specs/ci/system-design/pull-request-documentation-coverage.md)
 - [Decision](../../decisions/2026-09-10-pr-documentation-coverage.md)
+- [Absent merge queue label reevaluation follow-up](../pr-docs-absent-queue/plan.md)

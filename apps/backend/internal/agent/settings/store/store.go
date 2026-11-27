@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	// ErrProfileChanged is returned by DuplicateAgentProfile when a source
-	// row changed between the caller's read and the transactional insert, so
+	ErrProfileOrderAgentNotFound = errors.New("agent not found")
+	ErrProfileOrderSetMismatch   = errors.New("profile order does not match current global profile set")
+	// ErrProfileChanged means the source profile row changed between the caller's read and the transactional insert, so
 	// the copy would not reflect a consistent snapshot. Callers retry on a
 	// fresh read.
 	ErrProfileChanged = errors.New("source profile changed during duplicate")
@@ -53,6 +54,9 @@ type Repository interface {
 	// otherwise ErrProfileChanged is returned and no row is created.
 	DuplicateAgentProfile(ctx context.Context, input DuplicateAgentProfileInput) error
 	UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error
+	// UpdateAgentProfileWithEnabledIntent preserves the stored enabled value
+	// when enabled is nil and returns the written value in profile.Enabled.
+	UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error
 	UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error)
 	DeleteAgentProfile(ctx context.Context, id string) error
 	GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error)
@@ -70,6 +74,8 @@ type Repository interface {
 	// decides what that means, not this method.
 	GetAgentProfileTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.AgentProfile, bool, error)
 	ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
+	ReorderAgentProfiles(ctx context.Context, agentID string, orderedIDs []string) (revision int64, changed bool, err error)
+	GetAgentProfileOrderSnapshots(ctx context.Context, agentIDs []string) (map[string]AgentProfileOrderSnapshot, error)
 	// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
 	// profile rows. Seeding paths use this to distinguish a fresh agent that
 	// has never been provisioned (no rows at all -> seed a default) from one
@@ -100,6 +106,20 @@ type AgentProfileModelAdopter interface {
 	UpdateAgentProfileModelIfEmpty(ctx context.Context, profileID, model string) (bool, error)
 }
 
+// AgentProfileSelectionIntent extends ordinary profile updates with an atomic
+// supplied-field rule for Copilot plugin selections. A nil intent preserves
+// the committed column inside the same UPDATE, so a concurrent selection
+// commit cannot be overwritten by a stale read/modify/write snapshot. The
+// committed value is written back to profile.CopilotSelectedPlugins.
+type AgentProfileSelectionIntent interface {
+	UpdateAgentProfileWithSelectionIntent(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		enabled *bool,
+		selection *[]string,
+	) error
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the
@@ -109,6 +129,10 @@ type DynamicProfileRepository interface {
 	GetDynamicAgentProfile(ctx context.Context, profileID string) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error)
 	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
 	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
+	// DeleteDynamicAgentRoutesForDeletedProfiles removes routes that point at
+	// executionProfileID from soft-deleted dynamic parents, so a deleted
+	// candidate does not stay referenced by configuration that can never run.
+	DeleteDynamicAgentRoutesForDeletedProfiles(ctx context.Context, executionProfileID string) (int64, error)
 }
 
 // AtomicDynamicProfileRepository updates the base profile row and its
@@ -122,5 +146,13 @@ type AtomicDynamicProfileRepository interface {
 		dynamic *models.DynamicAgentProfile,
 		expectedVersion int64,
 		routes []models.DynamicAgentRoute,
+	) error
+	UpdateAgentProfileWithDynamicEnabledIntent(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		dynamic *models.DynamicAgentProfile,
+		expectedVersion int64,
+		routes []models.DynamicAgentRoute,
+		enabled *bool,
 	) error
 }

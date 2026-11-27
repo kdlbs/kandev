@@ -82,6 +82,11 @@ export interface LinearLabel {
   color?: string;
 }
 
+export interface LinearProject {
+  id: string;
+  name: string;
+}
+
 export interface LinearUser {
   id: string;
   name: string;
@@ -100,12 +105,19 @@ export interface LinearSearchFilter {
   priorities?: (0 | 1 | 2 | 3 | 4)[];
   /** Issue labels (OR semantics — match any). */
   labelIds?: string[];
+  /** Issue projects (OR semantics — match any). */
+  projectIds?: string[];
   /** Filter by issue creator UUID. */
   creatorId?: string;
   /** Inclusive lower bound on point estimate. */
   estimateMin?: number;
   /** Inclusive upper bound on point estimate. */
   estimateMax?: number;
+  /**
+   * Watch-only: skip issues whose Linear blockers are not all completed. Not a
+   * search condition, so it does not make a filter non-empty on its own.
+   */
+  requireBlockersDone?: boolean;
 }
 
 export type LinearIssueSortBy =

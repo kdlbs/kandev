@@ -17,7 +17,7 @@ func normalizeWorkspaceSourcesForCreation(req *CreateTaskRequest) error {
 	if req.WorkspaceSources == nil {
 		return nil
 	}
-	if len(req.Repositories) > 0 || strings.TrimSpace(req.WorkspacePath) != "" {
+	if req.Repositories != nil || strings.TrimSpace(req.WorkspacePath) != "" {
 		return fmt.Errorf("%w: workspace_sources cannot be combined with repositories or workspace_path", ErrInvalidWorkspaceSource)
 	}
 	if req.WorkspacePolicy != nil && req.WorkspacePolicy.Mode == workspaceModeInheritParent {

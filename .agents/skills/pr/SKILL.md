@@ -17,7 +17,7 @@ checks, and push. Ready PR monitoring and remediation continue through
 > - URL contains `gitlab` (e.g. `gitlab.com`, `gitlab.acme.corp`) → use the **GitLab flow** at the bottom of this file.
 > - For self-managed hosts, the user's repository configuration determines the host.
 >
-> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, use any available GitHub tools in the environment (e.g. MCP GitHub tools).
+> **GitHub tool selection:** The GitHub flow uses `gh` CLI by default. If `gh` is unavailable or fails, including a 401 authentication error, use structured GitHub connector/API tools for PR, check, and review data; authentication failure is unknown state, never clean state.
 > **GitLab tool selection:** The GitLab flow prefers `glab` CLI when available; otherwise it shells `curl` against the REST v4 API using `$GITLAB_TOKEN` (which the agent runtime injects from the user's secrets store).
 > **Azure Repos tool selection:** The Azure flow prefers `az repos pr create` with the Azure DevOps extension. Auth can come from an existing `az login` session or `AZURE_DEVOPS_EXT_PAT`.
 
@@ -57,14 +57,28 @@ explicitly requests task tracking.
    Request explicit user approval before a `workflow_dispatch` or other action
    writes a shared registry, and verify the target tag/digest exists.
 
-4. **Screenshots — capture and validate before publication.** For a UI-visible
-   change, capture fresh screenshots for every affected viewport before creating
-   the PR. When the changed surface is structurally absent on another viewport,
-   record that rationale instead of capturing an unrelated screen.
+4. **Screenshots — capture and validate before publication.** For GitHub UI
+   changes, choose the publication route in step 7 before capture. Check native
+   attachment prerequisites only when using native uploads. For
+   every host, capture fresh screenshots for every affected viewport of a
+   UI-visible change before creating the PR. For repository UI, use
+   `/playwright-cli` with an isolated headless
+   session or the managed `apps/web` E2E runner. See step 7 for capture routing
+   and blocker classification. When the changed surface is structurally absent
+   on another viewport, record that rationale instead of capturing an unrelated
+   screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
-   the recipe in step 7. If capture is impossible, report the concrete blocker
-   and stop before PR publication. For non-UI changes, record that screenshots
-   are not required and continue.
+   the recipe in step 7. If capture is impossible, document the concrete
+   blocker in the PR description and continue publication. The screenshot check
+   will fail until evidence is added or a maintainer applies
+   `no-screenshots-allow`. UI candidate PRs should include a fresh HTTPS
+   Markdown image with descriptive alt text in `## Screenshots` when capture is
+   possible.
+   The `UI screenshots` status applies to fork PRs too and checks presence;
+   reviewers assess freshness, visibility, relevance, and affected viewport
+   coverage. Only a maintainer can apply the exact `no-screenshots-allow` label
+   for a false positive or explained capture limitation. For non-UI changes,
+   record that screenshots are not required and continue.
 
 5. **Create the PR.** Before creating, check open PRs for the current branch and
    inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
@@ -97,7 +111,7 @@ explicitly requests task tracking.
    - Remove all HTML comments/placeholders from the final body.
    - Do NOT add tool attribution footers.
    - Before creating the PR, self-check that the final body has no `<!--`, no empty required sections, and no placeholder text.
-   - If the diff touches user-visible UI, append the already captured assets in a `## Screenshots` section after the PR is created (step 7) — don't add a placeholder for it here.
+   - If the diff touches user-visible UI, add the already captured assets under the template's `## Screenshots` heading after the PR is created (step 7).
    ```bash
    test -f .github/pull_request_template.md
    # Build /tmp/pr-body.md from the template, using comments as instructions
@@ -114,23 +128,46 @@ explicitly requests task tracking.
    preserve the validated title, head, base, and body, and never hand-escape
    Markdown or JSON.
 
+   After creating the PR through `gh pr create` or the REST fallback, fetch it
+   with `gh pr view <number> --json url,state,headRefName,baseRefName,headRefOid`.
+   Verify it is open and its head/base match the intended branch and target
+   before reporting the URL.
+
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
 7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the affected-viewport assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked. Preserve any structural-absence rationale recorded in step 4.
 
    **Capture prerequisite:**
+   - Start repository UI verification with `/playwright-cli` or the managed E2E
+     runner, rather than a connected personal browser or in-app browser tool.
+     The CLI's default profile is isolated; do not use `--extension` or a user's
+     persistent browser profile for disposable repository captures.
    - If `pnpm --dir apps exec playwright-cli list` has no local browser, use the
      managed `apps/web` E2E runner with a disposable capture spec instead of
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - Classify failures against the capability that failed. A connected-browser
+     saved-site denial does not prove that the repository Playwright workflow
+     cannot capture. Honor that tool's denial and any prohibition on alternate
+     routes; do not evade it by changing hosts, ports, profiles, or providers.
+     If alternate execution needs authorization, explain the boundary once and
+     request it. Filesystem sandbox changes can justify retrying a failed local
+     Playwright launch, but do not clear saved browser permissions. Report a
+     capture blocker only with evidence from the authorized capture workflow.
    - After opening a popover or dialog, assert that the intended surface is
      visible and await finite active CSS animations (`element.getAnimations().finished`)
      before capture; do not publish a mid-transition asset.
    - For disposable capture specs, prefer the existing `prCapture` fixture from
      `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
      manifest for PR assets.
+   - Keep captures for one spec file in a single test and use that test's one
+     shared `prCapture` instance. Each test fixture flushes, and
+     `PrAssetCapture.flush()` replaces manifest entries with the same capture
+     key, so multiple tests or default-key instances leave only the last
+     flush's assets. If multiple instances are necessary, give them distinct
+     `captureKey` values or use separate spec files.
    - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
      managed-runner invocation. Capture desktop and mobile assets in one
      invocation when possible; if separate runs are necessary, preserve/merge
@@ -140,6 +177,9 @@ required screenshot embedding in step 7 is complete.
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Start each publication attempt with a fresh PR-scoped capture directory.
+     Before publishing, compare the manifest entries with the explicit expected
+     viewport/capture list and reject stale files or unexpected entries.
    - Before inspecting, compressing, or publishing the assets, verify that every
      manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
      entry is missing, treat the capture as incomplete and restore or recapture
@@ -171,24 +211,67 @@ required screenshot embedding in step 7 is complete.
      fi
      ```
 
-   **Embed (GitHub only — image binaries must never merge into `main`):** GitHub has no public API to upload images into a PR body (drag-and-drop is web-UI only), so publish the images on an orphan commit that can never be merged and reference them with SHA-pinned raw URLs:
-   ```bash
-   blob=$(git hash-object -w apps/web/.pr-assets/shot.png)
-   printf '100644 blob %s\tshot.png\n' "$blob" > /tmp/tree
-   # repeat the hash-object + printf lines, appending one line per file to /tmp/tree
-   tree=$(git mktree < /tmp/tree)
-   commit=$(git commit-tree "$tree" -m "media: screenshots for PR #<N>")
-   git push origin "$commit:refs/heads/media/pr-<N>-screenshots"
-   ```
-   (A quoting glitch can make the first push report failure — retry with the literal commit SHA.) Reference each image in the PR body under a `## Screenshots` section using GitHub-Flavored Markdown image syntax and dash-named files (no spaces):
-   `![Short descriptive caption](https://raw.githubusercontent.com/<owner>/<repo>/<media-commit-sha>/shot.png)`
-   Bare image URLs render as clickable links instead of previews, so never add a screenshot URL without the surrounding `![alt text](...)` wrapper.
+   **Choose the GitHub publishing route before capture.** Use native attachments
+   when the authenticated actor can upload to the base repository and the host
+   supports them. Otherwise, use the fork fallback below when a suitable public
+   fork is available. The fallback does not require `gh --attach`. See
+   [GitHub's attachment guide](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli)
+   and [the release announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
 
-   Append the section to the PR body:
-   ```bash
-   gh pr edit <PR_NUMBER> --body-file <file>
+   **Native attachments (GitHub only):** Require GitHub CLI **2.99.0 or newer**,
+   confirm `gh pr comment --help` lists `--attach`, and check authenticated
+   repository push access. Determine the target hostname from
+   `git remote get-url origin`. For a custom GitHub hostname, establish its
+   deployment type and attachment support first; GitHub Enterprise Server is
+   unsupported. If support cannot be established, use the fork fallback when
+   available. If installed `gh` is older than 2.99.0, download a current official
+   release to a temporary directory, verify its published checksum, and use
+   that binary for upload without replacing the system install. If native upload
+   prerequisites are unavailable, use the fork fallback when available or
+   report the blocker.
+
+   Keep assets in ignored `apps/web/.pr-assets` for native uploads. Images must
+   be within GitHub's 10 MB upload limit. Add a
+   `## Screenshots` section to a PR-scoped upload comment body using Markdown
+   image embeds with descriptive alt text and matching local paths:
+   ```markdown
+   ![Desktop task dialog](apps/web/.pr-assets/task-dialog-desktop.png)
+   ![Mobile task dialog](apps/web/.pr-assets/task-dialog-mobile.png)
    ```
-   `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
+   Upload before fetching the PR body for its final update. Run from the
+   repository root and repeat `--attach` once per manifest asset:
+   ```bash
+   gh pr comment <PR_NUMBER> --body-file /tmp/pr-screenshots-<PR_NUMBER>.md \
+     --attach apps/web/.pr-assets/task-dialog-desktop.png \
+     --attach apps/web/.pr-assets/task-dialog-mobile.png
+   ```
+   `gh` uploads each file and rewrites its local reference in place, preserving
+   Markdown alt text. Unreferenced attachments are appended at the end, so
+   reference every asset in the owned section. Quote paths containing spaces;
+   attach each file only once. For issue or PR comments, the same repeatable
+   flag works with `gh issue comment` and `gh pr comment`; for an unreferenced
+   image, `--attach 'path/to/shot.png#Descriptive alt text'` supplies its caption.
+   Read the created comment back through the API and require every expected
+   embed to contain an uploaded HTTPS URL with its alt text intact. On a
+   nonzero exit or lost response, inspect the PR's comments before retrying;
+   do not assume the upload or comment creation failed. Recover verified URLs
+   and retry only missing assets. Treat the upload comment as temporary.
+
+   Only after all uploads finish, fetch the live PR body and merge the
+   verified uploaded embeds into its owned screenshot section using the
+   live-body procedure below. Write the merged body with
+   `gh pr edit <PR_NUMBER> --body-file <merged-file>` **without `--attach`**.
+   Never combine attachment uploads with a post-creation body replacement:
+   the upload interval would separate the concurrency check from the write.
+
+   `gh pr edit` can fail on this repo (GraphQL touches the deprecated
+   Projects-classic API), or report success without changing the body. Treat
+   read-back as authoritative. If the intended section is absent, re-fetch
+   and merge the already uploaded URLs before falling back to REST. Never
+   REST PATCH local image paths: REST does not upload attachments. If upload
+   fails, use the fork fallback below when available, or report the blocker.
+   For REST, build the payload with
+   `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
@@ -201,22 +284,44 @@ required screenshot embedding in step 7 is complete.
    does not prevent a truncated or empty JSON response from making `gh` report
    an error after the mutation succeeds. Read the resource back with a
    separate GET and verify the intended change.
+
+   After the PR body is verified, delete the temporary upload comment, then
+   check that every image still loads in an unauthenticated session. If removal
+   breaks an image, post a replacement comment with the embeds and report that
+   the duplication remains necessary for anonymous access.
+   Never leave a duplicate screenshot comment as routine capture evidence.
+
+   **Fork fallback:** If the actor cannot upload against the base repository,
+   use a public fork where the actor has push access. Publish the validated
+   images on a dedicated media branch in that fork and embed immutable,
+   commit-pinned raw image URLs in the PR body. Do not add assets to the PR
+   branch. Verify each URL anonymously and verify the final PR body. If no
+   suitable public fork is available, report the concrete blocker. Fork-scoped
+   attachment uploads may be used when available, but verify anonymous image
+   access after publication; do not assume private or unpublished assets are
+   accessible to reviewers.
+
    **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
    validate payloads without interpolating untrusted Markdown into shell
    syntax. When command output is redirected, piped, or consumed by `jq` or
-   another parser, run the command through `rtk proxy` so stdout is
-   byte-preserving; normal RTK filtering can truncate or annotate machine-readable
-   output. Keep the REST fallback byte-preserving for command substitutions,
+   another parser, run the command directly and preserve stdout byte-for-byte.
+   Keep the REST fallback byte-preserving for command substitutions,
    `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR
    is created, so never PATCH a body reconstructed from the creation-time
-   template or a stale `/tmp/pr-body.md`. Before every post-creation update:
+   template or a stale `/tmp/pr-body.md`.
 
-   1. Fetch the current body from GitHub and keep that pristine live response
+   This live-body procedure applies to every post-creation body edit, not only
+   screenshots. For each generated block, use operation-owned markers and
+   verify that its start and end markers occur exactly once before and after
+   the update.
+
+   1. Complete screenshot uploads first, then fetch the current body from
+      GitHub and keep that pristine live response
       as the merge base:
-      `gh pr view <PR_NUMBER> --json body --jq .body > /tmp/pr-body-latest.md`.
+      `gh pr view <PR_NUMBER> --json body | jq -j .body > /tmp/pr-body-<PR_NUMBER>-latest.md`.
    2. Change only the section owned by this operation. For screenshots, wrap
       the section in `<!-- kandev-screenshots-start -->` and
       `<!-- kandev-screenshots-end -->` markers (or replace the existing
@@ -224,24 +329,38 @@ required screenshot embedding in step 7 is complete.
       byte outside that range, including
       `<!-- kandev-preview-start --> ... <!-- kandev-preview-end -->`.
    3. Build a separate merged candidate, then re-fetch the live body immediately
-      before PATCH and compare the two live snapshots (not the candidate with a
-      snapshot). Use PR-scoped temporary filenames, fail immediately on a
+      before `gh pr edit` or REST PATCH and compare the two live snapshots
+      (not the candidate with a snapshot). Do not upload assets between this
+      check and the write. Use PR-scoped temporary filenames, fail immediately on a
       differing `cmp`, and discard any payload on failure; never reuse a prior
       `/tmp` payload. Extract JSON bodies byte-for-byte with `jq -j .body` before
       `cmp`; `jq -r .body` appends a newline and can report a false mismatch.
-      Verify the payload contains this PR's current body and required sentinels
-      before PATCH. If it changed, re-fetch and merge again; do not overwrite
-      the newer body.
-   4. After PATCH, read the body back and verify both the intended change and
-      all previously present sentinel sections are still present.
+      Verify the candidate or payload contains this PR's current body and
+      required sentinels before writing. If it changed, re-fetch and merge
+      again; do not overwrite the newer body.
+   4. After writing, read the body back and verify both the intended change and
+      all previously present sentinel sections are still present. For edits to
+      evidence or validation text, compare claims about files, tests, and
+      commands with the latest verification and correct stale counts before
+      reporting the PR. A body mutation can start fresh documentation/check
+      work and invalidates the prior PR snapshot, so refresh `pr-state` and
+      `pr-resolve` and rerun the appropriate `pr-await` wait before treating
+      the PR as complete.
 
    The REST PATCH endpoint replaces the complete body and does not provide a
    convenient description-level compare-and-swap, so this fetch/merge/check
    sequence is required even when the edit appears small.
 
-   Before treating screenshot publication as complete, inspect the submitted body and verify every screenshot entry is a Markdown image embed (`![...](https://raw.githubusercontent.com/.../*.png)`) rather than a bare URL. Use `gh pr view <PR_NUMBER> --json body --jq .body` for this check.
+   Before treating screenshot publication as complete, read the submitted body
+   with `gh pr view <PR_NUMBER> --json body --jq .body`. Require exactly the
+   expected screenshot entries, each a Markdown image embed pointing to an
+   uploaded HTTPS asset, with its descriptive alt text intact. Reject unresolved
+   local paths, bare image links, duplicate entries, or missing viewport assets.
 
-   Never commit the screenshot binaries to the PR branch itself — only to the throwaway `media/pr-<N>-screenshots` ref (`git rm` them from the PR branch tip if they were committed there earlier; with squash-merge, deleting at tip is enough). The `docs/screenshots/` directory is for product/docs imagery that is meant to merge — don't confuse the two. The media branch must survive branch-cleanup sweeps; deleting it 404s the images in the PR body, so don't treat "unmerged branch" as automatically safe to delete.
+   Never commit PR screenshot binaries to the PR branch. If already tracked,
+   remove them from its tip with `git rm`. `docs/screenshots/` is for product
+   documentation imagery intended to merge. Preserve legacy media refs still
+   referenced by existing PRs; deleting them breaks those historical embeds.
 
 8. **Report the PR URL** after all applicable steps are complete. For a ready
 GitHub PR, continue with `/pr-fixup` in the same conversation when requested.
@@ -290,7 +409,7 @@ Notes:
 
 When `git remote get-url origin` points at a GitLab host, use the same preflight
 (steps 1-4) and create a Merge Request for step 5. Skip the GitHub fixup
-handoff and the GitHub-only orphan-ref embedding portion of step 7, but do not
+handoff and the GitHub-only attachment portion of step 7, but do not
 skip screenshot capture. For a UI-visible change, capture and validate the
 required assets, including the synthetic/redaction gate, then attach them to
 the MR when supported or return fresh asset paths as an explicit attachment

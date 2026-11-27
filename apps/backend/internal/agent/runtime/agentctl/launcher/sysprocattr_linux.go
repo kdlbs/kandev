@@ -9,11 +9,11 @@ import "syscall"
 // ANY parent exit, including SIGKILL, so it must be omitted entirely when
 // the agent-survival capability is engaged for this launch
 // (AC-EXECUTORS-SURVIVAL-001.2 forbids depending on any backend shutdown
-// step). Setpgid stays set regardless -- it isolates agentctl from terminal
-// Ctrl+C, unrelated to survival.
+// step). Setsid stays set regardless because it gives cleanup a process
+// session owned by this runtime instead of the backend's terminal session.
 func buildSysProcAttr(survivalEnabled bool) *syscall.SysProcAttr {
 	attr := &syscall.SysProcAttr{
-		Setpgid: true,
+		Setsid: true,
 	}
 	if !survivalEnabled {
 		attr.Pdeathsig = syscall.SIGTERM

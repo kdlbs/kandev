@@ -4,6 +4,7 @@ import {
   type TaskLaunchRecoveryAction,
 } from "@/lib/types/task-launch-error";
 import type { AgentErrorCause } from "@/lib/types/task-status-summary";
+import { normalizeAgentErrorStorage, storageEvidenceToWire } from "@/lib/session-delivery-storage";
 
 export type LastAgentError = {
   message: string;
@@ -11,6 +12,7 @@ export type LastAgentError = {
   occurredAt?: string;
   agentExecutionId?: string;
   executionId?: string;
+  deliverySubmissionId?: string;
   phase?: string;
   attemptId?: string;
   causes?: AgentErrorCause[];
@@ -18,6 +20,9 @@ export type LastAgentError = {
   remediationUrl?: string;
   code?: string;
   details?: string;
+  startupReason?: string;
+  startupAttempts?: number;
+  startupNpmCode?: string;
   recoveryActions?: TaskLaunchRecoveryAction[];
   taskRepositoryId?: string;
   stamp?: string;
@@ -154,29 +159,228 @@ function readOptionalAgentErrorRecovery(
 }
 
 function readAgentErrorCauses(value: unknown): AgentErrorCause[] {
+  return normalizeAgentErrorCauses(value);
+}
+
+export function normalizeAgentErrorCauses(value: unknown): AgentErrorCause[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((cause): cause is Record<string, unknown> =>
-      Boolean(cause && typeof cause === "object"),
+      Boolean(cause && typeof cause === "object" && !Array.isArray(cause)),
     )
     .slice(0, 2)
-    .map((cause) => ({
-      ...(typeof cause.operation === "string" ? { operation: cause.operation } : {}),
-      ...(typeof cause.code === "string" ? { code: cause.code } : {}),
-      ...(typeof cause.detail === "string" ? { detail: cause.detail } : {}),
-    }))
+    .map(readAgentErrorCause)
     .filter((cause) => Boolean(cause.operation || cause.code || cause.detail));
 }
 
+function readCleanupPromptEvidence(cause: AgentErrorCause, record: Record<string, unknown>) {
+  if (cause.code === "runtime_cleanup_failed" && typeof record.prompt_not_sent === "boolean") {
+    cause.prompt_not_sent = record.prompt_not_sent;
+  }
+}
+
+function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
+  const cause: AgentErrorCause = {
+    ...(boundedString(record.operation, 64)
+      ? { operation: boundedString(record.operation, 64) }
+      : {}),
+    ...(boundedString(record.code, 64) ? { code: boundedString(record.code, 64) } : {}),
+    ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
+  };
+  if (cause.code === "plugin_preparation_failed") return readPluginPreparationCause(cause, record);
+  if (cause.code === "process_exited") return readProcessExitCause(cause, record);
+  readCleanupPromptEvidence(cause, record);
+  const storage = readStorageCauseValue(record.storage);
+  if (storage) cause.storage = storage;
+  return readSelectionCause(cause, record);
+}
+
+function readPluginPreparationCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The selected Copilot plugins could not be prepared.";
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  if (!isKnownPluginPreparationReason(reason)) return cause;
+  cause.reason = reason;
+  const runtimeVersion = safeAgentErrorRuntimeVersion(record.runtime_version);
+  if (runtimeVersion) cause.runtime_version = runtimeVersion;
+  return cause;
+}
+
+function readProcessExitCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  // i18n-exempt: mirrors the safe persisted backend detail; the UI renders localized guidance.
+  cause.detail = "The agent exited before startup completed.";
+  cause.reason =
+    record.reason === "mise_config_untrusted" ? "mise_config_untrusted" : "unclassified";
+  const exitCode = readProcessExitCode(record.exit_code);
+  if (exitCode !== undefined) cause.exit_code = exitCode;
+  return cause;
+}
+
+function readProcessExitCode(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < 0 || value > 4294967295) return undefined;
+  return value;
+}
+
+function readSelectionCause(
+  cause: AgentErrorCause,
+  record: Record<string, unknown>,
+): AgentErrorCause {
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  if (!isKnownSelectionReason(cause.code, reason)) return cause;
+  cause.reason = reason;
+  if (cause.code === "model_unavailable" || cause.code === "model_selection_failed") {
+    const requested = safeAgentErrorSelector(record.requested_model);
+    const effective = safeAgentErrorSelector(record.effective_model);
+    const attempted = safeAgentErrorSelector(record.attempted_model);
+    if (requested) cause.requested_model = requested;
+    if (effective) cause.effective_model = effective;
+    if (attempted) cause.attempted_model = attempted;
+  } else if (cause.code?.startsWith("thinking_level_")) {
+    cause.requested_setting = safeAgentErrorSelector(record.requested_setting);
+    cause.effective_setting = safeAgentErrorSelector(record.effective_setting);
+    cause.setting_config_id = safeAgentErrorSelector(record.setting_config_id);
+    if (record.setting_source === "agent_profile" || record.setting_source === "session_override")
+      cause.setting_source = record.setting_source;
+  } else {
+    const requested = safeAgentErrorSelector(record.requested_mode);
+    const effective = safeAgentErrorSelector(record.effective_mode);
+    if (requested) cause.requested_mode = requested;
+    if (effective) cause.effective_mode = effective;
+  }
+  if (typeof record.prompt_not_sent === "boolean") {
+    cause.prompt_not_sent = record.prompt_not_sent;
+  }
+  return cause;
+}
+
+function isKnownPluginPreparationReason(reason: string): boolean {
+  return [
+    "cli_unavailable",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "invalid_inventory",
+    "legacy_errors",
+    "runtime_unsupported",
+    "plugin_loading_unsupported",
+    "unsupported_launch_context",
+    "metadata_unavailable",
+    "ambiguous_identity",
+    "missing_root",
+    "manifest_mismatch",
+    "unsafe_root",
+    "builtin_not_mountable",
+    "external_not_mountable",
+    "unsupported_source",
+    "manual_mount_conflict",
+    "policy_unverified",
+  ].includes(reason);
+}
+
+function safeAgentErrorRuntimeVersion(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) return undefined;
+  if (new TextEncoder().encode(value).length > 256) return undefined;
+  const stableSemver =
+    /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+  return stableSemver.test(value) ? value : undefined;
+}
+
+function readStorageCauseValue(value: unknown): AgentErrorCause["storage"] | undefined {
+  const storage = normalizeAgentErrorStorage(value);
+  return storage ? storageEvidenceToWire(storage) : undefined;
+}
+
+function boundedString(value: unknown, maxLength: number): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, maxLength) : undefined;
+}
+
+function isKnownSelectionReason(code: string | undefined, reason: string): boolean {
+  switch (code) {
+    case "thinking_level_unavailable":
+    case "model_unavailable":
+      return reason === "requested_not_advertised";
+    case "model_selection_failed":
+      return [
+        "catalog_empty",
+        "selection_unsupported",
+        "application_failed",
+        "selection_missing",
+      ].includes(reason);
+    case "thinking_level_failed":
+    case "permission_mode_failed":
+      return reason === "client_unavailable" || reason === "application_failed";
+    case "thinking_level_unconfirmed":
+    case "permission_mode_unconfirmed":
+      return reason === "confirmation_missing";
+    case "thinking_level_mismatch":
+    case "permission_mode_mismatch":
+      return reason === "effective_mismatch";
+    default:
+      return false;
+  }
+}
+
+function safeAgentErrorSelector(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) return undefined;
+  if (new TextEncoder().encode(value).length > 256 || value.trim() !== value) return undefined;
+  const lower = value.toLowerCase();
+  if (
+    /[\\=@\s\u0000-\u001f\u007f]/u.test(value) ||
+    value.includes("://") ||
+    value.startsWith("/") ||
+    value.startsWith("~") ||
+    /^(?:[a-z]:[\\/])/iu.test(value) ||
+    ["token", "secret", "password", "api_key", "apikey", "bearer "].some((part) =>
+      lower.includes(part),
+    ) ||
+    /^(?:sk-|ghp_|github_pat_|kandev_pat_)/iu.test(value)
+  ) {
+    return undefined;
+  }
+  const segments = value.split("/");
+  if (
+    segments.length > 3 ||
+    segments.some(
+      (segment) =>
+        segment === "." ||
+        segment === ".." ||
+        segment.startsWith(".") ||
+        (segment.length >= 32 && /^[A-Za-z0-9+/=_-]+$/u.test(segment)),
+    )
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 function readStructuredFailureMetadata(record: Record<string, unknown>) {
+  const startupAttempts = record.startup_attempts ?? record.startupAttempts;
   return {
     code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
+    deliverySubmissionId: readFirstOptionalString(record, [
+      "delivery_submission_id",
+      "deliverySubmissionId",
+    ]),
     details: readFirstOptionalString(record, [
       "details",
       "failure_details",
       "failureDetails",
       "error_output",
     ]),
+    startupReason: readFirstOptionalString(record, ["startup_reason", "startupReason"]),
+    ...(typeof startupAttempts === "number" &&
+    Number.isInteger(startupAttempts) &&
+    startupAttempts >= 0
+      ? { startupAttempts }
+      : {}),
+    startupNpmCode: readFirstOptionalString(record, ["startup_npm_code", "startupNpmCode"]),
   };
 }
 

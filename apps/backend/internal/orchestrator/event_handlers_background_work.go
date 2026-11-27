@@ -1,0 +1,525 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"time"
+
+	taskservice "github.com/kandev/kandev/internal/task/service"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+func (s *Service) handleBackgroundWorkUpdatedEvent(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || payload.Data.BackgroundWork == nil {
+		return
+	}
+	obs := *payload.Data.BackgroundWork
+	obs.SessionID = sessionID
+	published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, sessionID)
+	if s.eventBus != nil {
+		subject := events.BuildBackgroundWorkUpdatedSubject(sessionID)
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
+	}
+}
+
+// recordBackgroundWorkObservation persists one observation and returns the
+// projection to publish. Observers that can report the committed row let the
+// publication carry its durable revision, output, and exit status; providers'
+// raw adapter frames lose those fields at the journal boundary.
+func (s *Service) recordBackgroundWorkObservation(
+	ctx context.Context,
+	obs streams.WorkloadRunObservation,
+	taskID, sessionID string,
+) streams.WorkloadRunObservation {
+	if s.backgroundWorkObserver == nil {
+		return obs
+	}
+	if recorder, ok := s.backgroundWorkObserver.(BackgroundWorkRecordingObserver); ok {
+		committed, err := recorder.RecordBackgroundWorkloadObservationWithResult(ctx, obs, taskID, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to record background workload observation",
+				zap.String("session_id", sessionID),
+				zap.String("work_id", obs.WorkID),
+				zap.Error(err))
+			return obs
+		}
+		// An adapter declaration wins over the projected row; a frame without
+		// one keeps the declaration already recorded for this workload. Dynamic
+		// availability always follows the committed state.
+		if obs.Capabilities.HasDeclaration() {
+			committed.Capabilities = obs.Capabilities
+		}
+		committed.Capabilities = streams.ApplyWorkloadActionAvailability(
+			committed.Capabilities,
+			committed.State,
+		)
+		return committed
+	}
+	_ = s.backgroundWorkObserver.RecordBackgroundWorkloadObservation(ctx, obs, taskID, sessionID)
+	return obs
+}
+
+func (s *Service) handleBackgroundWorkOutputEvent(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
+	sessionID := payload.SessionID
+	if sessionID == "" || payload.Data.BackgroundWorkOutput == nil {
+		return
+	}
+	chunk := *payload.Data.BackgroundWorkOutput
+	chunk.SessionID = sessionID
+	if s.backgroundWorkObserver != nil {
+		_ = s.backgroundWorkObserver.AppendBackgroundWorkloadOutput(ctx, chunk, sessionID)
+	}
+	if s.eventBus != nil {
+		subject := events.BuildBackgroundWorkOutputSubject(sessionID)
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkOutput, "orchestrator", &chunk))
+	}
+}
+
+func buildObservationFromNormalized(payload *runtime.AgentStreamEventPayload, originTurnID string) *streams.WorkloadRunObservation {
+	if payload.Data.Normalized == nil {
+		return nil
+	}
+	bw := payload.Data.Normalized.BackgroundWork()
+	if bw == nil {
+		return nil
+	}
+	state := streams.RunStateRunning
+	if bw.Ended || (!bw.Detached && isTerminalToolStatus(payload.Data.ToolStatus)) {
+		state = streams.RunStateCompleted
+		if payload.Data.ToolStatus == agentEventFailed || payload.Data.ToolStatus == agentEventError {
+			state = streams.RunStateFailed
+		}
+	}
+	title := payload.Data.ToolTitle
+	if title == "" {
+		title = payload.Data.ToolName
+	}
+	if title == "" && bw.Kind == streams.BackgroundWorkKindMonitor {
+		title = monitorObservationTitle(payload.Data.Normalized)
+	}
+	workID := bw.WorkID
+	if workID == "" {
+		workID = payload.Data.ToolCallID
+	}
+	obs := &streams.WorkloadRunObservation{
+		SessionID: payload.SessionID,
+		WorkID:    workID,
+		// Only the adapter-declared provider run identity is trusted here.
+		// Deriving it from WorkID would invent a second run for a provider
+		// whose item and process identities differ (native Codex).
+		RunID:        bw.RunID,
+		Kind:         streams.NormalizeWorkloadKind(string(bw.Kind)),
+		Title:        title,
+		State:        state,
+		ParentWorkID: payload.Data.ParentToolCallID,
+		SourceCallID: payload.Data.ToolCallID,
+		OriginTurnID: originTurnID,
+	}
+	if bw.Capabilities != nil {
+		obs.Capabilities = *bw.Capabilities
+	}
+	return obs
+}
+
+func monitorObservationTitle(payload *streams.NormalizedPayload) string {
+	if title := monitorObservationInputTitle(payload); title != "" {
+		return title
+	}
+	if title := monitorObservationOutputTitle(payload); title != "" {
+		return title
+	}
+	return streams.MonitorSubkind
+}
+
+func monitorObservationInputTitle(payload *streams.NormalizedPayload) string {
+	generic := payload.Generic()
+	if generic == nil {
+		return ""
+	}
+	args, ok := generic.Input.(map[string]any)
+	if !ok {
+		return ""
+	}
+	rawInput, ok := args["raw_input"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"description", "command"} {
+		if title, ok := rawInput[key].(string); ok && strings.TrimSpace(title) != "" {
+			return strings.TrimSpace(title)
+		}
+	}
+	return ""
+}
+
+func monitorObservationOutputTitle(payload *streams.NormalizedPayload) string {
+	generic := payload.Generic()
+	if generic == nil {
+		return ""
+	}
+	output, ok := generic.Output.(map[string]any)
+	if !ok {
+		return ""
+	}
+	monitor, ok := output[streams.MonitorViewKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	command, _ := monitor[streams.MonitorViewCommandKey].(string)
+	return strings.TrimSpace(command)
+}
+
+func (s *Service) recordBackgroundWorkObservationFromToolPayload(ctx context.Context, payload *runtime.AgentStreamEventPayload) {
+	if payload.SessionID == "" {
+		return
+	}
+	var obs streams.WorkloadRunObservation
+	switch {
+	case payload.Data.BackgroundWork != nil:
+		obs = *payload.Data.BackgroundWork
+		obs.SessionID = payload.SessionID
+		if obs.OriginTurnID == "" {
+			obs.OriginTurnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
+		}
+	case payload.Data.Normalized != nil:
+		if isMonitorPresentationOnlyToolUpdate(payload) {
+			return
+		}
+		if isSubagentPresentationUpdate(payload) {
+			return
+		}
+		fromNorm := buildObservationFromNormalized(payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+		if fromNorm == nil {
+			return
+		}
+		obs = *fromNorm
+	default:
+		return
+	}
+
+	if s.backgroundWorkObserver != nil {
+		published := s.recordBackgroundWorkObservation(ctx, obs, payload.TaskID, payload.SessionID)
+		if s.eventBus != nil {
+			subject := events.BuildBackgroundWorkUpdatedSubject(payload.SessionID)
+			_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &published))
+		}
+	}
+}
+
+func isMonitorPresentationOnlyToolUpdate(payload *runtime.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil || payload.Data.Type != agentEventToolUpdate ||
+		payload.Data.BackgroundWork != nil || payload.Data.Normalized == nil {
+		return false
+	}
+	work := payload.Data.Normalized.BackgroundWork()
+	return work != nil && work.Kind == streams.BackgroundWorkKindMonitor && work.Ended
+}
+
+// BackgroundWorkSettler ends background workloads whose owning agent process
+// is gone. It is optional on the observer so recorders without durable storage
+// keep working.
+type BackgroundWorkSettler interface {
+	SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error)
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
+}
+
+// BackgroundWorkRecordingObserver optionally reports the committed projection
+// after recording an observation. Publishers use it to carry the durable
+// revision and retained output instead of the adapter's raw frame.
+type BackgroundWorkRecordingObserver interface {
+	RecordBackgroundWorkloadObservationWithResult(
+		ctx context.Context,
+		obs streams.WorkloadRunObservation,
+		taskID, sessionID string,
+	) (streams.WorkloadRunObservation, error)
+}
+
+var _ BackgroundWorkSettler = (*taskservice.Service)(nil)
+var _ BackgroundWorkRecordingObserver = (*taskservice.Service)(nil)
+
+func (s *Service) backgroundWorkSettler() BackgroundWorkSettler {
+	settler, _ := s.backgroundWorkObserver.(BackgroundWorkSettler)
+	return settler
+}
+
+func backgroundWorkCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+}
+
+func (s *Service) settleOpenBackgroundWork(ctx context.Context, sessionID string) {
+	s.settleBackgroundWork(ctx, sessionID, "")
+}
+
+func (s *Service) backgroundWorkProcessGone(ctx context.Context, sessionID string, stoppedExecutionID string) bool {
+	if s.agentManager == nil {
+		return false
+	}
+	probedExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	// A live or uncertain probe keeps the work open: the process can still
+	// report completion, and a late report for an old execution must never
+	// settle a successor's work.
+	running, err := s.probeAgentRunning(ctx, sessionID)
+	if err != nil || running {
+		return false
+	}
+	executionID, identityErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionID != probedExecutionID {
+		return false
+	}
+	row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil {
+		return errors.Is(err, models.ErrExecutorRunningNotFound)
+	}
+	if row == nil {
+		return true
+	}
+	// Startup reconciliation terminalizes a row whose runtime recovery found no
+	// owner and clears its local PID in the same write. The ended status is the
+	// surviving stop evidence: RowProcessLiveness answers Unknown once the PID is
+	// cleared, and a live successor would already have failed the probe above.
+	if executorRowHasEnded(row.Status) {
+		return true
+	}
+	// Stop evidence belongs to an execution; a retained successor still owns
+	// its work when a delayed completion arrives for the previous execution.
+	if stoppedExecutionID != "" && stoppedExecutionID == row.AgentExecutionID {
+		return true
+	}
+	if identityErr == nil && executionID != "" && executionID == row.AgentExecutionID {
+		return true
+	}
+	return s.rowLiveness(row) == models.ProcessLivenessDead
+}
+
+// executorRowHasEnded reports whether the persisted row already records a
+// finished execution. The lifecycle manager clears LocalPID for exactly these
+// statuses, so the status is the stop evidence that survives startup
+// reconciliation.
+func executorRowHasEnded(status string) bool {
+	switch status {
+	case models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) settleBackgroundWork(ctx context.Context, sessionID string, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if !acquired {
+		return
+	}
+	defer release()
+	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+// Teardown callbacks run outside launch admission and can wait for its fence.
+// State-change hooks may already hold it and use the opportunistic path above.
+func (s *Service) settleBackgroundWorkAfterTeardown(ctx context.Context, sessionID, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	release, acquired := s.acquireSessionLifecycleLockWithContext(ctx, sessionID)
+	if !acquired {
+		return
+	}
+	defer release()
+	s.settleBackgroundWorkLocked(ctx, sessionID, stoppedExecutionID)
+}
+
+func (s *Service) acquireSessionLifecycleLockWithContext(ctx context.Context, sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	for {
+		if ctx.Err() != nil {
+			return nil, false
+		}
+		if lock.TryLock() {
+			if ctx.Err() == nil {
+				return lock.Unlock, true
+			}
+			lock.Unlock()
+			return nil, false
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, false
+		case <-timer.C:
+		}
+	}
+}
+
+// settleBackgroundWorkWithoutWaiting is the lifecycle-event path. The publisher
+// of the stop event can be the goroutine that already holds the session
+// lifecycle lock (prompt-readiness replacement stops synchronously publish
+// agent.stopped), so this must never block. It tries the lock once; a holder
+// that ends a process settles in place, and any other holder gets a detached
+// settle after it releases. The stopped execution ID stays bound so a late
+// settle cannot read a successor's liveness as the stopped process being alive.
+func (s *Service) settleBackgroundWorkWithoutWaiting(ctx context.Context, sessionID, stoppedExecutionID string) {
+	if sessionID == "" || s.backgroundWorkSettler() == nil {
+		return
+	}
+	settleCtx, cancel := backgroundWorkCleanupContext(ctx)
+	defer cancel()
+	release, acquired := s.tryAcquireSessionLifecycleLock(sessionID)
+	if acquired {
+		defer release()
+		s.settleBackgroundWorkLocked(settleCtx, sessionID, stoppedExecutionID)
+		return
+	}
+	s.startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID)
+}
+
+func (s *Service) startBackgroundWorkSettleWorker(sessionID, stoppedExecutionID string) {
+	s.backgroundWorkSettleMu.Lock()
+	if s.backgroundWorkSettleStopped {
+		s.backgroundWorkSettleMu.Unlock()
+		return
+	}
+	if s.backgroundWorkSettleCtx == nil {
+		s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	}
+	if s.backgroundWorkSettleWorkers == nil {
+		s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	}
+	workerCtx := s.backgroundWorkSettleCtx
+	workers := s.backgroundWorkSettleWorkers
+	workers.Add(1)
+	s.backgroundWorkSettleMu.Unlock()
+
+	go func() {
+		defer workers.Done()
+		ctx, cancel := context.WithTimeout(workerCtx, sendNowClaimRecoveryTimeout)
+		defer cancel()
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, stoppedExecutionID)
+	}()
+}
+
+func (s *Service) resetBackgroundWorkSettleWorkers() error {
+	s.backgroundWorkSettleMu.Lock()
+	defer s.backgroundWorkSettleMu.Unlock()
+	if !s.backgroundWorkSettleStopped {
+		return nil
+	}
+	if s.backgroundWorkSettleDrain != nil {
+		select {
+		case <-s.backgroundWorkSettleDrain:
+		default:
+			return errors.New("background-work settlement workers are still draining")
+		}
+	}
+	s.backgroundWorkSettleCtx, s.backgroundWorkSettleCancel = context.WithCancel(context.Background())
+	s.backgroundWorkSettleWorkers = &sync.WaitGroup{}
+	s.backgroundWorkSettleDrain = nil
+	s.backgroundWorkSettleStopped = false
+	return nil
+}
+
+func (s *Service) stopBackgroundWorkSettleWorkers() {
+	s.backgroundWorkSettleMu.Lock()
+	s.backgroundWorkSettleStopped = true
+	cancel := s.backgroundWorkSettleCancel
+	workers := s.backgroundWorkSettleWorkers
+	done := s.backgroundWorkSettleDrain
+	startWait := workers != nil && done == nil
+	if startWait {
+		done = make(chan struct{})
+		s.backgroundWorkSettleDrain = done
+	}
+	s.backgroundWorkSettleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if workers == nil {
+		return
+	}
+	if startWait {
+		go func() {
+			workers.Wait()
+			close(done)
+		}()
+	}
+	select {
+	case <-done:
+	case <-time.After(sendNowWorkerShutdownTimeout):
+		s.logger.Warn("timed out waiting for background-work settlement workers during shutdown")
+	}
+}
+
+func (s *Service) settleBackgroundWorkLocked(ctx context.Context, sessionID string, stoppedExecutionID string) {
+	settler := s.backgroundWorkSettler()
+	if settler == nil || sessionID == "" {
+		return
+	}
+	if !s.backgroundWorkProcessGone(ctx, sessionID, stoppedExecutionID) {
+		return
+	}
+	settled, err := settler.SettleOpenBackgroundWorkloads(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to settle open background work",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if s.eventBus == nil {
+		return
+	}
+	subject := events.BuildBackgroundWorkUpdatedSubject(sessionID)
+	for i := range settled {
+		obs := settled[i]
+		_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.BackgroundWorkUpdated, "orchestrator", &obs))
+	}
+}
+
+// settleOrphanedBackgroundWorkOnStartup ends open workloads of every session
+// that has no live agent after a backend restart. A live agent keeps its work
+// open because it can still report completion, and a failed probe is treated
+// as live.
+func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
+	settler := s.backgroundWorkSettler()
+	if settler == nil {
+		return
+	}
+	sessionIDs, err := settler.ListSessionIDsWithOpenBackgroundWork(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list sessions with open background work", zap.Error(err))
+		return
+	}
+	for _, sessionID := range sessionIDs {
+		if row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && row != nil && s.hasPendingRemoteRecovery(sessionID, row.AgentExecutionID) {
+			continue
+		}
+		if s.agentManager != nil {
+			running, err := s.probeAgentRunning(ctx, sessionID)
+			if err != nil || running {
+				continue
+			}
+		}
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, "")
+	}
+}

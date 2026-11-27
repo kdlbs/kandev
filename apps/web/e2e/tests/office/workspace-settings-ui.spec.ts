@@ -1,12 +1,8 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 
 test.describe("Workspace settings UI", () => {
-  test("settings page shows danger zone", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office/workspace/settings");
-    await expect(testPage.getByText(/danger zone/i)).toBeVisible({ timeout: 10_000 });
-  });
-
   test("renaming the workspace persists and updates the sidebar", async ({
     testPage,
     apiClient,
@@ -16,6 +12,8 @@ test.describe("Workspace settings UI", () => {
     let originalName: string | undefined;
     try {
       await testPage.goto("/office/workspace/settings");
+      await expect(officeTopbarTitle(testPage)).toHaveText(/preferences/i, { timeout: 10_000 });
+      await expect(testPage.getByText(/danger zone/i)).toBeVisible();
       const nameInput = testPage.getByPlaceholder("Workspace name");
       await expect(nameInput).toBeVisible({ timeout: 10_000 });
       originalName = await nameInput.inputValue();

@@ -1,11 +1,17 @@
 import type { Task } from "@/components/kanban-card";
-import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import {
+  filterTasksByRepositories,
+  mapSelectedRepositoryIds,
+  taskMatchesRepositorySearch,
+  type RepositorySearchLookup,
+} from "@/lib/kanban/filters";
 import { taskMatchesPriorityFilter } from "@/lib/kanban/priority-filter-tokens";
 import { changeRequestSearchText } from "@/lib/kanban/task-search-index";
 import type { TaskPriority } from "@/lib/types/http";
 
 type FilterTasksOptions = {
   searchQuery?: string;
+  repositoriesById?: RepositorySearchLookup;
   vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;
@@ -25,6 +31,7 @@ export function filterTasks(
   const {
     hiddenStepIds,
     searchQuery,
+    repositoriesById,
     vcsSearchTextByTaskId,
     matchesPluginTaskFilters,
     priorityFilterTokens,
@@ -43,6 +50,7 @@ export function filterTasks(
       (task) =>
         task.title.toLowerCase().includes(query) ||
         (task.description && task.description.toLowerCase().includes(query)) ||
+        taskMatchesRepositorySearch(task, query, repositoriesById) ||
         changeRequestSearchText(task).toLowerCase().includes(query) ||
         (vcsSearchTextByTaskId?.[task.id]?.toLowerCase().includes(query) ?? false),
     );
@@ -58,6 +66,7 @@ export function filterTasks(
 
 type WorkflowTaskProjectionOptions = {
   searchQuery: string;
+  repositoriesById?: RepositorySearchLookup;
   vcsSearchTextByTaskId?: Record<string, string>;
   matchesPluginTaskFilters?: (taskId: string) => boolean;
   hiddenStepIds?: Set<string>;

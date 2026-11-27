@@ -42,6 +42,16 @@
       "note": "This illustrative excerpt does not include persistence code or migrations. Database changes are not verified."
     }
   },
+  "feature_flags": {
+    "coverage": "none",
+    "summary": "The retry policy applies to every delivery after deployment. No feature flag controls this behavior.",
+    "flags": [],
+    "off_ux": {
+      "status": "none",
+      "items": [],
+      "note": "This example changes a background delivery worker. It adds no visible controls or messages."
+    }
+  },
   "architecture": {
     "caption": "The worker checks the retry policy before each send. Exhausted jobs move to the dead-letter queue.",
     "mermaid": "flowchart LR\n  Worker[Delivery worker] --> Policy[Retry policy]\n  Policy --> Sender[Webhook sender]\n  Sender --> Endpoint[Remote endpoint]\n  Policy -- exhausted --> DeadLetter[(Dead-letter queue)]"

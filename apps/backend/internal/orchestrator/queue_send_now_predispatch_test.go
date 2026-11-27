@@ -67,6 +67,24 @@ func (m *preDispatchGateAgentManager) PromptAgentWithDispatchCallback(
 	return result, nil
 }
 
+func (m *preDispatchGateAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 func (m *preDispatchGateAgentManager) releaseFirstDispatch() {
 	select {
 	case <-m.allowFirstDispatch:
@@ -145,7 +163,7 @@ func TestSendQueuedNowSerializesFIFOPredispatchAdmission(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.messageQueue.SetAutoMergeEnabled(false)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	turns := &armedTurnCaptureService{
 		repoTurnService: &repoTurnService{repo: repo},

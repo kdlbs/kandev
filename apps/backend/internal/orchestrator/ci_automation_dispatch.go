@@ -69,6 +69,12 @@ type ciAutomationDispatchParams struct {
 func (s *Service) dispatchCIAutomationPrompt(
 	ctx context.Context, session *models.TaskSession, params ciAutomationDispatchParams,
 ) (ciAutomationDispatchResult, error) {
+	if session == nil {
+		return ciAutomationDispatchResult{}, errors.New("CI automation session is nil")
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, session.ID); err != nil {
+		return ciAutomationDispatchResult{}, err
+	}
 	switch session.State {
 	case models.TaskSessionStateCreated, models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return s.queueOrReplaceCIAutomationPrompt(ctx, session, params, params.AllowNewRound)
@@ -124,6 +130,23 @@ func (s *Service) dispatchCIAutomationPromptToIdleSession(
 	if promptErr != nil {
 		if params.OnRejected != nil {
 			params.OnRejected(turnID, "")
+		}
+		if IsMessageTurnCapacityRefusal(promptErr) {
+			queuedParams := params
+			queuedParams.Metadata = copyCIQueuedMetadata(params.Metadata, turnID)
+			if params.OnQueued != nil {
+				// OnDirectAdmission already consumed this round. Record the
+				// queued receipt without incrementing the round again.
+				queuedParams.OnQueued = func(queueEntryID string, _ bool) error {
+					return params.OnQueued(queueEntryID, true)
+				}
+			}
+			result, queueErr := s.queueOrReplaceCIAutomationPrompt(
+				ctx, session, queuedParams, params.AllowNewRound,
+			)
+			if queueErr == nil {
+				return result, nil
+			}
 		}
 		return ciAutomationDispatchResult{}, promptErr
 	}
@@ -247,6 +270,19 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 	default:
 		return false
 	}
+}
+
+// copyCIQueuedMetadata marks a capacity-deferred CI prompt as already recorded
+// so the queue dispatch does not duplicate its transcript.
+func copyCIQueuedMetadata(meta map[string]interface{}, transcriptID string) map[string]interface{} {
+	queued := make(map[string]interface{}, len(meta)+3)
+	for key, value := range meta {
+		queued[key] = value
+	}
+	queued[metaKeyUserMessageRecorded] = true
+	queued[messagequeue.MetadataDurableTranscriptMessageID] = transcriptID
+	queued[MetaKeyTurnStartAlreadyProcessed] = true
+	return queued
 }
 
 func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string, meta map[string]interface{}) (string, bool) {

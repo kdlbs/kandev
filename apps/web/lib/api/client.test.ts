@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchBlob, fetchJson, setOnUnauthorized } from "./client";
+import { ApiError, fetchBlob, fetchConditionalJson, fetchJson, setOnUnauthorized } from "./client";
 
 const reloadMocks = vi.hoisted(() => ({
   signalBackendReloadRequired: vi.fn(),
@@ -12,6 +12,28 @@ vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
 
 const interlockToken = "replayable-per-boot-value";
 const BACKEND_URL = "http://backend.test";
+const AUTH_UNAVAILABLE_MESSAGE = "authentication temporarily unavailable";
+const PERSISTENCE_UNAVAILABLE_CODE = "persistence_unavailable";
+const SESSION_PATH = "/api/v1/task-sessions/sess-1";
+const SESSION_ETAG_V2 = '"session-v2"';
+const EXPORT_ZIP_PATH = "/api/v1/workspaces/ws-1/automations/export/zip";
+
+function persistenceUnavailableResponse() {
+  return new Response(
+    JSON.stringify({
+      error: AUTH_UNAVAILABLE_MESSAGE,
+      code: PERSISTENCE_UNAVAILABLE_CODE,
+    }),
+    { status: 503, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+function challengedUnauthorizedResponse() {
+  return new Response(JSON.stringify({ error: "authentication required" }), {
+    status: 401,
+    headers: { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" },
+  });
+}
 
 describe("fetchJson", () => {
   afterEach(() => {
@@ -119,6 +141,57 @@ describe("fetchJson", () => {
   });
 });
 
+describe("fetchConditionalJson", () => {
+  const SESSION_ETAG = '"session-v1"';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 304 and its validator without parsing a body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 304, headers: { ETag: SESSION_ETAG } }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const result = await fetchConditionalJson<{ session: { id: string } }>(SESSION_PATH, {
+      baseUrl: BACKEND_URL,
+      init: { headers: { "If-None-Match": SESSION_ETAG } },
+    });
+
+    expect(result).toEqual({ status: "not-modified", etag: SESSION_ETAG });
+    expect(fetcher).toHaveBeenCalledWith(
+      `${BACKEND_URL}${SESSION_PATH}`,
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    );
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("If-None-Match")).toBe(
+      '"session-v1"',
+    );
+  });
+
+  it("parses an updated response and returns its validator", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ session: { id: "sess-1" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: SESSION_ETAG_V2 },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchConditionalJson<{ session: { id: string } }>(SESSION_PATH, {
+        baseUrl: BACKEND_URL,
+      }),
+    ).resolves.toEqual({
+      status: "ok",
+      data: { session: { id: "sess-1" } },
+      etag: SESSION_ETAG_V2,
+    });
+  });
+});
+
 describe("fetchJson response parsing", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -193,7 +266,7 @@ describe("ApiError response classification", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: "forbidden" }), {
+        new Response(JSON.stringify({ error: "forbidden", error_code: "forbidden" }), {
           status: 403,
           headers: { "Content-Type": "application/json" },
         }),
@@ -205,6 +278,7 @@ describe("ApiError response classification", () => {
     ).rejects.toMatchObject({
       name: "ApiError",
       status: 403,
+      errorCode: "forbidden",
       handled: false,
     });
     expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();
@@ -222,14 +296,11 @@ describe("fetchBlob", () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
 
-    const result = await fetchBlob("/api/v1/workspaces/ws-1/automations/export/zip", {
+    const result = await fetchBlob(EXPORT_ZIP_PATH, {
       baseUrl: BACKEND_URL,
     });
 
-    expect(fetcher).toHaveBeenCalledWith(
-      `${BACKEND_URL}/api/v1/workspaces/ws-1/automations/export/zip`,
-      expect.any(Object),
-    );
+    expect(fetcher).toHaveBeenCalledWith(`${BACKEND_URL}${EXPORT_ZIP_PATH}`, expect.any(Object));
     expect(result).toBeInstanceOf(Blob);
     expect(await result.text()).toBe("zip-bytes");
   });
@@ -266,10 +337,116 @@ describe("fetchBlob", () => {
     );
 
     await expect(
-      fetchBlob("/api/v1/workspaces/ws-1/automations/export/zip", {
+      fetchBlob(EXPORT_ZIP_PATH, {
         baseUrl: BACKEND_URL,
       }),
     ).rejects.toBeInstanceOf(ApiError);
+    expect(unauthorized).toHaveBeenCalledOnce();
+  });
+});
+
+describe("authentication persistence unavailable", () => {
+  afterEach(() => {
+    setOnUnauthorized(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a fetchJson 503 in the calling surface and recovers without a login", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(persistenceUnavailableResponse())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ workspaces: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(fetchJson("/api/v1/workspaces", { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 503,
+      message: AUTH_UNAVAILABLE_MESSAGE,
+      body: { code: PERSISTENCE_UNAVAILABLE_CODE },
+    });
+    expect(unauthorized).not.toHaveBeenCalled();
+
+    await expect(fetchJson("/api/v1/workspaces", { baseUrl: BACKEND_URL })).resolves.toEqual({
+      workspaces: [],
+    });
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
+  it("keeps a fetchBlob 503 in the calling surface and recovers without a login", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(persistenceUnavailableResponse())
+      .mockResolvedValueOnce(new Response(new Blob(["zip-bytes"]), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(fetchBlob(EXPORT_ZIP_PATH, { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      status: 503,
+      message: AUTH_UNAVAILABLE_MESSAGE,
+      body: { code: PERSISTENCE_UNAVAILABLE_CODE },
+    });
+    expect(unauthorized).not.toHaveBeenCalled();
+
+    const recovered = await fetchBlob(EXPORT_ZIP_PATH, {
+      baseUrl: BACKEND_URL,
+    });
+    expect(await recovered.text()).toBe("zip-bytes");
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
+  it("keeps a fetchConditionalJson 503 in the calling surface and recovers without a login", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(persistenceUnavailableResponse())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ session: { id: "sess-1" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: SESSION_ETAG_V2 },
+        }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(
+      fetchConditionalJson<{ session: { id: string } }>(SESSION_PATH, {
+        baseUrl: BACKEND_URL,
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: AUTH_UNAVAILABLE_MESSAGE,
+      body: { code: PERSISTENCE_UNAVAILABLE_CODE },
+    });
+    expect(unauthorized).not.toHaveBeenCalled();
+
+    await expect(
+      fetchConditionalJson<{ session: { id: string } }>(SESSION_PATH, {
+        baseUrl: BACKEND_URL,
+      }),
+    ).resolves.toEqual({
+      status: "ok",
+      data: { session: { id: "sess-1" } },
+      etag: SESSION_ETAG_V2,
+    });
+    expect(unauthorized).not.toHaveBeenCalled();
+  });
+
+  it("keeps the challenged-401 sign-in transition for fetchConditionalJson", async () => {
+    const unauthorized = vi.fn();
+    setOnUnauthorized(unauthorized);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(challengedUnauthorizedResponse()));
+
+    await expect(
+      fetchConditionalJson(SESSION_PATH, { baseUrl: BACKEND_URL }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 401 });
     expect(unauthorized).toHaveBeenCalledOnce();
   });
 });

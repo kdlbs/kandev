@@ -89,8 +89,8 @@ type Repository interface {
 	// sessions. It is used by startup recovery to remove rows whose owning
 	// workflow reservation was not committed before a process crash.
 	ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error)
-	// ListDurableDeliveryEntries also includes caller-identified plan-comment
-	// receipts used for crash-safe transcript and prompt delivery.
+	// ListDurableDeliveryEntries also includes managed-input and caller-identified
+	// plan-comment receipts used for crash-safe prompt delivery.
 	ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error)
 
 	// CountBySession returns the number of entries for a session.
@@ -98,8 +98,8 @@ type Repository interface {
 
 	// CountPendingByTaskIDs returns the number of pending entries per task,
 	// keyed by task_id, for every requested task ID (zero when a task has no
-	// pending entries). Pending excludes durable lifecycle rows already
-	// reserved in flight, matching GetStatus semantics. The reserved exclusion
+	// pending entries). Pending excludes durable delivery rows already reserved
+	// in flight, matching GetStatus semantics. The reserved exclusion
 	// is applied in Go via IsReservedInFlight, never by matching JSON in SQL.
 	CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
 
@@ -108,9 +108,8 @@ type Repository interface {
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// ReserveHead returns the lowest-position entry. Ordinary entries are
-	// atomically deleted, matching TakeHead. Durable lifecycle entries remain
-	// stored until AcknowledgeReserved receives the exact reservation returned
-	// by this call after executor acceptance.
+	// atomically deleted, matching TakeHead. Durable delivery entries remain
+	// stored until exact acknowledgement or managed-input start settles them.
 	ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
 
 	// GetAutoRun returns the durable per-session automatic-drain policy. Missing
@@ -125,8 +124,7 @@ type Repository interface {
 	// GetAutoMergeOverride returns nil while the exact session inherits globally.
 	GetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity) (*AutoMergeOverride, error)
 
-	// SetAutoMergeOverride writes an explicit value and advances its session revision.
-	SetAutoMergeOverride(ctx context.Context, identity QueueSessionIdentity, enabled bool) (AutoMergeOverride, error)
+	SetSessionPolicyAndCompact(ctx context.Context, identity QueueSessionIdentity, change SessionPolicyChange, global AutoMergePolicy, globalErr error) (SessionPolicyResult, error)
 
 	// PauseAutoRunIfPending atomically persists OFF only when at least one
 	// visible pending entry remains. Reserved lifecycle rows do not count.
@@ -146,7 +144,7 @@ type Repository interface {
 		identity QueueSessionIdentity,
 	) (*QueuedMessage, bool, error)
 
-	// AcknowledgeReserved removes only the exact lifecycle reservation carried
+	// AcknowledgeReserved removes only the exact retained reservation carried
 	// by msg. A stale delivery attempt cannot remove a newer retry.
 	AcknowledgeReserved(ctx context.Context, msg *QueuedMessage) error
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
@@ -159,6 +157,14 @@ type Repository interface {
 		ctx context.Context,
 		identity QueueSessionIdentity,
 		messages []QueuedMessage,
+	) error
+	// ClearDeliveryAttemptForSession atomically revokes the at-most-once marker
+	// of still-reserved durable receipts whose prompt provably never reached
+	// transport. Reservations and transcript markers are kept.
+	ClearDeliveryAttemptForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+		reserved []QueuedMessage,
 	) error
 	// ReleaseDeliveryReservationForSession makes an unaccepted retained entry
 	// visible again without changing its FIFO position.
@@ -194,6 +200,17 @@ type Repository interface {
 	// AcknowledgeSendNowClaim removes every durable source after the replacement
 	// prompt has been accepted. Ordinary sources were already removed by claim.
 	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
+	// CanReleaseSendNowClaim reports whether the exact claim still owns its
+	// session and no successor owns a surviving source. A false result means the
+	// caller must not mark the message not delivered; callers check this before
+	// writing the status so the claim remains available for retry.
+	CanReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
+
+	// ReleaseSendNowClaim removes the exact open claim and every source row it
+	// still owns, so FIFO cannot deliver a message already reported as
+	// undelivered.
+	ReleaseSendNowClaim(ctx context.Context, claim *SendNowClaim) (bool, error)
 
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an

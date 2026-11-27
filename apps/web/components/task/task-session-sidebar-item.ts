@@ -1,14 +1,19 @@
 import type { KanbanState } from "@/lib/state/slices";
 import type { Repository, TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
+import {
+  statusSummaryRowErrorPreview,
+  statusSummaryTurnError,
+  statusSummaryUnreadSessionIds,
+} from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { taskPRInfoFromSummary } from "./task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
-import { taskColorFacts } from "@/lib/sidebar/task-color-projection";
-import { resolveAutomaticTaskColor } from "@/lib/sidebar/task-color-rules";
+import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
@@ -22,7 +27,8 @@ export type SidebarItemContext = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
-  pendingArchiveTaskIds?: ReadonlySet<string>;
+  manualColors?: Record<string, TaskColor | null>;
+  pendingRemovalTaskIds?: ReadonlySet<string>;
 };
 
 const EMPTY_REPOSITORIES_BY_ID = new Map<string, Repository>();
@@ -82,6 +88,7 @@ function sidebarSessionStatus(
     sessionState: (hasSummary ? primarySession?.state : task.primarySessionState) as
       | TaskSessionState
       | undefined,
+    hasRunningSession: summary?.has_running_session,
     // The task-level MOST-ACTIVE-WINS activity aggregate (ADR-0049) is
     // authoritative for the sidebar row: when no status summary is available,
     // fall back to the task record's own aggregate so multi-session and
@@ -102,7 +109,7 @@ function sidebarStatus(
   const sessionStatus = sidebarSessionStatus(summary, task);
   return {
     ...sessionStatus,
-    agentErrorMessage: statusSummaryActiveErrorPreview(
+    agentErrorMessage: statusSummaryRowErrorPreview(
       summary,
       context.acknowledgedAgentErrors,
       context.dismissedAgentErrors,
@@ -118,16 +125,31 @@ function sidebarStatus(
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
     launchQueue: summary?.launch_queue,
+    quotaWait: summary?.quota_wait,
+    waitReason: resolveWaitReason({
+      primarySessionState: sessionStatus.sessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: summary?.launch_queue,
+      quotaWait: summary?.quota_wait,
+    }),
+    turnError: sidebarTurnError(summary),
     wipQueue: context.wipQueueByTaskId?.get(task.id),
+    unreadSessionIds: statusSummaryUnreadSessionIds(summary),
   };
 }
 
-function isPendingArchive(
+function sidebarTurnError(summary: TaskStatusSummary | null | undefined) {
+  const value = statusSummaryTurnError(summary);
+  if (!value) return null;
+  return { stamp: value.stamp, preview: value.preview, sessionId: value.session_id };
+}
+
+function isPendingRemoval(
   task: KanbanState["tasks"][number],
   context: SidebarItemContext,
 ): boolean {
-  if (task.isArchived === true) return false;
-  return context.pendingArchiveTaskIds?.has(task.id) === true;
+  return context.pendingRemovalTaskIds?.has(task.id) === true;
 }
 
 /** Map a task-level status projection to a sidebar item without session streams. */
@@ -136,14 +158,13 @@ export function buildSidebarItem(
   context: SidebarItemContext,
 ) {
   const status = sidebarStatus(task, context);
-  const facts = taskColorFacts(task, {
+  const color = sidebarTaskColorDisplay(task, {
     workspaceId: context.workspaceId,
     repositoriesById: context.repositoriesById ?? EMPTY_REPOSITORIES_BY_ID,
     stepColorById: context.stepColorById ?? EMPTY_STEP_COLORS,
+    settings: context.automaticColorSettings,
+    manualColor: context.manualColors?.[task.id],
   });
-  const automaticColor = context.automaticColorSettings
-    ? resolveAutomaticTaskColor(context.automaticColorSettings, facts)
-    : null;
 
   return {
     id: task.id,
@@ -155,30 +176,32 @@ export function buildSidebarItem(
     parkedOnBackgroundWork: task.parkedOnBackgroundWork,
     ...status,
     description: task.description,
+    flagNote: task.flagNote,
     workflowId: task._workflowId,
     workflowName: context.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
     workflowStepTitle: workflowStepTitle(task, context.stepTitleById),
-    workspaceId: facts.workspaceId,
+    workspaceId: color.facts.workspaceId,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
-    workflowStepColor: facts.workflowStepColor,
+    workflowStepColor: color.facts.workflowStepColor,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     createdAt: task.createdAt,
     isArchived: task.isArchived === true,
-    isPendingArchive: isPendingArchive(task, context),
+    isPendingRemoval: isPendingRemoval(task, context),
     isFromOffice: task.isFromOffice,
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,
     repositories: resolveTaskRepositorySlugs(task.repositories, context.repositorySlugById),
     repositoryLinks: task.repositories,
-    repositoryRuleIdentities: facts.repositories,
-    automaticColor: automaticColor?.color,
-    automaticColorSource: automaticColor?.source,
+    repositoryRuleIdentities: color.facts.repositories,
+    automaticColor: color.automaticColor?.color,
+    automaticColorSource: color.automaticColor?.source,
+    effectiveColorToken: color.effectiveColorToken,
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
   };

@@ -9,14 +9,14 @@ Use the narrowest test that proves a rule, then cover the real boundary when beh
 
 ## Quick path
 
-1. Start with `make fmt`, `make typecheck`, `make test`, and `make lint`.
-2. Run the focused package or Vitest test for the changed rule.
+1. Format the changed files and run the focused package or Vitest test for the changed rule.
+2. For Go lint, use the changed-package hook below. Use broader local checks when the affected boundary requires them.
 3. Add Playwright coverage for every `apps/web/` behavior change.
 4. Run PostgreSQL, container, real-agent, or desktop layers only when the change crosses that boundary.
 
 ## Standard local checks
 
-From the repository root, format first:
+For an explicitly selected full local audit, run these checks sequentially from the repository root:
 
 ```bash
 make fmt
@@ -28,6 +28,20 @@ make lint
 `make test` runs backend, web, CLI, and repository-script tests. By default, it does **not** run browser Playwright, PostgreSQL-backed cases, real agent adapters, Sprites, real container executors, or a live Tauri launch. PostgreSQL cases do run when `KANDEV_TEST_POSTGRES_DSN` is supplied.
 
 Use `make test-e2e` for the browser suite. It builds the backend and web app before Playwright. Every change under `apps/web/` must add or update a Playwright scenario.
+
+## Local Go lint
+
+The commit hook lints the complete packages containing staged Go files. To check specific changed files from the repository root:
+
+```bash
+bash scripts/lint-go-changed apps/backend/internal/common/gitref/gitref.go
+```
+
+For a committed PR diff, use `pre-commit run go-lint --from-ref <base-sha> --to-ref HEAD`. If the PR targets another branch, set `kandev.lintBaseRef` to its local remote-tracking ref so the wrapper uses the correct comparison base.
+
+The wrapper defaults to `GOMEMLIMIT=3GiB`, `GOMAXPROCS=2`, two lint CPUs, and two Go build workers. Explicit environment values and `GOFLAGS=-p=N` override those defaults; other Go flags are preserved. The memory setting is a soft target for each Go process, not a limit on the combined process tree.
+
+Run lint and race/build suites sequentially. CI retains full-backend lint coverage. `make lint` and `make lint-backend` still select the entire backend; use OS-level resource limits covering subprocesses when running a full local scan. `--new-from-rev` filters reported findings and does not narrow the packages analyzed.
 
 ## Backend tests
 

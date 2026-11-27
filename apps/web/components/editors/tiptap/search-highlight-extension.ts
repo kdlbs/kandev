@@ -41,15 +41,28 @@ function findMatches(doc: PmNode, query: string): PlanSearchMatch[] {
   if (!query) return [];
   const matches: PlanSearchMatch[] = [];
   const re = new RegExp(escapeForRegex(query), "gi");
-  doc.descendants((node, pos) => {
-    if (!node.isText || !node.text) return;
-    const text = node.text;
-    let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(text)) !== null) {
-      matches.push({ from: pos + m.index, to: pos + m.index + m[0].length });
-      if (m.index === re.lastIndex) re.lastIndex++;
-    }
+  doc.descendants((block, pos) => {
+    if (!block.isTextblock) return;
+    let text = "";
+    let start = pos + 1;
+    const flush = () => {
+      re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(text)) !== null) {
+        matches.push({ from: start + match.index, to: start + match.index + match[0].length });
+      }
+      text = "";
+    };
+    block.forEach((child, offset) => {
+      if (!child.isText) {
+        flush();
+        return;
+      }
+      if (!text) start = pos + 1 + offset;
+      text += child.text;
+    });
+    flush();
+    return false;
   });
   return matches;
 }

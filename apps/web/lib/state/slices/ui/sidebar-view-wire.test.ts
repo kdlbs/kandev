@@ -15,8 +15,16 @@ const view: SidebarView = {
     { id: "c2", dimension: "state", op: "in", value: ["review", "in_progress"] },
     { id: "c3", dimension: "titleMatch", op: "matches", value: "fix " },
   ],
-  sort: { key: "lastActivityAt", direction: "desc" },
+  sort: {
+    key: "running",
+    direction: "desc",
+    thenBy: [
+      { key: "color", color: "red", direction: "desc" },
+      { key: "lastActivityAt", direction: "desc" },
+    ],
+  },
   group: "workflow",
+  groupIndent: false,
   collapsedGroups: ["backlog", "review"],
   taskRow: {
     detailsEnabled: true,
@@ -30,7 +38,12 @@ describe("sidebar view wire", () => {
   it("round-trips camelCase <-> snake_case", () => {
     const api = toApiSidebarView(view);
     expect(api.collapsed_groups).toEqual(view.collapsedGroups);
-    expect(api.sort).toEqual(view.sort);
+    expect(api.sort).toMatchObject({ key: "running", direction: "desc" });
+    expect(api.sort.then_by).toEqual([
+      { key: "color", color: "red", direction: "desc" },
+      { key: "lastActivityAt", direction: "desc" },
+    ]);
+    expect(api.group_indent).toBe(false);
     expect(api.filters).toHaveLength(view.filters.length);
     const restored = fromApiSidebarView(api);
     expect(restored).toEqual(view);
@@ -43,9 +56,11 @@ describe("sidebar view wire", () => {
       filters: [],
       sort: { key: "state", direction: "asc" },
       group: "none",
+      group_indent: undefined,
       collapsed_groups: undefined as unknown as string[],
     });
     expect(restored.collapsedGroups).toEqual([]);
+    expect(restored.groupIndent).toBe(true);
   });
 
   it("passes filter values through unchanged (bool / string / array)", () => {
@@ -86,6 +101,7 @@ describe("sidebar view wire", () => {
       filters: view.filters,
       sort: view.sort,
       group: view.group,
+      groupIndent: false,
       taskRow: {
         detailsEnabled: false,
         detailOrder: ["pull_request_number", "relative_time", "repository"],
@@ -96,6 +112,7 @@ describe("sidebar view wire", () => {
 
     const api = toApiSidebarDraft(draft);
     expect(api.task_row?.details_enabled).toBe(false);
+    expect(api.group_indent).toBe(false);
     expect(fromApiSidebarDraft(api)).toEqual(draft);
   });
 
@@ -106,6 +123,7 @@ describe("sidebar view wire", () => {
       filters: [],
       sort: { key: "state", direction: "asc" },
       group: "none",
+      group_indent: undefined,
       collapsed_groups: [],
     });
 

@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-10-09
 owners:
   - tbd
 ---
@@ -23,6 +23,114 @@ Workflow sync keeps a workspace's workflows in lockstep with definition files co
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.1:** **One sync source per workspace.** The provider is a property of the single existing config row, not a new dimension.
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.2:** **GitLab targets are addressed by `project_path`.** GitHub keeps `repo_owner` + `repo_name`.
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.3:** **The GitLab host comes from the workspace's existing GitLab connection.** The sync config stores no host of its own.
+
+### REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002: Settings lifetime
+
+**Intent:** Workflow Sync settings for either GitHub or GitLab shall publish
+results only to the settings lifetime that admitted the action. Leaving that
+view shall not let its delayed completion reload or dismiss a later view.
+This extends this integration-owned capability; workspace authorization remains
+owned by the [workspace authorization contract](../../tasks/requirements/workflow-sync-workspace-authz.md).
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.1:** After a settings view is
+  retired by committed workspace replacement or unmount, its delayed read,
+  save, removal, or forced-sync success or failure shall not replace local
+  configuration or form values, emit feedback, reset pending controls, or
+  refresh the current browser view.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.2:** A retained action or form-input
+  callback from a retired view shall not dispatch a new request or edit the
+  current view. Work admitted before retirement may complete on the server.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.3:** Returning from A through B to A
+  shall create a new settings lifetime; old A work shall remain retired.
+  Independent views shall not retire each other, and a workspace render that
+  never commits shall not retire the visible view.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.4:** Retirement shall reset only
+  that view's pending state. When multiple current operations own the same
+  pending control, an older finalizer shall not clear the newest pending
+  operation's control. This does not order configuration results across reads
+  and writes.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.5:** An admitted save or removal
+  shall preserve its truthful caller outcome: success resolves true and failure
+  resolves false, including after retirement. Suppressing presentation shall
+  not pretend an accepted write failed, cancel it, or reverse it. An action
+  refused before admission shall perform no mutation and report no success.
+  Forced-sync completion shall preserve its existing caller outcome shape.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.6:** Current reads shall still load
+  configuration and report initial-load errors. Current saves and removals
+  shall preserve feedback and caller outcomes; current removal shall refresh
+  workflows. Current forced sync shall preserve success, warnings, returned
+  sync errors, request failures, and refresh only when a result reports changes.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.7:** An admitted dialog save or
+  removal shall dismiss only its still-current open dialog. Closing, reopening,
+  replacing, or unmounting the dialog shall retire its delayed dismissal.
+  A configuration returned by that same current save, or removal's own
+  config/form reset, shall not by itself prevent successful dismissal.
+  A genuine removal target change while the request is pending shall suppress
+  that confirmation's delayed dismissal or failure retry publication. Current
+  failures shall retain the existing error and retry behavior.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.8:** Desktop and phone shall share
+  these lifetime rules through the existing controls. Current form parsing,
+  provider selection, save/reset behavior, status-only background reads,
+  refresh cadence, API shapes, backend authorization, accepted writes, and
+  provider/poller semantics shall remain unchanged. This contract establishes
+  no independent rule for edits made during a same-workspace save.
+
+The [settings lifetime design](../system-design/workflow-sync-settings-lifetime.md)
+defines this clause's technical boundary. Earlier provider requirements and
+the migrated source detail below retain their existing scope.
+
+### REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003: Source draft preservation during Save
+
+**Intent:** Save shall record an accepted source without discarding a newer draft
+or dismissing its dialog. This newly admitted contract extends the earlier
+lifetime scope, which excluded these edits in AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.8.
+
+**Raw draft:** Provider, both providers' identifiers, branch, directory, interval,
+auto-sync choice and displayed link/project-path text before normalization.
+Equality compares all these values with the submitted draft, not the saved
+source or normalized payload.
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.1:** When a current Save succeeds,
+  settings shall record canonical configuration and existing success feedback
+  even with newer edits. Success shall still resolve true under
+  AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.5 when preserving a draft/open dialog.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.2:** When any raw draft value
+  differs from its submitted value when Save is acknowledged, settings shall
+  preserve the complete current draft and keep its still-current dialog open.
+  This includes field/provider edits and valid, invalid or equivalently parsed
+  link text, even when parsed identifiers have not changed.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.3:** When complete raw drafts match
+  at acknowledgement, settings shall adopt canonical editable values/link and
+  dismiss the still-current dialog, including normalized, first and
+  provider-switch Save. Editing away and back to submitted values shall likewise
+  permit adoption/dismissal.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.4:** Reverting to pre-Save stored
+  values while saving a different draft shall preserve that reverted draft and
+  its current open dialog at acknowledgement. Next Save shall submit the retained
+  draft through existing validation/provider rules.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.5:** Current failure shall preserve
+  the complete raw draft/open dialog for retry, show existing error feedback and
+  resolve false. Saving shall settle under existing control ownership. Retained
+  invalid input shall prevent Save until corrected.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.6:** Explicit close/reopen shall
+  preserve existing editable-state behavior and old-dismissal retirement under
+  AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.7. Acknowledgement shall not reopen a
+  closed dialog, dismiss a reopened one, reactivate retired settings or couple
+  independent instances.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.7:** Desktop and phone shall share
+  this acknowledgement behavior through the existing controls. Initial load,
+  status-only background refresh, provider parsing, Delete, Sync now, polling,
+  authorization and API payload/response shapes shall retain their existing
+  contracts. This extension defines no ordering among overlapping operations,
+  transport cancellation, persistent draft, or new layout/copy/navigation.
+
+The [settings lifetime and Save draft design](../system-design/workflow-sync-settings-lifetime.md#save-draft-acknowledgement)
+defines the local acknowledgement boundary. Delivery is tracked in the
+[draft-preservation plan](../../../plans/preserve-workflow-sync-save-drafts/plan.md).
 
 ## Migrated source detail
 
@@ -265,3 +373,6 @@ logged, never fatal to the poller.
 ## Implementation Plan
 
 See `docs/plans/gitlab-workflow-sync/plan.md`.
+
+Settings lifetime delivery is tracked separately in the
+[retirement plan](../../../plans/retire-workflow-sync-navigation/plan.md).

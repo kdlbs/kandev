@@ -1,18 +1,23 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupTaskStorage,
+  wasStorageNoticeDismissed,
+  markStorageNoticeDismissed,
   clearGlobalSidebarWidth,
-  getGlobalSidebarWidth,
+  getEnvLayout,
   getEnvLayoutProfile,
+  getGlobalSidebarWidth,
   getManualRightWidth,
   getOpenFileTabs,
   getStoredAutoScrollEnabled,
   getStoredAutoScrollTop,
+  getChatDraftAttachments,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   markPRPanelOffered,
   restoreAttachmentPreview,
   removeEnvLayoutProfile,
+  setEnvLayout,
   setGlobalSidebarWidth,
   setEnvLayoutProfile,
   setManualRightWidth,
@@ -20,6 +25,7 @@ import {
   setOpenFileTabs,
   setStoredAutoScrollEnabled,
   setStoredAutoScrollTop,
+  setChatDraftAttachments,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
   wasPRPanelOffered,
@@ -197,6 +203,27 @@ describe("manual right width storage", () => {
   });
 });
 
+describe("dockview environment layout storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("reports whether an environment layout write reached session storage", () => {
+    const layout = { panels: {} };
+    expect(setEnvLayout("env-a", layout)).toBe(true);
+    expect(getEnvLayout("env-a")).toEqual(layout);
+
+    const setItem = vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    try {
+      expect(setEnvLayout("env-b", layout)).toBe(false);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+});
+
 describe("dockview layout profile storage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -336,6 +363,27 @@ describe("open file tabs storage", () => {
 });
 
 describe("chat draft attachment storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("does not persist file bytes while an upload is incomplete", () => {
+    const file = new File(["pending"], "pending.txt", { type: "text/plain" });
+    setChatDraftAttachments("session-a", [
+      {
+        id: "pending-file",
+        file,
+        data: "cGVuZGluZw==",
+        mimeType: "text/plain",
+        fileName: file.name,
+        size: file.size,
+        isImage: false,
+      },
+    ]);
+
+    expect(getChatDraftAttachments("session-a")).toEqual([]);
+  });
+
   it("normalizes invalid restored image delivery modes to prompt", () => {
     const restored = restoreAttachmentPreview({
       id: "att-1",
@@ -401,5 +449,25 @@ describe("transcript auto-scroll storage", () => {
     expect(getStoredAutoScrollTop("session-a")).toBeNull();
     expect(getStoredAutoScrollEnabled("session-b")).toBe(false);
     expect(getStoredAutoScrollTop("session-b")).toBe(200);
+  });
+});
+
+// @covers AC-PLATFORM-DELIVERY-STORAGE-DIAGNOSTICS-004.2
+describe("Storage notice dismissal storage", () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("isolates tasks and PR flags, removes deleted tasks, and resets with tab storage", () => {
+    expect(wasStorageNoticeDismissed("task-a")).toBe(false);
+    markStorageNoticeDismissed("task-a");
+    expect(wasStorageNoticeDismissed("task-a")).toBe(true);
+    expect(wasStorageNoticeDismissed("task-b")).toBe(false);
+    expect(wasPRMergedBannerDismissed("task-a")).toBe(false);
+    expect(wasPRClosedBannerDismissed("task-a")).toBe(false);
+    markStorageNoticeDismissed("task-b");
+    cleanupTaskStorage("task-a", []);
+    expect(wasStorageNoticeDismissed("task-a")).toBe(false);
+    expect(wasStorageNoticeDismissed("task-b")).toBe(true);
+    window.sessionStorage.clear();
+    expect(wasStorageNoticeDismissed("task-b")).toBe(false);
   });
 });

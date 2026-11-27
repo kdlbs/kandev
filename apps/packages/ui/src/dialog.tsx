@@ -7,42 +7,18 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
-import {
-  DIALOG_CLOSE_RECOVERY_MS,
-  finishClosingDialogAnimations,
-  subscribeDialogCloseRecovery,
-} from "./lib/dialog-body-lock";
+import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
+import { ModalToastOutlet } from "./modal-toast-outlet";
+
+const DialogModalContext = React.createContext(true);
 
 function Dialog({ onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const finishClosingAnimations = React.useCallback(
-    () => finishClosingDialogAnimations(document),
-    [],
+  const handleOpenChange = useDialogBodyLockRecovery(props.open, onOpenChange);
+  return (
+    <DialogModalContext.Provider value={props.modal !== false}>
+      <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />
+    </DialogModalContext.Provider>
   );
-
-  // Unmount is one way to strand the lock — Radix's animation-based cleanup
-  // never runs when the dialog disappears mid-close.
-  React.useEffect(
-    () => () => {
-      finishClosingAnimations();
-    },
-    [finishClosingAnimations],
-  );
-
-  // Becoming visible again is the other. Dialog roots share one document-level
-  // listener because the body lock and closing portals are document-global.
-  React.useEffect(() => subscribeDialogCloseRecovery(document), []);
-
-  // And the general case: once a close has been requested, the page must be
-  // usable shortly afterwards whether or not animationend ever arrives.
-  const handleOpenChange = React.useCallback(
-    (open: boolean) => {
-      onOpenChange?.(open);
-      if (!open) window.setTimeout(finishClosingAnimations, DIALOG_CLOSE_RECOVERY_MS);
-    },
-    [finishClosingAnimations, onOpenChange],
-  );
-
-  return <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />;
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
@@ -79,14 +55,17 @@ function DialogContent({
   showCloseButton = true,
   overlayClassName,
   enterConfirms = true,
+  toastOutlet = true,
   onKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  toastOutlet?: boolean;
   overlayClassName?: string;
   /** Pressing Enter activates the semantic action button. Default: true. */
   enterConfirms?: boolean;
 }) {
+  const modal = React.useContext(DialogModalContext);
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event);
     if (enterConfirms) handleDialogDefaultActionKeyDown(event);
@@ -104,6 +83,7 @@ function DialogContent({
         {...props}
       >
         {children}
+        {toastOutlet && modal && <ModalToastOutlet />}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">

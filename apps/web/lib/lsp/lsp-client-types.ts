@@ -24,9 +24,9 @@ export type ManagedLspConnection = LSPConnection & {
   configuration: Record<string, unknown>;
   protocolInitialized: boolean;
   diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
+  closedDocuments: Set<string>;
   progress: LspProgressSnapshot;
   registeredProgressTokens: Set<LspProgressToken>;
-  continuityEnabled: boolean;
   leaseId: string | null;
   transportGeneration: number;
   reconnectAttempts: number;
@@ -61,7 +61,6 @@ export type ManagedLspConnectionOptions = {
   generation: number;
   ws: WebSocket;
   configuration: Record<string, unknown>;
-  continuityEnabled?: boolean;
   leaseId?: string | null;
   lspLanguage?: string;
 };
@@ -75,7 +74,6 @@ export function createManagedLspConnection(
     generation,
     ws,
     configuration,
-    continuityEnabled = false,
     leaseId = null,
     lspLanguage = "",
   } = options;
@@ -92,9 +90,9 @@ export function createManagedLspConnection(
     idleTimer: null,
     openDocuments: new Map(),
     diagnosticsByUri: new Map(),
+    closedDocuments: new Set(),
     progress: EMPTY_LSP_PROGRESS,
     registeredProgressTokens: new Set(),
-    continuityEnabled,
     leaseId,
     transportGeneration: 0,
     reconnectAttempts: 0,

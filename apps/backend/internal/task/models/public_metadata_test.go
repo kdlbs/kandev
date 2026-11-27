@@ -13,6 +13,11 @@ func TestPublicTaskMetadataStripsWorkflowMoveMarker(t *testing.T) {
 			"move_id":      "move-abc",
 			"options":      `{"instructions":"secret reviewer note"}`,
 		},
+		MetaKeyTaskManagementDeferredFence: map[string]interface{}{
+			"installation_id": "manager",
+			"instance_key":    "instance",
+			"generation":      int64(2),
+		},
 	}
 
 	public := PublicTaskMetadata(metadata)
@@ -20,12 +25,40 @@ func TestPublicTaskMetadataStripsWorkflowMoveMarker(t *testing.T) {
 	if _, leaked := public[MetaKeyWorkflowMovePending]; leaked {
 		t.Fatal("public metadata must not carry the transient workflow_move_pending marker")
 	}
+	if _, leaked := public[MetaKeyTaskManagementDeferredFence]; leaked {
+		t.Fatal("public metadata must not carry the task management fence")
+	}
 	if _, ok := public["title_generated"]; !ok {
 		t.Fatal("public metadata must preserve unrelated keys")
 	}
 	// The source map is never mutated by the projection.
 	if _, ok := metadata[MetaKeyWorkflowMovePending]; !ok {
 		t.Fatal("PublicTaskMetadata must not mutate the source metadata map")
+	}
+}
+
+func TestPublicTaskMetadataRedactsInterruptedSessionOwnership(t *testing.T) {
+	metadata := map[string]interface{}{
+		MetaKeyInterruptedAt: "2026-11-25T10:00:00Z",
+		MetaKeyInterruptedSessions: map[string]interface{}{
+			"session-1": map[string]interface{}{
+				"incarnation_id": "private-incarnation",
+				"interrupted_at": "2026-11-25T10:00:00Z",
+				"token":          "private-token",
+			},
+		},
+		MetaKeyLegacyInterruptedAt: "2026-11-24T10:00:00Z",
+	}
+
+	public := PublicTaskMetadata(metadata)
+	if _, ok := public[MetaKeyInterruptedSessions]; ok {
+		t.Fatal("public metadata must not expose session interruption ownership")
+	}
+	if _, ok := public[MetaKeyLegacyInterruptedAt]; ok {
+		t.Fatal("public metadata must not expose the legacy interruption timestamp")
+	}
+	if got := public[MetaKeyInterruptedAt]; got != metadata[MetaKeyInterruptedAt] {
+		t.Fatalf("interrupted projection = %v, want %v", got, metadata[MetaKeyInterruptedAt])
 	}
 }
 

@@ -4,6 +4,8 @@ import type { SeedData } from "../../fixtures/test-base";
 import { createStandardProfile } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 
 export async function withTaskActionSettings(api: ApiClient, run: () => Promise<void>) {
   const { settings } = await api.getUserSettings();
@@ -24,7 +26,7 @@ export async function withTaskActionSettings(api: ApiClient, run: () => Promise<
 }
 
 export async function seedActionThreads(api: ApiClient, seed: SeedData) {
-  const profile = await createStandardProfile(api, "thread-task-actions");
+  const profile = await createStandardProfile(api, "thread-task-actions", seed.agentProfileId);
   const source = await api.createWorkflow(seed.workspaceId, "Thread actions source", "simple");
   const { steps } = await api.listWorkflowSteps(source.id);
   const start = steps.find((step) => step.is_start_step);
@@ -96,8 +98,11 @@ export class ThreadActionsPage {
     }
   }
   async press(locator: Locator) {
-    if (this.mobile) await locator.tap();
-    else await locator.click();
+    if (this.mobile) {
+      const drawer = this.page.getByTestId("task-management-drawer");
+      if (await drawer.isVisible()) await waitForFiniteAnimations(drawer);
+      await locator.tap();
+    } else await locator.click();
   }
   async open(taskId: string) {
     await this.trigger(taskId).scrollIntoViewIfNeeded();
@@ -111,8 +116,10 @@ export class ThreadActionsPage {
   }
   async nested(name: string) {
     const option = this.choice(name);
-    if (this.mobile) await option.tap();
-    else {
+    if (this.mobile) {
+      await this.press(option);
+      await expect(this.page.getByTestId("task-management-drawer")).toHaveAccessibleName(name);
+    } else {
       await this.movePointer(option);
       await option.click();
       await expect(option).toHaveAttribute("aria-expanded", "true");
@@ -208,7 +215,7 @@ export async function allTaskActionOutcomes(
   await expect(root.getByRole(mobile ? "button" : "menuitem")).toHaveText([
     "Priority",
     "Move to",
-    "Send to workflow",
+    "Change workflow...",
     "Link",
     "Archive",
     "Delete",
@@ -216,10 +223,15 @@ export async function allTaskActionOutcomes(
   await page.keyboard.press("Escape");
 
   await ui.open(a.id);
-  await ui.nested("Send to workflow");
-  await expect(page.getByTestId(`task-context-workflow-${emptyWorkflow.id}`)).toBeDisabled();
-  await page.keyboard.press("Escape");
-  if (mobile) await page.keyboard.press("Escape");
+  await ui.pick("Change workflow...");
+  const emptyForm = new ChangeWorkflowPage(page, mobile);
+  await expect(emptyForm.form).toBeVisible();
+  await emptyForm.chooseWorkflow(emptyWorkflow.id);
+  await expect(page.getByTestId("change-workflow-no-steps")).toContainText(
+    "This workflow has no steps",
+  );
+  await expect(page.getByTestId("change-workflow-submit")).toBeDisabled();
+  await ui.press(page.getByTestId("change-workflow-cancel"));
 
   await ui.open(a.id);
   await ui.nested("Priority");
@@ -246,9 +258,12 @@ export async function allTaskActionOutcomes(
   await expect.poll(async () => (await api.getTask(a.id)).workflow_step_id).toBe(localStep.id);
 
   await ui.open(a.id);
-  await ui.nested("Send to workflow");
-  await ui.nested(destination.name);
-  await ui.pick("Incoming");
+  await ui.pick("Change workflow...");
+  const changeWorkflow = new ChangeWorkflowPage(page, mobile);
+  await expect(changeWorkflow.form).toBeVisible();
+  await changeWorkflow.chooseWorkflow(destination.id);
+  await changeWorkflow.chooseStep(destinationStep.id);
+  await changeWorkflow.submit();
   await expect
     .poll(async () => (await api.getTask(a.id)).workflow_step_id)
     .toBe(destinationStep.id);

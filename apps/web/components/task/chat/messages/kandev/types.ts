@@ -13,6 +13,7 @@ export type KandevRendererProps = {
   result: unknown;
   status: KandevStatus;
   sessionId?: string;
+  messageId?: string;
   onOpenFile?: (path: string, repo?: string) => void;
 };
 

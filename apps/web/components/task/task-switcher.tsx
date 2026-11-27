@@ -96,6 +96,9 @@ function buildTaskRowProps(
     selectedTaskId: props.selectedTaskId,
     showActivityTime: props.showActivityTime,
     taskRowPresentation: props.taskRowPresentation,
+    unreadMessagesEnabled: props.unreadMessagesEnabled,
+    unreadDotHideDelayMs: props.unreadDotHideDelayMs,
+    displayedSessionId: props.displayedSessionId,
     showRepository: shouldShowRowRepository(props.grouped),
     onSelectTask: handlers.onSelectTask,
     onEditTask: optionalHandler(props, handlers, "onEditTask"),
@@ -116,8 +119,6 @@ function buildTaskRowProps(
     onTogglePin: optionalHandler(props, handlers, "onTogglePin"),
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
-    archivingTaskId: props.archivingTaskId,
-    isArchiving: props.isArchiving,
     selectedTaskIds: props.selectedTaskIds,
     onToggleSelectTask: optionalHandler(props, handlers, "onToggleSelectTask"),
     onSelectTaskRange: optionalHandler(props, handlers, "onSelectTaskRange"),
@@ -164,7 +165,8 @@ function buildGroupSectionProps(
   const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
   return {
     group,
-    subTasksByParentId: grouped.subTasksByParentId,
+    grouping: grouped.groupKey,
+    subTasksByParentId: group.subTasksByParentId ?? grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
     pinnedSet,
@@ -173,6 +175,7 @@ function buildGroupSectionProps(
     collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
+    groupIndent: props.groupIndent,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
     onNestTask: props.onNestTask,
@@ -191,8 +194,7 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
-      role="status"
-      aria-live="polite"
+      role="alert"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >
@@ -256,6 +258,20 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
   return (
     <div>
       {loadErrorNotice}
+      {(props.selectedTaskIds?.size ?? 0) > 0 && props.onClearSelection && (
+        <div className="flex min-h-11 items-center justify-between gap-2 px-3 py-1 text-xs text-muted-foreground">
+          <span role="status">
+            {t("selectedTaskCount", { count: props.selectedTaskIds!.size })}
+          </span>
+          <button
+            type="button"
+            className="min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:min-h-7"
+            onClick={props.onClearSelection}
+          >
+            {t("clearSelection")}
+          </button>
+        </div>
+      )}
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}

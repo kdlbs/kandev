@@ -15,13 +15,23 @@ Its layout wrapper currently snaps between 56 px and the stored expanded width;
 its absolutely positioned aside animates width over 300 ms. Keep that explicit
 collapse/expand behavior. The hover reveal changes only the visual aside.
 
+Shared measurements live in `apps/web/lib/layout/app-sidebar-geometry.ts`:
+320 px is the expanded width baseline and 56 px is the collapsed rail width.
+`AppSidebar` uses both values; the UI state slice uses the expanded value for
+its initial width. This module owns numeric geometry only. Section IDs and
+presentation classes remain in `app-sidebar-constants.ts`. Moving these values
+does not change the saved width or collapse preference. It does not change the
+layout reservation, status-bar position, or phone navigation. See
+[REQ-UI-SIDEBAR-HOVER-001](../requirements/sidebar-hover-reveal.md), AC .2, .4,
+and .5.
+
 ## Requirement mapping
 
-| Criteria for REQ-UI-SIDEBAR-HOVER-001 | Design section |
-| --- | --- |
-| .1, .3, .4 | Interaction state |
-| .2 | Rendering and persistence |
-| .5 | Responsive behavior |
+| Criteria for REQ-UI-SIDEBAR-HOVER-001 | Design section            |
+| ------------------------------------- | ------------------------- |
+| .1, .3, .4                            | Interaction state         |
+| .2                                    | Rendering and persistence |
+| .5                                    | Responsive behavior       |
 
 ## Interaction state
 

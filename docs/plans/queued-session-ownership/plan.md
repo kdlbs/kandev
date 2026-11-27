@@ -316,3 +316,10 @@ separate and combined recovery cases on desktop and phone. Existing results and 
 remain unchanged. The follow-up UI work order is complete. Its 2026-09-23 update also
 covers Review-to-Implement peer resumption with legacy parking metadata. The recovery
 package remains the single owner for removing parking presentation and its E2E coverage.
+
+## Queue projection fixup, 2026-10-10
+
+Direct task routes can hydrate `taskOverview.byId` before legacy board snapshots.
+Queue status reads that shared record and retains revision-based selection across all summary candidates.
+The Task 03 work order records this regression and desktop/phone verification.
+Existing admission rules and PostgreSQL release prerequisites remain unchanged.

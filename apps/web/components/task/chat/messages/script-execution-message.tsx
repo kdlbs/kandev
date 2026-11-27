@@ -22,6 +22,9 @@ interface ScriptExecutionMetadata {
   completed_at?: string;
   process_id?: string;
   error?: string;
+  startup_retrying?: boolean;
+  startup_retry_attempt?: number;
+  startup_retry_max_attempts?: number;
 }
 
 // Returns the catalog key for the whole "<verb> agent <name>" line rather than
@@ -53,10 +56,17 @@ function AgentBootHeader({
   const { t } = useTranslation();
   const agentName = metadata.agent_name || t("task:agentFallbackName");
   const messageKey = getAgentBootMessageKey(metadata.is_resuming, isSuccess, isRunning);
+  const message =
+    isRunning && metadata.startup_retrying
+      ? t("task:agentBootRetrying", {
+          attempt: metadata.startup_retry_attempt ?? 2,
+          maxAttempts: metadata.startup_retry_max_attempts ?? 2,
+        })
+      : t(messageKey, { agentName });
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-        <span className="text-xs text-muted-foreground">{t(messageKey, { agentName })}</span>
+        <span className="text-xs text-muted-foreground">{message}</span>
         {isRunning && <GridSpinner className="text-muted-foreground" />}
       </span>
     </div>

@@ -16,17 +16,17 @@ The packaged `kandev` executable is a single native Go binary with the compiled 
 
 ## Supported release targets
 
-| OS | Architectures | Install channels |
-|---|---|---|
-| macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
-| Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | Scoop, npm/npx |
+| OS      | Architectures                          | Install channels  |
+| ------- | -------------------------------------- | ----------------- |
+| macOS   | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
+| Linux   | `arm64`, `x64`                         | Homebrew, npm/npx |
+| Windows | `x64`                                  | Scoop, npm/npx    |
 
 The `kandev` binary contains the backend and compiled web application. A
-release bundle also contains the host `agentctl` and Linux/macOS remote
-`agentctl` helpers for task environments. These helpers support agent
-execution in SSH and container environments. They do not serve the Kandev web
-application.
+Stable standard runtime contains the host `agentctl` and a manifest for Linux
+and macOS remote helpers. Kandev downloads a selected helper when a remote
+executor needs it and no verified copy is cached. Full Stable archives and npm
+Nightlies contain all remote helpers. These helpers do not serve the web app.
 
 The npm package is a small Node.js shim. It selects an exact, same-version
 native runtime package for `process.platform` and `process.arch`, then starts
@@ -95,6 +95,18 @@ tar -xzf kandev-linux-x64.tar.gz
 
 Verifying the checksum matters more here than with the package managers, which do that themselves.
 
+The default Stable archive is the standard runtime. It contains `kandev`, the host `agentctl`, and
+`remote-helpers.json`. A remote task can need an HTTPS download the first time it selects a platform.
+The download comes from that Stable release and Kandev checks its SHA-256 digest before use. Allow
+outbound HTTPS to `github.com` and `release-assets.githubusercontent.com`; GitHub redirects release
+asset downloads to the second host.
+
+For an offline CLI install, add `-full` before the archive extension, as in
+`kandev-linux-x64-full.tar.gz`. This archive also contains all four remote helpers. Windows users
+can use `kandev-windows-x64-full.zip`. Stable Desktop has no full offline installer or updater.
+Containers and npm Nightlies retain all helpers. See the [release size report](https://github.com/kdlbs/kandev/releases/latest/download/runtime-size-report.md)
+for the current archive and helper sizes.
+
 The archive extracts to a `kandev/` directory containing `bin/`, and the launcher finds the rest of
 the bundle relative to itself. The extracted directory can be moved anywhere; add `kandev/bin` to
 `PATH` for a persistent command. Set `KANDEV_BUNDLE_DIR` only to point the launcher at a bundle it
@@ -147,6 +159,12 @@ time. The launcher prints phase changes and periodic status, so a long backup,
 migration, or recovery can be distinguished from an unreachable backend. These
 values describe elapsed work and do not estimate completion.
 
+A measured step also reports its own count. Byte counts use readable units with
+factors of 1024, and byte rates add a scaled unit and `/s`, for example
+`Database backup: 14.3 GB (1.0 MB/s)`. The startup page in the browser and the
+Kandev restart dialog show the same sizes. Values below 1 KB stay whole bytes,
+values from 1 KB upward keep one decimal digit, and the scale stops at TB.
+
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
 On macOS and Linux, Kandev includes the runtime user's `~/.local/bin` in its
@@ -177,14 +195,21 @@ kandev start [options]
 kandev service <action> [service options]
 ```
 
-| Option | Meaning |
-|---|---|
-| `--port <1-65535>` | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work. |
-| `--headless`, `--no-browser` | Do not open a browser. |
-| `--verbose`, `-v` | Show backend info output. |
-| `--debug` | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
-| `--version`, `-V` | Print the native runtime version. |
-| `--help`, `-h`, `help` | Print help. |
+| Option                       | Meaning                                                                                                                                             |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--port <1-65535>`           | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work.                                                       |
+| `--headless`, `--no-browser` | Do not open a browser.                                                                                                                              |
+| `--verbose`, `-v`            | Show backend info output.                                                                                                                           |
+| `--debug`                    | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
+| `--version`, `-V`            | Print the native runtime version.                                                                                                                   |
+| `--json`                     | With `--version` or `-V`, print build identity as JSON.                                                                                            |
+| `--help`, `-h`, `help`       | Print help.                                                                                                                                         |
+
+Use `kandev --version --json` to print one JSON object: `version` matches plain
+`--version`, `commit` identifies the source revision, and `build_time` is the
+build timestamp. An unstamped build uses `dev` for an empty version and
+`unknown` for missing commit or build time stamps. This command does not start
+Kandev.
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
@@ -232,6 +257,14 @@ make dev
 
 `make dev` builds the launcher plus the host `agentctl` and, on hosts other than Linux/amd64, one Linux/amd64 helper. It then invokes the repository's native Go launcher. The `kandev dev` syntax above belongs to that source launcher; installing the npm or Homebrew release does not install it as a second runtime mode.
 
+Source builds compile the frontend with `NODE_ENV=production`, even when the
+invoking shell sets `NODE_ENV=development`. This serves production React, which
+omits React development warnings and default performance-track
+instrumentation. Kandev runtime diagnostics are independent of that choice:
+`make start-debug` still enables backend debug file logging, pprof, and ACP
+frame logging. Use `make dev` with `NODE_ENV` unset or set to `development` when
+you need development React and hot reload.
+
 ### OS service commands
 
 The native CLI can install and manage a systemd user/system unit on Linux or a launchd agent/daemon on macOS:
@@ -240,9 +273,15 @@ The native CLI can install and manage a systemd user/system unit on Linux or a l
 kandev service install
 kandev service status
 kandev service logs --follow
+kandev service logs --lines 1000
+kandev service logs -n 0 --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`.
+
+For `service logs`, use `--lines N`, `--lines=N`, or `-n N` to select a decimal count from 0 to 1000000. The default is 200; `-n 0 --follow` follows new output without history. On macOS, the count applies separately to the output and error log files.
+
+On macOS, a user service can opt into non-interactive Bash or Zsh login initialization with `--shell bash`, `--shell zsh`, or an absolute shell path. New installs keep direct startup by default. An existing selection survives reinstall without the flag and supported Apply updates; pass `--shell=none` to reset it. This option is not available for system services. See [Run as a service](run-as-a-service.md#optional-macos-login-initialization) for startup-file behavior and recovery.
 
 </details>
 
@@ -254,18 +293,19 @@ command for the same file the backend uses (`--home-dir`, `database.path`,
 normal launcher):
 
 ```text
-kandev maintenance database [--execute] [--compact]
+kandev maintenance database [--execute] [--compact] [--json]
     [--keep-plan-revisions <n>] [--candidate-limit <n>] [--home-dir <path>]
 ```
 
-| Option | Meaning |
-|---|---|
-| `--execute` | Perform retention deletes. Without it, the command is a read-only dry run (the default). |
-| `--compact` | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
-| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`). |
-| `--candidate-limit <n>` | Cap how many rows are reported/deleted per retention category (default: unlimited). |
-| `--home-dir <path>` | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`). |
-| `--help`, `-h` | Print command help. |
+| Option                      | Meaning                                                                                                                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--json`                    | Print one machine-readable JSON outcome to stdout. The default remains a read-only dry run.                                                           |
+| `--execute`                 | Perform retention deletes. Without it, the command is a read-only dry run (the default).                                                                   |
+| `--compact`                 | After retention deletes commit, additionally stage a compacted copy and atomically replace the live database. Only takes effect together with `--execute`. |
+| `--keep-plan-revisions <n>` | Additionally protect the `n` most recent non-HEAD plan revisions per task (default `0`).                                                                   |
+| `--candidate-limit <n>`     | Cap legacy categories and bounded delivery samples. Delivery defaults to at most 200 candidates per batch.                                                                        |
+| `--home-dir <path>`         | Kandev home directory override (default: `$KANDEV_HOME_DIR` or `~/.kandev`).                                                                               |
+| `--help`, `-h`              | Print command help.                                                                                                                                        |
 
 **Dry run (default).** Without `--execute`, the command never acquires a
 lock, takes a backup, or changes anything; it is always safe to run
@@ -277,13 +317,70 @@ and orphaned message payloads (externalized tool output no message still
 references). Normal conversation rows, the current plan HEAD, revert
 ancestry, and any protected snapshot are never candidates.
 
+Delivery categories include eligible projected payloads, fully settled prompts,
+expired event receipts, retired-session evidence, and attributable orphan identities.
+Their samples use the same safety predicates as automatic cleanup.
+The report marks sample limits and unavailable retention schemas.
+A legacy-schema dry run does not migrate the database.
+Delivery samples default to at most 200 candidates, even without `--candidate-limit`.
+They are not exact database-wide totals.
+Retired-session evidence shares the candidate row budget across its sampled tables.
+
+**JSON output.** Use `--json` to read the same bounded report in a script:
+
+```bash
+set -o pipefail
+kandev maintenance database --json | jq '.report.total_candidate_rows'
+```
+
+The output is one JSON object followed by a newline. `mode` is `dry_run` or
+`execute`. `report` contains `generated_at` (UTC RFC3339),
+`database_size_bytes`, `candidates`, `delivery_retention`,
+`total_candidate_rows`, and `total_estimated_bytes`. The three `candidates`
+keys are `duplicate_git_snapshots`, `obsolete_plan_revisions`, and
+`orphaned_message_payloads`. Each group has integer `rows` and
+`estimated_bytes` and boolean `sample_limit_reached`.
+
+`delivery_retention` has boolean `available` and string `unavailable_reason`
+(empty when available; otherwise `schema_unavailable` or `format_unsupported`).
+When available, its `candidates` contains groups
+`projected_delivery_payloads`, `settled_delivery_prompts`,
+`retired_delivery_event_receipts`, `retired_delivery_session_evidence`, and
+`orphaned_delivery_identities` with the same fields; otherwise `candidates` is
+omitted. Totals sum the reported groups, including bounded samples, and are not
+necessarily database-wide counts. Estimated bytes are row-content estimates,
+not promised disk savings.
+
+An executed outcome adds `execution` with `backup_path`, `partial`, and the
+counts `deleted_git_snapshots`, `deleted_plan_revisions`,
+`deleted_message_payloads`, `deleted_delivery_event_payloads`,
+`deleted_settled_delivery_prompts`, `retired_delivery_event_receipts`,
+`purged_retired_delivery_rows`, `delivery_orphan_jobs_scheduled`, and
+`delivery_retirement_jobs_completed`. A successful compaction adds
+`compaction` with `size_before_bytes`, `size_after_bytes`, and
+`rollback_path`; otherwise that section is omitted. All byte sizes are bytes,
+counts are integers, and omitted sections are not null. Future fields may be
+added; scripts should ignore unknown fields.
+
+`partial` indicates that bounded maintenance work may remain: any candidate
+sample limit, pending delivery work, or a delivery execution error can set it.
+It is not a general success indicator. Check the exit status: if an error
+occurs after work commits, stdout still reports the committed outcome, stderr
+reports the failure, and the exit status is 1. A failure before an outcome may leave stdout empty. A failed stdout
+write can leave incomplete JSON and also produces a nonzero exit.
+
 **Execute.** `--execute` requires exclusive access to the database: it takes
 the same ownership lock a live backend takes at boot, so it refuses to run
 while `kandev` is already running against the same home/database. It always
 takes and verifies a fresh backup before deleting anything, written to
 `<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
-unverified backup aborts before any delete. Retention deletes run inside a
-single transaction, so partial deletion across categories cannot happen.
+unverified backup aborts before any delete. The three legacy categories use one transaction.
+Delivery cleanup uses separate bounded transactions with fresh eligibility checks.
+A run can finish partially and reports committed counts plus the backup path.
+Pending deletion jobs also produce the partial-progress notice, even when the current job removed few rows.
+Repeat the command to continue delivery cleanup.
+The configured delivery policy applies to both analysis and execution.
+This command remains SQLite-only. PostgreSQL uses automatic cleanup and operator database tools.
 
 **Compaction and rollback.** `--compact` (with `--execute`) stages a
 `VACUUM INTO` compacted copy after retention deletes commit, verifies it
@@ -296,6 +393,8 @@ path. If compaction fails after retention deletes already committed, the
 command still reports the completed backup path and deleted-row counts; only
 the optional compaction step is aborted.
 
+See [delivery retention operations](operations.md#backend-delivery-retention) for the supported rollback boundary and backup requirements.
+
 ### PR-watch and bounded-storage diagnostics
 
 Kandev publishes aggregate operational counters through Go's `/debug/vars`
@@ -305,41 +404,57 @@ backend to loopback while diagnostics are enabled and treat the complete
 response as sensitive process data. The counters below never use task,
 workspace, repository, branch, session, or execution identifiers as labels.
 
-| Metric | Meaning |
-|---|---|
-| `github_pr_watch_active` | Canonical watches eligible for polling in the latest poll census. |
-| `github_pr_watch_searching` | Eligible watches still searching by branch. |
-| `github_pr_watch_duplicates` | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`. |
-| `github_pr_watch_orphans` | Watches whose task or task/repository relationship is missing. Expected value: `0`. |
-| `github_pr_watch_canonical_poll_requests_total` | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request. |
-| `task_status_summary_cas_retries_total` | Projection compare-and-swap losses retried after reloading authoritative state. |
-| `task_status_summary_cas_exhaustions_total` | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase. |
-| `task_status_summary_event_handler_failures_total` | Status-summary events that returned a handler error. |
-| `task_message_payload_hydrations_total` | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`. |
-| `task_message_payload_hydration_latency_ms` | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
-| `task_message_content_bytes` | Logical bytes in message content from the latest database-stat read. |
-| `task_message_metadata_bytes` | Logical bytes in inline message metadata from the latest database-stat read. |
-| `task_message_payload_compressed_bytes` | Compressed external payload bytes from the latest database-stat read. |
-| `task_git_snapshot_bytes` | Logical Git snapshot file and metadata bytes from the latest database-stat read. |
-| `database_size_bytes` / `database_wal_size_bytes` | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge. |
-| `message_queue_depth` | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed. |
-| `agent_active_runtimes` | Agent executions currently owned by the lifecycle runtime. |
+| Metric                                              | Meaning                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `github_pr_watch_active`                            | Canonical watches eligible for polling in the latest poll census.                                                         |
+| `github_pr_watch_searching`                          | Eligible watches still searching by branch.                                                                               |
+| `github_pr_watch_duplicates`                         | Rows that violate the canonical searching or discovered identity in the latest census. Expected value: `0`.               |
+| `github_pr_watch_orphans`                            | Watches whose task or task/repository relationship is missing. Expected value: `0`.                                       |
+| `github_pr_watch_canonical_poll_requests_total`      | Canonical watch targets submitted to GitHub polling, including targets combined into one batch request.                   |
+| `task_status_summary_cas_retries_total`              | Projection compare-and-swap losses retried after reloading authoritative state.                                           |
+| `task_status_summary_cas_exhaustions_total`          | Projection updates that exhausted the bounded retry policy. Expected steady-state value: no increase.                     |
+| `task_status_summary_event_handler_failures_total`   | Status-summary events that returned a handler error.                                                                      |
+| `task_message_payload_hydrations_total`              | Explicit payload hydration outcomes, labelled only by `outcome=success` or `outcome=error`.                               |
+| `task_message_payload_hydration_latency_ms`          | Cumulative hydration counts in the bounded `10`, `50`, `250`, `1000`, and `+Inf` millisecond buckets, labelled by outcome. |
+| `task_message_content_bytes`                          | Logical bytes in message content from the latest complete database-stat scan.                                             |
+| `task_message_metadata_bytes`                         | Logical bytes in inline message metadata from the latest complete database-stat scan.                                     |
+| `task_message_payload_compressed_bytes`               | Compressed external payload bytes from the latest complete database-stat scan.                                            |
+| `task_git_snapshot_bytes`                             | Logical Git snapshot file and metadata bytes from the latest complete database-stat scan.                                  |
+| `database_logical_stats_measured_at_unix`              | Unix timestamp of the latest complete logical database-stat scan. Zero means no scan has completed.                       |
+| `database_logical_stats_scan_total`                    | Background logical scan outcomes, keyed only by the fixed result category.                                                |
+| `database_size_bytes` / `database_wal_size_bytes`     | Database and SQLite WAL bytes from the latest database-stat read. PostgreSQL reports `0` for the SQLite-only WAL gauge.    |
+| `message_queue_depth`                                 | Current unreserved prompt queue depth. `-1` means the queue is unavailable or the bounded read failed.                    |
+| `agent_active_runtimes`                               | Agent executions currently owned by the lifecycle runtime.                                                                |
 
-`GET /api/v1/system/database` refreshes the database and storage gauges and
-returns the same values as typed fields: `size_bytes`, `wal_size_bytes`,
-`message_content_bytes`, `message_metadata_bytes`, `message_payload_bytes`,
-and `git_snapshot_bytes`. Storage categories use portable logical byte
+`GET /api/v1/system/database` returns live database metadata and the latest
+complete logical storage snapshot. Metadata fields include `size_bytes`,
+`wal_size_bytes`, `backup_directory`, `schema_version`, and `last_backup_at`.
+`message_content_bytes`,
+`message_metadata_bytes`, `message_payload_bytes`, and `git_snapshot_bytes` are
+null until the first scan completes. `logical_stats_state` reports `pending`,
+`ready`, `refreshing`, `stale`, or `unavailable`, and
+`logical_stats_measured_at` identifies the snapshot time. A request does not
+wait for a logical scan. The backend builds snapshots in bounded batches and
+keeps one process-local result for 15 minutes. If a refresh fails, the endpoint
+keeps the previous values and their timestamp; a backend restart starts a new
+cold scan. `metadata_stale` and `metadata_measured_at` describe freshness of
+the live metadata separately. `logical_stats_error` contains a stable error
+code when a scan fails. Storage categories use portable logical byte
 aggregates, so they remain available when SQLite `dbstat` or PostgreSQL
 relation-size facilities are unavailable. Use them for trends and retention
 decisions; use filesystem or database-provider metrics for physical quota and
 capacity alerts.
 
+`POST /api/v1/system/database/refresh` requests an immediate background retry
+and bypasses any remaining automatic retry backoff. It returns `204` without
+waiting for the scan, or `503` while persistence is known to be unavailable.
+
 ## Ports and network exposure
 
-| Process | Preferred port | Automatic behavior |
-|---|---:|---|
-| Backend (UI, HTTP, WebSocket, MCP) | `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
-| Core `agentctl` | `39429` | Uses the same automatic fallback strategy and never shares the backend port. |
+| Process                            | Preferred port | Automatic behavior                                                                                            |
+| ---------------------------------- | -------------: | ------------------------------------------------------------------------------------------------------------- |
+| Backend (UI, HTTP, WebSocket, MCP) |        `38429` | If no port was requested and this port cannot bind on loopback, try up to 10 random ports in `10000`-`60000`. |
+| Core `agentctl`                    |        `39429` | Uses the same automatic fallback strategy and never shares the backend port.                                  |
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
@@ -369,18 +484,18 @@ does not merge candidates, and an unreadable or invalid first file stops the
 launch. There is no public `--config` flag. Service launches use the same
 discovery and carry the selected file into the managed backend process.
 
-| Variable | Default | Behavior |
-|---|---|---|
-| `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
-| `KANDEV_PORT` | unset | Compatibility backend-port alias. |
-| `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md). |
-| `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
-| `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
-| `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
-| `KANDEV_BUNDLE_DIR` | selected by installer | Advanced packaging override. The npm shim and Homebrew wrapper set this; a bad path is a fatal runtime validation error. |
-| `KANDEV_VERSION` | unset | Optional installer-supplied display metadata (the Homebrew wrapper sets it). |
-| `KANDEV_SHUTDOWN_DEBUG` | unset | The exact value `1` prints launcher process IDs, commands, paths, signals, and graceful/forced shutdown decisions. Use temporarily for shutdown diagnosis. |
+| Variable                   | Default                  | Behavior                                                                                                                                                   |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KANDEV_BACKEND_PORT`      | unset                    | Backend port when `--port` is absent.                                                                                                                      |
+| `KANDEV_PORT`              | unset                    | Compatibility backend-port alias.                                                                                                                          |
+| `KANDEV_HOME_DIR`          | `~/.kandev`              | Root for application data, tasks, repositories, logs, and launcher state.                                                                                  |
+| `KANDEV_DATABASE_PATH`     | `<home>/data/kandev.db`  | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](configuration.md).                                 |
+| `KANDEV_LOG_LEVEL`         | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection.                                                                       |
+| `KANDEV_HEALTH_TIMEOUT_MS` | `45000`                  | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds.                                                           |
+| `KANDEV_NO_BROWSER`        | unset                    | The exact value `1` suppresses browser opening.                                                                                                            |
+| `KANDEV_BUNDLE_DIR`        | selected by installer    | Advanced packaging override. The npm shim and Homebrew wrapper set this; a bad path is a fatal runtime validation error.                                   |
+| `KANDEV_VERSION`           | unset                    | Optional installer-supplied display metadata (the Homebrew wrapper sets it).                                                                               |
+| `KANDEV_SHUTDOWN_DEBUG`    | unset                    | The exact value `1` prints launcher process IDs, commands, paths, signals, and graceful/forced shutdown decisions. Use temporarily for shutdown diagnosis. |
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
@@ -436,7 +551,10 @@ Remove `--omit=optional` from npm configuration for this install. On unsupported
 
 ### A required binary or remote helper is missing
 
-Reinstall or upgrade the whole package. Runtime validation intentionally fails when `kandev`, `agentctl`, or a required Linux/macOS remote helper is absent. Mixing archives or pruning package files produces this error.
+If `kandev` or the host `agentctl` is missing, reinstall the whole package. A Stable standard runtime
+does not contain remote helpers. If a remote task cannot get its selected helper, allow outbound
+HTTPS to `github.com` and `release-assets.githubusercontent.com`, then retry. For an offline CLI
+install, use a `-full` archive or an existing helper-path override. See [Executors](executors.md#stable-remote-helpers).
 
 ### The requested port is already in use
 
@@ -461,12 +579,12 @@ The launcher prints buffered backend output once when startup fails, followed by
 
 Use the failure class to choose the next action:
 
-| Failure class | Meaning and recovery |
-|---|---|
-| Early backend exit | The child stopped before readiness. Read the named backend log for the startup error. |
-| Unreachable backend | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
-| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log. |
-| Different process | A selected port answered without the launcher's token. Free the port or choose another backend port. |
+| Failure class           | Meaning and recovery                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| Early backend exit      | The child stopped before readiness. Read the named backend log for the startup error.                  |
+| Unreachable backend     | No target accepted a connection. Check the effective binds, firewall rules, and environment overrides. |
+| Unhealthy HTTP response | A target answered with a non-success status. Inspect that status and the backend log.                  |
+| Different process       | A selected port answered without the launcher's token. Free the port or choose another backend port.   |
 
 If the backend is still running when readiness expires, the summary says that the launcher stopped it after readiness failed. It does not describe that case as a backend crash. Common underlying causes include an invalid `config.yaml`, a database migration or permission error, an occupied explicit port, or a damaged runtime bundle.
 

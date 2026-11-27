@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -98,9 +99,9 @@ func (h *GitHandlers) SetOnPRCreated(cb PRCreatedCallback) {
 	h.onPRCreated = cb
 }
 
-// isGitHubPRURL reports whether prURL is a GitHub pull request link. Azure Repos
-// (/pullrequest/) and GitLab (/-/merge_requests/) are excluded so onPRCreated only
-// wires GitHub TaskPR / PRWatch rows (Azure association is a separate follow-up).
+// isGitHubPRURL reports whether prURL is a GitHub pull request link. Other
+// providers, such as GitLab (/-/merge_requests/) or Azure Repos (/pullrequest/),
+// are excluded so onPRCreated only wires GitHub TaskPR / PRWatch rows.
 func isGitHubPRURL(prURL string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(prURL)), "/pull/")
 }
@@ -876,6 +877,9 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 	select {
 	case r := <-ch:
 		if r.Err != nil {
+			if errors.Is(r.Err, models.ErrTaskSessionNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "not found", nil)
+			}
 			return nil, r.Err
 		}
 		return ws.NewResponse(msg.ID, msg.Action, r.Val)
@@ -926,7 +930,7 @@ func (h *GitHandlers) computeGitCommits(ctx context.Context, req *GitCommitsRequ
 	// merge-base from git status. Applies to sessions created before the
 	// base-commit capture feature, or when that capture failed.
 	if baseCommit == "" {
-		status, statusErr := agentClient.GetGitStatus(ctx)
+		status, statusErr := agentClient.GetGitStatusWithDetails(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
 			baseCommit = status.BaseCommit
 			h.logger.Debug("using git status base commit as fallback",
@@ -966,6 +970,9 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 	select {
 	case r := <-ch:
 		if r.Err != nil {
+			if errors.Is(r.Err, models.ErrTaskSessionNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "not found", nil)
+			}
 			return nil, r.Err
 		}
 		return ws.NewResponse(msg.ID, msg.Action, r.Val)
@@ -1006,7 +1013,7 @@ func (h *GitHandlers) computeCumulativeDiff(ctx context.Context, req *Cumulative
 		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
 	if baseCommit == "" {
-		status, statusErr := agentClient.GetGitStatus(ctx)
+		status, statusErr := agentClient.GetGitStatusWithDetails(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
 			baseCommit = status.BaseCommit
 			h.logger.Debug("using git status base commit as fallback for cumulative diff",

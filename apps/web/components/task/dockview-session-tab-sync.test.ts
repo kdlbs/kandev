@@ -3,6 +3,9 @@ import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { defaultState } from "@/lib/state/default-state";
+import { setEnvHiddenSessions } from "@/lib/env-hidden-sessions";
+import { hideSessionPanel } from "./dockview-hidden-session-panels";
 import {
   clearSessionTabUserActivationIntentsForTest,
   markSessionTabUserActivationIntent,
@@ -26,11 +29,14 @@ type SessionTabSyncApi = {
   onDidActivePanelChange: (callback: (panel: { id: string } | null) => void) => {
     dispose: ReturnType<typeof vi.fn<() => void>>;
   };
+  removePanel: ReturnType<typeof vi.fn<(panel: { id: string }) => void>>;
 };
 
 type SessionTabSyncStore = {
   getState: () => {
     tasks: { activeTaskId: string; activeSessionId: string };
+    taskRemoval: { navigationRevision: number };
+    workflowSessionFocus: AppState["workflowSessionFocus"];
     taskSessions: {
       items: Record<string, { id: string; task_id: string }>;
     };
@@ -53,6 +59,7 @@ function makeSessionTabSyncHarness(args: {
   activeSessionId: string;
   otherSessionId: string;
   includeOtherEnv?: boolean;
+  includeOtherSession?: boolean;
   includeOtherInTaskList?: boolean;
   otherEnvironmentId?: string;
   otherSessionTaskId?: string;
@@ -82,6 +89,7 @@ function makeSessionTabSyncHarness(args: {
       activePanelChange = callback;
       return { dispose: vi.fn() };
     },
+    removePanel: vi.fn(),
   };
   const setActiveSession = vi.fn();
   const setActiveSessionAuto = vi.fn();
@@ -97,13 +105,19 @@ function makeSessionTabSyncHarness(args: {
         activeTaskId: args.activeTaskId,
         activeSessionId: args.activeSessionId,
       },
+      taskRemoval: { navigationRevision: 0 },
+      workflowSessionFocus: defaultState.workflowSessionFocus,
       taskSessions: {
         items: {
           [args.activeSessionId]: { id: args.activeSessionId, task_id: args.activeTaskId },
-          [args.otherSessionId]: {
-            id: args.otherSessionId,
-            task_id: args.otherSessionTaskId ?? args.activeTaskId,
-          },
+          ...(args.includeOtherSession === false
+            ? {}
+            : {
+                [args.otherSessionId]: {
+                  id: args.otherSessionId,
+                  task_id: args.otherSessionTaskId ?? args.activeTaskId,
+                },
+              }),
         },
       },
       taskSessionsByTask: {
@@ -135,6 +149,7 @@ function makeSessionTabSyncHarness(args: {
 
 function makeDefaultSessionTabSyncHarness(args?: {
   includeOtherEnv?: boolean;
+  includeOtherSession?: boolean;
   includeOtherInTaskList?: boolean;
   otherEnvironmentId?: string;
   otherSessionTaskId?: string;
@@ -147,6 +162,7 @@ function makeDefaultSessionTabSyncHarness(args?: {
     activeSessionId: ACTIVE_SESSION_ID,
     otherSessionId: OTHER_SESSION_ID,
     includeOtherEnv: args?.includeOtherEnv,
+    includeOtherSession: args?.includeOtherSession,
     includeOtherInTaskList: args?.includeOtherInTaskList,
     otherEnvironmentId: args?.otherEnvironmentId,
     otherSessionTaskId: args?.otherSessionTaskId,
@@ -175,6 +191,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const disposable of activeDisposables.splice(0)) disposable.dispose();
   clearSessionTabUserActivationIntentsForTest();
+  setEnvHiddenSessions("env-A", []);
   useDockviewStore.setState({ isRestoringLayout: false });
   vi.useRealTimers();
 });
@@ -188,6 +205,24 @@ describe("setupSessionTabSync automatic activation", () => {
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
+  });
+
+  // @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.7
+  it("adopts a visible successor when the active session is explicitly hidden", async () => {
+    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+
+    startSessionTabSync(harness);
+    hideSessionPanel(
+      harness.api as unknown as DockviewReadyEvent["api"],
+      ACTIVE_SESSION_ID,
+      TASK_ID,
+    );
+
+    await Promise.resolve();
+
+    expect(harness.setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
   });
 });
 
@@ -337,7 +372,11 @@ describe("setupSessionTabSync explicit activation", () => {
   });
 
   it("restores active panel for stale session panels without an environment mapping", () => {
-    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+    const harness = makeDefaultSessionTabSyncHarness({
+      includeOtherEnv: false,
+      includeOtherSession: false,
+      includeOtherInTaskList: false,
+    });
 
     startSessionTabSync(harness);
     markSessionTabUserActivationIntent(OTHER_SESSION_ID);
@@ -345,5 +384,14 @@ describe("setupSessionTabSync explicit activation", () => {
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects a compact session before its environment mapping arrives", () => {
+    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+    startSessionTabSync(harness);
+    markSessionTabUserActivationIntent(OTHER_SESSION_ID);
+    harness.fireActivePanelChange(OTHER_SESSION_PANEL_ID);
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
   });
 });

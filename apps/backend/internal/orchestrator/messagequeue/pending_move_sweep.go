@@ -20,7 +20,7 @@ import (
 func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveRecord, error) {
 	rows, err := r.ro.QueryxContext(ctx, `
 		SELECT session_id, move_id, session_incarnation_id, task_id, workflow_id,
-		       workflow_step_id, step_position, queued_at, actor, sender_session_id
+		       workflow_step_id, from_step_id, from_transition_id, step_position, queued_at, actor, sender_session_id
 		FROM pending_moves
 	`)
 	if err != nil {
@@ -32,13 +32,15 @@ func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveR
 	for rows.Next() {
 		var (
 			sessionID, moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+			fromStepID                                                                  string
+			fromTransitionID                                                            int64
 			position                                                                    int
 			queuedAt                                                                    time.Time
 			actor, senderSessionID                                                      string
 		)
 		if err := rows.Scan(
 			&sessionID, &moveID, &sessionIncarnationID, &taskID, &workflowID,
-			&workflowStepID, &position, &queuedAt, &actor, &senderSessionID,
+			&workflowStepID, &fromStepID, &fromTransitionID, &position, &queuedAt, &actor, &senderSessionID,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending move: %w", err)
 		}
@@ -50,6 +52,8 @@ func (r *sqliteRepository) ListPendingMoves(ctx context.Context) ([]PendingMoveR
 				TaskID:               taskID,
 				WorkflowID:           workflowID,
 				WorkflowStepID:       workflowStepID,
+				FromStepID:           fromStepID,
+				FromTransitionID:     fromTransitionID,
 				Position:             position,
 				QueuedAt:             queuedAt,
 				Actor:                actor,

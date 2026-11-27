@@ -6,12 +6,9 @@ import { kandevToolStemOf, type ToolCallMetadata } from "@/components/task/chat/
 import { extractKandevArgs, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
+import { PermissionUnavailableFeedback } from "./permission-unavailable-feedback";
 import { normalizeToolCallStatus } from "./tool-status";
-import {
-  parsePermission,
-  resolvePermissionAvailability,
-  usePermissionResponseHandlers,
-} from "./use-permission-handlers";
+import { useResolvedPermission } from "./use-permission-handlers";
 import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
 
@@ -58,19 +55,17 @@ export const KandevToolMessage = memo(function KandevToolMessage({
 }: KandevToolMessageProps) {
   const meta = comment.metadata as ToolCallMetadata | undefined;
   const renderer = getKandevRenderer(kandevToolStemOf(comment));
-  const { permissionMetadata, permissionStatus, isPermissionPending } =
-    parsePermission(permissionMessage);
   const {
+    permissionStatus: effectivePermissionStatus,
+    isPermissionPending: effectivePermissionPending,
     isResponding,
-    isUnavailable,
     handleApprove,
     handleAllowAlways,
     hasAllowAlways,
     handleReject,
-  } = usePermissionResponseHandlers({
-    permissionMetadata,
-    permissionMessage,
-  });
+    offeredChoices,
+    handleOfferedChoice,
+  } = useResolvedPermission(permissionMessage);
   if (!renderer) return null;
 
   // The ACP normalizer stores MCP tool args/result inside the Generic payload:
@@ -84,10 +79,6 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const result = extractMcpResult(rawResult);
   const status = normalizeToolCallStatus(meta?.status);
 
-  const {
-    permissionStatus: effectivePermissionStatus,
-    isPermissionPending: effectivePermissionPending,
-  } = resolvePermissionAvailability(permissionStatus, isPermissionPending, isUnavailable);
   const permissionUI = derivePermissionUI(effectivePermissionStatus, effectivePermissionPending);
 
   // Each renderer is a stable function-pointer pulled from the static
@@ -95,11 +86,21 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   // and avoids the lint rule against "components created during render".
   const rendered = (
     <KandevPermissionUIProvider value={permissionUI}>
-      {renderer({ args, result, status, sessionId, onOpenFile })}
+      {renderer({ args, result, status, sessionId, messageId: comment.id, onOpenFile })}
     </KandevPermissionUIProvider>
   );
 
-  if (!effectivePermissionPending) return rendered;
+  if (!effectivePermissionPending) {
+    if (effectivePermissionStatus !== "expired") return rendered;
+    return (
+      <>
+        {rendered}
+        <div className="mt-1 ml-7">
+          <PermissionUnavailableFeedback />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -109,6 +110,8 @@ export const KandevToolMessage = memo(function KandevToolMessage({
           onApprove={handleApprove}
           onReject={handleReject}
           onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
+          offeredChoices={offeredChoices}
+          onChooseOfferedChoice={handleOfferedChoice}
           isResponding={isResponding}
         />
       </div>

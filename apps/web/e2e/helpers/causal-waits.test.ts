@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Page, Response } from "@playwright/test";
 import { DWELL_CATEGORIES, dwell, injectLatency, waitForHttp, watchWs } from "./causal-waits";
 
@@ -246,6 +246,51 @@ describe("watchWs().waitForEvent", () => {
 // ---------------------------------------------------------------------------
 
 describe("watchWs().waitForResponse", () => {
+  it("matches a null response without treating it as an object", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("automation.list", {
+      where: (payload) => payload === null,
+      timeout: 30,
+    });
+    socket.emit("framesent", {
+      id: "empty",
+      type: "request",
+      action: "automation.list",
+      payload: {},
+    });
+    socket.emit("framereceived", {
+      id: "empty",
+      type: "response",
+      action: "automation.list",
+      payload: null,
+    });
+    await expect(pending).resolves.toMatchObject({ id: "empty" });
+  });
+
+  it("ignores correlated responses until the payload matches", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("automation.list", {
+      where: (payload) => Array.isArray(payload) && payload.some((row) => row.name === "Renamed"),
+    });
+    for (const [id, name] of [
+      ["stale-read", "Old"],
+      ["current-read", "Renamed"],
+    ]) {
+      socket.emit("framesent", { id, type: "request", action: "automation.list", payload: {} });
+      socket.emit("framereceived", {
+        id,
+        type: "response",
+        action: "automation.list",
+        payload: [{ id: "automation", name }],
+      });
+    }
+    await expect(pending).resolves.toMatchObject({ id: "current-read" });
+  });
+
   it("correlates the reply to the request it armed for, by frame id", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);
@@ -290,6 +335,43 @@ describe("watchWs().waitForResponse", () => {
     );
   });
 
+  it("filters correlated responses by the originating request payload", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("github.pr_commits.get", {
+      requestWhere: (payload) => payload.number === 202,
+    });
+    socket.emit("framesent", {
+      id: "task-a",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { number: 101 },
+    });
+    socket.emit("framereceived", {
+      id: "task-a",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: ["task a"] },
+    });
+    socket.emit("framesent", {
+      id: "task-b",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { number: 202 },
+    });
+    socket.emit("framereceived", {
+      id: "task-b",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: ["task b"] },
+    });
+    await expect(pending).resolves.toMatchObject({
+      id: "task-b",
+      payload: { commits: ["task b"] },
+    });
+  });
+
   it("only correlates requests sent after it was armed", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);
@@ -306,6 +388,69 @@ describe("watchWs().waitForResponse", () => {
     await expect(pending).rejects.toThrow(
       'watchWs.waitForResponse: no reply to "task.plan.get" within 30ms',
     );
+  });
+
+  it("starts the timeout after the dependent operation completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { page } = fakePage();
+      const ws = watchWs(page);
+      let completeRestart!: () => void;
+      const restart = new Promise<void>((resolve) => {
+        completeRestart = resolve;
+      });
+      const pending = ws.waitForResponse("user.subscribe", {
+        timeout: 30,
+        timeoutAfter: restart,
+      });
+      const outcome = pending.then(
+        () => "resolved",
+        () => "rejected",
+      );
+
+      await vi.advanceTimersByTimeAsync(31);
+      expect(await Promise.race([outcome, Promise.resolve("pending")])).toBe("pending");
+
+      completeRestart();
+      await vi.advanceTimersByTimeAsync(29);
+      expect(await Promise.race([outcome, Promise.resolve("pending")])).toBe("pending");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).rejects.toThrow(
+        'watchWs.waitForResponse: no reply to "user.subscribe" within 30ms',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps observing responses while waiting for the dependent operation", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    let completeRestart!: () => void;
+    const restart = new Promise<void>((resolve) => {
+      completeRestart = resolve;
+    });
+    const pending = ws.waitForResponse("user.subscribe", {
+      timeout: 30,
+      timeoutAfter: restart,
+    });
+    socket.emit("framesent", {
+      id: "req-1",
+      type: "request",
+      action: "user.subscribe",
+      payload: {},
+    });
+    socket.emit("framereceived", {
+      id: "req-1",
+      type: "response",
+      action: "user.subscribe",
+      payload: {},
+    });
+
+    await expect(pending).resolves.toMatchObject({ id: "req-1" });
+    completeRestart();
   });
 
   it("rejects with the backend error payload when the request is refused", async () => {

@@ -52,6 +52,22 @@ func TestKubernetesTaskPodStopPreservesSibling(t *testing.T) {
 	require.NotContains(t, active, "instance-2")
 }
 
+func TestKubernetesTaskPodIdleSuspensionPreservesTaskCompute(t *testing.T) {
+	f := newTaskPodFixture(t)
+	a := f.launch(t, 1)
+	b := f.launch(t, 2)
+	ctx := context.Background()
+	b.StopReason = StopReasonIdleSuspension
+
+	require.NoError(t, f.runtime.StopInstance(ctx, b, false))
+	require.Empty(t, f.resources.deletedPods)
+	require.Empty(t, f.resources.deletedPVCs)
+	require.NoError(t, a.Client.Health(ctx), "suspending one session must preserve its task sibling")
+	_, active, _ := f.control.snapshot()
+	require.Contains(t, active, "instance-1")
+	require.NotContains(t, active, "instance-2")
+}
+
 func TestKubernetesTaskPodTerminalCleanup(t *testing.T) {
 	f := newTaskPodFixture(t)
 	a := f.launch(t, 1)

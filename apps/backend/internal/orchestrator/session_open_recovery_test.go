@@ -34,8 +34,27 @@ func TestSessionOpenRecoveryEligibility(t *testing.T) {
 		name         string
 		taskMetadata map[string]interface{}
 		sessionMeta  map[string]interface{}
+		routeState   string
 		wantAllowed  bool
+		wantReason   string
 	}{
+		{
+			name:        "manual dynamic route recovery is not passively resumed",
+			routeState:  dynamicRouteStatusActionRequired,
+			wantAllowed: false,
+			wantReason:  autoResumeBlockedDynamicRoute,
+		},
+		{
+			name:        "pending dynamic route action stays owned by routing",
+			routeState:  "retry_wait",
+			wantAllowed: false,
+			wantReason:  autoResumeBlockedDynamicRoute,
+		},
+		{
+			name:        "active dynamic route remains eligible for ordinary session recovery",
+			routeState:  dynamicRouteStatusActive,
+			wantAllowed: true,
+		},
 		{
 			name: "reused destination ignores consumed historical stop",
 			taskMetadata: map[string]interface{}{
@@ -96,6 +115,7 @@ func TestSessionOpenRecoveryEligibility(t *testing.T) {
 				ID:             "session-reused",
 				TaskID:         "task-reused",
 				AgentProfileID: "profile-reused",
+				RouteState:     tt.routeState,
 				IsPrimary:      true,
 				Metadata:       tt.sessionMeta,
 			}
@@ -103,6 +123,9 @@ func TestSessionOpenRecoveryEligibility(t *testing.T) {
 			allowed, reason := (&Service{}).autoResumeEligibility(context.Background(), task, session)
 			if allowed != tt.wantAllowed {
 				t.Fatalf("allowed = %t, want %t (reason %q)", allowed, tt.wantAllowed, reason)
+			}
+			if reason != tt.wantReason {
+				t.Fatalf("reason = %q, want %q", reason, tt.wantReason)
 			}
 		})
 	}
@@ -243,7 +266,7 @@ func TestSessionOpenRecoveryAfterRestart(t *testing.T) {
 	taskRepo.tasks["task-reused"] = &v1.Task{ID: "task-reused", State: v1.TaskStateInProgress}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: restartedRepo}
 	svc := createTestServiceWithAgent(restartedRepo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, restartedRepo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, restartedRepo, testLogger(), executor.ExecutorConfig{}))
 	svc.reconcileExecutorSessionsOnStartup(ctx)
 
 	session, err := restartedRepo.GetTaskSession(ctx, "session-reused")

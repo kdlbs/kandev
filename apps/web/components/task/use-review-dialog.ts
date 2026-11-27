@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   useSessionGitStatus,
@@ -12,16 +12,15 @@ import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selec
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
-import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
 import {
   getCumulativeReviewRepositoryNames,
   isReviewMultiRepo,
   reviewFileKey,
 } from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { generateUUID } from "@/lib/utils";
+import { prepareReviewCommentRequest, type ReviewFileAdmission } from "./review-comment-request";
 import { useToast } from "@/components/toast-provider";
-import type { ReviewComment } from "@/lib/state/slices/comments";
+import { isReviewComment, useCommentsStore, type ReviewComment } from "@/lib/state/slices/comments";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { normalizeGitStatusFiles } from "@/lib/state/slices/session-runtime/git-status-normalizer";
 import { t } from "@/lib/i18n";
@@ -50,6 +49,14 @@ function buildMultiRepoReviewFiles(
   return files;
 }
 
+function getUnlistedRootStatus(
+  reviewGitStatus: GitStatusEntry | undefined,
+  statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
+): GitStatusEntry | undefined {
+  if (!reviewGitStatus?.files || reviewGitStatus.repository_name !== "") return undefined;
+  return statusByRepo.some((entry) => entry.repository_name === "") ? undefined : reviewGitStatus;
+}
+
 export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -57,10 +64,14 @@ export function buildReviewGitStatusFiles(
   cumulativeRepositoryNames: Iterable<string> = [],
 ): ReviewGitStatusFiles {
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
+  // In multi-repo tasks the legacy slot mirrors the latest repository update.
+  // Trust it as root only when its explicit repository_name is empty.
+  const legacyRootStatus = getUnlistedRootStatus(reviewGitStatus, statusByRepo);
   const isMultiRepo = isReviewMultiRepo(
     taskRepositoryCount,
     statusByRepo
       .map((entry) => entry.repository_name)
+      .concat(legacyRootStatus ? [""] : [])
       .concat(Array.from(cumulativeRepositoryNames)),
   );
   if (!isMultiRepo) {
@@ -86,7 +97,10 @@ export function buildReviewGitStatusFiles(
     };
   }
 
-  const files = buildMultiRepoReviewFiles(statusByRepo);
+  const normalizedStatuses = legacyRootStatus
+    ? [{ repository_name: "", status: legacyRootStatus }, ...statusByRepo]
+    : statusByRepo;
+  const files = buildMultiRepoReviewFiles(normalizedStatuses);
   return {
     files: Object.keys(files).length > 0 ? files : null,
     isMultiRepo: true,
@@ -120,10 +134,100 @@ function useReviewGitStatusFiles(
   );
 }
 
+function isPendingReviewComment(
+  comment: ReviewComment,
+  sessionId: string,
+  state: ReturnType<typeof useCommentsStore.getState>,
+): boolean {
+  return (
+    comment.sessionId === sessionId &&
+    comment.status === "pending" &&
+    state.byId[comment.id] === comment &&
+    state.pendingForChat.includes(comment.id)
+  );
+}
+
+function useReviewCommentDelivery(
+  taskId: string | null,
+  sessionId: string | null,
+  closeReview: () => void,
+) {
+  const { toast } = useToast();
+  const pending = useRef(false);
+  const pendingFileAdmission = useRef<ReviewFileAdmission | null>(null);
+  const [sendingReviewComments, setSendingReviewComments] = useState(false);
+  const owner = useRef<{ taskId: string | null; sessionId: string | null } | null>(null);
+  useEffect(() => {
+    owner.current = { taskId, sessionId };
+    return () => {
+      owner.current = null;
+    };
+  }, [taskId, sessionId]);
+
+  const handleReviewSendComments = useCallback(
+    async (comments: ReviewComment[]): Promise<boolean> => {
+      if (pending.current || !taskId || !sessionId) return false;
+      const state = useCommentsStore.getState();
+      const submitted = comments.filter(
+        (comment) => isReviewComment(comment) && isPendingReviewComment(comment, sessionId, state),
+      );
+      if (submitted.length === 0) return false;
+      const client = getWebSocketClient();
+      if (!client || client.getStatus() !== "connected") {
+        toast({ title: t("task:failedToSendComments"), variant: "error" });
+        return false;
+      }
+      pending.current = true;
+      setSendingReviewComments(true);
+      try {
+        const request = prepareReviewCommentRequest(
+          taskId,
+          sessionId,
+          submitted,
+          pendingFileAdmission,
+        );
+        await client.request("message.add", request, 10000);
+        pendingFileAdmission.current = null;
+        const current = useCommentsStore.getState();
+        // Immutable row identity keeps edits made during delivery pending.
+        const acknowledgedIds = submitted
+          .filter((comment) => isPendingReviewComment(comment, sessionId, current))
+          .map((comment) => comment.id);
+        current.markCommentsSent(acknowledgedIds);
+        const remaining = useCommentsStore
+          .getState()
+          .getPendingComments()
+          .some((comment) => comment.sessionId === sessionId && isReviewComment(comment));
+        if (
+          owner.current?.taskId === taskId &&
+          owner.current.sessionId === sessionId &&
+          !remaining
+        ) {
+          closeReview();
+        }
+        return true;
+      } catch {
+        toast({ title: t("task:failedToSendComments"), variant: "error" });
+        return false;
+      } finally {
+        pending.current = false;
+        setSendingReviewComments(false);
+      }
+    },
+    [taskId, sessionId, closeReview, toast],
+  );
+  return { handleReviewSendComments, sendingReviewComments };
+}
+
 export function useReviewDialog(effectiveSessionId: string | null) {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
-  const { toast } = useToast();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const closeReview = useCallback(() => setReviewDialogOpen(false), []);
+  const { handleReviewSendComments, sendingReviewComments } = useReviewCommentDelivery(
+    activeTaskId,
+    effectiveSessionId,
+    closeReview,
+  );
   const taskRepositories = useTaskRepositories(activeTaskId);
   const baseBranch = useAppStore((state) => {
     if (!effectiveSessionId) return undefined;
@@ -156,31 +260,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewTaskPR?.repo ?? null,
     reviewTaskPR?.pr_number ?? null,
     reviewTaskPR?.last_synced_at ?? null,
-  );
-
-  const handleReviewSendComments = useCallback(
-    (comments: ReviewComment[]) => {
-      if (!activeTaskId || !effectiveSessionId || comments.length === 0) return;
-      const client = getWebSocketClient();
-      if (!client) return;
-      const markdown = formatReviewCommentsAsMarkdown(comments);
-      client
-        .request(
-          "message.add",
-          {
-            task_id: activeTaskId,
-            session_id: effectiveSessionId,
-            client_message_id: generateUUID(),
-            content: markdown,
-          },
-          10000,
-        )
-        .catch(() => {
-          toast({ title: t("task:failedToSendComments"), variant: "error" });
-        });
-      setReviewDialogOpen(false);
-    },
-    [activeTaskId, effectiveSessionId, toast],
+    reviewTaskPR?.github_host,
   );
 
   useEffect(() => {
@@ -207,5 +287,6 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewUseRepositoryKeys: reviewGitStatus.isMultiRepo,
     reviewOpenFile,
     handleReviewSendComments,
+    sendingReviewComments,
   };
 }

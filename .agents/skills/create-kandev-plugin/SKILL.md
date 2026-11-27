@@ -102,6 +102,7 @@ Choose the narrowest surface that satisfies the behavior:
 | Store files or use a plugin-managed database | `KANDEV_PLUGIN_DATA_DIR` | The plugin owns schema, locking, migrations, and recovery. |
 | Read Kandev entities | Typed Host readers plus `api_read` | Use opaque pagination cursors and stable SDK DTOs; never query Kandev's database or internal HTTP API. |
 | Mutate Kandev entities | Typed Host writers | `api_write:tasks` gates `Tasks().Create/Update`; `api_write:messages` gates `Messages().Send`. A missing mutation requires a separate Host API change. |
+| Add task-agent tools | Manifest `agent_tools` plus `pluginsdk.AgentToolPlugin` | Kandev owns MCP registration, routing, and verified caller identity; do not add a send webhook or separate MCP server for task-agent calls. |
 | Notify another plugin | `Host.EmitEvent` | Events are published as `plugin.<id>.<name>`; keep names and payloads versionable. |
 | Add native interface | UI registry and `host.ui` | Use host-owned React and components so themes, contexts, portals, and mobile behavior remain compatible. |
 
@@ -128,12 +129,12 @@ Prefer the public authoring docs and current template over old examples. The
 frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 `apps/web/lib/plugins/types.ts`; concrete UI exports are in
 `apps/web/lib/plugins/host-api.ts`. The backend contract is
-`apps/backend/pkg/pluginsdk` plus `apps/backend/proto/kandev/plugin/v1/plugin.proto`.
+`pluginsdk` plus `pluginsdk/proto/kandev/plugin/v1/plugin.proto`.
 Read `docs/plans/plugins/GRPC-CONTRACT.md` when changing the wire contract or
 when the public docs do not answer a low-level compatibility question.
 
 The frontend and backend matrices in `docs/public/plugins-authoring.md`,
-together with `apps/web/lib/plugins/types.ts` and `apps/backend/pkg/pluginsdk`,
+together with `apps/web/lib/plugins/types.ts` and `pluginsdk`,
 are the authoritative record of what exists today. Read them rather than
 asserting from memory that a hook is missing, and do not publish a signature
 they do not declare.
@@ -155,8 +156,8 @@ for later. In the same change:
    - frontend: `docs/plans/plugins/PLUGIN-API.md` plus
      `apps/web/lib/plugins/types.ts`; update `host-api.ts`, `registry.ts`, or
      the mounted component when the concrete surface changes;
-   - backend: `apps/backend/pkg/pluginsdk`,
-     `apps/backend/proto/kandev/plugin/v1/plugin.proto`, and the manifest model
+   - backend: `pluginsdk`,
+     `pluginsdk/proto/kandev/plugin/v1/plugin.proto`, and the manifest model
      or validator when applicable; update `docs/plans/plugins/GRPC-CONTRACT.md`
      for wire-level changes.
 3. Update `docs/public/plugins-authoring.md` in the same change: add the hook to
@@ -205,9 +206,17 @@ repository above.
 4. Inspect repository-local instructions before editing. Replace template
    identity and example behavior without deleting its packaging, test, or
    release safeguards.
-5. Materialize the plugin as a sibling of the Kandev checkout, or update the
-   template's `go.mod` replacement deliberately. Until the SDK is a standalone
-   module, the default `replace` resolves `../kandev/apps/backend`.
+5. Check public SDK availability before migrating. After the selected release
+   is verified, pin `github.com/kdlbs/kandev/pluginsdk` and `@kdlbs/plugin-sdk`
+   to exact versions. Remove SDK local replacements/file links, regenerate
+   locks, and run the installed-dependency compatibility checker documented in
+   the authoring guide. Use the SDK-wide host floor, not a guessed feature floor.
+
+Existing templates may still use `.kandev-sdk-ref` and sibling checkouts. Keep
+that tested commit until the separate template migration is ready. Inspect
+packaging steps before removing checkouts: `plugin-pack` still belongs to the
+backend and needs an independently pinned tooling source. SDK-only compilation
+and typechecking do not require a Kandev sibling after public migration.
 
 If the requested repository does not exist and cannot be created with the
 available GitHub tooling, stop after producing a precise repository bootstrap
@@ -220,6 +229,11 @@ request. Do not silently substitute a directory in the Kandev monorepo.
 2. Declare only the capabilities the plugin exercises. Treat `api_read`,
    `state`, `secrets`, event subscriptions, and webhooks as permission
    boundaries rather than descriptive metadata.
+   When a capability adds scopes, update its manifest field descriptions and
+   the Settings card, including guidance for already-connected installations:
+   explain reauthorization or reinstallation and any fallback limitations.
+   Name diagnostic controls and results for the behavior they actually check;
+   authentication success does not prove scope or delivery validation.
 3. Embed `pluginsdk.UnimplementedPlugin`, override only required methods, and
    access Kandev through the injected Host API. The Host can be unavailable
    during construction and isolated tests, so resolve it when handling work.
@@ -268,6 +282,11 @@ then verify the artifact rather than only the source tree:
    exercise every declared capability. Cover config validation, permission
    failures, lifecycle restart, events or webhooks, and native UI registration
    as applicable.
+   For `agent_tools`, start a task agent before testing (prepare-only is not
+   enough), then use that task's endpoint for MCP `initialize`, `tools/list`,
+   and `tools/call`. Exercise both successful and error serialization, include
+   SSH when supported, and distinguish mocked external delivery from a real
+   external-service verification in the evidence.
 4. Exercise the failure guarantees that matter to this plugin: duplicate event
    delivery, handler cancellation, missing or invalid webhook authentication,
    unavailable dependencies, denied Host calls, and corrupt state. For native

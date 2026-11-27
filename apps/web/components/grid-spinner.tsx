@@ -1,7 +1,11 @@
 "use client";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { firstAnimationListValue, parseCssTime } from "@kandev/ui/animation-utils";
+import {
+  firstAnimationListValue,
+  parseCssTime,
+  releaseAnimation,
+} from "@kandev/ui/animation-utils";
 import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 
 type GridSpinnerProps = {
@@ -30,24 +34,42 @@ export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
     if (!grid) return;
     const visibility = createPersistentMotionVisibility(grid);
     const registrations = cubes.map((cube) => visibility.register(cube));
-    const animations = startGridAnimations(cubes);
-    if (!animations) {
-      return () => {
-        for (const registration of registrations) registration.unregister();
-        visibility.dispose();
-      };
-    }
-
-    for (let index = 0; index < cubes.length; index += 1) {
-      registrations[index]?.setAnimation(animations[index] ?? null);
-      cubes[index].style.animation = "none";
-    }
+    let animations: Animation[] | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let frame = 0;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const reset = () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      for (const animation of animations ?? []) releaseAnimation(animation);
+      animations = null;
+      for (const registration of registrations) registration.setAnimation(null);
+      for (const cube of cubes) cube.style.removeProperty("animation-name");
+    };
+    const updateMotion = () => {
+      reset();
+      if (reducedMotion?.matches) return;
+      // CSS supplies the initial motion. Defer style reads past the first paint.
+      frame = requestAnimationFrame(() => {
+        timer = setTimeout(() => {
+          animations = startGridAnimations(cubes);
+          if (!animations) return;
+          for (let index = 0; index < cubes.length; index += 1) {
+            registrations[index]?.setAnimation(animations[index] ?? null);
+            cubes[index].style.animationName = "none";
+          }
+        }, 0);
+      });
+    };
+    updateMotion();
+    reducedMotion?.addEventListener("change", updateMotion);
 
     return () => {
-      for (const animation of animations) animation.cancel();
+      reducedMotion?.removeEventListener("change", updateMotion);
+      reset();
       for (const registration of registrations) registration.unregister();
       visibility.dispose();
-      for (const cube of cubes) cube.style.removeProperty("animation");
+      for (const cube of cubes) cube.style.removeProperty("animation-name");
     };
   }, []);
 
@@ -85,7 +107,7 @@ function startGridAnimations(cubes: HTMLElement[]): Animation[] | null {
     }
     return animations;
   } catch {
-    for (const animation of animations) animation.cancel();
+    for (const animation of animations) releaseAnimation(animation);
     return null;
   }
 }

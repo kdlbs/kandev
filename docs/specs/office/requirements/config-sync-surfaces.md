@@ -2,6 +2,7 @@
 status: draft
 system: office
 created: 2026-09-01
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -91,6 +92,15 @@ configuration and status consistent with shipped workflow sync settings.
 **User story:** As an operator, I want to configure and check Office config
 sync the way I configure workflow sync, so I do not learn a second mental
 model.
+
+The configuration form participates in the shared
+[Settings Manual Save](../../ui/requirements/settings-manual-save.md) policy,
+including AC-UI-SETTINGS-MANUAL-SAVE-001.4. That policy owns submitted-draft
+acknowledgment, retention of edits made during saving, Reset, and dirty-route
+navigation on desktop and phone. Office owns the source configuration and
+provider-specific fields; it does not define a second save policy. The form's
+bounded acknowledgment design is in
+[Config Sync Surfaces](../system-design/config-sync-surfaces.md).
 
 #### Acceptance criteria
 

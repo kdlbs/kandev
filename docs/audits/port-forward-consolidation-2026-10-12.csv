@@ -1,0 +1,18 @@
+original_title,original_line,keeper_title,disposition
+empty discovery shows no orphaned port group headings,99,empty discovery shows no orphaned port group headings,retain
+merges late tunnel hydration with a newly started forward,131,merges late tunnel hydration with a newly started forward,retain
+prioritizes forwarded ports and preserves focus through start and stop,174,prioritizes forwarded ports and preserves focus through start and stop,retain
+local executor can enable the port forwarding control,243,local executor can enable port forwarding and retain the preference after reload,consolidate
+button is visible for mock remote executor after launcher enable,254,mock remote executor can enable and disable the port forwarding control,consolidate
+disabling the preference hides the top-bar control,265,mock remote executor can enable and disable the port forwarding control,consolidate
+disabling visibility leaves an active tunnel available,285,disabling visibility leaves an active tunnel available,retain
+preference survives a task page reload,320,local executor can enable port forwarding and retain the preference after reload,consolidate
+dialog opens on button click,335,remote port dialog discovers ports and validates manual entries,consolidate
+auto-refresh loads port list on open,342,remote port dialog discovers ports and validates manual entries,consolidate
+add manual port shows row with Manual badge,355,remote port dialog discovers ports and validates manual entries,consolidate
+opens the proxy URL in the existing Browser panel,369,opens the proxy URL in the existing Browser panel,retain
+opens the proxy URL in a new Browser panel,403,opens the proxy URL in a new Browser panel,retain
+rejects invalid port number,428,remote port dialog discovers ports and validates manual entries,consolidate
+rejects duplicate port,441,remote port dialog discovers ports and validates manual entries,consolidate
+manual port row has correct proxy URL,463,remote port dialog discovers ports and validates manual entries,consolidate
+Enter key submits port,485,remote port dialog discovers ports and validates manual entries,consolidate

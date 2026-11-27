@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,11 +26,10 @@ import (
 )
 
 func TestGitLabRequestSurfaceCannotImportWebSocketTransport(t *testing.T) {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate GitLab package")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	packageDir := filepath.Dir(sourceFile)
 	entries, err := os.ReadDir(packageDir)
 	if err != nil {
 		t.Fatalf("read GitLab package: %v", err)
@@ -65,11 +63,11 @@ func TestWebSocketCatalogContainsOnlyAuthorizedGitLabActions(t *testing.T) {
 		"ActionGitLabTaskMRDeleted":           true,
 		"ActionGitLabTaskMRAutomationUpdated": true,
 	}
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("locate GitLab package")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	actionsPath := filepath.Join(filepath.Dir(sourceFile), "..", "..", "pkg", "websocket", "actions.go")
+	actionsPath := filepath.Join(packageDir, "..", "..", "pkg", "websocket", "actions.go")
 	file, err := parser.ParseFile(token.NewFileSet(), actionsPath, nil, 0)
 	if err != nil {
 		t.Fatalf("parse WebSocket action catalog: %v", err)

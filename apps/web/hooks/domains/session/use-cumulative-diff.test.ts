@@ -1,197 +1,207 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, renderHook, act } from "@testing-library/react";
-
-const mockRequest = vi.fn();
-
-vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
-}));
-
-let storeState: Record<string, unknown> = {};
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
-}));
-
+import { act, cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setWebSocketClient } from "@/lib/ws/connection";
+import type { WebSocketClient } from "@/lib/ws/client";
 import { useCumulativeDiff, invalidateCumulativeDiffCache } from "./use-cumulative-diff";
+import { deferred, renderSessionRead } from "./session-read-test-helpers";
 
-// Mirrors COALESCE_WINDOW_MS in the hook; advance past it to flush the timer.
-const WINDOW = 250;
-
-function setStore() {
-  // No environment mapping → envKey resolves to the sessionId itself.
-  storeState = {
-    environmentIdBySessionId: {} as Record<string, string>,
-  };
-}
-
-describe("useCumulativeDiff invalidation coalescing", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.useFakeTimers();
-    setStore();
-    mockRequest.mockResolvedValue({ cumulative_diff: { session_id: "x", files: {} } });
+const request = vi.fn();
+const cached = {
+  session_id: "session",
+  base_commit: "base",
+  head_commit: "head",
+  total_commits: 1,
+  files: {},
+};
+beforeEach(() => {
+  vi.useFakeTimers();
+  request.mockReset().mockResolvedValue({ cumulative_diff: cached });
+  setWebSocketClient({ request } as unknown as WebSocketClient);
+});
+afterEach(() => {
+  cleanup();
+  setWebSocketClient(null);
+  vi.useRealTimers();
+});
+const advance = (ms = 0) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.2
+describe("cumulative diff response ownership", () => {
+  it("keeps session-specific diff reads independent inside a shared environment", async () => {
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    request.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result } = renderSessionRead(
+      () => [useCumulativeDiff("session"), useCumulativeDiff("other")],
+      undefined,
+      (store) =>
+        store.setState({
+          environmentIdBySessionId: { session: "environment", other: "environment" },
+        }),
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    const other = { ...cached, session_id: "other", head_commit: "other-head" };
+    await act(async () => second.resolve({ cumulative_diff: other }));
+    await act(async () => first.resolve({ cumulative_diff: cached }));
+    expect(result.current.value.map((value) => value.diff)).toEqual([cached, other]);
+    expect(result.current.value.map((value) => value.loading)).toEqual([false, false]);
   });
 
-  it("collapses a burst of invalidations into a single trailing refetch", async () => {
-    const sid = "sess-burst";
-    renderHook(() => useCumulativeDiff(sid));
-
-    // Drain the mount fetch.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(1);
-    mockRequest.mockClear();
-
-    // Fire 5 invalidations within the coalesce window.
-    act(() => {
-      for (let i = 0; i < 5; i += 1) invalidateCumulativeDiffCache(sid);
-    });
-    // Nothing should have fired yet (trailing edge).
-    expect(mockRequest).toHaveBeenCalledTimes(0);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(WINDOW);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not refetch after an unmounted subscriber's coalesced timer fires", async () => {
-    const sid = "sess-unmount";
-    const { unmount } = renderHook(() => useCumulativeDiff(sid));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    mockRequest.mockClear();
-
-    act(() => {
-      invalidateCumulativeDiffCache(sid);
-    });
-    // Unmount before the window elapses. The timer is NOT cleared (it is shared
-    // per envKey), but the listener-subscription cleanup removed this hook's
-    // handler, so the timer firing is a no-op for the unmounted subscriber.
-    act(() => {
-      unmount();
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(WINDOW);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(0);
-  });
-
-  it("does not double-fetch when a mid-flight invalidation drains alongside a queued timer", async () => {
-    const sid = "sess-drain";
-    let resolveFirst: (v: unknown) => void = () => {};
-    mockRequest.mockReset();
-    mockRequest
-      .mockImplementationOnce(
-        () =>
-          new Promise((r) => {
-            resolveFirst = r;
-          }),
-      )
-      .mockResolvedValue({ cumulative_diff: { session_id: "x", files: {} } });
-
-    renderHook(() => useCumulativeDiff(sid));
-    // Mount fetch is in-flight (request #1 pending).
-    expect(mockRequest).toHaveBeenCalledTimes(1);
-
-    // Invalidate while in-flight → sets the pending flag AND queues a timer.
-    act(() => {
-      invalidateCumulativeDiffCache(sid);
-    });
-
-    // Resolve the in-flight fetch → finally drains the pending flag (immediate
-    // follow-up fetch #2) and must cancel the queued timer.
-    await act(async () => {
-      resolveFirst({ cumulative_diff: { session_id: "x", files: {} } });
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(2);
-
-    // The cancelled timer must NOT fire a third fetch.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(WINDOW);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(2);
-  });
-
-  it("uses independent timers per envKey", async () => {
-    const sidA = "sess-A";
-    const sidB = "sess-B";
-    renderHook(() => useCumulativeDiff(sidA));
-    renderHook(() => useCumulativeDiff(sidB));
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(mockRequest).toHaveBeenCalledTimes(2); // one mount fetch each
-    mockRequest.mockClear();
-
-    act(() => {
-      invalidateCumulativeDiffCache(sidA);
-      invalidateCumulativeDiffCache(sidB);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(WINDOW);
-    });
-    // One refetch per envKey — they don't collapse into each other.
-    expect(mockRequest).toHaveBeenCalledTimes(2);
+  it("returns an idle snapshot while unbound and rejects a retired completion", async () => {
+    const stale = deferred<unknown>();
+    request.mockReturnValueOnce(stale.promise);
+    const { result, rerender } = renderSessionRead(
+      (session: string | null) => useCumulativeDiff(session),
+      "session" as string | null,
+    );
+    expect(result.current.value.loading).toBe(true);
+    rerender(null);
+    act(() => result.current.store.setState({ workspaceContextGeneration: 1 }));
+    await act(async () => stale.resolve({ cumulative_diff: { ...cached, head_commit: "stale" } }));
+    expect(result.current.value).toMatchObject({ loading: false, diff: null, error: null });
+    rerender("session");
+    await advance();
+    expect(result.current.value).toMatchObject({ loading: false, diff: cached, error: null });
   });
 });
 
-describe("useCumulativeDiff terminal session", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.useFakeTimers();
-    setStore();
+describe("cumulative diff invalidation", () => {
+  it("does not retain a response that settled after the session changed environments", async () => {
+    const old = deferred<unknown>();
+    request.mockReturnValueOnce(old.promise);
+    const { result } = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+    act(() => result.current.store.setState({ environmentIdBySessionId: { session: "new-env" } }));
+    await advance();
+    await act(async () => old.resolve({ cumulative_diff: { ...cached, head_commit: "obsolete" } }));
+    act(() =>
+      result.current.store.setState({ environmentIdBySessionId: { session: "environment" } }),
+    );
+    await advance();
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(result.current.value.diff).toEqual(cached);
   });
 
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-  });
-
-  it("preserves a cached diff when the backend reports session_terminal", async () => {
-    const sid = "sess-terminal";
-    const cached = {
-      session_id: sid,
-      files: { "a.ts": { status: "modified", additions: 1, deletions: 0 } },
-    };
-    mockRequest.mockResolvedValueOnce({ cumulative_diff: cached }).mockResolvedValueOnce({
-      cumulative_diff: null,
-      ready: false,
-      reason: "session_terminal",
-    });
-
-    const { result } = renderHook(() => useCumulativeDiff(sid));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(result.current.diff).toEqual(cached);
-
-    // Invalidate so the hook refetches; the terminal envelope must not wipe
-    // the previously visible snapshot.
+  it("coalesces a burst into one refresh for all consumers", async () => {
+    const { result } = renderSessionRead(
+      () => [useCumulativeDiff("session"), useCumulativeDiff("session")],
+      undefined,
+    );
+    await advance();
+    expect(request).toHaveBeenCalledTimes(1);
     act(() => {
-      invalidateCumulativeDiffCache(sid);
+      for (let i = 0; i < 5; i++)
+        invalidateCumulativeDiffCache(result.current.store, "environment");
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(WINDOW);
-    });
-
-    expect(mockRequest).toHaveBeenCalledTimes(2);
-    expect(result.current.diff).toEqual(cached);
-
-    // A later subscriber (e.g. another panel mount) must also see the restored
-    // shared cache — not null from the post-invalidation miss.
-    const second = renderHook(() => useCumulativeDiff(sid));
-    expect(second.result.current.diff).toEqual(cached);
+    expect(request).toHaveBeenCalledTimes(1);
+    await advance(250);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(result.current.value.map((v) => v.diff)).toEqual([cached, cached]);
   });
+
+  it("does not refresh after the last subscriber unmounts", async () => {
+    const { result, unmount } = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+    await advance();
+    act(() => invalidateCumulativeDiffCache(result.current.store, "environment"));
+    unmount();
+    await advance(250);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("drains a mid-flight invalidation without a second trailing timer", async () => {
+    const response = deferred<unknown>();
+    request.mockReturnValueOnce(response.promise);
+    const { result } = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+    act(() => invalidateCumulativeDiffCache(result.current.store, "environment"));
+    await act(async () =>
+      response.resolve({ cumulative_diff: { ...cached, head_commit: "obsolete" } }),
+    );
+    await advance(250);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(result.current.value.diff).toEqual(cached);
+  });
+
+  it("uses independent timers for unrelated environments", async () => {
+    const { result } = renderSessionRead(
+      () => [useCumulativeDiff("session"), useCumulativeDiff("other")],
+      undefined,
+    );
+    await advance();
+    act(() => {
+      invalidateCumulativeDiffCache(result.current.store, "environment");
+      invalidateCumulativeDiffCache(result.current.store, "other-environment");
+    });
+    await advance(250);
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+
+  it("preserves the last known diff on terminal response and later subscription", async () => {
+    request
+      .mockResolvedValueOnce({ cumulative_diff: cached })
+      .mockResolvedValue({ ready: false, reason: "session_terminal", cumulative_diff: null });
+    const { result, rerender } = renderSessionRead(
+      (second: string | null) => [useCumulativeDiff("session"), useCumulativeDiff(second)],
+      null as string | null,
+    );
+    await advance();
+    act(() => invalidateCumulativeDiffCache(result.current.store, "environment"));
+    await advance(250);
+    rerender("session");
+    await advance(5000);
+    expect(result.current.value.map((v) => v.diff)).toEqual([cached, cached]);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates caches in separate app stores", async () => {
+    request
+      .mockResolvedValueOnce({ cumulative_diff: cached })
+      .mockResolvedValueOnce({ cumulative_diff: { ...cached, head_commit: "other-store" } });
+    const first = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+    const second = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+    await advance();
+    expect(first.result.current.value.diff?.head_commit).toBe("head");
+    expect(second.result.current.value.diff?.head_commit).toBe("other-store");
+  });
+});
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+describe("diff environment round trips", () => {
+  it.each([false, true])(
+    "retires the original binding across A to B to A (batched=%s)",
+    async (batched) => {
+      const old = deferred<unknown>();
+      const intermediate = deferred<unknown>();
+      const fresh = deferred<unknown>();
+      request.mockReturnValueOnce(old.promise);
+      if (!batched) request.mockReturnValueOnce(intermediate.promise);
+      request.mockReturnValue(fresh.promise);
+      const { result } = renderSessionRead(() => useCumulativeDiff("session"), undefined);
+      const move = (environment: string) =>
+        result.current.store.setState({ environmentIdBySessionId: { session: environment } });
+      if (batched) {
+        act(() => {
+          move("new-env");
+          move("environment");
+        });
+      } else {
+        act(() => move("new-env"));
+        act(() => move("environment"));
+      }
+      await act(async () =>
+        old.resolve({ cumulative_diff: { ...cached, head_commit: "obsolete" } }),
+      );
+      expect(result.current.value.diff).toEqual(null);
+      expect(request).toHaveBeenCalledTimes(batched ? 2 : 3);
+      await act(async () =>
+        fresh.resolve({ cumulative_diff: { ...cached, head_commit: "fresh" } }),
+      );
+      await act(async () =>
+        intermediate.resolve({ cumulative_diff: { ...cached, head_commit: "obsolete" } }),
+      );
+      expect(result.current.value.diff).toEqual({ ...cached, head_commit: "fresh" });
+      expect(result.current.value.loading).toBe(false);
+    },
+  );
 });

@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // httpGetTaskUsageTotals serves GET /api/v1/tasks/:id/usage
@@ -37,4 +39,57 @@ func (h *TaskHandlers) httpGetTaskSessionUsageTotals(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.ToTaskUsageTotalsDTO(dto.TaskUsageTotalsScopeSession, sessionID, totals))
+}
+
+func (h *TaskHandlers) httpGetTaskSessionUsageTurns(c *gin.Context) {
+	taskID := c.Param("id")
+	sessionID := c.Param("sessionId")
+	var cursor int64
+	if raw := c.Query("cursor"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid usage cursor"})
+			return
+		}
+		cursor = parsed
+	}
+	limit := 50
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "usage limit must be between 1 and 100"})
+			return
+		}
+		limit = parsed
+	}
+	turns, nextCursor, err := h.service.ListTaskSessionUsageTurns(c.Request.Context(), taskID, sessionID, cursor, limit)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
+	page := dto.UsageTurnsPageDTO{SessionID: sessionID, Turns: make([]dto.UsageTurnDTO, 0, len(turns))}
+	for _, turn := range turns {
+		page.Turns = append(page.Turns, dto.ToUsageTurnDTO(turn, false))
+	}
+	if nextCursor != cursor {
+		page.NextCursor = strconv.FormatInt(nextCursor, 10)
+	}
+	c.JSON(http.StatusOK, page)
+}
+
+func (h *TaskHandlers) httpGetTaskSessionUsageTurn(c *gin.Context) {
+	taskID := c.Param("id")
+	sessionID := c.Param("sessionId")
+	turnID := c.Param("turnId")
+	events, err := h.service.GetTaskSessionUsageTurn(c.Request.Context(), taskID, sessionID, turnID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
+	if len(events) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "usage turn not found"})
+		return
+	}
+	turn := dto.ToUsageTurnDTO(models.TaskUsageTurnEvents{TurnID: turnID, Events: events}, true)
+	c.JSON(http.StatusOK, turn)
 }

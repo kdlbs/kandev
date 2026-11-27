@@ -20,23 +20,41 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
-	"Name":               {exported: true, yamlKey: "name"},
-	"Description":        {exported: true, yamlKey: "description"},
-	"Prompt":             {exported: true, yamlKey: "prompt"},
-	"TaskTitleTemplate":  {exported: true, yamlKey: "task_title_template"},
-	"Enabled":            {exported: true, yamlKey: "enabled"},
-	"MaxConcurrentRuns":  {exported: true, yamlKey: "max_concurrent_runs"},
-	"ContinuationPolicy": {exported: true, yamlKey: "continuation_policy"},
-	"TaskMode":           {exported: true, yamlKey: "task_mode"},
-	"RepositoryMode":     {exported: true, yamlKey: "repository_mode"},
-	"Triggers":           {exported: true, yamlKey: "triggers"},
-	"WorkflowID":         {exported: true, yamlKey: "workflow.name"},
-	"WorkflowStepID":     {exported: true, yamlKey: "workflow.step"},
-	"AgentProfileID":     {exported: true, yamlKey: "agent_profile"},
-	"ExecutorProfileID":  {exported: true, yamlKey: "executor_profile"},
-	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
-	"Repositories":       {exported: false},
-	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
+	"CreatedByUserID":                  {exported: false}, // Trusted execution authority is rebound to the importer.
+	"Name":                             {exported: true, yamlKey: "name"},
+	"Description":                      {exported: true, yamlKey: "description"},
+	"Prompt":                           {exported: true, yamlKey: "prompt"},
+	"TaskTitleTemplate":                {exported: true, yamlKey: "task_title_template"},
+	"Enabled":                          {exported: true, yamlKey: "enabled"},
+	"MaxConcurrentRuns":                {exported: true, yamlKey: "max_concurrent_runs"},
+	"ContinuationPolicy":               {exported: true, yamlKey: "continuation_policy"},
+	"TaskMode":                         {exported: true, yamlKey: "task_mode"},
+	"ManagedDestination":               {exported: true, yamlKey: "managed_destination"},
+	"ManagedOwnerInstallationID":       {exported: false}, // installation identity is rebound in the destination workspace
+	"ManagedDestinationInstallationID": {exported: false}, // workspace-local installation identity, resolved from the portable destination
+	"ManagedDestinationConversationID": {exported: false}, // workspace-local conversation identity, resolved from the portable destination
+	"ManagedDestinationPluginID":       {exported: false}, // storage projection of ManagedDestination
+	"ManagedDestinationInstanceKey":    {exported: false}, // storage projection of ManagedDestination
+	"ManagedDestinationRevision":       {exported: false}, // refreshed during explicit destination binding
+	"ResourceRevision":                 {exported: false}, // destination schedule concurrency token
+	"RepositoryMode":                   {exported: true, yamlKey: "repository_mode"},
+	"Triggers":                         {exported: true, yamlKey: "triggers"},
+	"WorkflowID":                       {exported: true, yamlKey: "workflow.name"},
+	"WorkflowStepID":                   {exported: true, yamlKey: "workflow.step"},
+	"AgentProfileID":                   {exported: true, yamlKey: "agent_profile"},
+	"ExecutorProfileID":                {exported: true, yamlKey: "executor_profile"},
+	"RepositoryIDs":                    {exported: true, yamlKey: "repositories"},
+	"Repositories":                     {exported: false},
+	"RetryPolicy":                      {exported: true, yamlKey: "retry_policy"},
+	"RetryPolicyJSON":                  {exported: false}, // persisted JSON representation
+	"MCPSelection":                     {exported: false}, // Workspace-local grants require native selection after import.
+	"MCPSelectionJSON":                 {exported: false}, // Persisted representation of local grants.
+	"MCPSelectionRevision":             {exported: false}, // Local concurrency token.
+	"PluginTools":                      {exported: false}, // approval authority is never portable
+	"PluginToolsJSON":                  {exported: false}, // persisted JSON representation of the approval
+	"AutomationRevision":               {exported: false}, // configuration revision
+	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
+	"PRContinuationSettings":           {exported: true, yamlKey: "follow_up_prompt, pr_merged_action, pr_closed_action, workflow.continuation_step"},
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity
@@ -55,6 +73,7 @@ var automationTriggerFieldDispositions = map[string]fieldDisposition{
 	"ConfigJSON":      {exported: false}, // raw storage of Config; same value
 	"ID":              {exported: false}, // instance identity
 	"AutomationID":    {exported: false}, // instance identity
+	"TriggerRevision": {exported: false}, // configuration revision
 	"LastEvaluatedAt": {exported: false}, // runtime state / fire anchor
 	"CreatedAt":       {exported: false}, // runtime state / fire anchor
 	"UpdatedAt":       {exported: false}, // runtime state

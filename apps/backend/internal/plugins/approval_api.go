@@ -1,6 +1,23 @@
 package plugins
 
-import "time"
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// SetCapabilityApprovalWorkspaceAuthorizer wires the workspace manage check
+// used by the human approval HTTP surface. Production supplies the task
+// service's canonical workspace authorization method during route setup.
+func (s *Service) SetCapabilityApprovalWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	s.capabilityApprovalWorkspaceAuthorizer = authorizer
+}
+
+// SetHumanInteractionResponseAuthorizer wires the native session-control
+// scope used to mint a one-use receipt for a human response.
+func (s *Service) SetHumanInteractionResponseAuthorizer(authorizer func(context.Context, string) error) {
+	s.humanInteractionResponseAuthorizer = authorizer
+}
 
 // ListCapabilityApprovals returns the current approval rows for one installed
 // plugin identity.
@@ -12,6 +29,24 @@ func (s *Service) ListCapabilityApprovals(installationID string) ([]CapabilityAp
 	out := make([]CapabilityApprovalDTO, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, approvalDTOFromCurrent(row))
+	}
+	return out, nil
+}
+
+// ListCapabilityApprovalEvents returns the immutable audit events for one
+// installation/workspace pair in append order.
+func (s *Service) ListCapabilityApprovalEvents(installationID, workspaceID string) ([]CapabilityApprovalEventDTO, error) {
+	ledger := s.approvalLedger()
+	if ledger == nil {
+		return nil, ErrApprovalLedgerUnavailable
+	}
+	events, err := ledger.eventsByWorkspace(installationID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CapabilityApprovalEventDTO, 0, len(events))
+	for _, event := range events {
+		out = append(out, approvalEventDTOFromCurrent(event))
 	}
 	return out, nil
 }
@@ -47,13 +82,31 @@ func (s *Service) GrantCapabilityApproval(installationID, workspaceID string, re
 // RevokeCapabilityApproval revokes only the supplied current revision. A
 // stale caller receives ErrApprovalRevisionConflict and must read back state.
 func (s *Service) RevokeCapabilityApproval(installationID, workspaceID string, expectedRevision uint64, actor, reason, auditID string) (CapabilityApprovalDTO, error) {
+	s.approvalEffectMu.Lock()
 	ledger := s.approvalLedger()
 	if ledger == nil {
-		return CapabilityApprovalDTO{}, ErrApprovalRevisionConflict
+		s.approvalEffectMu.Unlock()
+		return CapabilityApprovalDTO{}, ErrApprovalLedgerUnavailable
+	}
+	previous, found, err := ledger.get(installationID, workspaceID)
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return CapabilityApprovalDTO{}, err
+	}
+	if !found {
+		s.approvalEffectMu.Unlock()
+		return CapabilityApprovalDTO{}, ErrApprovalNotFound
 	}
 	row, err := ledger.revokeIfRevision(installationID, workspaceID, expectedRevision, actor, reason, auditID, time.Now().UTC(), false)
+	changed := err == nil && (row.Revision != previous.Revision || row.State != previous.State)
+	s.approvalEffectMu.Unlock()
 	if err != nil {
 		return CapabilityApprovalDTO{}, err
+	}
+	if changed {
+		if err := s.invalidateManagedConversationPolicy(installationID, workspaceID); err != nil {
+			return approvalDTOFromCurrent(row), fmt.Errorf("plugins: approval revoked but managed conversation cancellation failed: %w", err)
+		}
 	}
 	return approvalDTOFromCurrent(row), nil
 }

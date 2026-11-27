@@ -1,0 +1,322 @@
+package lifecycle
+
+import (
+	"context"
+	"fmt"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"sync"
+	"time"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+)
+
+const (
+	streamProjectionBatchBytes = 64 << 10
+	streamProjectionBatchWait  = 20 * time.Millisecond
+	streamProjectionQueueSize  = 4096
+)
+
+var errStreamEventProcessorQueueFull = fmt.Errorf(
+	"%w: durable agent event processor queue is full",
+	ErrUncertainPromptDelivery,
+)
+
+// streamEventProcessor keeps the transport reader responsive while preserving
+// ordered lifecycle delivery. Compatible canonical chunks can accumulate until
+// the byte or timer bound and commit through one repository transaction.
+type streamEventProcessor struct {
+	manager           *StreamManager
+	ctx               context.Context
+	cancel            context.CancelFunc
+	execution         *AgentExecution
+	client            *agentctl.Client
+	delivery          AgentDeliveryRepository
+	startupGeneration uint64
+	attempt           *deliveryStartupAttempt
+	progress          *streamProjectionProgress
+	events            chan streamEventAdmission
+	done              chan struct{}
+
+	closeOnce sync.Once
+	errMu     sync.Mutex
+	err       error
+}
+
+type streamEventAdmission struct {
+	event    agentctl.AgentEvent
+	accepted chan struct{}
+}
+
+type streamEventBatch struct {
+	items   []preparedAgentEvent
+	bytes   int
+	timer   *time.Timer
+	timerCh <-chan time.Time
+}
+
+func newStreamEventProcessor(
+	manager *StreamManager,
+	parent context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	startupGeneration uint64,
+	attempt *deliveryStartupAttempt,
+) *streamEventProcessor {
+	ctx, cancel := context.WithCancel(parent)
+	processor := &streamEventProcessor{
+		manager:           manager,
+		ctx:               ctx,
+		cancel:            cancel,
+		execution:         execution,
+		client:            client,
+		delivery:          delivery,
+		startupGeneration: startupGeneration,
+		attempt:           attempt,
+		progress:          &streamProjectionProgress{tracker: execution.streamProjectionTracker()},
+		events:            make(chan streamEventAdmission, streamProjectionQueueSize),
+		done:              make(chan struct{}),
+	}
+	go processor.run()
+	return processor
+}
+
+func (p *streamEventProcessor) enqueue(event agentctl.AgentEvent) bool {
+	admission := streamEventAdmission{event: event, accepted: make(chan struct{})}
+	select {
+	case p.events <- admission:
+		p.progress.enqueued()
+		close(admission.accepted)
+		return true
+	case <-p.ctx.Done():
+		return false
+	}
+}
+
+func (p *streamEventProcessor) waitForAdmission(admission streamEventAdmission) bool {
+	select {
+	case <-admission.accepted:
+		return true
+	case <-p.ctx.Done():
+		return false
+	}
+}
+
+func (p *streamEventProcessor) close() error {
+	p.closeOnce.Do(func() {
+		close(p.events)
+	})
+	<-p.done
+	p.cancel()
+	p.errMu.Lock()
+	defer p.errMu.Unlock()
+	return p.err
+}
+
+func (p *streamEventProcessor) fail(err error) {
+	if err == nil {
+		return
+	}
+	p.errMu.Lock()
+	if p.err == nil {
+		p.err = err
+	}
+	p.errMu.Unlock()
+	p.cancel()
+}
+
+func (p *streamEventProcessor) run() {
+	defer close(p.done)
+	defer p.cancel()
+
+	batch := &streamEventBatch{}
+	for {
+		select {
+		case admission, ok := <-p.events:
+			if !ok {
+				p.fail(p.flushBatch(batch))
+				return
+			}
+			if !p.waitForAdmission(admission) {
+				return
+			}
+			if err := p.handleEvent(batch, admission.event); err != nil {
+				p.fail(err)
+				return
+			}
+		case <-batch.timerCh:
+			if err := p.flushBatch(batch); err != nil {
+				p.fail(err)
+				return
+			}
+		case <-p.ctx.Done():
+			return
+		}
+	}
+}
+
+func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
+	prepared, err := p.manager.prepareAgentEventWithReceipt(
+		p.ctx, p.execution, p.client, p.delivery, event, p.batchableEvent(event), p.attempt,
+	)
+	if err != nil {
+		return err
+	}
+	if prepared.duplicate {
+		p.manager.scheduleDurableDeliveryAck(p.execution, p.client, prepared.event)
+		p.progress.completed(1)
+		return nil
+	}
+	if !p.batchable(prepared) {
+		if err := p.flushBatch(batch); err != nil {
+			return err
+		}
+		if prepared.receiptDeferred {
+			err := p.manager.replayPreparedAgentEventsWithReceipt(
+				p.ctx, p.execution, []preparedAgentEvent{prepared}, p.delivery, p.client, p.startupGeneration, p.attempt,
+			)
+			if err == nil {
+				p.progress.completed(1)
+			}
+			return err
+		}
+		err := p.manager.processPreparedAgentEvent(
+			p.ctx, p.execution, p.client, p.delivery, prepared, p.startupGeneration,
+		)
+		if err == nil {
+			p.progress.completed(1)
+		}
+		return err
+	}
+	if p.mustFlushBefore(batch, prepared) {
+		if err := p.flushBatch(batch); err != nil {
+			return err
+		}
+	}
+	batch.items = append(batch.items, prepared)
+	batch.bytes += len(prepared.durableEvent.Payload)
+	if len(batch.items) == 1 {
+		batch.timer = time.NewTimer(streamProjectionBatchWait)
+		batch.timerCh = batch.timer.C
+	}
+	if batch.bytes >= streamProjectionBatchBytes {
+		return p.flushBatch(batch)
+	}
+	return nil
+}
+
+func (p *streamEventProcessor) mustFlushBefore(batch *streamEventBatch, prepared preparedAgentEvent) bool {
+	if len(batch.items) == 0 {
+		return false
+	}
+	previous := batch.items[len(batch.items)-1]
+	return !compatibleCanonicalBatch(previous, prepared, p.execution) ||
+		batch.bytes+len(prepared.durableEvent.Payload) > streamProjectionBatchBytes
+}
+
+func (p *streamEventProcessor) flushBatch(batch *streamEventBatch) error {
+	if len(batch.items) == 0 {
+		return nil
+	}
+	count := len(batch.items)
+	err := p.manager.commitPreparedAgentEvents(
+		p.ctx, p.execution, batch.items, p.delivery, p.client, p.startupGeneration, p.attempt,
+	)
+	if err == nil {
+		p.progress.completed(uint64(count))
+	}
+	batch.items = nil
+	batch.bytes = 0
+	if batch.timer != nil && !batch.timer.Stop() {
+		select {
+		case <-batch.timer.C:
+		default:
+		}
+	}
+	batch.timer = nil
+	batch.timerCh = nil
+	return err
+}
+
+// batchableEvent reports whether preparation should defer this event's inbox
+// receipt to the batch transaction. Terminal, tool, and shell events keep the
+// individual admission path.
+func (p *streamEventProcessor) batchableEvent(event agentctl.AgentEvent) bool {
+	if _, ok := p.delivery.(canonicalAgentDeliveryBatchReceiver); !ok {
+		return false
+	}
+	return !event.ReplaceMessageContent &&
+		event.Type != streams.EventTypeShellOutputUpdate && event.Type != streams.EventTypeToolCall &&
+		canonicalAgentDeliveryEvent(event)
+}
+
+func (p *streamEventProcessor) batchable(prepared preparedAgentEvent) bool {
+	if _, ok := p.delivery.(canonicalAgentDeliveryBatchReceiver); !ok {
+		return false
+	}
+	return prepared.receiptDeferred && prepared.durableEvent != nil &&
+		prepared.event.Type != streams.EventTypeShellOutputUpdate &&
+		prepared.event.Type != streams.EventTypeToolCall && canonicalAgentDeliveryEvent(prepared.event)
+}
+
+func compatibleCanonicalBatch(previous, next preparedAgentEvent, execution *AgentExecution) bool {
+	if previous.durableEvent == nil || next.durableEvent == nil {
+		return false
+	}
+	if previous.event.Type != next.event.Type {
+		return false
+	}
+	return canonicalAgentMessageID(execution, previous.event) == canonicalAgentMessageID(execution, next.event)
+}
+
+func (sm *StreamManager) processPreparedAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	prepared preparedAgentEvent,
+	startupGeneration uint64,
+) error {
+	if prepared.duplicate {
+		if !prepared.skipAcknowledgement {
+			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
+		}
+		return nil
+	}
+	if prepared.durableEvent != nil && prepared.durableEvent.Terminal {
+		if err := sm.projectDurableAgentDeliveryEventWithEffect(
+			ctx, prepared.durableEvent, delivery, prepared.deliveryEffect,
+		); err != nil {
+			return fmt.Errorf("project durable terminal agent event: %w", err)
+		}
+		if !prepared.skipAcknowledgement {
+			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
+		}
+		if !prepared.skipCallback && !prepared.staleTerminal {
+			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
+		}
+		return nil
+	}
+	event, canonicalProjected, notify, err := sm.projectCanonicalAgentEvent(
+		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
+		!prepared.skipAcknowledgement,
+	)
+	if err != nil {
+		return fmt.Errorf("canonical agent event projection: %w", err)
+	}
+	if notify && !prepared.skipCallback {
+		sm.notifyAgentEvent(execution, event, startupGeneration)
+	}
+	if prepared.durableEvent == nil || canonicalProjected {
+		return nil
+	}
+	if err := sm.projectDurableAgentDeliveryEventWithEffect(
+		ctx, prepared.durableEvent, delivery, prepared.deliveryEffect,
+	); err != nil {
+		return fmt.Errorf("project durable agent event: %w", err)
+	}
+	if !prepared.skipAcknowledgement {
+		sm.scheduleDurableDeliveryAck(execution, client, event)
+	}
+	return nil
+}

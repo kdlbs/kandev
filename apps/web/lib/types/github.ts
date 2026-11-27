@@ -2,9 +2,11 @@
 
 import type { GitHubAppRegistration } from "./github-app";
 import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
+import type { CheckRun, CheckSummary, WorkflowAttention } from "./github-checks";
 
 export * from "./github-app";
 export * from "./github-pr-discovery";
+export * from "./github-checks";
 
 export type GitHubAuthMethod =
   | "gh_cli"
@@ -117,6 +119,7 @@ export type GitHubRateLimitUpdate = {
 };
 
 export type GitHubPR = {
+  github_host?: string;
   number: number;
   title: string;
   body?: string;
@@ -172,41 +175,12 @@ export type PRComment = {
   in_reply_to: number | null;
 };
 
-export type CheckRun = {
-  name: string;
-  source: "check_run" | "status_context";
-  status: string;
-  conclusion: string;
-  html_url: string;
-  output: string;
-  started_at: string | null;
-  completed_at: string | null;
-};
-
-export type WorkflowAttentionState = "unknown" | "none" | "approval_required" | "action_required";
-
-export type WorkflowAttentionRun = {
-  run_id: number;
-  run_attempt: number;
-  workflow_id: number;
-  name: string;
-  url: string;
-  reason: string;
-};
-
-export type WorkflowAttention = {
-  state: WorkflowAttentionState;
-  head_sha: string;
-  observed_at: string;
-  stale: boolean;
-  runs: WorkflowAttentionRun[];
-};
-
 export type PRFeedback = {
   pr: GitHubPR;
   reviews: PRReview[];
   comments: PRComment[];
   checks: CheckRun[];
+  checks_state?: string;
   has_issues: boolean;
   workflow_attention?: WorkflowAttention | null;
 };
@@ -221,6 +195,7 @@ export type GitHubPRStatus = {
   checks_total: number;
   checks_passing: number;
   workflow_attention?: WorkflowAttention | null;
+  check_summary?: CheckSummary | null;
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";
@@ -229,6 +204,11 @@ export type RepoMergeMethods = {
   merge: boolean;
   squash: boolean;
   rebase: boolean;
+};
+
+export type RepoMergeAccess = {
+  state: "allowed" | "denied" | "unknown";
+  actor: GitHubAuthPrincipal | null;
 };
 
 export type MergeableState =
@@ -253,6 +233,7 @@ export type MergeQueueState =
   | (string & {});
 
 export type TaskPR = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   task_id: string;
@@ -271,6 +252,7 @@ export type TaskPR = {
   review_state: "approved" | "changes_requested" | "pending" | "";
   checks_state: "success" | "failure" | "pending" | "unstable" | "";
   mergeable_state: MergeableState;
+  has_merge_conflicts?: boolean | null;
   review_count: number;
   pending_review_count: number;
   /** Number of approving reviews required by the base branch protection rule.
@@ -294,6 +276,8 @@ export type TaskPR = {
   head_sha?: string;
   /** Head-scoped GitHub Actions evidence that needs human attention. */
   workflow_attention?: WorkflowAttention | null;
+  /** Last selected detailed check snapshot. Null when never observed. */
+  check_summary?: CheckSummary | null;
   /** Empty when GitHub did not return an active merge-queue entry. */
   merge_queue_state?: MergeQueueState;
   merge_queue_entry_id?: string;
@@ -421,6 +405,7 @@ export type TaskCIAutomationPatch = {
 };
 
 export type PRWatch = {
+  github_host?: string;
   id: string;
   session_id: string;
   task_id: string;
@@ -440,10 +425,11 @@ export type RepoFilter = {
   name: string;
 };
 
-export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
+export type GitHubRepoScopeMode = "all" | "selected";
 export type TaskGitCredentialsMode = "managed" | "executor";
 
 export type GitHubWorkspaceSettings = {
+  github_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode: GitHubRepoScopeMode;
@@ -456,6 +442,7 @@ export type GitHubWorkspaceSettings = {
 };
 
 export type UpdateGitHubWorkspaceSettingsRequest = {
+  expected_host?: string;
   workspace_id: string;
   task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode?: GitHubRepoScopeMode;
@@ -471,6 +458,7 @@ export type GitHubOrg = {
 };
 
 export type GitHubRepoInfo = {
+  github_host?: string;
   full_name: string;
   owner: string;
   name: string;
@@ -491,6 +479,7 @@ export type ReviewScope = "user" | "user_and_teams";
 export type CleanupPolicy = "auto" | "always" | "never";
 
 export type ReviewWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -571,6 +560,7 @@ export type CleanupTasksResponse = {
 // Issue watch types
 
 export type IssueWatch = {
+  github_host?: string;
   id: string;
   workspace_id: string;
   workflow_id: string;
@@ -655,6 +645,7 @@ export type PRCommitDetail = {
 
 // GitHub Issue (separate from Pull Request)
 export type GitHubIssue = {
+  github_host?: string;
   number: number;
   title: string;
   body: string;
@@ -672,6 +663,7 @@ export type GitHubIssue = {
 };
 
 export type TaskIssueLink = {
+  github_host?: string;
   task_id: string;
   task_title: string;
   owner: string;

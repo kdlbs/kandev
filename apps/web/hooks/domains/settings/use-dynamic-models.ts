@@ -15,6 +15,7 @@ import type {
   ConfigOptionEntry,
   ModeEntry,
   ModelEntry,
+  ModelDiscovery,
   CapabilityStatus,
   DynamicModelsResponse,
   ModelConfig,
@@ -32,6 +33,8 @@ type UseAgentCapabilitiesState = {
   currentModelId: string | undefined;
   currentModeId: string | undefined;
   status: CapabilityStatus | undefined;
+  /** How the model list was assembled. Undefined for agents without a host CLI. */
+  discovery: ModelDiscovery | undefined;
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -312,6 +315,7 @@ export function useAgentCapabilities(
   );
   const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
   const [status, setStatus] = useState<CapabilityStatus | undefined>(initial.status);
+  const [discovery, setDiscovery] = useState<ModelDiscovery | undefined>(initial.discovery);
   const [manualRefreshAgentName, setManualRefreshAgentName] = useState<string>();
   const hasManualRefresh = manualRefreshAgentName === agentName;
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
@@ -334,6 +338,7 @@ export function useAgentCapabilities(
         if (sequence !== capabilityRequestSequence.current) return;
         setStatus(response.status);
         setError(response.error ?? null);
+        setDiscovery(response.discovery);
         if (forceRefresh) {
           setManualRefreshAgentName(agentName);
         }
@@ -359,8 +364,9 @@ export function useAgentCapabilities(
   useEffect(() => {
     if (!hasManualRefresh) {
       setStatus(initial.status);
+      setDiscovery(initial.discovery);
     }
-  }, [hasManualRefresh, initial.status]);
+  }, [hasManualRefresh, initial.status, initial.discovery]);
 
   useEffect(() => {
     if (supportsDynamicModels && agentName) {
@@ -380,6 +386,7 @@ export function useAgentCapabilities(
     currentModelId,
     currentModeId,
     status,
+    discovery,
     isLoading,
     error,
     refresh,

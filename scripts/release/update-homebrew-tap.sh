@@ -114,6 +114,7 @@ log_ok "Tap cloned to $TAP_DIR"
 
 FORMULA_PATH="$TAP_DIR/Formula/kandev.rb"
 mkdir -p "$(dirname "$FORMULA_PATH")"
+ALLOWLIST_PATH="$TAP_DIR/audit_exceptions/mismatched_binary_allowlist.json"
 
 GITHUB_BASE="https://github.com/kdlbs/kandev/releases/download/${TAG}"
 
@@ -128,6 +129,10 @@ sed \
 
 log_ok "Formula written to Formula/kandev.rb"
 
+# The compact formula has no foreign helper binaries, so retire the exact
+# mismatched-binary exception in the same external tap commit.
+node "$SCRIPT_DIR/homebrew-audit-allowlist.mjs" "$ALLOWLIST_PATH"
+
 # -- Commit and push (or open PR) ---------------------------------------------
 
 cd "$TAP_DIR"
@@ -135,6 +140,9 @@ git config user.email "release-bot@kandev"
 git config user.name "kandev release bot"
 
 git add Formula/kandev.rb
+if [[ -f "$ALLOWLIST_PATH" ]]; then
+  git add audit_exceptions/mismatched_binary_allowlist.json
+fi
 
 if git diff --cached --quiet; then
   log "Formula unchanged — nothing to commit"

@@ -131,6 +131,26 @@ export async function resetRetention(page: Page) {
   expect(response.ok(), await response.text()).toBe(true);
 }
 
+export async function seedRetentionAnalysis(page: Page) {
+  const { policy } = await retentionStatus(page);
+  const accepted = await page.request.post(`${RETENTION_API}/analyze`, {
+    data: { age: policy.age },
+  });
+  const body = (await accepted.json()) as { operation_id?: string; code?: string };
+  expect(accepted.status(), JSON.stringify(body)).toBe(202);
+  const id = body.operation_id;
+  expect(id).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        const status = await retentionStatus(page);
+        return status.last_analysis?.id === id ? status.last_analysis.state : "pending";
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("succeeded");
+}
+
 export async function failNextRetentionStatusRead(page: Page) {
   const pattern = `**${RETENTION_API}`;
   let reads = 0;
@@ -168,7 +188,13 @@ export async function recoverRetentionStatusPolling(page: Page, preserveError = 
   );
   await page.clock.runFor(30_000);
   await failed;
-  await expect(page.getByTestId("tool-payload-error")).toBeVisible();
+  const error = page.getByTestId("tool-payload-error");
+  await expect(error).toBeVisible();
+  await expect(error).toContainText("Current status is unavailable");
+  await expect(page.getByTestId("tool-payload-estimate")).toContainText("Completed");
+  if (!preserveError) {
+    await expect(error).not.toContainText("operation could not complete");
+  }
 
   const recovered = page.waitForResponse(
     (response) =>
@@ -178,8 +204,12 @@ export async function recoverRetentionStatusPolling(page: Page, preserveError = 
   );
   await page.clock.runFor(30_000);
   await recovered;
-  if (preserveError) await expect(page.getByTestId("tool-payload-error")).toBeVisible();
-  else await expect(page.getByTestId("tool-payload-error")).toHaveCount(0);
+  if (preserveError) {
+    await expect(error).toContainText("operation could not complete");
+    await expect(error).not.toContainText("Current status is unavailable");
+  } else {
+    await expect(error).toHaveCount(0);
+  }
 }
 
 export async function failRetentionAnalysis(page: Page, touch = false) {

@@ -19,6 +19,20 @@ environment. The system must keep each firing addressable, preserve the
 complete shared transcript, and expose one backend-owned coordinator authority
 only to hidden automation agents.
 
+## Package-selection extension
+
+[Automation MCP selection](automation-mcp-selection.md) extends the fixed native catalog with explicit human-selected packages.
+It includes Configuration and preserves the Automation principal, hidden-run lifecycle, and Core coordination restrictions.
+Legacy automations retain the fixed catalog. Explicit selections use the linked extension.
+
+## PR continuation extension
+
+[GitHub PR follow-up](automations-pr-follow-up.md) adds a third policy,
+`reuse_per_pr`, which keeps one task per pull request and can archive or
+delete it when the pull request ends. It reuses this
+document's exact run binding and continuation dispatch. The `new_task` and
+`reuse_thread` contracts here are unchanged.
+
 ## Terminology
 
 - **New-task policy:** `new_task`, which creates an isolated hidden task,
@@ -43,7 +57,7 @@ tasks as ordinary Kanban work.
 #### Acceptance criteria
 
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.1:** When an automation is created or
-  edited, the settings form shall show a visible Context between runs choice
+  edited, the settings form shall show a visible **Task for each run** choice
   with `new_task` and `reuse_thread` options.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.2:** When no policy is selected, the
   system shall use `new_task`.
@@ -54,11 +68,12 @@ tasks as ordinary Kanban work.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.4:** When `reuse_thread` is selected,
   the system shall limit the automation to one open run at a time.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.5:** When the hidden target is
-  selected, the form shall state that new-task runs use separate conversation
-  and files and that those tasks do not appear in Kanban or the sidebar.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-001.6:** Both policy descriptions shall
-  remain visible and accessible on desktop and mobile, and each choice shall
-  provide a touch target of at least 44 pixels.
+  selected, the form shall state that its tasks do not appear in Kanban or the
+  sidebar, and that new-task runs start with their own conversation and files.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-001.6:** The selected policy's
+  description shall remain visible, and every policy's description shall be
+  available on desktop and mobile. Each choice shall provide a touch target of
+  at least 44 pixels.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-002: Preserve and focus shared turns
 
@@ -117,14 +132,17 @@ while preventing owner-wide access, self-targeting, and task-local questions.
 #### Acceptance criteria
 
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.1:** Every hidden automation task
-  session shall receive the fixed `SurfaceAutomation` profile resolved by the
+  session shall receive the `SurfaceAutomation` profile resolved by the
   backend before MCP dispatch. A visible normal task shall receive its normal
   task profile instead.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-004.2:** The fixed catalog shall include
+- **AC-OFFICE-AUTOMATION-CONTINUITY-004.2:** The legacy Core catalog shall include
   workspace inventory, read-only launch catalog, task/session inspection,
   task coordination, and blocker coordination tools, and shall exclude
   `ask_user_question_kandev`, permanent task deletion, configuration writes,
   task-local authoring, diagnostics, plugin tools, and provider PR/MR tools.
+  Explicit native packages and plugin approvals extend this catalog under
+  [automation MCP selection](automation-mcp-selection.md) and
+  [plugin tools](automation-plugin-tools.md).
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.3:** The trusted principal shall carry
   the automation, workspace, caller task, caller session, and surface
   identities. Handlers shall use it as the workspace boundary and audit the
@@ -135,9 +153,9 @@ while preventing owner-wide access, self-targeting, and task-local questions.
   workspaces. Archiving shall be exempt from the self-target rejection so
   that an automation can archive its own hidden task as its end-of-run
   completion signal; a run bound to a specific target task shall still
-  archive only that bound target. Every other mutation on the automation's
-  own hidden task shall remain rejected, as shall any foreign-workspace
-  target.
+  archive only that bound target. Other coordination mutations on the automation's own hidden task
+  shall remain rejected, as shall any foreign-workspace target. Selected
+  package authoring tools may write reports on the caller's own task.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-004.5:** A task spawned on another task
   shall receive that target task's normal profile and shall not inherit
   `SurfaceAutomation` from its caller.
@@ -145,6 +163,6 @@ while preventing owner-wide access, self-targeting, and task-local questions.
 ## Out of scope
 
 - Concurrent turns or additional sessions on a reusable automation.
-- Per-automation MCP capability settings or arbitrary tool allowlists.
+- Arbitrary native tool allowlists.
 - Cross-workspace coordinator authority or self-approval.
 - Automatic reset or rebase of a reused worktree.

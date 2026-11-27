@@ -26,8 +26,10 @@ go and which launches a budget applies to, and operability, which needs one
 identifier traceable from a wake through its run and session to any run that
 session spawns.
 
-Office owns this contract because Office owns the run row and the enqueue path
-where causation is decided.
+Office owns the causation semantics because its enqueue paths decide how each
+Office run is attributed. The shared run-row data contract belongs to the runs
+system; this requirement defines the Office meaning and rules for its causation
+fields.
 
 ## Terminology
 
@@ -232,6 +234,18 @@ chain without correlating log lines by timestamp.
   causing run exists but predates this capability, and from
   AC-OFFICE-RUN-CAUSATION-001.10, where a value is malformed rather than deliberately
   empty.
+- **AC-OFFICE-RUN-CAUSATION-001.25:** When a wake is queued because a task entered a
+  workflow step, the actor and causing run shall come from the committed step
+  transition that produced the entry, not from a session that happens to be live when
+  the wake is queued. When an Office task-owned or run-owned agent execution causes
+  the transition, the transition shall retain its trusted causing run ID. The wake
+  shall load that exact run under AC-OFFICE-RUN-CAUSATION-001.3, even if session
+  binding has not yet completed or retry and recovery have cleared mutable claim
+  fields. This lets a review and rework loop between workflow steps deepen one chain.
+  A transition caused by a human shall produce a human-rooted root under
+  AC-OFFICE-RUN-CAUSATION-001.9. Other transitions shall fall back to the task
+  carrier of AC-OFFICE-RUN-CAUSATION-001.18. Rows written before the trusted run ID
+  was recorded may use the existing session-and-time lookup for compatibility.
 
 ## Out of scope
 

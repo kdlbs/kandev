@@ -1,5 +1,7 @@
 "use client";
 
+import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
+
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -23,16 +25,16 @@ import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
 import { SessionTabDialogs } from "./session-tab-menu";
 import { TabRenameInput } from "./tab-rename-input";
 import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
+import { PreviewRecoveryRegion } from "./preview-plan-recovery";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskLaunchErrorProvider } from "./task-launch-error-context";
 import { PreviewTaskErrorShell } from "./preview-task-error-shell";
 import { type SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { HandoffPreset } from "./new-session-dialog";
-import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
+import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
 import {
   buildAgentLabelsById,
   isSessionActive,
-  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
@@ -128,7 +130,6 @@ function useBuildPreviewTabs({
   taskId,
   isPrimarySession,
   dialogs,
-  handleSessionRemoved,
 }: {
   sortedSessions: TaskSession[];
   profilesById: Record<string, AgentProfileOption>;
@@ -136,7 +137,6 @@ function useBuildPreviewTabs({
   taskId: string;
   isPrimarySession: (session: TaskSession) => boolean;
   dialogs: PreviewDialogsState;
-  handleSessionRemoved: (sessionId: string) => void;
 }): SessionTab[] {
   return useMemo(
     () =>
@@ -163,7 +163,6 @@ function useBuildPreviewTabs({
               isPrimary={isPrimarySession(session)}
               onRename={dialogs.setRenamingSessionId}
               onRequestDelete={dialogs.handleRequestDelete}
-              onSessionRemoved={handleSessionRemoved}
               onShareRequested={dialogs.setShareSessionId}
               onHandoff={dialogs.handleHandoffProfile}
             />
@@ -176,20 +175,12 @@ function useBuildPreviewTabs({
                 onCommit={dialogs.handleCommitRename}
                 onCancel={() => dialogs.setRenamingSessionId(null)}
                 testId="preview-session-tab-rename-input"
-                maxLength={MAX_SESSION_NAME_LENGTH}
+                limitValue={limitSessionName}
               />
             ) : undefined,
         };
       }),
-    [
-      sortedSessions,
-      agentLabelsById,
-      profilesById,
-      taskId,
-      isPrimarySession,
-      dialogs,
-      handleSessionRemoved,
-    ],
+    [sortedSessions, agentLabelsById, profilesById, taskId, isPrimarySession, dialogs],
   );
 }
 
@@ -249,27 +240,6 @@ function PreviewSessionTabDialogHost({
   );
 }
 
-function PreviewSessionRecoverySurface({
-  workspaceId,
-  resumption,
-}: {
-  workspaceId?: string | null;
-  resumption: ReturnType<typeof useSessionResumption>;
-}) {
-  return (
-    <SessionRecoveryFeedback
-      error={resumption.error}
-      notice={resumption.notice}
-      recoveryFailure={resumption.recoveryFailure}
-      onRetry={getSessionRecoveryRetry(resumption)}
-      retryDisabled={
-        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-      }
-      workspaceId={workspaceId ?? null}
-    />
-  );
-}
-
 /**
  * Session tabs for the kanban preview panel.
  *
@@ -309,10 +279,7 @@ export function PreviewSessionTabs({
     [primarySessionId],
   );
 
-  const activeSessionId = useMemo(
-    () => pickActiveSessionId(sortedSessions, sessionId),
-    [sortedSessions, sessionId],
-  );
+  const activeSessionId = sessionId;
   const activeSession = useMemo(
     () => sortedSessions.find((s) => s.id === activeSessionId) ?? null,
     [sortedSessions, activeSessionId],
@@ -330,25 +297,14 @@ export function PreviewSessionTabs({
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
+  const automaticRecoveryOwnedByChat = useAutomaticRecoveryChatOwner({
+    taskId,
+    sessionId: activeSessionId,
+    recovery: resumption,
+    summary: taskStatusSummary,
+    disabled: Boolean(isArchived),
+  });
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
-  // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
-  // closure at the moment delete is confirmed, and `session.delete` can take
-  // a WS round-trip to settle. Reading these off refs (updated every render)
-  // instead of closing over `activeSessionId`/`sortedSessions` means the
-  // eventual `onDeleted` call sees which tab is active *now*, not which one
-  // was active when the delete was requested.
-  const activeSessionIdRef = useRef(activeSessionId);
-  activeSessionIdRef.current = activeSessionId;
-  const sortedSessionsRef = useRef(sortedSessions);
-  sortedSessionsRef.current = sortedSessions;
-  const handleSessionRemoved = useCallback(
-    (removedSessionId: string) => {
-      if (removedSessionId !== activeSessionIdRef.current) return;
-      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
-      onSessionChange?.(remaining[0]?.id ?? null);
-    },
-    [onSessionChange],
-  );
 
   // Do not force the Plan view while the session list is still loading. The
   // first render can have zero sessions before the list arrives, and treating
@@ -364,7 +320,6 @@ export function PreviewSessionTabs({
     taskId,
     isPrimarySession,
     dialogs,
-    handleSessionRemoved,
   });
 
   const tabs = useMemo<SessionTab[]>(() => [...sessionTabs, planTab], [sessionTabs, planTab]);
@@ -410,7 +365,6 @@ export function PreviewSessionTabs({
       resumption={resumption}
     >
       <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-        <PreviewSessionRecoverySurface workspaceId={workspaceId} resumption={resumption} />
         <div className="border-b px-2 py-1">
           <SessionTabs
             tabs={tabs}
@@ -430,6 +384,16 @@ export function PreviewSessionTabs({
             resumption={resumption}
           />
         </div>
+        <PreviewRecoveryRegion
+          key={activeSessionId}
+          viewMode={viewMode}
+          session={activeSession}
+          archived={isArchived}
+          ownedByChat={automaticRecoveryOwnedByChat}
+          taskId={taskId}
+          workspaceId={workspaceId}
+          resumption={resumption}
+        />
         <PreviewSessionTabDialogHost
           dialogs={dialogs}
           sortedSessions={sortedSessions}
@@ -602,7 +566,9 @@ export function PreviewSessionBody({
   resumption?: SessionRecoveryOwner;
 }) {
   if (session.is_passthrough) {
-    return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
+    return (
+      <PassthroughToolbar sessionId={session.id} taskId={taskId} isVisible={false} detailActive />
+    );
   }
 
   return (
@@ -622,6 +588,7 @@ export function PreviewSessionBody({
           // Read-only kanban hover preview — a transient glance, not "opening"
           // the task. Never advances the Slack-style read cursor.
           isVisible={false}
+          detailActive
         />
       </TaskLaunchErrorProvider>
     </div>

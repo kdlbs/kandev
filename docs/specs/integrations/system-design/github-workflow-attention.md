@@ -1,7 +1,8 @@
 ---
-status: draft
+status: current
 system: integrations
 requirements:
+  - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003
   - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-002
   - REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001
 ---
@@ -13,16 +14,24 @@ requirements:
 Workflow attention supplements check results. It does not rewrite GitHub mergeability or manufacture check runs.
 The integration owns collection, storage, and interpretation. Existing shared components own presentation geometry.
 
+The November 11 amendment changes only badge priority through the implemented [corner-badge fix](../../../plans/pr-conflict-corner-badge/plan.md).
+All provider collection, caching, freshness, and projection contracts retain their existing behavior.
+
 ## Requirement mapping
 
 | Acceptance criteria | Design sections |
 | --- | --- |
-| 001.1, 001.6, 001.7 | Provider evidence |
+| 001.1, 001.6, 001.7, 001.10 | Provider evidence |
 | 001.2, 001.4 | Status and automation |
 | 001.5 | Storage and recovery |
 | 001.3, 001.8 | Presentation |
+| 001.9 | Monitored workflow phase |
 
 All criteria reference `AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION`.
+
+`REQ-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003` maps to [Task approval badge](#task-approval-badge).
+Criteria 003.1-003.6 use eligibility and visual precedence; 003.7 uses the bounded projection;
+003.8 uses the existing disclosure and accessibility contracts.
 
 ## Provider evidence
 
@@ -48,12 +57,18 @@ A completed fork `pull_request` run with `action_required` and no jobs supplies 
 This is an interpretation of combined provider evidence, not an explicit approval-reason field.
 Other action-required runs use the generic attention classification.
 Unknown job counts must not become zero. Missing runs, `waiting`, and `UNSTABLE` alone never prove approval.
+A failed or deferred job read for any selected `action_required` run makes the whole observation incomplete.
+Classify it as `unknown`, so storage preserves same-head evidence as stale. Never downgrade it to the generic
+`action_required` reason, which would claim provider evidence Kandev did not observe.
 
 `getPRStatus` and `getPRFeedback` in `client_helpers.go` share the collector and classifier.
-The batched service path in `service_pr_watch_batched.go` enriches statuses before caching and applying them.
+Single-PR REST reads, clients without GraphQL, and the monitored-phase fallback below use this REST collector.
+GraphQL-capable batched sync uses the [monitored workflow phase](#monitored-workflow-phase) instead.
+A GraphQL response may resolve some aliases and reject others. A path-bearing
+error makes only the named PR or suite node unavailable; the resolved siblings
+keep their evidence. An error without a usable path fails the whole chunk.
 Cover both numbered and branch-discovered watches. The existing poller owns refresh cadence.
-Coalesce enrichment by credential scope, repository, and head identity within each sync.
-Use bounded concurrency and the existing context budget. Do not add a frontend poller or one request per mounted surface.
+Do not add a frontend poller or one request per mounted surface.
 The unwatched-task lifecycle sweep only reconciles PR state, the observed head, and stored workflow attention; it does not issue new Actions reads. Retained watches and REST feedback/status paths provide fresh workflow evidence, while a head change invalidates the stored observation.
 
 The REST [workflow runs contract](https://docs.github.com/en/rest/actions/workflow-runs) defines collection and permission requirements.
@@ -124,12 +139,12 @@ Audit the GitHub registered-provider adapter and compact task projection so acti
 `pr-ci-popover.tsx` and `pr-detail-panel.tsx` show the workflow name, reason, and "View on GitHub" link.
 Do not show "No checks" as the sole explanation or offer "Fix CI" for approval-only evidence.
 Use the existing provider-neutral summary and detail anatomy. Avoid GitHub-specific slots in shared primitives.
-All new copy uses locale keys in English, Portuguese, and the three Chinese catalogs.
+All new copy uses locale keys in English, Portuguese, Japanese, and the three Chinese catalogs.
 
 The phone entry remains task navigation, then the PR status chip.
 Reuse `PRStatusChipDrawer` and its existing scroll owner, safe areas, and dismiss behavior.
 The closest shipped exemplar is `e2e/tests/pr/mobile-pr-ci-chip.spec.ts` and its corresponding chip component.
-The compact task-row icon stays passive on touch. No new drawer or nested overlay is necessary.
+The compact task-row icon uses the existing `PRTaskIconDrawer` on touch. No new drawer or nested overlay is necessary.
 The external link has a 44px minimum touch hit area, while desktop density stays unchanged.
 
 ## Verification
@@ -145,6 +160,7 @@ Desktop and mobile Playwright tests verify the existing entry points and the pro
 - [Requirements](../requirements/github-workflow-attention.md)
 - [Shared task summary design](../../ui/system-design/pr-task-status-summary.md)
 - [Implementation plan](../../../plans/github-workflow-attention/plan.md)
+- [Workflow approval freshness plan](../../../plans/github-workflow-approval-freshness/plan.md)
 
 ## Expiring Actions observations
 
@@ -167,8 +183,9 @@ arrive for the same SHA. Never use an infinite TTL. Cache job observations by
 credential scope, repository, run ID, and attempt, with the same expiry classes.
 A run-attempt change must not reuse jobs from an earlier attempt.
 
-Keep existing batched enrichment limits: concurrency 4 and total budget
-5 seconds. Preserve the outer status/search cache TTL of 30 seconds and the
+These caches serve the REST collector. The monitored workflow phase reads
+current GraphQL evidence on each pass and coalesces equivalent heads through
+its singleflight key instead. Preserve the outer status/search cache TTL of 30 seconds and the
 feedback TTL of 8 seconds. Long Actions entries only affect workflow attention,
 not checks, review status, or auto-merge decisions.
 
@@ -184,3 +201,214 @@ Provider errors retain unknown/stale-positive semantics and existing retry
 admission. Terminal PRs continue to skip Actions reads altogether.
 
 See [the implementation plan](../../../plans/watch-task-cleanup/plan.md).
+
+## Monitored workflow phase
+
+`AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-001.9` maps to this section.
+
+### Why the batched path does not use per-head REST
+
+Background REST admission allows one in-flight request per principal and
+resource, followed by at least one second of pacing. The poller requests
+non-blocking admission. A per-head REST fan-out therefore loses every read except
+one on each pass. On 2026-10-29 the running instance recorded about 21 rejected
+Actions reads per minute while GitHub reported 122 Core requests used in that hour.
+Serial REST reads would still need one paced request per head every minute,
+which cannot keep pace as the number of open PRs grows. The GraphQL evidence
+below costs one point per chunk of 20 PRs and one more query per pass for job counts.
+
+### Evidence source
+
+After the numbered and searching phases apply their status results, a third
+workflow phase reads Actions evidence for the open known PRs it just observed.
+The phase takes its input from the applied `TaskPR` rows: workspace, credential
+scope, repository, PR number, and stored head SHA. It does not reuse status
+results from memory, so an inventory tick and a continuation wake follow one path.
+
+Step 1 is a dedicated query, separate from the status batch, so its failure
+cannot withhold check or review status. It groups at most 20 PRs per request:
+
+```text
+repository(owner, name) {
+  prN: pullRequest(number) {
+    headRefOid
+    commits(last: 1) { nodes { commit { oid
+      checkSuites(first: 100) {
+        pageInfo { hasNextPage }
+        nodes { id status conclusion createdAt
+          workflowRun { databaseId event url workflow { databaseId name } } } } } } }
+  }
+}
+```
+
+Do not filter by GitHub App ID. App IDs differ on GitHub Enterprise Server.
+A suite with a non-null `workflowRun` is an Actions run. The query also selects
+`headRefName`, `headRepository`, and `headRepositoryOwner`, because an applied
+`TaskPR` row stores only the base repository and the fork identity must come from
+the same response.
+Production-shaped probes on 2026-10-29 rejected two alternatives. Adding
+`checkSuites` inside the 50-PR status batch returned HTTP 502 or truncated
+responses. Selecting `checkRuns` together with `workflowRun` across 20 PRs
+exceeded GitHub's resource limits.
+
+Step 2 runs only when step 1 found `COMPLETED` / `ACTION_REQUIRED` suites from
+`pull_request` events on fork PRs. One `nodes(ids:)` query, chunked at 50 suite
+IDs, reads `checkRuns(first: 0, filterBy: {checkType: LATEST}) { totalCount }`
+for each one. A zero count is the jobless approval signature. Suites outside that
+filter need no step-2 read, because they cannot qualify for approval.
+
+### Classification
+
+Convert each Actions suite into the existing `WorkflowRun` shape. Map run ID,
+workflow ID and name, event, lowercase status and conclusion, URL, and creation
+time from the suite. The suites come from the queried head commit of one PR, so
+take the head SHA from that commit and the head repository and branch from the
+PR. GraphQL does not expose a run attempt; store attempt `0` in that case.
+Attach the queried PR's identity as a `WorkflowRunPullRequest` association to
+each converted run, so action-required suites from any event on that head still
+match the PR rather than requiring a `pull_request` event.
+Then call `classifyWorkflowAttentionWithJobs` with a job reader that answers
+from the step-2 counts. A missing count is unavailable evidence, so the
+incomplete-observation rule above applies.
+
+A query or commit head that differs from the stored head SHA, or a suite page
+with `hasNextPage`, yields `unknown` for that PR. Do not page further.
+A TaskPR row without a head is skipped, and the store rejects an empty expected
+head, so every write stays head-scoped.
+
+### Writes and deferral
+
+Write through a narrow head-guarded update of `github_task_prs.workflow_attention`
+that applies `resolveTaskPRWorkflowAttention`. A row whose head changed since the
+phase read it is skipped. Publish the existing `github.task_pr.updated` event
+only when the stored observation changes semantically, so task status summaries
+derive the badge through their existing projection.
+
+The workflow phase owns its own singleflight and progress key
+(`batched-workflow:`), separate from the numbered and searching keys. A local
+`AdmissionDeferredError` from either step leaves the affected rows untouched.
+It does not mark them stale. The phase returns those PRs as unfinished workflow work.
+The PR monitor keeps them in its existing pending inventory with a workflow-phase
+marker. Its timer resumes only the workflow phase at the admission boundary.
+Completed status phases are not repeated. A genuine provider error yields
+`unknown`, which stores same-head evidence as stale, as before.
+
+When GraphQL is unsupported or step 1 fails with an invalid-query classification,
+use the REST collector for that workspace serially, one head at a time. A local
+deferral then stops the workspace's remaining heads and records them as pending
+workflow work, matching the bounded-fallback rules.
+
+Explicit refresh through the batched path runs the same phase under its
+interactive admission. Passive per-task sync returns the typed deferral instead
+of writing `unknown`.
+
+## Task approval badge
+
+### Eligibility and visual precedence
+
+This extension reuses the stored `TaskPR.workflow_attention` observation.
+The provider collector, refresh cadence, persistence schema, check counts, and automation rules retain their existing contracts.
+
+For full PR records, reuse `getTaskPRWorkflowAttention` and `isWorkflowApprovalRequired` from `pr-workflow-attention.ts`.
+Eligible evidence requires an open PR, a nonempty current head SHA, and matching observation head SHA.
+The observation state must equal `approval_required`; `action_required`, `unknown`, missing evidence, and `none` do not qualify.
+Same-head stale positives remain eligible. The task summary retains their stale flag so the last-known status stays qualified by PR after hydration.
+
+Aggregate eligibility across open PRs independently from the status-color calculation.
+`PRTaskIconView` supplies the approval flag through the shared CI state to `PRStatusGlyph`.
+The `ciState` glyph prop defaults to `none`.
+Other glyph callers remain compatible; the topbar, subtask, and composer glyphs consume the same CI state through the [CI bubble package](github-pr-ci-bubble.md).
+
+Use Tabler `IconLockFilled` in the shared 10px upper-right CI bubble wrapper.
+Keep the glyph at 8px.
+Use `text-[#D97706] dark:text-[#FBBF24]` and the existing `bg-background` halo.
+Explicit colors preserve the accepted palette independently of Tailwind's amber token version.
+Keep the PR color and automation dot positions intact. Do not add animation or a separate badge interaction target.
+When conflicts coexist with approval, the conflict triangle owns the shared upper-right slot and hides the lock.
+Retain both facts in text and accessible names. After conflict resolution, show the lock if approval remains the selected CI state.
+Conflict placement, CI priority, and skipped-check neutrality belong to the [CI bubble design](github-pr-ci-bubble.md).
+
+### Bounded projection
+
+Add `workflow_approval_required` to `status_summary.pull_request` as a boolean and serialize both true and false for current payloads.
+It represents eligible approval on any open linked PR, independent of the representative PR and aggregate color.
+It is a display fact, never merge permission or an authorization claim about the current user.
+Old clients ignore it; old payloads without the field remain unknown. Do not infer it from `attention` or `aggregate_state`.
+When approval is present, also project one bounded approval PR number and repository plus whether that selected evidence is stale.
+When conflicts are present, project one bounded conflict PR number and repository. These identities attribute compact disclosure rows without expanding a PR array.
+
+Extend `statussummary.PullRequestInput` and its internal PR observation with bounded owner/repository identity, head SHA, workflow-attention state and head, and the stale flag.
+The package derives approval with the eligibility predicate above, without importing GitHub's full provider model.
+The `githubTaskStatusSummaryPRReader` adapter copies those fields from the stored observation.
+`Projector.applyPREventLocked` extracts the same fields from the existing `github.task_pr.updated` payload.
+Support the event payload normalization used by the projector; test malformed or omitted objects without approval inference.
+Carry these fields through `applyPullRequestInputs` and compare them during event deduplication.
+`derivePullRequestSummary` computes an OR over eligible open PRs, preferring a non-stale eligible observation for its single approval identity when one exists.
+Rebuild and live-event paths must agree. Authoritative head changes, terminal states, and empty PR lists clear the flag.
+Unavailable source reads retain the existing summary baseline policy.
+
+Extend `TaskStatusSummary` in `lib/types/task-status-summary.ts` and `TaskPRInfo` in `lib/task-pr-info.ts` with approval/conflict identities, stale state, and the summary timestamp.
+`taskPRInfoFromSummary` preserves explicit false while leaving a missing legacy field unknown.
+When full PR records exist, compare the compact summary timestamp with every record's `last_synced_at` and any later workflow `observed_at`.
+Use compact workflow-attention status only when the timestamp is valid and strictly newer than all full records; otherwise current full evidence remains authoritative, including an explicit absence of approval.
+Compact-authoritative disclosure rows come from that bounded projection and retain per-PR attribution for both approval and conflicts.
+Never OR an older compact positive into a newer full negative result.
+No additional API request, provider poller, database column, or session subscription is necessary.
+
+### Disclosure and accessibility
+
+Reuse `github:workflowAwaitingApproval` for visible text and the approval portion of the accessible name.
+Its existing English value is "Awaiting maintainer approval". This preserves established terminology and six-language localization.
+Do not add an approval-only tooltip over the icon's existing disclosure.
+Hydrated disclosures reuse `PRTaskStatusSummary` with per-PR approval and conflict rows.
+When a newer compact source requires approval, the disclosure uses the existing projected approval/conflict rows with their selected PR identities.
+A newer explicit negative uses the [negative approval disclosure](#negative-approval-disclosure) path.
+Compact same-head stale approval includes the existing localized last-known explanation and repository/PR attribution.
+Hydration failure must not leave a visible padlock with only a generic loading or unavailable message.
+
+The nearest phone exemplar is `PRTaskIconDrawer`, exercised by `mobile-pr-sidebar-automation-indicators.spec.ts`.
+The task picker keeps its existing navigation and scroll ownership.
+Tapping the PR control opens its existing drawer and stops row navigation; dismissal restores focus to the opener.
+Retain its touch hit area, safe-area behavior, internal scroller, and desktop density.
+Verify phone rendering and a narrow fine-pointer viewport; no new overlay composition is needed.
+
+### Negative approval disclosure
+
+An explicit false flag means no linked open PR has eligible approval evidence.
+It does not mean that linked PR records or their independent status details are absent.
+The existing timestamp predicate determines whether compact approval evidence supersedes every cached full observation.
+
+`pr-task-workflow-projection.ts` owns negative disclosure derivation.
+`getTaskPRIconViewModel` applies that result to both the desktop tooltip and phone drawer.
+The negative path retains one entry per cached linked PR, including its number, title, and nonempty author.
+It removes older approval rows across all open siblings and omits stale approval notes.
+Independent review, check, queue, and merge rows remain detail-snapshot evidence.
+A negative approval flag alone does not clear generic action-required or unavailable workflow evidence.
+
+Conflict rows use the accepted compact conflict projection.
+Selected conflict identity requires repository plus PR number when multiple repositories share a number.
+Known full identities retain their metadata. A missing selected full identity uses the existing attributed compact entry.
+Superseded conflict rows do not return through a fallback.
+
+For one cached PR with the matching representative number, a newer compact merged or closed state supplies the terminal row.
+Compact lifecycle values require case normalization because the frontend mapper capitalizes them.
+One representative lifecycle cannot define every sibling state in a mixed collection.
+The negative path derives disclosure count and heading identity from its resulting entries.
+It never treats an empty positive-attention array as a complete PR disclosure.
+
+Missing legacy flags and invalid, equal, or older compact timestamps retain the current full-record behavior.
+The existing positive compact projection remains unchanged.
+Disclosure reconciliation cannot change stored observations, merge eligibility, or automation state.
+It adds no provider reads, subscriptions, persistence, or public wire fields.
+
+The [shared summary contract](../../ui/requirements/pr-task-status-summary.md) defines visible identity, terminal rows, authors, and complete PR entries.
+The existing `PRTaskIconDrawer` remains the phone surface, with its current header, single scroll owner, safe areas, and focus return.
+The [repair plan](../../../plans/pr-task-disclosure-negative-projection/plan.md) owns regression and rendered desktop/phone evidence.
+
+### Delivery and verification
+
+The [badge plan](../../../plans/github-workflow-approval-badge/plan.md) extends the completed workflow-attention package.
+Its two sequential work orders own projection/component regressions, then rendered desktop/phone coverage and public explanation.
+Existing workflow-attention and polling plans keep their recorded completion results; this extension does not reopen their delivery scope.
+Unit tests cover all observation states, lifecycle cleanup, multi-PR aggregation, conflict priority, and hydration precedence.
+Provider-backed browser fixtures prove visibility before disclosure, reload, refresh recovery, and the phone explanation.

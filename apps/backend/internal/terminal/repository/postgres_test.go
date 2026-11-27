@@ -13,8 +13,36 @@ import (
 // AC-TASKS-TASK-TERMINALS-001.3
 func TestPostgresTerminalRepositoryLifecycle(t *testing.T) {
 	t.Run("create get and rename", testPostgresTerminalCreateGetRename)
+	t.Run("one-shot initial command", testPostgresOneShotInitialCommand)
 	t.Run("list and state", testPostgresTerminalListAndState)
 	t.Run("delete", testPostgresTerminalDelete)
+}
+
+func testPostgresOneShotInitialCommand(t *testing.T) {
+	repo := newPostgresTerminalTestRepo(t)
+	ctx := context.Background()
+	term, err := repo.CreateWithInitialCommandOnce(ctx, "task-auth", "env-auth", "shell-auth", "exec cursor-agent mcp login server", true)
+	if err != nil {
+		t.Fatalf("create one-shot terminal: %v", err)
+	}
+	if !term.InitialCommandOnce || term.InitialCommandConsumed {
+		t.Fatalf("created terminal = %+v", term)
+	}
+	claimed, err := repo.ConsumeInitialCommandOnce(ctx, "task-auth", "env-auth", term.ID)
+	if err != nil || !claimed {
+		t.Fatalf("first consume = (%v, %v), want true, nil", claimed, err)
+	}
+	claimed, err = repo.ConsumeInitialCommandOnce(ctx, "task-auth", "env-auth", term.ID)
+	if err != nil || claimed {
+		t.Fatalf("second consume = (%v, %v), want false, nil", claimed, err)
+	}
+	got, err := repo.Get(ctx, term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.InitialCommandOnce || !got.InitialCommandConsumed {
+		t.Fatalf("persisted terminal = %+v, want consumed one-shot command", got)
+	}
 }
 
 func newPostgresTerminalTestRepo(t *testing.T) *Repository {

@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { ChatMessage } from "./chat-message";
+import { MessageTaskOriginProvider } from "./message-task-origin-context";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { activateLocale } from "@/lib/i18n";
@@ -565,6 +566,68 @@ describe("ChatMessage sender badge", () => {
   });
 });
 
+describe("ChatMessage blocked delivery badge", () => {
+  it("keeps the saved user instruction visible with its blocked delivery state", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Inspect the saved work and continue",
+            metadata: { delivery_status: "blocked" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-blocked").textContent).toBe(
+      "Delivery is blocked while session recovery is pending.",
+    );
+    expect(screen.getByText("Inspect the saved work and continue", { exact: true })).not.toBeNull();
+  });
+});
+
+describe("ChatMessage not-delivered badge", () => {
+  it("shows the localized not-delivered status on the saved user instruction", async () => {
+    await activateLocale("en");
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: "Fix the button spacing (2 notes)",
+            metadata: { delivery_status: "not_delivered" },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Not delivered. Send it again.",
+    );
+    expect(screen.getByTestId("user-message-delivery-not-delivered").getAttribute("role")).toBe(
+      "status",
+    );
+    expect(screen.getByText("Fix the button spacing (2 notes)", { exact: true })).not.toBeNull();
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+    expect(screen.getByTestId("user-message-delivery-not-delivered").textContent).toBe(
+      "Ńōţ ďēĺĩvēŕēď. Śēńď ĩţ àĝàĩń.",
+    );
+    await act(async () => {
+      await activateLocale("en");
+    });
+  });
+});
+
 describe("ChatMessage raw view", () => {
   it("shows user raw_content with hidden kandev-system blocks when raw view is enabled", () => {
     const raw = `<kandev-system>This message was sent by an agent working in task "Sender" (${SENDER_TASK_ID}).</kandev-system>
@@ -659,6 +722,60 @@ describe("ChatMessage bounded user source", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
 
     expect(copyMessage).toHaveBeenCalledWith(content);
+  });
+});
+
+const COORDINATOR_ABOUT_MESSAGE = "About KAN-418: why is this here?";
+
+describe("ChatMessage task origin", () => {
+  it("renders the coordinator About-prefix tag when wrapped in MessageTaskOriginProvider", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("coordinator-about-tag")).toBeTruthy();
+    expect(screen.getByText("why is this here?")).toBeTruthy();
+  });
+
+  it("renders the About-prefix verbatim without a provider", () => {
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByTestId("coordinator-about-tag")).toBeNull();
+    expect(screen.getByText(/About KAN-418: why is this here\?/)).toBeTruthy();
+  });
+
+  it("copies the full stored text, prefix included, for a coordinator-origin message", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(COORDINATOR_ABOUT_MESSAGE);
   });
 });
 
@@ -767,10 +884,13 @@ describe("ChatMessage image attachments", () => {
     expect(openSpy).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
     const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
-    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("w-[min(96vw,1126px)]");
     expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
-    expect(preview.className).toContain("w-[min(92vw,1100px)]");
-    expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
+    expect(screen.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
+    expect(screen.getByRole("button", { name: "Actual size" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 

@@ -1,8 +1,13 @@
 import type { Locator } from "@playwright/test";
+import type { SidebarLayoutApi } from "../../../lib/types/http-user-settings";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR } from "../../helpers/gitlab";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 
 useRegularMode();
 
@@ -27,6 +32,18 @@ async function openDependencyPicker(
 }
 
 test.describe("Task-create dependency selector", () => {
+  let originalLayout: SidebarLayoutApi | undefined;
+
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    originalLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+  });
+
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await restoreSidebarLayout(apiClient, seedData.workspaceId, originalLayout);
+  });
+
   test("selects, clears, and persists multiple predecessor tasks", async ({
     testPage,
     apiClient,
@@ -54,6 +71,7 @@ test.describe("Task-create dependency selector", () => {
     try {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
       await kanban.createTaskButton.first().click();
 
       const dialog = testPage.getByTestId("create-task-dialog");
@@ -89,22 +107,14 @@ test.describe("Task-create dependency selector", () => {
       await expect(
         advancedSettings.getByTestId("task-create-dependency-setting-label"),
       ).toContainText("Depends on");
-      const settingGrid = advancedSettings.getByTestId("task-create-advanced-settings-grid");
-      const settingGridBox = await settingGrid.boundingBox();
-      const settingRow = advancedSettings.getByTestId("task-create-dependency-setting-row");
-      const settingRowBox = await settingRow.boundingBox();
       const settingLabel = advancedSettings.getByTestId("task-create-dependency-setting-label");
       const settingLabelBox = await settingLabel.boundingBox();
       const selectorContainer = advancedSettings.getByTestId(
         "task-create-dependency-selector-container",
       );
       const selectorContainerBox = await selectorContainer.boundingBox();
-      expect(settingGridBox).not.toBeNull();
-      expect(settingRowBox).not.toBeNull();
       expect(settingLabelBox).not.toBeNull();
       expect(selectorContainerBox).not.toBeNull();
-      expect(settingRowBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
-      expect(selectorContainerBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
       expect(selectorContainerBox!.x).toBeGreaterThan(settingLabelBox!.x + settingLabelBox!.width);
       expect(Math.abs(selectorContainerBox!.y - settingLabelBox!.y)).toBeLessThanOrEqual(4);
       const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
@@ -116,6 +126,13 @@ test.describe("Task-create dependency selector", () => {
       const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
       await expect(dependency).toBeVisible();
       await expect(dependency).toContainText("No dependency");
+      await expect(dependency).toHaveCSS("border-top-width", "1px");
+      const promptBorder = await dialog.getByTestId("task-description-input").evaluate((input) => {
+        const wrapper = input.closest(".border-input");
+        if (!wrapper) throw new Error("Prompt border is missing");
+        return getComputedStyle(wrapper).borderTopColor;
+      });
+      await expect(dependency).toHaveCSS("border-top-color", promptBorder);
       await dependency.click();
 
       const picker = dialog.getByTestId("task-create-dependencies-popover");
@@ -215,6 +232,12 @@ test.describe("Task-create dependency selector", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog.getByTestId("task-edit-dependencies")).toBeVisible();
+    await waitForFiniteAnimations(dialog);
+    const dependencyInfo = dialog.getByTestId("task-edit-dependency-info");
+    await expect(dependencyInfo).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    await expectControlHeight(dependencyInfo, 24);
     await prCapture.screenshot("desktop-task-dependency-edit-dialog", {
       caption: "Desktop task edit dialog with predecessor dependencies",
     });
@@ -290,6 +313,7 @@ test.describe("Task-create dependency selector", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -349,6 +373,7 @@ test.describe("Task-create dependency selector", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();

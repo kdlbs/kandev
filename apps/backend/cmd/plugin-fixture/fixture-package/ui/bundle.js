@@ -6,7 +6,7 @@
  * registers a nav item, a top-level route, a `task-sidebar` slot component,
  * a `main-top-bar` slot component, a `task.created` WS handler, and the
  * `open-demo` keybinding (declared in manifest.yaml's `ui.keybindings`,
- * default `mod+shift+j`) which opens a `host.openModal(...)` demo modal
+ * default `mod+alt+shift+j`) which opens a `host.openModal(...)` demo modal
  * containing a `host.ui` Tooltip. Uses only host.React/host.jsx/host.ui.
  *
  * The plugin page also renders a `host.theme` readout kept current purely
@@ -22,8 +22,8 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), task-card indicator/tag components, generic task-row metadata,
  * and task-menu actions under the "edit" and "primary" groups. It registers a
- * task-list facet (registerTaskListFacet) whose values a spec drives through
- * `window.__e2eFacetValues`, so /tasks facet sort and grouping can be exercised
+ * task-list facet (registerTaskListFacet) whose values come from a workspace
+ * user-state document, so /tasks facet sort and grouping can be exercised
  * against real plugin registrations. It also
  * registers one composer action on all three composer slots
  * (chat-input-actions, task-create-input-actions, new-session-input-actions),
@@ -38,12 +38,18 @@
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
-  // Task-list facet plumbing. Values come from `window.__e2eFacetValues`
-  // (taskId -> [{value,label,color}]) so a spec can drive multi-value
-  // membership, colors, and the untagged fallback against task ids the
-  // fixture cannot know ahead of time. `window.__e2eFacetNotify()` fires
-  // the subscription so the reactive re-read path is exercised for real.
+  // Synchronous facet reads use a per-workspace cache, hydrated and refreshed
+  // through host.storage. The browser hook is only for getValues failure tests.
+  // The cache itself lives inside initialize(): the host revokes this plugin's
+  // storage subscriptions on disable, so a cache that outlived a re-enable would
+  // never be re-read or re-subscribed.
   var facetListeners = new Set();
+
+  function notifyFacetListeners() {
+    facetListeners.forEach(function (fn) {
+      fn();
+    });
+  }
 
   function emit() {
     listeners.forEach(function (fn) {
@@ -72,8 +78,10 @@
 
   var FIXTURE_REPOSITORY_ID = "fixture-repository";
   var FIXTURE_HELLO_PATH = "/plugins/e2e-hello";
+  var FIXTURE_MANAGED_CHAT_PATH = "/plugins/e2e-managed-chat";
   var FIXTURE_SIDEBAR_SECTION = "sidebar-footer";
   var PROVIDER_ID = "fixture-source-control";
+  var FIXTURE_ACTION_ICON_PATH = "M5 12h14M12 5v14";
   var PULL_REQUEST_URL =
     "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
   var REPOSITORY_URL = "https://bitbucket.example.test/scm/TEAM/fixture.git";
@@ -113,9 +121,109 @@
 
   window.registerKandevPlugin("kandev-plugin-e2e", {
     initialize: function (registry, host) {
+      registry.registerComponent(
+        "notification-formatter",
+        function FixtureFormatter({ slotProps: props }) {
+          const h = host.jsx;
+          const { t } = host.i18n.useTranslation();
+          const [notice, setNotice] = host.React.useState(null);
+          const [prepared, setPrepared] = host.React.useState(null);
+          const prepare = async () => {
+            const receipt = await host.api.invokeAction("notification.prepare", {
+              notificationProviderId: props.provider.id,
+              notificationFormatter: {
+                installationId: props.formatter.installation_id,
+                formatterKey: props.formatter.key,
+                expectedBindingRevision: props.binding?.revision ?? "",
+                mode: "candidate",
+              },
+              body: {},
+            });
+            setPrepared(receipt);
+            setNotice({ kind: "formatterPrepared" });
+            return receipt;
+          };
+          host.useSettingsSaveContributor({
+            id: `fixture-formatter:${props.provider.id}`,
+            order: 40,
+            revision: JSON.stringify([props.selectionChanged, prepared?.revision]),
+            isDirty: Boolean(props.selectionChanged && !prepared),
+            save: prepare,
+            discard: () => {
+              setPrepared(null);
+              setNotice(null);
+            },
+          });
+          let noticeText = "";
+          if (notice) noticeText = notice.kind === "preview" ? notice.title : t(notice.kind);
+          return h(
+            "div",
+            { "data-testid": "fixture-notification-formatter", className: "space-y-3" },
+            h(
+              host.ui.Button,
+              {
+                type: "button",
+                className: "cursor-pointer [@media(pointer:coarse)]:min-h-11",
+                "data-testid": "fixture-formatter-preview",
+                onClick: async () => {
+                  const result = await props.previewConfiguration({}, "session.failed", "normal");
+                  setNotice({ kind: "preview", title: result.title });
+                },
+              },
+              t("formatterPreview"),
+            ),
+            h(
+              host.ui.Button,
+              {
+                type: "button",
+                className: "cursor-pointer [@media(pointer:coarse)]:min-h-11",
+                "data-testid": "fixture-formatter-activate",
+                onClick: async () => {
+                  const receipt = prepared ?? (await prepare());
+                  await props.activateConfiguration(receipt, props.binding?.revision ?? "");
+                  setNotice({ kind: "formatterActive" });
+                },
+              },
+              t("formatterActivate"),
+            ),
+            h("p", { role: "status", "data-testid": "fixture-formatter-status" }, noticeText),
+          );
+        },
+      );
       var React = host.React;
+      registry.registerFileViewer({
+        id: "stl",
+        Component: function FixtureFilePreview(props) {
+          var state = React.useState(null);
+          React.useEffect(
+            function () {
+              var controller = new AbortController();
+              props
+                .readBytes(controller.signal)
+                .then(function (bytes) {
+                  if (!controller.signal.aborted) state[1](bytes.byteLength);
+                })
+                .catch(function () {});
+              return function () {
+                controller.abort();
+              };
+            },
+            [props.file.generation],
+          );
+          return React.createElement("div", { "data-testid": "fixture-file-preview" }, state[0]);
+        },
+      });
+
       var jsx = host.jsx;
       var ui = host.ui;
+
+      function renderActionGroup(actions, label) {
+        if (!actions.length) return null;
+        if (ui.ActionGroup) {
+          return jsx(ui.ActionGroup, { label: label, children: actions });
+        }
+        return jsx(React.Fragment, { children: actions });
+      }
 
       // Reads host.theme once on mount, then tracks it purely through
       // host.onThemeChange — so the readout only stays correct if the
@@ -202,6 +310,300 @@
         );
       }
 
+      function ManagedChatPage() {
+        var config = window.__e2eManagedChatConfig || {};
+        var workspaceId = config.workspaceId || host.store.getState().workspaces.activeId || "";
+        var agentProfileId = config.agentProfileId || "";
+        var instances = Array.isArray(config.instances) ? config.instances : [];
+        var selection = React.useState(config.selectedInstanceKey || "");
+        var selectedKey = selection[0];
+        var setSelectedKey = selection[1];
+        var initialSnapshot = {
+          workspaceId: workspaceId,
+          instanceKey: selectedKey,
+          taskId: "",
+          sessionId: null,
+          revision: 0,
+          sessionResourceVersion: "",
+          state: "loading",
+          pendingInteractions: [],
+        };
+        var snapshotState = React.useState(initialSnapshot);
+        var snapshot = snapshotState[0];
+        var setSnapshot = snapshotState[1];
+        var selectedKeyRef = React.useRef(selectedKey);
+        var loadGeneration = React.useRef(0);
+
+        function publishSnapshot(next) {
+          setSnapshot(next);
+        }
+
+        function invoke(key, body) {
+          return host.api.invokeAction(key, { workspaceId: workspaceId, body: body });
+        }
+
+        function mapInput(receipt) {
+          return {
+            hostInputId: receipt.host_input_id,
+            occurrenceKey: receipt.occurrence_key || "",
+            sequence: receipt.sequence || 0,
+            origin: receipt.origin,
+            payload: receipt.payload || "",
+            coalesceKey: receipt.coalesce_key || "",
+            conversationRevision: receipt.conversation_revision || 0,
+            state: receipt.state,
+            createdAt: receipt.created_at || "",
+            updatedAt: receipt.updated_at || "",
+            queueEntryId: receipt.queue_entry_id || "",
+            executionId: receipt.execution_id || "",
+            turnId: receipt.turn_id || "",
+            supersededBy: receipt.superseded_by || "",
+          };
+        }
+
+        function mapInteractionOption(option) {
+          return {
+            id: option.option_id,
+            label: option.label,
+            description: option.description || undefined,
+          };
+        }
+
+        function mapInteraction(interaction) {
+          return {
+            id: interaction.id,
+            kind: interaction.kind,
+            title: interaction.title || "",
+            context: interaction.context || undefined,
+            expectedResourceVersion: interaction.resource_version || "",
+            agentDisconnected: interaction.agent_disconnected,
+            options: (interaction.options || []).map(mapInteractionOption),
+            questions: (interaction.questions || []).map(function (question) {
+              return {
+                id: question.id,
+                title: question.title || "",
+                prompt: question.prompt || undefined,
+                options: (question.options || []).map(mapInteractionOption),
+              };
+            }),
+          };
+        }
+
+        function managedState(response, reason) {
+          if (response.managed_conversation_supported) {
+            return response.desired_paused ? "paused" : "ready";
+          }
+          return reason === "capability_not_approved" ? "revoked" : "unsupported";
+        }
+
+        function mapSnapshot(response, instanceKey) {
+          var reason = response.managed_conversation_reason || "";
+          var state = managedState(response, reason);
+          return {
+            workspaceId: workspaceId,
+            instanceKey: response.instance_key || instanceKey,
+            taskId: response.task_id || "",
+            sessionId: response.session_id || null,
+            revision: response.revision || 0,
+            sessionResourceVersion: response.session_resource_version || "",
+            executionId: response.execution_id || undefined,
+            sessionState: response.session_state || undefined,
+            state: state,
+            readOnly: false,
+            statusReason: reason || undefined,
+            recoverySupported: response.recovery_supported || false,
+            recoveryReason: response.recovery_reason || undefined,
+            pendingInteractions: (response.pending_interactions || []).map(mapInteraction),
+          };
+        }
+
+        function readStatus(instanceKey) {
+          return invoke("managed-conversation-status", { instance_key: instanceKey }).then(
+            function (response) {
+              var next = mapSnapshot(response, instanceKey);
+              if (selectedKeyRef.current === instanceKey) publishSnapshot(next);
+              return next;
+            },
+          );
+        }
+
+        function checkCommand(result) {
+          if (["APPLIED", "ALREADY_APPLIED", "NO_CHANGE"].indexOf(result.status) === -1) {
+            throw new Error(result.reason || "Managed conversation command was not accepted");
+          }
+        }
+
+        function loadInstance(instanceKey) {
+          var generation = ++loadGeneration.current;
+          selectedKeyRef.current = instanceKey;
+          publishSnapshot({
+            workspaceId: workspaceId,
+            instanceKey: instanceKey,
+            taskId: "",
+            sessionId: null,
+            revision: 0,
+            sessionResourceVersion: "",
+            state: "loading",
+            pendingInteractions: [],
+          });
+          return invoke("managed-conversation-ensure", {
+            instance_key: instanceKey,
+            agent_profile_id: agentProfileId,
+          })
+            .then(function () {
+              return invoke("managed-conversation-status", { instance_key: instanceKey });
+            })
+            .then(function (response) {
+              if (generation === loadGeneration.current)
+                publishSnapshot(mapSnapshot(response, instanceKey));
+            })
+            .catch(function () {
+              if (generation === loadGeneration.current) {
+                publishSnapshot({
+                  workspaceId: workspaceId,
+                  instanceKey: instanceKey,
+                  taskId: "",
+                  sessionId: null,
+                  revision: 0,
+                  sessionResourceVersion: "",
+                  state: "unavailable",
+                  pendingInteractions: [],
+                });
+              }
+            });
+        }
+
+        React.useEffect(
+          function () {
+            void loadInstance(selectedKey);
+          },
+          [selectedKey],
+        );
+
+        var controller = {
+          getStatus: function () {
+            return readStatus(selectedKeyRef.current);
+          },
+          listInputs: function (input) {
+            return invoke("managed-conversation-inputs", {
+              instance_key: selectedKeyRef.current,
+              sequence_cursor: input.sequenceCursor,
+              limit: input.limit,
+            }).then(function (response) {
+              return {
+                inputs: (response.inputs || []).map(mapInput),
+                nextSequenceCursor: response.next_sequence_cursor || 0,
+                hasMore: response.has_more || false,
+              };
+            });
+          },
+          enqueue: function (input) {
+            return invoke("managed-conversation-enqueue", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              occurrence_key: input.occurrenceKey,
+              payload: input.payload,
+            }).then(function (response) {
+              checkCommand(response);
+              if (!response.input) throw new Error("Host did not return an input receipt");
+              return { receipt: mapInput(response.input) };
+            });
+          },
+          cancelInput: function (input) {
+            return invoke("managed-conversation-cancel", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              host_input_id: input.hostInputId,
+              expected_execution_id: input.expectedExecutionId,
+            }).then(checkCommand);
+          },
+          setPaused: function (input) {
+            var key = input.paused ? "managed-conversation-pause" : "managed-conversation-resume";
+            return invoke(key, {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+            }).then(function (result) {
+              checkCommand(result);
+              return readStatus(selectedKeyRef.current);
+            });
+          },
+          recover: function (input) {
+            return invoke("managed-conversation-recover", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              idempotency_key: input.idempotencyKey,
+              expected_revision: input.expectedConversationRevision,
+              expected_session_resource_version: input.expectedSessionResourceVersion,
+              expected_execution_id: input.expectedExecutionId,
+            }).then(function (result) {
+              checkCommand(result);
+              return readStatus(selectedKeyRef.current);
+            });
+          },
+          respondToPermission: function (input) {
+            return invoke("managed-conversation-permission-response", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              interaction_id: input.interactionId,
+              expected_resource_version: input.expectedResourceVersion,
+              option_id: input.optionId,
+              cancelled: input.cancelled,
+              human_response_receipt_id: input.humanResponseReceiptId,
+            }).then(checkCommand);
+          },
+          answerClarification: function (input) {
+            return invoke("managed-conversation-clarification-response", {
+              instance_key: selectedKeyRef.current,
+              request_id: input.requestId,
+              interaction_id: input.interactionId,
+              expected_resource_version: input.expectedResourceVersion,
+              answers: input.answers.map(function (answer) {
+                return {
+                  question_id: answer.questionId,
+                  selected_options: answer.selectedOptions,
+                  custom_text: answer.customText,
+                };
+              }),
+              human_response_receipt_id: input.humanResponseReceiptId,
+            }).then(checkCommand);
+          },
+        };
+
+        var taskPanels = snapshot.taskId
+          ? jsx(
+              React.Fragment,
+              null,
+              jsx(ui.WorkspaceTaskStatus, { taskId: snapshot.taskId }),
+              jsx(ui.WorkspaceTaskUsage, {
+                taskId: snapshot.taskId,
+                sessionId: snapshot.sessionId,
+              }),
+            )
+          : null;
+
+        return jsx(
+          "div",
+          {
+            className: "flex h-[calc(100dvh-3.5rem)] min-h-0 min-w-0 flex-col overflow-hidden",
+            "data-testid": "fixture-managed-chat-page",
+          },
+          jsx(ui.WorkspaceAgentChat, {
+            conversation: snapshot,
+            controller: controller,
+            instances: instances,
+            onSelectInstance: setSelectedKey,
+            tasksPanel: taskPanels,
+            onStatus: publishSnapshot,
+          }),
+        );
+      }
+
       function FixtureReviewPanel(props) {
         return jsx(
           "section",
@@ -251,14 +653,47 @@
         return Promise.resolve();
       }
 
+      function PluginFocusModalContent() {
+        return jsx(
+          "button",
+          { type: "button", "data-testid": "e2e-plugin-focus-modal-content" },
+          "Modal content action",
+        );
+      }
+
+      function openPluginFocusModal(title, presentation) {
+        host.openModal({
+          title: title,
+          content: PluginFocusModalContent,
+          presentation: presentation,
+        });
+      }
+
       function SidebarSlot() {
         return jsx("div", { id: "hello-sidebar" }, "Hello E2E sidebar");
+      }
+
+      function FixtureActionGlyph() {
+        return jsx(
+          "svg",
+          {
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": true,
+            "data-testid": "e2e-component-action-glyph",
+          },
+          jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+        );
       }
 
       function MainTopBarSlot(props) {
         var slotProps = props.slotProps || {};
         var label = "Hello " + slotProps.currentPage;
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyButton = jsx(
           ui.Button,
           {
             id: "hello-main-top-bar",
@@ -279,6 +714,98 @@
           ),
           jsx("span", { className: "sr-only" }, label),
         );
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture workspace topbar action",
+                icon: jsx(FixtureActionGlyph, {}),
+                pressed: pressed,
+                "data-testid": "e2e-main-topbar-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture workspace status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "63%",
+                badge: "2",
+                "data-testid": "e2e-main-topbar-value-action",
+              }),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(
+          standardActions,
+          "Fixture workspace topbar actions",
+        );
+        var focusModalAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Open workspace modal focus fixture",
+              icon: jsx(FixtureActionGlyph, {}),
+              "data-testid": "e2e-main-topbar-focus-action",
+              onClick: function () {
+                openPluginFocusModal("Fixture workspace modal");
+              },
+            })
+          : null;
+        return jsx(React.Fragment, {
+          children: [legacyButton, standardActionGroup, focusModalAction],
+        });
+      }
+
+      // Keeps source-derived legacy topbar shapes beside standard Actions:
+      // a raw metric button and a plugin-controlled disclosure trigger.
+      function LegacyCompatibilitySlot() {
+        var metricState = React.useState(false);
+        var metricActivated = metricState[0];
+        var setMetricActivated = metricState[1];
+        var disclosureState = React.useState(false);
+        var disclosureOpen = disclosureState[0];
+        var setDisclosureOpen = disclosureState[1];
+        return jsx("div", {
+          className: "inline-flex items-center gap-1",
+          children: [
+            jsx("button", {
+              type: "button",
+              className:
+                "h-7 min-w-12 rounded border border-amber-600 bg-amber-500/10 px-2 text-xs",
+              "aria-label": "Legacy CPU usage",
+              "data-activated": metricActivated,
+              "data-testid": "e2e-legacy-raw-topbar-action",
+              onClick: function () {
+                setMetricActivated(!metricActivated);
+              },
+              children: "CPU 17%",
+            }),
+            jsx("button", {
+              type: "button",
+              className: "h-7 w-7 rounded border border-violet-500 bg-violet-500/10",
+              "aria-label": "Open legacy preview",
+              "aria-expanded": disclosureOpen,
+              "aria-controls": "e2e-legacy-preview-content",
+              "data-testid": "e2e-legacy-preview-trigger",
+              onClick: function () {
+                setDisclosureOpen(!disclosureOpen);
+              },
+              children: "K",
+            }),
+            jsx("div", {
+              id: "e2e-legacy-preview-content",
+              hidden: !disclosureOpen,
+              "data-testid": "e2e-legacy-preview-content",
+              children: "Legacy preview details",
+            }),
+          ],
+        });
       }
 
       function ChatTopBarStatus(props) {
@@ -305,22 +832,116 @@
         var activeState = React.useState(false);
         var active = activeState[0];
         var setActive = activeState[1];
-        if (slotProps.presentation !== "mobile") return null;
-        return jsx(
-          ui.Button,
-          {
-            type: "button",
-            variant: "outline",
-            className: "cursor-pointer",
-            "data-testid": "e2e-chat-top-bar-action",
-            "data-presentation": slotProps.presentation || "unknown",
-            "data-activated": active ? "true" : "false",
-            onClick: function () {
-              setActive(true);
-            },
-          },
-          active ? "Fixture action complete" : "Run fixture task action",
-        );
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture task topbar action",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                pressed: active,
+                "data-testid": "e2e-chat-top-bar-standard-action",
+                onClick: function () {
+                  setActive(true);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture task completion status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "Ready",
+                "data-testid": "e2e-chat-top-bar-value-action",
+              }),
+              ...(slotProps.presentation === "mobile"
+                ? [
+                    jsx(ui.Action, {
+                      key: "phone-overflow-one",
+                      label: "Fixture long task action one",
+                      icon: jsx(
+                        "svg",
+                        {
+                          viewBox: "0 0 24 24",
+                          fill: "none",
+                          stroke: "currentColor",
+                          "aria-hidden": true,
+                        },
+                        jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                      ),
+                      text: "A long fixture value that needs a second row",
+                      "data-testid": "e2e-chat-top-bar-long-value-one",
+                    }),
+                    jsx(ui.Action, {
+                      key: "phone-overflow-two",
+                      label: "Fixture long task action two",
+                      icon: jsx(
+                        "svg",
+                        {
+                          viewBox: "0 0 24 24",
+                          fill: "none",
+                          stroke: "currentColor",
+                          "aria-hidden": true,
+                        },
+                        jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                      ),
+                      text: "Another long fixture value that needs a second row",
+                      "data-testid": "e2e-chat-top-bar-long-value-two",
+                    }),
+                  ]
+                : []),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(standardActions, "Fixture task topbar actions");
+        var focusModalAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Open task modal focus fixture",
+              icon: jsx(FixtureActionGlyph, {}),
+              "data-testid": "e2e-chat-top-bar-focus-action",
+              onClick: function () {
+                if (slotProps.presentation === "mobile") {
+                  openPluginFocusModal("Fixture task drawer", "drawer");
+                } else {
+                  openPluginFocusModal("Fixture task modal");
+                }
+              },
+            })
+          : null;
+        var legacyMobileButton =
+          slotProps.presentation === "mobile"
+            ? jsx(
+                ui.Button,
+                {
+                  type: "button",
+                  variant: "outline",
+                  className: "cursor-pointer",
+                  "data-testid": "e2e-chat-top-bar-action",
+                  "data-presentation": slotProps.presentation || "unknown",
+                  "data-activated": active ? "true" : "false",
+                  onClick: function () {
+                    setActive(true);
+                  },
+                },
+                active ? "Fixture action complete" : "Run fixture task action",
+              )
+            : null;
+        if (!standardActionGroup && !focusModalAction && !legacyMobileButton) return null;
+        return jsx(React.Fragment, {
+          children: [standardActionGroup, focusModalAction, legacyMobileButton],
+        });
       }
 
       // Debounce delay for the Notes panel's autosave — short, so e2e specs
@@ -620,7 +1241,10 @@
 
       function WorkspaceActionsSlot(props) {
         var slotProps = props.slotProps || {};
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyButton = jsx(
           "button",
           {
             type: "button",
@@ -639,19 +1263,154 @@
           },
           "W",
         );
+        var standardActions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture sidebar workspace action",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                pressed: pressed,
+                "data-testid": "e2e-sidebar-standard-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture sidebar workspace status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "2 tasks",
+                "data-testid": "e2e-sidebar-standard-value-action",
+              }),
+            ]
+          : [];
+        var standardActionGroup = renderActionGroup(
+          standardActions,
+          "Fixture sidebar workspace actions",
+        );
+        return jsx(React.Fragment, { children: [legacyButton, standardActionGroup] });
       }
 
       function StatusSlot(props) {
         var slotProps = props.slotProps || {};
         var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
-        return jsx(
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
+        var legacyStatus = jsx(
           "span",
-          { id: id },
+          {
+            id: id,
+            className: slotProps.presentation === "mobile-drawer" ? "sr-only" : undefined,
+          },
           "Hello status " +
             String(slotProps.presentation || "unknown") +
             " " +
             String(slotProps.activeTaskId || "no-task"),
         );
+        var actions = ui.Action
+          ? [
+              jsx(ui.Action, {
+                label: "Fixture service status",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("circle", { cx: "12", cy: "12", r: "8" }),
+                ),
+                text: "Online",
+                badge: "2",
+                pressed: pressed,
+                "data-testid":
+                  slotProps.presentation === "bar"
+                    ? "e2e-status-bar-action"
+                    : "e2e-status-drawer-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                },
+              }),
+              jsx(ui.Action, {
+                label: "Fixture status queue",
+                icon: jsx(
+                  "svg",
+                  {
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    "aria-hidden": true,
+                  },
+                  jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+                ),
+                text: "2 queued",
+                "data-testid":
+                  slotProps.presentation === "bar"
+                    ? "e2e-status-bar-value-action"
+                    : "e2e-status-drawer-value-action",
+              }),
+            ]
+          : [];
+        if (slotProps.presentation === "mobile-drawer" && ui.Action) {
+          actions.push(
+            jsx(ui.Action, {
+              label: "Refresh status",
+              icon: jsx(
+                "svg",
+                { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "aria-hidden": true },
+                jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+              ),
+              busy: true,
+              "data-testid": "e2e-status-busy-action",
+              onClick: function () {
+                setPressed(true);
+              },
+            }),
+            jsx(ui.Action, {
+              label: "Unavailable status action",
+              icon: jsx(
+                "svg",
+                { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "aria-hidden": true },
+                jsx("path", { d: FIXTURE_ACTION_ICON_PATH }),
+              ),
+              disabled: true,
+              "data-testid": "e2e-status-disabled-action",
+            }),
+          );
+        }
+        var standardActionGroup = renderActionGroup(actions, "Fixture status actions");
+        var focusModalAction =
+          slotProps.placement === "right" && ui.Action
+            ? jsx(ui.Action, {
+                label: "Open status modal focus fixture",
+                icon: jsx(FixtureActionGlyph, {}),
+                "data-testid": "e2e-status-right-focus-action",
+                onClick: function () {
+                  openPluginFocusModal("Fixture status modal");
+                },
+              })
+            : null;
+        return jsx(React.Fragment, {
+          children: [legacyStatus, standardActionGroup, focusModalAction],
+        });
       }
 
       // Drives PluginComposerCapability through native composers. Capturing
@@ -671,10 +1430,76 @@
         var status = statusState[0];
         var setStatus = statusState[1];
         var capturedRef = React.useRef(null);
+        var pressedState = React.useState(false);
+        var pressed = pressedState[0];
+        var setPressed = pressedState[1];
 
         function record(result) {
           setStatus(result && result.status ? result.status : String(result));
         }
+
+        var standardAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Fixture composer action",
+              icon: jsx(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  "aria-hidden": true,
+                },
+                jsx("circle", { cx: "12", cy: "12", r: "8" }),
+              ),
+              pressed: pressed,
+              busy: true,
+              "data-testid": "e2e-standard-composer-action",
+              onClick: function () {
+                setPressed(!pressed);
+                record("standard-action-activated");
+              },
+            })
+          : jsx(
+              "button",
+              {
+                type: "button",
+                "aria-label": "Fixture composer action",
+                "data-testid": "e2e-standard-composer-action",
+                onClick: function () {
+                  setPressed(!pressed);
+                  record("legacy-action-activated");
+                },
+              },
+              "fixture action",
+            );
+        var secondStandardAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Fixture busy stop action",
+              icon: jsx(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  "aria-hidden": true,
+                },
+                jsx("path", { d: "M6 6h12v12H6z" }),
+              ),
+              busy: true,
+              "data-testid": "e2e-busy-stop-action",
+              onClick: function () {
+                record("busy-stop-activated");
+              },
+            })
+          : null;
+        var standardActionGroup = ui.ActionGroup
+          ? jsx(
+              ui.ActionGroup,
+              { label: "Fixture composer actions" },
+              standardAction,
+              secondStandardAction,
+            )
+          : jsx("span", null, standardAction, secondStandardAction);
 
         return jsx(
           "span",
@@ -688,6 +1513,7 @@
             "data-submittable": String(Boolean(slotProps.submittable)),
             "data-status": status,
           },
+          standardActionGroup,
           jsx(
             "button",
             {
@@ -786,12 +1612,9 @@
         section: FIXTURE_SIDEBAR_SECTION,
       });
       // Three more sidebar-footer items so this one plugin install alone
-      // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
-      // over-budget item) — enough to drive the desktop footer's overflow
-      // trigger and menu with the real Radix DropdownMenu in a browser (see
-      // plugins.spec.ts's overflow test). The budget counts destinations,
-      // not distinct plugins, so one plugin registering 4 items exercises
-      // the same partition as 4 plugins registering 1 each. Labeled
+      // provides four ordered entries for the desktop utilities menu.
+      // The browser test verifies that every destination remains reachable.
+      // These entries are labeled
       // "E2E Overflow Item N" rather than a numbered suffix of the first
       // item's own label ("E2E Insights Tools") so Playwright's default
       // substring name matching can't accidentally match more than one of
@@ -814,9 +1637,17 @@
         path: FIXTURE_HELLO_PATH,
         section: FIXTURE_SIDEBAR_SECTION,
       });
+      registry.registerNavItem({
+        id: "e2e-integration",
+        label: "E2E Integration",
+        path: FIXTURE_HELLO_PATH,
+        section: "integrations",
+      });
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
+      registry.registerRoute(FIXTURE_MANAGED_CHAT_PATH, ManagedChatPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
+      registry.registerComponent("main-top-bar", LegacyCompatibilitySlot);
       registry.registerComponent("chat-top-bar", ChatTopBarStatus);
       registry.registerComponent("chat-top-bar", ChatTopBarAction);
       registry.registerComponent("app-status-bar-left", StatusSlot);
@@ -929,6 +1760,10 @@
 
       registry.registerTranslations({
         en: {
+          formatterPreview: "Preview fixture formatter",
+          formatterActivate: "Activate fixture formatter",
+          formatterActive: "Fixture formatter active",
+          formatterPrepared: "Configuration prepared. Activate it explicitly.",
           promptHistoryTitle: "Prompt history fixture",
           loading: "Loading prompt history",
           retry: "Retry",
@@ -940,8 +1775,59 @@
           durationSeconds: "s",
           durationMinutes: "m",
           durationHours: "h",
+          providerDisplayName: "Fixture Remote Sandbox",
+          providerDescription: "A bounded remote environment used to verify provider profiles.",
+          profileRegion: "Region",
+          profileRegionDescription: "Select the environment region.",
+          profileCredential: "Credential",
+          profileCredentialDescription:
+            "The credential is stored as a secret and never returned by profile reads.",
+          profileWorkspaceLabel: "Environment label with additional context for long names",
+          profileWorkspaceLabelDescription:
+            "A long optional label that verifies narrow form layouts.",
+        },
+        ko: {
+          formatterPreview: "예제 포매터 미리보기",
+          formatterActivate: "예제 포매터 활성화",
+          formatterActive: "예제 포매터 활성화됨",
+          formatterPrepared: "설정이 준비됐습니다. 명시적으로 활성화하세요.",
+        },
+        ja: {
+          formatterPreview: "サンプルフォーマッターをプレビュー",
+          formatterActivate: "サンプルフォーマッターを有効化",
+          formatterActive: "サンプルフォーマッターは有効です",
+          formatterPrepared: "設定を準備しました。明示的に有効化してください。",
+        },
+        "pt-pt": {
+          formatterPreview: "Pré-visualizar o formatador de exemplo",
+          formatterActivate: "Ativar o formatador de exemplo",
+          formatterActive: "Formatador de exemplo ativo",
+          formatterPrepared: "Configuração preparada. Ative-a explicitamente.",
+        },
+        "zh-cn": {
+          formatterPreview: "预览示例格式器",
+          formatterActivate: "启用示例格式器",
+          formatterActive: "示例格式器已启用",
+          formatterPrepared: "配置已准备。请明确启用。",
+        },
+        // Generated from zh-cn with the shared OpenCC/glossary converter.
+        "zh-tw": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啟用示例格式器",
+          formatterActive: "示例格式器已啟用",
+          formatterPrepared: "設定已準備。請明確啟用。",
+        },
+        "zh-hk": {
+          formatterPreview: "預覽示例格式器",
+          formatterActivate: "啓用示例格式器",
+          formatterActive: "示例格式器已啓用",
+          formatterPrepared: "設定已準備。請明確啓用。",
         },
         pseudo: {
+          formatterPreview: "Ƥřḗṽīḗẇ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActivate: "Ȧƈŧīṽȧŧḗ ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř",
+          formatterActive: "Ƒīẋŧŭřḗ ƒǿřḿȧŧŧḗř ȧƈŧīṽḗ",
+          formatterPrepared: "Ƈǿƞƒīɠŭřȧŧīǿƞ ƥřḗƥȧřḗḓ. Ȧƈŧīṽȧŧḗ īŧ ḗẋƥŀīƈīŧŀẏ.",
           promptHistoryTitle: "Ƥřǿɱƥŧ ħīşŧǿřẏ ƒīẋŧŭřḗ",
           loading: "Ŀǿȧḓīƞɠ ƥřǿɱƥŧ ħīşŧǿřẏ",
           retry: "Řḗŧřẏ",
@@ -953,6 +1839,16 @@
           durationSeconds: "ş",
           durationMinutes: "ɱ",
           durationHours: "ħ",
+          providerDisplayName: "Ƒĩẋŧũŕē Ŕēḿōŧē Śàńďƀōẋ",
+          providerDescription: "À ƀōũńďēď ŕēḿōŧē ēńvĩŕōńḿēńŧ ũśēď ŧō vēŕĩƒẏ ƥŕōvĩďēŕ ƥŕōƒĩĺēś.",
+          profileRegion: "Ŕēģĩōń",
+          profileRegionDescription: "Śēĺēćŧ ŧħē ēńvĩŕōńḿēńŧ ŕēģĩōń.",
+          profileCredential: "Ćŕēďēńŧĩàĺ",
+          profileCredentialDescription:
+            "Ŧħē ćŕēďēńŧĩàĺ ĩś śŧōŕēď àś à śēćŕēŧ àńď ńēvēŕ ŕēŧũŕńēď ƀẏ ƥŕōƒĩĺē ŕēàďś.",
+          profileWorkspaceLabel: "Ēńvĩŕōńḿēńŧ ĺàƀēĺ wĩŧħ àďďĩŧĩōńàĺ ćōńŧēẋŧ ƒōŕ ĺōńģ ńàḿēś",
+          profileWorkspaceLabelDescription:
+            "À ĺōńģ ōƥŧĩōńàĺ ĺàƀēĺ ŧħàŧ vēŕĩƒĩēś ńàŕŕōw ƒōŕḿ ĺàẏōũŧś.",
         },
       });
       registry.registerTaskPanel({
@@ -974,21 +1870,46 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      var facetByWorkspace = new Map();
+      function ensureFacetWorkspace(workspaceId) {
+        var cached = facetByWorkspace.get(workspaceId);
+        if (cached) return cached;
+        cached = { values: {}, generation: 0 };
+        facetByWorkspace.set(workspaceId, cached);
+        function refresh() {
+          var generation = ++cached.generation;
+          host.storage.get("workspace", workspaceId, "facet-values").then(
+            function (entry) {
+              if (generation !== cached.generation) return;
+              cached.values = entry ? entry.value : {};
+              notifyFacetListeners();
+            },
+            function () {
+              // Preserve the last available document if a refresh fails.
+            },
+          );
+        }
+        host.storage.subscribe(
+          { scope: "workspace", scopeId: workspaceId, key: "facet-values" },
+          refresh,
+        );
+        refresh();
+        return cached;
+      }
+
       registry.registerTaskListFacet({
         id: "fixture-tags",
         label: "Fixture tag",
         getValues: function (context) {
-          var byTask = window.__e2eFacetValues || {};
-          if (byTask.__throwFor === context.taskId) throw new Error("fixture facet boom");
-          return byTask[context.taskId] || [];
+          if (window.__e2eFacetValues?.__throwFor === context.taskId) {
+            throw new Error("fixture facet boom");
+          }
+          if (!context.workspaceId) return [];
+          return ensureFacetWorkspace(context.workspaceId).values[context.taskId] || [];
         },
         subscribe: function (listener) {
           facetListeners.add(listener);
-          window.__e2eFacetNotify = function () {
-            facetListeners.forEach(function (fn) {
-              fn();
-            });
-          };
+          window.__e2eFacetNotify = notifyFacetListeners;
           return function () {
             facetListeners.delete(listener);
           };

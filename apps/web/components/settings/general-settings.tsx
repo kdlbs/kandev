@@ -1,4 +1,5 @@
 "use client";
+import { ImagePreviewDefaultsSettings } from "./image-preview-defaults-settings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme/app-theme";
@@ -14,6 +15,7 @@ import {
 } from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsRow } from "@/components/settings/settings-group";
@@ -33,7 +35,6 @@ import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-gen
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
@@ -46,6 +47,8 @@ import { AppearanceAccountSections } from "@/components/settings/appearance-acco
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
+import { useShortcutDraft } from "./use-shortcut-draft";
+import { useIntegrationShortcutEntries } from "@/hooks/use-integration-shortcut-entries";
 import {
   appearanceRevision,
   parseSidebarHoverDelay,
@@ -54,6 +57,7 @@ import {
   rebaseAppearanceDraft,
   type AppearanceState,
 } from "@/components/settings/appearance-settings-state";
+import { useChatInputSettingsDraft } from "./use-chat-input-settings-draft";
 
 function ThemeSettingsCard({
   theme,
@@ -225,6 +229,7 @@ function AppearanceThemeSection({
         isDirty={isChatMotionDirty}
         onChange={onChatMotionChange}
       />
+      <ImagePreviewDefaultsSettings />
     </SettingsSection>
   );
 }
@@ -545,36 +550,11 @@ export function AppearanceSettings() {
 
 export function KeyboardShortcutsSettings() {
   const { t } = useTranslation();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
   const { items: pluginItems } = usePlugins();
   const pluginShortcutEntries = buildPluginShortcutEntries(pluginItems);
-  const [saved, setSaved] = useState(() => ({
-    chatSubmitKey: userSettings.chatSubmitKey,
-    keyboardShortcuts: userSettings.keyboardShortcuts as StoredShortcutOverrides,
-  }));
-  const [draft, setDraft] = useState(saved);
-  const revision = JSON.stringify(draft);
-
-  useSettingsSaveContributor({
-    id: "general-keyboard-shortcuts",
-    revision,
-    isDirty: revision !== JSON.stringify(saved),
-    save: async () => {
-      const submitted = draft;
-      const current = storeApi.getState().userSettings;
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        chat_submit_key: submitted.chatSubmitKey,
-        keyboard_shortcuts: submitted.keyboardShortcuts,
-      });
-      setSaved(submitted);
-      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
-    },
-    discard: () => setDraft(saved),
-  });
+  const integrationEntries = useIntegrationShortcutEntries(pluginItems);
+  const shortcuts = useShortcutDraft("general-keyboard-shortcuts");
+  const { saved, draft, updateDraft } = useChatInputSettingsDraft();
 
   return (
     <div className="space-y-8">
@@ -583,10 +563,25 @@ export function KeyboardShortcutsSettings() {
         title={t("settings:chatInput")}
         description={t("settings:configureChatInputBehavior")}
       >
+        <SettingsRow
+          label={t("settings:escapeCancelsAgent")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.escapeCancelsAgent}
+          description={t("settings:escapeCancelsAgentDescription")}
+          controlId="escape-cancels-agent"
+          touchTarget="switch"
+          isDirty={draft.escapeCancelsAgent !== saved.escapeCancelsAgent}
+          control={
+            <Switch
+              id="escape-cancels-agent"
+              checked={draft.escapeCancelsAgent}
+              onCheckedChange={(escapeCancelsAgent) => updateDraft({ escapeCancelsAgent })}
+            />
+          }
+        />
         <ChatSubmitKeyCard
           value={draft.chatSubmitKey}
           isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}
-          onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
+          onChange={(chatSubmitKey) => updateDraft({ chatSubmitKey })}
         />
       </SettingsSection>
 
@@ -598,12 +593,11 @@ export function KeyboardShortcutsSettings() {
         description={t("settings:customizeKeyboardShortcutsForTheCommand")}
       >
         <KeyboardShortcutsCard
-          overrides={draft.keyboardShortcuts}
-          baselineOverrides={saved.keyboardShortcuts}
-          onChange={(keyboardShortcuts) =>
-            setDraft((current) => ({ ...current, keyboardShortcuts }))
-          }
+          overrides={shortcuts.draft}
+          baselineOverrides={shortcuts.saved}
+          onChange={(keyboardShortcuts) => shortcuts.setDraft(keyboardShortcuts)}
           pluginEntries={pluginShortcutEntries}
+          integrationEntries={integrationEntries}
         />
       </SettingsSection>
     </div>

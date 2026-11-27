@@ -107,21 +107,24 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
   const history = [{ content: "hello world", entityReferences: [] }];
   const anchorRect = new DOMRect(40, 500, 300, 32);
 
-  it("closes on Escape when the input itself is the target (baseline, via its own onKeyDown)", () => {
+  it("uses the Escape-dismiss callback when the input itself is the target", () => {
     const onClose = vi.fn();
+    const onEscapeDismiss = vi.fn();
     const { getByTestId } = render(
       createElement(MessageHistorySearch, {
         history,
         anchorRect,
         container: document.body,
         onClose,
+        onEscapeDismiss,
         onSelect: vi.fn(),
       }),
     );
 
     fireEvent.keyDown(getByTestId("history-search-input"), { key: "Escape" });
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onEscapeDismiss).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   /**
@@ -140,6 +143,7 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
     const somethingElseInTheDialog = document.createElement("button");
     dialogContent.appendChild(somethingElseInTheDialog);
     const onClose = vi.fn();
+    const onEscapeDismiss = vi.fn();
 
     render(
       createElement(MessageHistorySearch, {
@@ -147,15 +151,38 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
         anchorRect,
         container: dialogContent,
         onClose,
+        onEscapeDismiss,
         onSelect: vi.fn(),
       }),
     );
 
     fireEvent.keyDown(somethingElseInTheDialog, { key: "Escape", bubbles: true, cancelable: true });
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onEscapeDismiss).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
 
     document.body.removeChild(dialogContent);
+  });
+
+  it("keeps outside clicks on the normal close callback", () => {
+    const onClose = vi.fn();
+    const onEscapeDismiss = vi.fn();
+
+    render(
+      createElement(MessageHistorySearch, {
+        history,
+        anchorRect,
+        container: document.body,
+        onClose,
+        onEscapeDismiss,
+        onSelect: vi.fn(),
+      }),
+    );
+
+    fireEvent.mouseDown(document.body, { bubbles: true });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onEscapeDismiss).not.toHaveBeenCalled();
   });
 
   /**
@@ -170,6 +197,7 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
     const unrelated = document.createElement("button");
     document.body.appendChild(unrelated);
     const onClose = vi.fn();
+    const onEscapeDismiss = vi.fn();
 
     render(
       createElement(MessageHistorySearch, {
@@ -177,6 +205,7 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
         anchorRect,
         container: document.body,
         onClose,
+        onEscapeDismiss,
         onSelect: vi.fn(),
       }),
     );
@@ -184,6 +213,7 @@ describe("MessageHistorySearch Escape fallback close (F11)", () => {
     fireEvent.keyDown(unrelated, { key: "Escape", bubbles: true, cancelable: true });
 
     expect(onClose).not.toHaveBeenCalled();
+    expect(onEscapeDismiss).not.toHaveBeenCalled();
 
     document.body.removeChild(unrelated);
   });

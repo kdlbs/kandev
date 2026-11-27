@@ -17,6 +17,9 @@ System-page owns install-wide storage inventory, maintenance settings, and quara
 This extension adds a broad read-only footprint and an optional policy for existing owned artifacts.
 It does not turn discovered paths into cleanup candidates.
 
+The draft [temporary storage pressure extension](temporary-storage-pressure.md) adds filesystem capacity warnings
+and directory breakdowns. It preserves this design's measurement and cleanup ownership boundaries.
+
 This design is implemented. System temporary folders are measured read-only, and the general
 footprint is informational. Registered-artifact cleanup remains disabled by default; an enabled
 saved policy permits scheduled and full manual maintenance to quarantine eligible artifacts.

@@ -6,6 +6,7 @@ import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtim
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
+import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
@@ -28,6 +29,7 @@ import {
   splitReviewFileKey as splitFileKey,
   suppressAvailableGitlinkFiles,
 } from "./types";
+import { createReviewToggleHandler } from "./review-dialog-handlers";
 import { t } from "@/lib/i18n";
 
 /**
@@ -181,7 +183,8 @@ export type ReviewDialogProps = {
   onOpenChange: (open: boolean) => void;
   sessionId: string;
   baseBranch?: string;
-  onSendComments: (comments: ReviewComment[]) => void;
+  onSendComments: (comments: ReviewComment[]) => Promise<boolean>;
+  sendingComments?: boolean;
   onOpenFile?: (filePath: string, repo?: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
@@ -279,20 +282,13 @@ type ReviewDialogHandlerOptions = {
   markReviewed: (path: string, hash: string) => void;
   markUnreviewed: (path: string) => void;
   onSendComments: ReviewDialogProps["onSendComments"];
-  onOpenChange: ReviewDialogProps["onOpenChange"];
   sessionId: string;
 };
 
 function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
-  const { allFiles, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId } = opts;
+  const { allFiles, markReviewed, markUnreviewed, onSendComments, sessionId } = opts;
   const { discard } = useGitOperations(sessionId);
   const { toast } = useToast();
-
-  const handleToggleSplitView = useCallback((split: boolean) => {
-    const mode = split ? "split" : "unified";
-    localStorage.setItem("diff-view-mode", mode);
-    window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
-  }, []);
 
   const handleSelectFile = useCallback((key: string, setSelectedFile: (k: string) => void) => {
     setSelectedFile(key);
@@ -300,24 +296,14 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     // This ensures proper timing after the section expands
   }, []);
 
-  const handleToggleReviewed = useCallback(
-    (key: string, reviewed: boolean) => {
-      if (reviewed) {
-        // Look up by composite key so two same-name files in different repos
-        // don't share their reviewed/diff-hash.
-        const file = allFiles.find((f) => reviewFileKey(f) === key);
-        markReviewed(key, file ? hashDiff(file.diff) : "");
-      } else markUnreviewed(key);
-    },
+  const handleToggleReviewed = useMemo(
+    () => createReviewToggleHandler(allFiles, markReviewed, markUnreviewed),
     [allFiles, markReviewed, markUnreviewed],
   );
 
   const handleSendComments = useCallback(
-    (comments: ReviewComment[]) => {
-      onSendComments(comments);
-      onOpenChange(false);
-    },
-    [onSendComments, onOpenChange],
+    (comments: ReviewComment[]) => onSendComments(comments),
+    [onSendComments],
   );
 
   const handleDiscard = useCallback(
@@ -347,7 +333,6 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   );
 
   return {
-    handleToggleSplitView,
     handleSelectFile,
     handleToggleReviewed,
     handleSendComments,
@@ -380,6 +365,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     onOpenChange,
     sessionId,
     onSendComments,
+    sendingComments = false,
     gitStatusFiles,
     cumulativeDiff,
     selectedPRKey = null,
@@ -391,9 +377,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const reviewSourceKey = reviewDialogSourceKey(sessionId, selectedPRKey);
   const { selectedFile, filter, setSelectedFile, setFilter } =
     useReviewDialogTransientState(reviewSourceKey);
-  const [splitView, setSplitView] = useState(() =>
-    typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
-  );
+  const [viewMode, setViewMode] = useGlobalViewMode();
+  const splitView = viewMode === "split";
   const [wordWrap, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
@@ -403,7 +388,6 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const getPendingComments = useCallback((): ReviewComment[] => {
     return filterPendingReviewCommentsForSession(getStorePendingComments(), sessionId);
   }, [getStorePendingComments, sessionId]);
-  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 
   const allFiles = useMemo<ReviewFile[]>(
     () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys),
@@ -438,15 +422,13 @@ function useReviewDialogState(props: ReviewDialogProps) {
     markReviewed,
     markUnreviewed,
     onSendComments,
-    onOpenChange,
     sessionId,
   });
   const handleToggleSplitView = useCallback(
     (split: boolean) => {
-      setSplitView(split);
-      handlers.handleToggleSplitView(split);
+      setViewMode(split ? "split" : "unified");
     },
-    [handlers.handleToggleSplitView],
+    [setViewMode],
   );
   const handleSelectFile = usePRKeyedReviewFileSelection(
     handlers.handleSelectFile,
@@ -470,7 +452,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     totalCommentCount,
     fileRefs,
     getPendingComments,
-    markCommentsSent,
+    sendingComments,
     handleToggleSplitView,
     handleSelectFile,
     handleToggleReviewed: handlers.handleToggleReviewed,

@@ -1,11 +1,13 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskPreviewPanel } from "./task-preview-panel";
 import type { WorkflowStepperStep } from "./task/workflow-step-disclosure";
 import type { Task } from "./kanban-card";
+import { PREVIEW_HEADER_INDICATOR } from "@/lib/settings/constants";
 
 vi.mock("./task/preview-session-tabs", () => ({
   PreviewSessionTabs: () => <div data-testid="preview-session-tabs" />,
@@ -40,7 +42,9 @@ const STEPS: WorkflowStepperStep[] = [
 function withProviders(ui: ReactNode) {
   return (
     <ToastProvider>
-      <StateProvider>{ui}</StateProvider>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
     </ToastProvider>
   );
 }
@@ -197,5 +201,19 @@ describe("TaskPreviewPanel step indicator lifecycle", () => {
     rerender(withProviders(<TaskPreviewPanel task={TASK} onClose={vi.fn()} workflowSteps={[]} />));
 
     expect(onDisclosureOpenChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("TaskPreviewPanel step indicator floor", () => {
+  it("gives the indicator wrapper an explicit fine-pointer content floor", () => {
+    renderPanel();
+
+    // Not `min-w-min`: a long step name's `white-space: nowrap` (from
+    // `truncate`) makes its own min-content size its full, unbroken text
+    // width, which would dominate an ancestor's `min-content` computation
+    // instead of leaving room for it to shrink to 0.
+    const wrapper = screen.getByTestId(STEPPER_TEST_ID).parentElement;
+    expect(wrapper?.className).toContain(`min-w-[${PREVIEW_HEADER_INDICATOR.MIN_WIDTH_PX}px]`);
+    expect(wrapper?.className).not.toContain("min-w-min");
   });
 });

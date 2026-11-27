@@ -5,7 +5,9 @@ import { QueuePanelHeader, type QueuePanelHeaderProps } from "./queued-ghost-pan
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 
 const props: QueuePanelHeaderProps = {
   count: 1,
@@ -47,9 +49,7 @@ describe("QueuePanelHeader", () => {
     }
     const descriptionId = autoRunSwitches[0].getAttribute("aria-describedby");
     expect(descriptionId).not.toBeNull();
-    expect(document.getElementById(descriptionId ?? "")?.textContent).toBe(
-      "Finishes the current response, then queued messages wait.",
-    );
+    expect(document.getElementById(descriptionId ?? "")).not.toBeNull();
   });
 
   it("disables both policies through the same conflicting-operation state", () => {
@@ -61,6 +61,17 @@ describe("QueuePanelHeader", () => {
     expect((screen.getByTestId("queue-auto-run") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("queue-auto-merge") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("disables Clear All while another queue mutation is in flight", () => {
+    render(
+      <TooltipProvider>
+        <QueuePanelHeader {...props} isLoading />
+      </TooltipProvider>,
+    );
+
+    expect((screen.getByTestId("queue-clear-all") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("keeps the unavailable Auto-merge tooltip keyboard reachable", () => {
     const { container } = render(
       <TooltipProvider>

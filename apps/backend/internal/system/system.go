@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -53,6 +54,7 @@ type BuildInfo struct {
 	Version   string
 	Commit    string
 	BuildTime string
+	BootID    string
 }
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
@@ -75,28 +77,38 @@ type Wiring struct {
 	SessionCapacityEnvironment sessioncapacity.Environment
 	TaskSessions               sleepinhibition.SessionReader
 	ToolPayloadChanged         func(context.Context, []string)
+	HistoryCompaction          toolretention.HistoryCompactor
+	HistoryBackup              backups.RetentionSources
+	AgentRuntimeRecovery       AgentRuntimeRecoveryTarget
+}
+
+// AgentRuntimeRecoveryTarget owns retry admission and the boot, epoch, and
+// revision fences for a local agent runtime replacement.
+type AgentRuntimeRecoveryTarget interface {
+	RetryAtRevision(context.Context, string, uint64, uint64, string) (agentruntime.AvailabilitySnapshot, error)
 }
 
 // Service exposes the composed system sub-services. Each field is
 // addressable so the cmd/kandev wiring can attach callbacks (Restart)
 // after construction.
 type Service struct {
-	logger          *logger.Logger
-	Info            *info.Service
-	Jobs            *jobs.Tracker
-	Disk            *disk.Service
-	Database        *database.Service
-	Backups         *backups.Service
-	LogBundles      *logbundle.Service
-	FrontendErrors  *frontenderrors.Service
-	Metrics         *metrics.Service
-	MessageQueue    *queuesettings.Service
-	SessionCapacity *sessioncapacity.Service
-	SleepInhibition *sleepinhibition.Service
-	Updates         *updates.Service
-	Restart         restart.Manager
-	Storage         *storage.Handler
-	ToolRetention   *toolretention.Service
+	logger               *logger.Logger
+	Info                 *info.Service
+	Jobs                 *jobs.Tracker
+	Disk                 *disk.Service
+	Database             *database.Service
+	Backups              *backups.Service
+	LogBundles           *logbundle.Service
+	FrontendErrors       *frontenderrors.Service
+	Metrics              *metrics.Service
+	MessageQueue         *queuesettings.Service
+	SessionCapacity      *sessioncapacity.Service
+	SleepInhibition      *sleepinhibition.Service
+	Updates              *updates.Service
+	Restart              restart.Manager
+	Storage              *storage.Handler
+	ToolRetention        *toolretention.Service
+	AgentRuntimeRecovery AgentRuntimeRecoveryTarget
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
 	Persistence    *systempersistence.Handler
@@ -124,6 +136,9 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	if wiring.PersistenceHealth != nil {
+		dbSvc.SetPersistenceHealthProbe(wiring.PersistenceHealth.Healthy)
+	}
 	markPersistenceUnavailable := func() {
 		if wiring.PersistenceHealth != nil {
 			wiring.PersistenceHealth.MarkUnavailable()
@@ -133,6 +148,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.RetentionSources = wiring.HistoryBackup
 	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
 	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
 	dbSvc.DatabaseQuiesce = retentionQuiesce(retentionSvc, wiring.DatabaseQuiesce)
@@ -140,7 +156,13 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	if restoreQuiesce == nil && wiring.OrchestratorShutdown != nil {
 		restoreQuiesce = func() error { wiring.OrchestratorShutdown(); return nil }
 	}
-	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, restoreQuiesce)
+	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, func() error {
+		dbSvc.InvalidateDatabase()
+		if restoreQuiesce != nil {
+			return restoreQuiesce()
+		}
+		return nil
+	})
 
 	settingsStore := wiring.SystemSettings
 	if settingsStore == nil {
@@ -196,7 +218,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	return &Service{
 		logger:        log,
-		Info:          info.NewService(build.Version, build.Commit, build.BuildTime),
+		Info:          info.NewServiceWithBootID(build.Version, build.Commit, build.BuildTime, build.BootID),
 		Jobs:          tracker,
 		Disk:          disk.NewService(homeDir, tracker, log),
 		Database:      dbSvc,
@@ -206,14 +228,15 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
 			BuildTime: build.BuildTime, Log: log,
 		}),
-		FrontendErrors:  frontenderrors.New(log, nil),
-		Metrics:         metricsSvc,
-		MessageQueue:    queueSettingsSvc,
-		SessionCapacity: sessionCapacitySvc,
-		SleepInhibition: sleepInhibitionSvc,
-		Updates:         updatesSvc,
-		Restart:         restart.NewManagerFromEnv(),
-		Persistence:     persistenceHandler,
+		FrontendErrors:       frontenderrors.New(log, nil),
+		Metrics:              metricsSvc,
+		MessageQueue:         queueSettingsSvc,
+		SessionCapacity:      sessionCapacitySvc,
+		SleepInhibition:      sleepInhibitionSvc,
+		Updates:              updatesSvc,
+		Restart:              restart.NewManagerFromEnv(),
+		Persistence:          persistenceHandler,
+		AgentRuntimeRecovery: wiring.AgentRuntimeRecovery,
 	}
 }
 
@@ -233,6 +256,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	// authentication disabled the synthetic single-user identity is an admin,
 	// so behavior is unchanged; with it enabled, members are read-only here.
 	admin := g.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	if s.AgentRuntimeRecovery != nil {
+		admin.POST("/agent-runtime/retry", handleAgentRuntimeRetry(s.AgentRuntimeRecovery))
+	}
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
@@ -245,6 +271,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/disk-usage/open", disk.HandleOpenFolder(s.Disk))
 
 	g.GET("/database", database.HandleStats(s.Database))
+	g.POST("/database/refresh", database.HandleRefreshStats(s.Database))
 	admin.POST("/database/vacuum", database.HandleVacuum(s.Database))
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
@@ -312,6 +339,9 @@ func (s *Service) StartBackground(ctx context.Context) {
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.Database != nil {
+		s.Database.StopBackground()
+	}
 	if s.ToolRetention != nil {
 		s.ToolRetention.Stop()
 	}
@@ -331,6 +361,9 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 		CreateBackup: func(ctx context.Context) (string, error) {
 			receipt, err := snapshots.CreateForRetention(ctx)
 			if err != nil {
+				if log != nil {
+					log.Error("retention backup preparation failed", zap.Error(err))
+				}
 				return "", err
 			}
 			encoded, err := json.Marshal(receipt)
@@ -341,10 +374,20 @@ func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bu
 			if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
 				return err
 			}
-			return snapshots.VerifyRetentionBackupUnderLease(ctx, receipt)
+			err := snapshots.VerifyRetentionBackupWithSources(ctx, receipt)
+			if err != nil && log != nil {
+				log.Error("retention backup verification failed", zap.Error(err))
+			}
+			return err
 		},
 		Changed: wiring.ToolPayloadChanged,
+		History: wiring.HistoryCompaction,
 		Report:  func(ctx context.Context, op *toolretention.Operation) { reportToolRetention(ctx, eventBus, log, op) },
+		Log: func(_ context.Context, message string, err error) {
+			if log != nil {
+				log.Error(message, zap.Error(err))
+			}
+		},
 	})
 }
 

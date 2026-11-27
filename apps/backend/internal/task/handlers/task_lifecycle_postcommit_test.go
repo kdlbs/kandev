@@ -76,6 +76,9 @@ func TestHTTPTaskLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *te
 			h.SetHandoffService(handoff)
 
 			c, rec := authzDeleteRequest(t, "user-b", "task-b")
+			if tc.name == "delete" {
+				authorizeTaskDeletePreview(t, h, c, "task-b")
+			}
 			tc.call(h, c)
 
 			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())

@@ -54,7 +54,8 @@ failures are outside provider policy.
 
 Unknown, low-confidence, stale, or conflicting evidence is `unclassified`.
 This is an internal classification state, not a third configurable class. It
-always fails closed to manual recovery. A new semantic code without an explicit
+fails closed to manual recovery except for the narrowly scoped
+[repeated-failure extension](2026-09-28-repeated-unclassified-fallback.md). A new semantic code without an explicit
 class assignment also classifies as unclassified until exhaustive tests and
 the catalogue are updated.
 

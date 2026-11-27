@@ -569,6 +569,13 @@ func TestCreateTask_SubtaskOfSubtask_Office_Allowed(t *testing.T) {
 func TestCreateTask_Subtask_CrossWorkspaceParentDoesNotInheritForeignProject(t *testing.T) {
 	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(_ context.Context, projectID string) (ProjectRepositorySources, error) {
+		workspaceID := "ws-1"
+		if projectID == "proj-ws2" {
+			workspaceID = "ws-2"
+		}
+		return ProjectRepositorySources{WorkspaceID: workspaceID}, nil
+	}))
 
 	ws, err := repo.GetWorkspace(ctx, "ws-1")
 	if err != nil {

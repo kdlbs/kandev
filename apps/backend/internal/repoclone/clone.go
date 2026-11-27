@@ -18,6 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/ctxmutex"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
@@ -45,6 +46,7 @@ var (
 	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
 	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
 	ErrManagedCloneOriginMismatch     = errors.New("managed repository origin does not match requested clone URL")
+	errManagedCloneDestinationExists  = errors.New("managed repository path already exists")
 	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
 	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
 )
@@ -127,9 +129,9 @@ func (c *Cloner) SetGitCredentialProvider(provider GitCredentialProvider) {
 	c.credentials = provider
 }
 
-func (c *Cloner) repoMu(path string) *sync.Mutex {
-	mu, _ := c.repoMus.LoadOrStore(path, &sync.Mutex{})
-	return mu.(*sync.Mutex) //nolint:forcetypeassert // LoadOrStore always stores *sync.Mutex
+func (c *Cloner) repoMu(path string) *ctxmutex.Mutex {
+	mu, _ := c.repoMus.LoadOrStore(path, &ctxmutex.Mutex{})
+	return mu.(*ctxmutex.Mutex) //nolint:forcetypeassert // LoadOrStore always stores *ctxmutex.Mutex
 }
 
 // ExpandedBasePath returns the base path with ~ expanded to the user's home directory.
@@ -232,8 +234,8 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 // opaque connection scope and immutable repository ID. A non-empty scope
 // selects this isolated layout and requires a paired repository ID (the path
 // segment needs both to stay unique); a bare repository ID with no scope is
-// the normal shape for every built-in provider (GitHub, GitLab, Azure
-// DevOps) — none of them resolve a provider connection scope — so it falls
+// the normal shape for every built-in provider (GitHub, GitLab) — neither
+// resolves a provider connection scope — so it falls
 // through to the legacy origin/owner/name layout below, same as when both
 // are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
@@ -273,6 +275,48 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 	}
 	parts = append(parts, filepath.FromSlash(owner), name)
 	return filepath.Join(parts...), nil
+}
+
+// ManagedCloneRelocationPaths returns the exact managed source candidates and
+// destination eligible for legacy-to-workspace relocation. Unsupported
+// repository sources return ok=false so callers can leave them untouched.
+func (c *Cloner) ManagedCloneRelocationPaths(repository *models.Repository) (
+	root, providerSource, ownerNameSource, destination string, ok bool, err error,
+) {
+	if repository == nil || strings.ToLower(strings.TrimSpace(repository.SourceType)) != "provider" {
+		return "", "", "", "", false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if provider != githubProvider && provider != gitlabProvider {
+		return "", "", "", "", false, nil
+	}
+	if strings.TrimSpace(repository.WorkspaceID) == "" || strings.TrimSpace(repository.ProviderHost) == "" ||
+		strings.TrimSpace(repository.ProviderOwner) == "" || strings.TrimSpace(repository.ProviderName) == "" {
+		return "", "", "", "", false, nil
+	}
+	root, err = c.ExpandedBasePath()
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	providerSource, err = c.ProviderRepoPath(provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	ownerNameSource, err = c.RepoPath(repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	destination, err = c.WorkspaceProviderRepositoryPath(
+		repository.WorkspaceID, provider, repository.ProviderHost, repository.ProviderScope,
+		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName,
+	)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if filepath.Clean(providerSource) == filepath.Clean(destination) {
+		return "", "", "", "", false, nil
+	}
+	return root, providerSource, ownerNameSource, destination, true, nil
 }
 
 func stableIdentitySegment(value string) string {
@@ -512,11 +556,15 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithBasicAuth(
 	}, 0)
 }
 
+// refreshWorkspaceRepository updates origin and the Kandev-owned PR snapshot refs
+// without changing the checkout HEAD.
 func (c *Cloner) refreshWorkspaceRepository(
 	ctx context.Context, targetPath, cloneURL string, auth *cloneAuth, prNumber int,
 ) error {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer mu.Unlock()
 	if !gitCheckoutExists(targetPath) {
 		return errors.New("scoped workspace checkout is not a Git repository")
@@ -541,7 +589,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("refs/pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}
@@ -566,7 +614,9 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 		return errors.New("repository path and origin URL are required")
 	}
 	mu := c.repoMu(repositoryPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer mu.Unlock()
 	return c.setOriginURLLocked(ctx, repositoryPath, originURL)
 }
@@ -657,7 +707,7 @@ func (c *Cloner) workspaceCloneAuthRequest(
 	if provider == "" {
 		provider = githubProvider
 	}
-	if provider != githubProvider && (provider == gitlabProvider || provider == "azure_devops" || strings.TrimSpace(token) != "") {
+	if provider != githubProvider && (provider == gitlabProvider || strings.TrimSpace(token) != "") {
 		auth, err := credentialAuth(request.CloneURL, credentialOrigin, token)
 		return request.CloneURL, auth, err
 	}
@@ -728,13 +778,67 @@ func (c *Cloner) ensureClonedAtPath(
 	return c.ensureClonedAtPathWithOriginVerification(ctx, cloneURL, targetPath, auth, false)
 }
 
+func inspectCloneDestination(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errManagedCloneDestinationExists
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) != 0 {
+		return nil, errManagedCloneDestinationExists
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(info, current) {
+		return nil, errManagedCloneDestinationExists
+	}
+	return info, nil
+}
+
+func prepareCloneDestinationForPublication(path string, emptyDestination os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if emptyDestination == nil || !os.SameFile(emptyDestination, current) || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 {
+		return errManagedCloneDestinationExists
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return errManagedCloneDestinationExists
+	}
+	return os.Remove(path)
+}
+
 func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	ctx context.Context, cloneURL, targetPath string, auth *cloneAuth, verifyExistingOrigin bool,
 ) (string, error) {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return "", err
+	}
 	defer mu.Unlock()
 
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
 		if verifyExistingOrigin {
@@ -745,7 +849,82 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	emptyDestination, err := inspectCloneDestination(targetPath)
+	if err != nil {
+		return "", err
+	}
+	parent := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return "", fmt.Errorf("create parent directory: %w", err)
+	}
+	stagingRoot, err := os.MkdirTemp(parent, ".kandev-clone-")
+	if err != nil {
+		if emptyDestination != nil {
+			return c.cloneIntoExistingEmptyDestination(ctx, cloneURL, targetPath, auth, emptyDestination)
+		}
+		return "", fmt.Errorf("create clone staging directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stagingRoot) }()
+	stagingPath := filepath.Join(stagingRoot, "checkout")
+	if err := c.clone(ctx, cloneURL, stagingPath, auth); err != nil {
+		return targetPath, err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
+	if emptyDestination != nil {
+		if err := os.Chmod(stagingPath, emptyDestination.Mode().Perm()); err != nil {
+			return "", fmt.Errorf("apply destination permissions: %w", err)
+		}
+	}
+	if err := prepareCloneDestinationForPublication(targetPath, emptyDestination); err != nil {
+		return "", err
+	}
+	if err := os.Rename(stagingPath, targetPath); err != nil {
+		return "", fmt.Errorf("publish cloned repository: %w", err)
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
+}
+
+func (c *Cloner) cloneIntoExistingEmptyDestination(
+	ctx context.Context,
+	cloneURL string,
+	targetPath string,
+	auth *cloneAuth,
+	emptyDestination os.FileInfo,
+) (string, error) {
+	current, err := inspectCloneDestination(targetPath)
+	if err != nil {
+		return "", err
+	}
+	if current == nil || !os.SameFile(emptyDestination, current) {
+		return "", errManagedCloneDestinationExists
+	}
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := ctx.Err(); err != nil {
+		return "", errors.Join(err, clearCloneDestination(targetPath))
+	}
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
+	return targetPath, nil
+}
+
+func clearCloneDestination(path string) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	var cleanupErr error
+	for _, entry := range entries {
+		cleanupErr = errors.Join(cleanupErr, os.RemoveAll(filepath.Join(path, entry.Name())))
+	}
+	return cleanupErr
 }
 
 // EnsureClonedWithBasicAuth retains the legacy basic-auth clone path.
@@ -777,8 +956,13 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 	ctx context.Context, targetPath, cloneURL, username, password string,
 ) (string, error) {
 	mu := c.repoMu(targetPath)
-	mu.Lock()
+	if err := mu.LockContext(ctx); err != nil {
+		return "", err
+	}
 	defer mu.Unlock()
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	origin, err := gitCredentialOrigin(cloneURL)
 	if err != nil {
 		return targetPath, err
@@ -792,7 +976,10 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return targetPath, err
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
 }
 
 func gitCredentialOrigin(cloneURL string) (string, error) {
@@ -829,37 +1016,6 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
 	); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), authToken(auth)), err)
-	}
-	return nil
-}
-
-func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
-	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags}
-	if out, err := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, authURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		c.logger.Warn("authenticated git fetch failed (non-fatal)",
-			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
-	}
-}
-
-func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, header string) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("create parent directory: %w", err)
-	}
-	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	args := []string{"clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath}
-	if out, err := c.runConfiguredGitCombined(ctx, gitCloneTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, cloneURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
 }
@@ -907,14 +1063,14 @@ func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {
 	if err := validateCloneAuth(auth); err != nil {
 		return nil, err
 	}
-	helperPath, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
+	helperCommand, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
 	if err != nil {
 		return nil, err
 	}
 	env = append(env,
 		"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperPath,
+		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperCommand,
 		"GIT_CONFIG_KEY_2=credential.useHttpPath", "GIT_CONFIG_VALUE_2=true",
 	)
 	env = append(env, helperEnv...)
@@ -941,7 +1097,7 @@ func validateCloneAuth(auth *cloneAuth) error {
 
 func cleanGitEnvironment() []string {
 	env := withoutEnv(os.Environ(),
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", gitHubCredentialEnv, gitHubCredentialUserEnv,
 		gitCredentialUsernameFileEnv, gitCredentialPasswordFileEnv,
 		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND",
 		"GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",

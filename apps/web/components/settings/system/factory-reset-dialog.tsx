@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -16,6 +17,17 @@ import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
 import { resetDatabase } from "@/lib/api/domains/system-api";
 import { useSystemJob } from "@/hooks/domains/system/use-system-jobs";
+import {
+  invalidateBackupList,
+  useBackupListScope,
+  type BackupListScope,
+} from "@/hooks/domains/system/backup-list-query";
+
+type ResetAttempt = {
+  scope: BackupListScope;
+  jobId: string | null;
+  settled: boolean;
+};
 
 type Props = {
   open: boolean;
@@ -155,10 +167,13 @@ function SuccessView({ onClose }: { onClose: () => void }) {
 
 export function FactoryResetDialog({ open, onOpenChange }: Props) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const backupScope = useBackupListScope();
   const [typed, setTyped] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [requestPending, setRequestPending] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const resetAttempt = useRef<ResetAttempt | null>(null);
 
   const job = useSystemJob(jobId);
   const succeeded = job?.state === "succeeded";
@@ -167,6 +182,33 @@ export function FactoryResetDialog({ open, onOpenChange }: Props) {
   // `job.message` is the backend's own diagnostic text and stays as sent.
   const error = requestError ?? (failed ? (job?.message ?? t("system:factoryResetFailed")) : null);
   const enabled = typed === CONFIRM_TOKEN && !submitting && !succeeded;
+
+  useEffect(() => {
+    resetAttempt.current = null;
+    setTyped("");
+    setJobId(null);
+    setRequestPending(false);
+    setRequestError(null);
+  }, [backupScope.identityKey]);
+
+  useEffect(() => {
+    const attempt = resetAttempt.current;
+    if (
+      !attempt ||
+      attempt.settled ||
+      !attempt.jobId ||
+      job?.id !== attempt.jobId ||
+      (job.state !== "succeeded" && job.state !== "failed")
+    ) {
+      return;
+    }
+    attempt.settled = true;
+    void invalidateBackupList(
+      queryClient,
+      attempt.scope.identity,
+      () => resetAttempt.current === attempt && backupScope.isCurrentScope(attempt.scope),
+    ).catch(() => undefined);
+  }, [backupScope.isCurrentScope, job, queryClient]);
 
   const handleClose = (next: boolean) => {
     if (submitting) return;
@@ -179,16 +221,29 @@ export function FactoryResetDialog({ open, onOpenChange }: Props) {
   };
 
   const onConfirm = async () => {
+    const attempt: ResetAttempt = {
+      scope: backupScope.captureScope(),
+      jobId: null,
+      settled: false,
+    };
+    resetAttempt.current = attempt;
     setRequestPending(true);
     setRequestError(null);
     setJobId(null);
     try {
       const res = await resetDatabase(CONFIRM_TOKEN);
+      if (resetAttempt.current !== attempt || !backupScope.isCurrentScope(attempt.scope)) return;
+      attempt.jobId = res.job_id;
       setJobId(res.job_id);
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : t("system:factoryResetRequestFailed"));
+      if (resetAttempt.current === attempt && backupScope.isCurrentScope(attempt.scope)) {
+        setRequestError(err instanceof Error ? err.message : t("system:factoryResetRequestFailed"));
+      }
     } finally {
-      setRequestPending(false);
+      if (resetAttempt.current === attempt && backupScope.isCurrentScope(attempt.scope)) {
+        setRequestPending(false);
+        if (attempt.jobId === null) resetAttempt.current = null;
+      }
     }
   };
 

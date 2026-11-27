@@ -12,6 +12,52 @@ vi.mock("@/components/integrations/registered-change-request-task-icon", () => (
 
 afterEach(cleanup);
 
+const taskActionsName = "Task actions";
+
+describe("TaskItemTrailing diff stats", () => {
+  it.each([
+    [2083, 0, "+2083"],
+    [2290, 0, "+2290"],
+    [0, 4, "-4"],
+    [6410, 4, "+6410 -4"],
+  ])("renders %i additions and %i deletions as %s", (additions, deletions, expected) => {
+    render(
+      <TaskItemTrailing
+        trailing="git_changes"
+        diffStats={{ additions, deletions }}
+        menuOpen={false}
+        effectiveMenuOpen={false}
+      />,
+    );
+
+    const stats = screen.getByTestId("sidebar-task-diff-stats");
+    expect(stats.textContent).toBe(expected);
+    expect(stats.querySelector(".text-emerald-500")?.textContent).toBe(
+      additions > 0 ? `+${additions}` : undefined,
+    );
+    expect(stats.querySelector(".text-rose-500")?.textContent).toBe(
+      deletions > 0 ? `-${deletions}` : undefined,
+    );
+  });
+
+  it.each([undefined, { additions: 0, deletions: 0 }])(
+    "omits the badge and keeps task actions for %j stats",
+    (diffStats) => {
+      render(
+        <TaskItemTrailing
+          trailing="git_changes"
+          diffStats={diffStats}
+          menuOpen={false}
+          effectiveMenuOpen={false}
+        />,
+      );
+
+      expect(screen.queryByTestId("sidebar-task-diff-stats")).toBeNull();
+      expect(screen.getByRole("button", { name: taskActionsName })).not.toBeNull();
+    },
+  );
+});
+
 describe("TaskItemTrailing relative time", () => {
   it("renders a compact value with the full relative time as its accessible name", () => {
     const relativeTimeValue = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -42,7 +88,7 @@ describe("TaskItemTrailing relative time", () => {
     );
 
     expect(screen.queryByTestId("sidebar-task-trailing-time")).toBeNull();
-    expect(screen.getByRole("button", { name: "Task actions" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: taskActionsName })).not.toBeNull();
   });
 });
 
@@ -78,7 +124,7 @@ describe("TaskItemTrailing change-request status", () => {
     );
 
     expect(screen.queryByTestId("sidebar-task-change-request-status")).toBeNull();
-    expect(screen.getByRole("button", { name: "Task actions" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: taskActionsName })).not.toBeNull();
   });
 
   it("keeps the menu-only layout when a task has no change-request status", () => {
@@ -97,7 +143,7 @@ describe("TaskItemTrailing change-request status", () => {
 
     expect(status.childElementCount).toBe(0);
     expect(status.className).toContain("empty:hidden");
-    expect(actions.contains(screen.getByRole("button", { name: "Task actions" }))).toBe(true);
+    expect(actions.contains(screen.getByRole("button", { name: taskActionsName }))).toBe(true);
     expect(menuSlot.className).toContain("w-0");
   });
 });

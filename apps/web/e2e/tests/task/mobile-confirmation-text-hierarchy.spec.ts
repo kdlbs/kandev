@@ -33,6 +33,9 @@ async function openDeleteDialog(page: Page, title: string) {
     .getByTestId("mobile-task-switcher-list")
     .locator("xpath=ancestor::*[@data-slot='drawer-content'][1]");
   await expect(drawer).toBeVisible();
+  const drawerTitle = drawer.locator('[data-slot="drawer-title"]');
+  await expect(drawerTitle).toBeVisible();
+  await expect(drawerTitle).toHaveCSS("text-wrap", "balance");
 
   const taskRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible();
@@ -46,6 +49,7 @@ async function openDeleteDialog(page: Page, title: string) {
 
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();
+  await expect(drawer).not.toBeAttached();
   return { dialog, drawer, taskRow };
 }
 
@@ -191,10 +195,7 @@ test.describe("Mobile confirmation text hierarchy", () => {
 
     for (const width of [320, 393]) {
       await testPage.setViewportSize({ width, height: 400 });
-      const { dialog, drawer } = await openDeleteDialog(testPage, LONG_TASK_TITLE);
-      const drawerTitle = drawer.locator('[data-slot="drawer-title"]');
-      await expect(drawerTitle).toBeVisible();
-      await expect(drawerTitle).toHaveCSS("text-wrap", "balance");
+      const { dialog } = await openDeleteDialog(testPage, LONG_TASK_TITLE);
       await assertPhoneDeleteDialog(dialog, width);
 
       const discard = dialog.getByTestId("delete-discard-worktree-checkbox");

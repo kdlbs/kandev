@@ -70,6 +70,7 @@ const classificationCases = [
     name: "rewritten provider history",
     overrides: {
       providerCommits: [{ sha: REWRITTEN_BASE }, { sha: REWRITTEN_HEAD }],
+      providerHead: REWRITTEN_HEAD,
       upstreamHead: REWRITTEN_HEAD,
       remoteAhead: 2,
       remoteBehind: 2,
@@ -142,8 +143,11 @@ describe("classifyRemoteContribution", () => {
     expect(
       classifyRemoteContribution(
         input({
-          providerCommits: [{ sha: "different-sha" }],
-          upstreamHead: "different-sha",
+          providerCommits: [{ sha: REWRITTEN_HEAD }],
+          providerHead: REWRITTEN_HEAD,
+          upstreamHead: REWRITTEN_HEAD,
+          remoteAhead: 1,
+          remoteBehind: 1,
         }),
       ),
     ).toMatchObject({ kind: "diverged", presentation: "separate" });
@@ -155,10 +159,11 @@ describe("classifyRemoteContribution", () => {
         input({ upstreamHead: "unrelated-upstream", remoteAhead: 3, remoteBehind: 0 }),
       ),
     ).toMatchObject({
-      kind: "diverged",
-      canPush: false,
-      canReplaceRemote: true,
-      canUseRemote: true,
+      kind: "unknown",
+      presentation: "unified",
+      action: "unavailable_evidence",
+      canReplaceRemote: false,
+      canUseRemote: false,
     });
   });
 
@@ -199,11 +204,50 @@ describe("classifyRemoteContribution", () => {
   });
 });
 
+describe("classifyRemoteContribution snapshot consistency", () => {
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4
+  it.each([0, 2])(
+    "returns unknown for a stale upstream snapshot with behind=%s",
+    (remoteBehind) => {
+      const relation = classifyRemoteContribution(
+        input({ upstreamHead: PROVIDER_BASE, remoteAhead: 2, remoteBehind }),
+      );
+
+      expect(relation).toMatchObject({
+        kind: "unknown",
+        presentation: "unified",
+        canReplaceRemote: false,
+        canUseRemote: false,
+      });
+      expect(remoteContributionActionPolicy(relation)).toMatchObject({
+        pushDisabled: true,
+        pullDisabled: true,
+        replaceDisabled: true,
+        useDisabled: true,
+      });
+    },
+  );
+
+  it.each([0, 1])(
+    "returns unknown for unequal heads without local-ahead counts, behind=%s",
+    (remoteBehind) => {
+      expect(classifyRemoteContribution(input({ remoteBehind }))).toMatchObject({
+        kind: "unknown",
+        presentation: "unified",
+        action: "unavailable_evidence",
+        canReplaceRemote: false,
+        canUseRemote: false,
+      });
+    },
+  );
+});
+
 describe("remoteContributionActionPolicy", () => {
   it("offers explicit version choices for diverged histories", () => {
     const relation = classifyRemoteContribution(
       input({
         providerCommits: [{ sha: REWRITTEN_HEAD }],
+        providerHead: REWRITTEN_HEAD,
         upstreamHead: REWRITTEN_HEAD,
         remoteAhead: 1,
         remoteBehind: 1,
@@ -304,6 +348,7 @@ describe("remoteContributionActionReasonKey", () => {
     const diverged = classifyRemoteContribution(
       input({
         providerCommits: [{ sha: REWRITTEN_HEAD }],
+        providerHead: REWRITTEN_HEAD,
         upstreamHead: REWRITTEN_HEAD,
         remoteAhead: 1,
         remoteBehind: 1,

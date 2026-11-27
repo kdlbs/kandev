@@ -82,7 +82,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, usermodels.TasksListApiSort(tasksListSort))
 	routeData := map[string]any{
 		"activeWorkspaceId":        activeWorkspaceID,
 		"workflows":                workflowsToDTOs(workflows),
@@ -687,18 +687,23 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"shellOptions":                    response.ShellOptions,
 		"defaultEditorId":                 nullString(settings.DefaultEditorID),
 		"enablePreviewOnClick":            settings.EnablePreviewOnClick,
+		"escapeCancelsAgent":              settings.EscapeCancelsAgent,
 		"chatSubmitKey":                   defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":          settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
+		"unreadTaskDot":                   settings.UnreadTaskDot,
+		"unreadTaskDotHideDelaySeconds":   settings.UnreadTaskDotHideDelaySeconds,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
+		"promptSuggestions":               settings.PromptSuggestions,
 		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTurnChangedFiles":            settings.ShowTurnChangedFiles,
 		"showTodoListPanel":               settings.ShowTodoListPanel,
 
 		// Sub-option: only auto-pin when the agent's todo list is not empty.
@@ -708,6 +713,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspAutoStartLanguages":             stringSlice(settings.LspAutoStartLanguages),
 		"lspAutoInstallLanguages":           stringSlice(settings.LspAutoInstallLanguages),
 		"lspServerConfigs":                  mapStringMap(settings.LspServerConfigs),
+		"markdownPreviewByDefault":          settings.MarkdownPreviewByDefault,
 		"lspStatusLocation":                 usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
@@ -730,12 +736,15 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontSize":                  nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
-		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
+		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
+		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"sidebarFastActionsEnabled":         settings.SidebarFastActionsEnabled,
+		"sidebarNewTaskStyle":               settings.SidebarNewTaskStyle,
 		"sidebarHoverEnabled":               settings.SidebarHoverEnabled,
 		"sidebarHoverDelayMs":               settings.SidebarHoverDelayMs,
 		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
@@ -771,19 +780,25 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
 		"created_at":                      workspace.CreatedAt,
 		"updated_at":                      workspace.UpdatedAt,
 	}
 }
 
-// mapWorkflowItemState maps a workflow DTO to its SPA boot shape.
+// mapWorkflowItemState maps a workflow DTO to its SPA boot shape. It must carry
+// every field the workflow settings page saves: an omitted prompt reads there as
+// a cleared value and the next step save persists it. This mirrors the web
+// mapWorkflowItem in apps/web/lib/routing/route-bootstrap.ts.
 func mapWorkflowItemState(workflow taskdto.WorkflowDTO) map[string]any {
 	return map[string]any{
 		"id":               workflow.ID,
 		"workspaceId":      workflow.WorkspaceID,
 		"name":             workflow.Name,
 		"description":      workflow.Description,
+		"prompt":           stringValue(workflow.Prompt),
 		"sortOrder":        workflow.SortOrder,
 		"agent_profile_id": nullString(workflow.AgentProfileID),
 		"hidden":           workflow.Hidden,
@@ -833,9 +848,23 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 	}
 	return map[string]any{
 		"id":                          task.ID,
+		"workspaceId":                 task.WorkspaceID,
+		"workflowId":                  task.WorkflowID,
+		"origin":                      task.Origin,
+		"metadata":                    task.Metadata,
+		"isArchived":                  task.ArchivedAt != nil,
+		"isFromOffice":                task.IsFromOffice,
+		"primaryExecutorId":           task.PrimaryExecutorID,
+		"primaryExecutorProfileId":    task.PrimaryExecutorProfileID,
+		"primaryExecutorType":         task.PrimaryExecutorType,
+		"primaryExecutorName":         task.PrimaryExecutorName,
+		"isRemoteExecutor":            task.IsRemoteExecutor,
+		"foregroundActivity":          task.ForegroundActivity,
 		"workflowStepId":              task.WorkflowStepID,
+		"identifier":                  nullString(task.Identifier),
 		"title":                       task.Title,
 		"description":                 task.Description,
+		"flagNote":                    task.FlagNote,
 		"position":                    task.Position,
 		"state":                       task.State,
 		"repositoryId":                primaryRepositoryID,
@@ -865,6 +894,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"blockedReason":      nullString(task.BlockedReason),
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
+		"related":            dependencyRefStates(task.Related),
 		"startWhenUnblocked": task.StartWhenUnblocked,
 		// Parked-on-background-work projection, stamped by
 		// EnrichTaskParkedProjection before this mapper runs — omitting it here

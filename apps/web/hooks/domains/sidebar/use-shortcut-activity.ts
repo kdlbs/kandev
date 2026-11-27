@@ -3,9 +3,10 @@
 import { useCallback, useMemo } from "react";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
 import { useLiveRefresh } from "@/components/runs/use-live-refresh";
+import { useAutomationRunRecorded } from "@/components/runs/use-automation-run-recorded";
 import { automationState, type AutomationActivityState } from "@/components/runs/automation-rows";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
-import type { Automation } from "@/lib/types/automation";
+import type { Automation, AutomationRun } from "@/lib/types/automation";
 
 export type ShortcutActivityState = AutomationActivityState | "unknown";
 
@@ -13,6 +14,7 @@ export type ShortcutActivity = {
   state: ShortcutActivityState;
   loading: boolean;
   error: boolean;
+  lastRun?: AutomationRun;
 };
 
 export type ShortcutActivityReader = (automationId: string) => ShortcutActivity | undefined;
@@ -50,6 +52,7 @@ export function useShortcutActivity({
   const refresh = useCallback(() => summaries.refresh(), [summaries.refresh]);
 
   useLiveRefresh(Boolean(summaryWorkspaceId), refresh);
+  useAutomationRunRecorded(summaryWorkspaceId, undefined, refresh);
   useForegroundRefresh(refresh, Boolean(summaryWorkspaceId), summaryWorkspaceId);
 
   const activities = useMemo(() => {
@@ -76,6 +79,7 @@ export function useShortcutActivity({
         state: automationState(automation, item?.open_runs ?? 0),
         loading: false,
         error: false,
+        lastRun: item?.last_run,
       });
     }
     return next;

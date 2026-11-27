@@ -59,3 +59,9 @@ different runtime generation.
 - Returning raw probe stderr to the backend was rejected because it can contain paths, URLs, identifiers, or provider diagnostics.
 - Running every normal probe with online-preferred metadata was rejected because healthy cached exact versions should not require registry access.
 - Automatically rolling back to the prior version was rejected because it changes the reviewed effective runtime without operator consent.
+
+## Later qualification
+
+[Bounded managed npm startup retry](2026-10-02-bounded-managed-npm-startup-retry.md)
+replaces automatic execution-tree deletion with non-destructive metadata retry.
+Explicit maintenance retains scoped executor-local repair.

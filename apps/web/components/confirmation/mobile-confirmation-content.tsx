@@ -5,6 +5,12 @@ import { useTranslation } from "react-i18next";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 
+const ACTION_BUTTON_CLASS = [
+  "h-auto max-md:h-auto [@media(pointer:coarse)]:h-auto [@media(any-pointer:coarse)]:h-auto",
+  "min-h-12 max-md:min-h-12 [@media(any-pointer:coarse)]:min-h-12",
+  "w-full cursor-pointer whitespace-normal px-4 py-3 text-sm",
+].join(" ");
+
 export type MobileConfirmationContentProps = {
   title: ReactNode;
   subject?: ReactNode;
@@ -111,7 +117,7 @@ export function MobileConfirmationContent({
           aria-label={confirmAriaLabel}
           data-testid={confirmTestId}
           onClick={onConfirm}
-          className="h-auto min-h-12 w-full cursor-pointer whitespace-normal px-4 py-3 text-sm"
+          className={ACTION_BUTTON_CLASS}
         >
           {confirmLabel}
         </Button>
@@ -121,7 +127,7 @@ export function MobileConfirmationContent({
           variant="outline"
           disabled={disabled}
           onClick={onCancel}
-          className="h-auto min-h-12 w-full cursor-pointer whitespace-normal px-4 py-3 text-sm"
+          className={ACTION_BUTTON_CLASS}
         >
           {cancelLabel}
         </Button>

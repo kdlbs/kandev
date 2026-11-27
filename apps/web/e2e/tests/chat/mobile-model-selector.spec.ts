@@ -2,6 +2,8 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { seedStaleRuntimeConfigWithoutSettlement } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 type E2EModelStoreWindow = Window & {
@@ -26,11 +28,16 @@ type E2ESessionModels = {
   >;
 };
 
-async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
+async function seedAndOpenTask(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+  agentProfileId = seedData.agentProfileId,
+) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile Model Selector",
-    seedData.agentProfileId,
+    agentProfileId,
     {
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
@@ -38,6 +45,21 @@ async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: S
       repository_ids: [seedData.repositoryId],
     },
   );
+
+  if (!task.session_id) throw new Error("expected an auto-started model-selector session");
+  await waitForAgentMessage(
+    apiClient,
+    task.session_id,
+    "This is a simple mock response for e2e testing.",
+    30_000,
+  );
+  await waitForSessionState(apiClient, {
+    taskId: task.id,
+    sessionId: task.session_id,
+    expectedState: "WAITING_FOR_INPUT",
+    timeout: 30_000,
+    message: "initial phone model-selector turn must settle before interaction",
+  });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -89,7 +111,91 @@ async function seedLongReasoningMenu(testPage: Page, sessionId: string) {
 }
 
 test.describe("Mobile chat model selector", () => {
-  test.describe.configure({ retries: 1, timeout: 60_000 });
+  test.describe.configure({ timeout: 60_000 });
+
+  test("Antigravity arch loads from the logo API in the phone model picker", async ({
+    backend,
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+    const restoreBackend = await backend.useEnv({ KANDEV_E2E_MOCK_ANTIGRAVITY: "true" });
+    try {
+      const { agents } = await apiClient.listAgents();
+      const agent = agents.find((candidate) => candidate.name === "antigravity-acp");
+      if (!agent) throw new Error("Antigravity agent is not available in the E2E registry");
+      const profile = await apiClient.createAgentProfile(agent.id, "Antigravity logo phone", {
+        model: "mock-fast",
+        cli_flags: [],
+      });
+      await testPage.addInitScript((theme) => localStorage.setItem("theme", theme), "light");
+      const logoResponsePromise = testPage.waitForResponse((response) =>
+        response.url().includes("/api/v1/agents/antigravity-acp/logo?variant=light"),
+      );
+      await seedAndOpenTask(testPage, apiClient, seedData, profile.id);
+
+      const logoResponse = await logoResponsePromise;
+      expect(logoResponse.status()).toBe(200);
+      expect(logoResponse.headers()["content-type"]).toContain("image/svg+xml");
+      const trigger = testPage
+        .getByTestId("mobile-chat-toolbar-left-actions")
+        .getByTestId("model-config-trigger");
+      await expect(trigger).toContainText("Mock Fast");
+      const icon = trigger.getByTestId("model-provider-icon");
+      const image = icon.locator("img");
+      await expect(image).toBeVisible();
+      await expect
+        .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+      expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+      await trigger.tap();
+      const pickerIcon = testPage
+        .locator("[cmdk-group-heading]")
+        .getByTestId("model-provider-icon");
+      await expect(pickerIcon.locator("img")).toBeVisible();
+      await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible();
+      await prCapture.screenshot("antigravity-logo-phone", {
+        caption: "Antigravity arch in the phone composer model picker",
+      });
+      const viewport = testPage.viewportSize()!;
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(viewport.width);
+    } finally {
+      await restoreBackend();
+    }
+  });
+
+  test("keeps model settings open after a persisted touch selection", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
+    const trigger = testPage
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByTestId("model-config-trigger");
+    await expect(trigger).toContainText("Mock Fast");
+    await trigger.tap();
+    const effort = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effort).toBeVisible();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+    await expect(trigger).toContainText("Mock Smart");
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+        const runtime = sessions.find((item) => item.id === task.session_id)?.metadata
+          ?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+    await expect(effort).toBeVisible();
+    await effort.tap();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+  });
 
   test("shows compact changes and provider descriptions by touch", async ({
     testPage,
@@ -102,7 +208,7 @@ test.describe("Mobile chat model selector", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const baseline = sessions[0]?.metadata?.acp_config_baseline as
           | Record<string, string>
           | undefined;
@@ -117,7 +223,7 @@ test.describe("Mobile chat model selector", () => {
 
     await expect(leftActions.getByTestId("session-mode-selector")).toBeVisible();
 
-    const trigger = leftActions.getByRole("button", { name: "Session model settings" });
+    const trigger = leftActions.getByTestId("model-config-trigger");
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
     await expect(trigger.getByTestId("model-provider-icon")).toBeVisible();
@@ -220,5 +326,73 @@ test.describe("Mobile chat model selector", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       viewport!.width,
     );
+  });
+
+  test("stale runtime config without settlement keeps touch controls usable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("expected a seeded model-selector session");
+
+    const trigger = testPage
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByTestId("model-config-trigger");
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+
+    const seeded = await seedStaleRuntimeConfigWithoutSettlement(testPage, sessionId);
+    expect(seeded.configOptionsSettled).toBe(false);
+    expect(seeded.staleKeyValues).toEqual({ context: "200k", reasoning_effort: "high" });
+    expect(seeded.advertisedConfigOptionCount).toBeGreaterThan(0);
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+
+    const configRequests: string[] = [];
+    await testPage.route("**/set-config-option", async (route) => {
+      const body = route.request().postDataJSON() as { config_id?: string };
+      if (body.config_id) configRequests.push(body.config_id);
+      await route.continue();
+    });
+    await testPage.route("**/set-model", async (route) => {
+      await route.continue();
+    });
+
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+
+    await trigger.tap();
+    const smartOption = testPage.getByRole("option", { name: /Mock Smart/ });
+    await expect(smartOption).toBeVisible({ timeout: 5_000 });
+
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    const optionBox = await smartOption.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.x).toBeGreaterThanOrEqual(0);
+    expect(optionBox!.x + optionBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport!.width,
+    );
+
+    await smartOption.tap();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
+        const runtime = sessions.find((item) => item.id === sessionId)?.metadata?.runtime_config as
+          | { model?: string }
+          | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 5_000 });
+    await effortTrigger.tap();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+
+    expect(configRequests).toEqual(["model"]);
   });
 });

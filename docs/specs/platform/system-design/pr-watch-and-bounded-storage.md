@@ -92,6 +92,10 @@ writes.
 
 ## Payload storage and retention candidates
 
+Pre-journal shell snapshot bounds and ordered preservation are specified in the
+[stream storage design](delivery-stream-storage.md) and
+[repair plan](../../../plans/delivery-stream-storage/plan.md).
+
 A payload above the inline threshold is stored in
 `task_message_payloads` keyed by digest with compression encoding, byte
 size, and an internal reference; message rows retain the lightweight
@@ -124,7 +128,10 @@ each present workspace's connection fingerprint once per cycle
 (`Service.WorkspaceConnectionFingerprint`) and recording outcomes at all
 three poll-path call sites through `classifyPollErr`. The workflow-sync loop
 persists circuit state and fingerprint per config and skips due-but-open
-configs. `apps/backend/internal/health` exposes aggregate health (counts by
+configs. GitHub credential and missing-target failures also suspend workflow
+sync until a credential or configuration change or an explicit Sync now
+attempt. GitLab workflow sync keeps bounded auth/config circuit retries.
+`apps/backend/internal/health` exposes aggregate health (counts by
 class, no workspace identifiers or secrets), and bounded-label expvar counters
 report skips, resets, and failures.
 

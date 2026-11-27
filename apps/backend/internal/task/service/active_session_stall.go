@@ -38,11 +38,11 @@ func (s *Service) stallThreshold() time.Duration {
 // runActiveSessionSweep is the session reconciliation sweep's active-task
 // pass: for every unarchived task that still holds an active session
 // (CREATED/STARTING/RUNNING/WAITING_FOR_INPUT), it classifies each session
-// against the in-memory execution store. A session with a registered live
-// execution is healthy regardless of silence. A session with no live
-// execution has lost its actor (backend restart, lost executor, or a launch
-// that never registered) and nothing in any request path will ever advance
-// it again, so the pass:
+// against the in-memory execution store and exact pending remote-owner state.
+// A session with a registered live execution or pending remote recovery is
+// not an orphan regardless of silence. A session with neither has lost its
+// actor (backend restart, lost executor, or a launch that never registered)
+// and nothing in any request path will ever advance it again, so the pass:
 //
 //   - emits one task.stalled event per stall episode once the session has
 //     been event-silent beyond the stall threshold (detection only), and
@@ -51,9 +51,9 @@ func (s *Service) stallThreshold() time.Duration {
 //     for lazy recovery and delivering the session.state_changed event clients
 //     key off.
 //
-// The execution check is fail-closed: without the registry the pass cannot
-// prove "no live execution", so it skips rather than healing or alerting on
-// a guess. The event-silence clock is the newest of the session row's
+// The execution and pending-owner checks are fail-closed: incomplete owner
+// evidence skips the task rather than healing or alerting on a guess. The
+// event-silence clock is the newest of the session row's
 // updated_at and its newest task_session_messages row, so any state
 // transition or message resets it.
 func (s *Service) runActiveSessionSweep(ctx context.Context, now time.Time) {
@@ -101,10 +101,19 @@ func (s *Service) sweepTaskSessions(
 		return
 	}
 
+	pendingRemoteSessions, err := s.pendingRemoteRecoverySessions(ctx, activeSessions)
+	if err != nil {
+		s.logger.Warn("active-session sweep: failed to inspect pending remote owners; skipping task",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
 	liveSessions := s.liveSessionSet(task.ID)
 	orphaned := make([]*models.TaskSession, 0, len(activeSessions))
 	for _, session := range activeSessions {
 		if session == nil {
+			continue
+		}
+		if _, pending := pendingRemoteSessions[session.ID]; pending {
 			continue
 		}
 		if _, live := liveSessions[session.ID]; !live {
@@ -318,26 +327,24 @@ func (s *Service) notifyStalledSessions(
 	}
 }
 
-// healOrphanedSessions returns execution-less sessions that have been silent
-// beyond the grace window to WAITING_FOR_INPUT. It preserves the conversation
-// and settles only the turn observed by the compare-and-set snapshot. No
+// healOrphanedSessions returns unowned sessions that have been silent beyond
+// the grace window to WAITING_FOR_INPUT. It preserves the conversation and
+// settles only the turn observed by the compare-and-set snapshot. No
 // cancellation effects run: questions, queued work, and workflow ownership
 // remain available for lazy recovery.
 //
 // Healing is task-scoped at the eligibility boundary, so it only runs when
-// every active session of the task is execution-less and past the grace
-// window. The write itself is candidate-scoped, so a same-session resume or a
-// newer turn cannot be changed by a stale sweep snapshot.
+// every active session of the task has no live execution or pending remote
+// owner and is past the grace window. The write itself is candidate-scoped,
+// so a same-session resume or newer turn cannot be changed by a stale snapshot.
 //
 // The guard is re-evaluated at the recovery boundary itself: the
 // liveness snapshot was taken before the silence reads, and an execution
 // that registered (or a session that started) in between must abort the
-// heal. Re-checking LiveSessionIDsForTask immediately before the write is
-// not a lock — a registration can still land after it — but it closes the
-// window from "seconds of reads ago" to "instantaneous", and any residual
-// race must also co-occur with every session of the task having been
-// silent past twice the stall threshold. The next sweep tick heals once
-// the condition genuinely holds.
+// heal. Re-checking live executions and pending remote owners immediately
+// before the write closes the window from "seconds of reads ago" to
+// "instantaneous". A new owner can still appear after the check, so each
+// candidate write remains conditional on its session snapshot.
 func (s *Service) healOrphanedSessions(
 	ctx context.Context,
 	task *models.Task,
@@ -402,8 +409,17 @@ func (s *Service) healOrphanedSessions(
 		if !time.Now().Before(deadline) {
 			return
 		}
-		if _, live := s.liveSessionSet(task.ID)[candidate.SessionID]; live {
-			continue
+		pendingRemoteSessions, err := s.pendingRemoteRecoverySessions(ctx, activeSessions)
+		if err != nil {
+			s.logger.Warn("active-session sweep: failed to recheck pending remote owners; aborting task heal",
+				zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
+		if len(pendingRemoteSessions) > 0 {
+			return
+		}
+		if live := s.liveSessionSet(task.ID); len(live) > 0 {
+			return
 		}
 		recovered, err := repo.RecoverTaskSessionByCandidate(healCtx, candidate, time.Time{})
 		if err != nil {
@@ -446,6 +462,18 @@ func (s *Service) retryPendingRecoverySettlements(
 		}
 		settlement, ok := models.LoadInterruptedRecoverySettlement(session.Metadata)
 		if !ok {
+			continue
+		}
+		pending, err := s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("active-session sweep: failed to inspect pending owner before settlement retry",
+				zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if pending {
+			continue
+		}
+		if _, live := s.liveSessionSet(task.ID)[session.ID]; live {
 			continue
 		}
 		candidate := models.ActiveSessionRecoveryCandidate{

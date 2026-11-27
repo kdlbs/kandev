@@ -43,7 +43,7 @@ func TestHandleAgentReady_PassthroughLifecycleReservationBlocksConcurrentDrain(t
 	steps := newMockStepGetter()
 	steps.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
 	svc := createTestServiceWithAgent(repo, steps, taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -126,7 +126,7 @@ func TestHandleAgentReady_PassthroughOrdinaryReservationRejectsRecreatedSession(
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	if _, err := svc.messageQueue.QueueMessage(
 		ctx, "s1", "t1", "must not reach replacement", "", messagequeue.QueuedByAgent, false, nil,
 	); err != nil {
@@ -163,7 +163,7 @@ func TestHandleAgentReady_PassthroughOrdinaryDispatchDoesNotHoldQueueLockDuringP
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
 	if err != nil {
 		t.Fatalf("resolve session identity: %v", err)
@@ -209,7 +209,7 @@ func TestHandleAgentReady_PassthroughOrdinaryReservationRejectsArchivedTask(t *t
 		repoForExecutionLookup: repo,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	if _, err := svc.messageQueue.QueueMessage(
 		ctx, "s1", "t1", "must not reach archived task", "", messagequeue.QueuedByAgent, false, nil,
 	); err != nil {
@@ -251,7 +251,7 @@ func TestHandleAgentReady_PassthroughLifecycleArchiveBeforeDeferredDispatchHasNo
 	// Preserve the counter wrapper while retaining the test helper's normal
 	// construction of every other service dependency.
 	svc.workflowStepGetter = steps
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +53,73 @@ func TestProcessRunnerStartPipedOutputRemainsReadableAfterDone(t *testing.T) {
 	}
 	if string(stderr) != "stderr-after-done" {
 		t.Fatalf("stderr = %q, want %q", stderr, "stderr-after-done")
+	}
+}
+
+func TestProcessRunnerStartPipedSignalsDirectExitBeforeProcessGroupCleanup(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 2*1024*1024)
+	groupReapStarted := make(chan struct{})
+	releaseGroupReap := make(chan struct{})
+	var groupOnce, releaseOnce sync.Once
+	runner.groupAliveFn = func(int) bool { return true }
+	runner.terminateGroupFn = func(int) error { return nil }
+	runner.waitGroupExitFn = func(ctx context.Context, _ int) bool {
+		groupOnce.Do(func() { close(groupReapStarted) })
+		select {
+		case <-releaseGroupReap:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	command, env := fixtureExec("echo direct-exit")
+	proc, err := runner.StartPiped(PipedStartRequest{
+		SessionID:  "session-exit-signal",
+		Kind:       types.ProcessKindCustom,
+		ScriptName: "test-exit-signal",
+		Command:    command[0],
+		Args:       command[1:],
+		Env:        env,
+		PipeStderr: true,
+	})
+	if err != nil {
+		t.Fatalf("StartPiped() error = %v", err)
+	}
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(releaseGroupReap) })
+		_ = proc.Stdin.Close()
+		select {
+		case <-proc.Done:
+		case <-time.After(5 * time.Second):
+		}
+		_ = proc.Stdout.Close()
+		if proc.Stderr != nil {
+			_ = proc.Stderr.Close()
+		}
+	})
+
+	select {
+	case <-proc.Exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("direct process exit was not observed")
+	}
+	select {
+	case <-groupReapStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process group cleanup did not start")
+	}
+	select {
+	case <-proc.Done:
+		t.Fatal("process cleanup completed before its held reaper was released")
+	default:
+	}
+
+	releaseOnce.Do(func() { close(releaseGroupReap) })
+	select {
+	case <-proc.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("process cleanup did not finish after its reaper was released")
 	}
 }
 

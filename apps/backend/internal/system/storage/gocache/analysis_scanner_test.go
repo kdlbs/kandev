@@ -2,8 +2,10 @@ package gocache
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,8 +41,104 @@ func TestAnalyzeUsesConfiguredBoundedScanner(t *testing.T) {
 	if _, err := provider.Analyze(context.Background()); err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
-	if completed.Load() != 1 {
-		t.Fatalf("completed roots = %d, want one managed-cache root", completed.Load())
+	if completed.Load() != 2 {
+		t.Fatalf("completed roots = %d, want managed build and fuzz roots", completed.Load())
+	}
+}
+
+func TestAnalyzeSeparatesCleanupEligibleGoCacheBytes(t *testing.T) {
+	home := t.TempDir()
+	settings := storage.DefaultSettings()
+	settings.GoCache.Enabled = true
+	provider := New(Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: settings},
+	})
+	env, err := provider.ExecutionEnvironment(context.Background())
+	if err != nil {
+		t.Fatalf("ExecutionEnvironment: %v", err)
+	}
+	t.Setenv("GOCACHE", env["GOCACHE"])
+	if err := os.WriteFile(filepath.Join(env["GOCACHE"], "compiled"), []byte("build"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fuzzSeed := filepath.Join(env["GOCACHE"], fuzzDirectoryName, "FuzzDecode", "seed")
+	if err := os.MkdirAll(filepath.Dir(fuzzSeed), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fuzzSeed, []byte("corpus"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.SizeBytes != int64(len("build")+len("corpus")) {
+		t.Fatalf("physical size = %d, want build plus fuzz bytes", analysis.SizeBytes)
+	}
+	payload, err := json.Marshal(analysis)
+	if err != nil {
+		t.Fatalf("marshal analysis: %v", err)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(payload, &summary); err != nil {
+		t.Fatalf("unmarshal analysis: %v", err)
+	}
+	if eligible, ok := summary["cleanup_eligible_size_bytes"]; !ok || eligible != float64(len("build")) {
+		t.Fatalf("cleanup-eligible bytes = %v, want %d", summary["cleanup_eligible_size_bytes"], len("build"))
+	}
+}
+
+func TestAnalyzeExcludesNestedMountsFromGoCacheUsage(t *testing.T) {
+	home := t.TempDir()
+	settings := storage.DefaultSettings()
+	settings.GoCache.Enabled = true
+	provider := New(Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: settings},
+	})
+	env, err := provider.ExecutionEnvironment(context.Background())
+	if err != nil {
+		t.Fatalf("ExecutionEnvironment: %v", err)
+	}
+	t.Setenv("GOCACHE", env["GOCACHE"])
+	if err := os.WriteFile(filepath.Join(env["GOCACHE"], "compiled"), []byte("build"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(env["GOCACHE"], "fuzz", "FuzzDecode"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env["GOCACHE"], "fuzz", "FuzzDecode", "seed"), []byte("corpus"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mountedPath := filepath.Join(env["GOCACHE"], "mounted")
+	if err := os.MkdirAll(mountedPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mountedPath, "foreign"), []byte("external mounted data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider.config.mountID = func(path string) (string, error) {
+		relative, err := filepath.Rel(env["GOCACHE"], path)
+		if err != nil {
+			return "", err
+		}
+		if relative == "mounted" || strings.HasPrefix(relative, "mounted"+string(filepath.Separator)) {
+			return "simulated-bind-mount", nil
+		}
+		return "cache-mount", nil
+	}
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.SizeBytes != int64(len("build")+len("corpus")) {
+		t.Fatalf("cache size includes mounted data: %d", analysis.SizeBytes)
+	}
+	if analysis.CleanupEligibleSizeBytes == nil || *analysis.CleanupEligibleSizeBytes != int64(len("build")) {
+		t.Fatalf("cleanup-eligible size includes mounted or fuzz data: %#v", analysis.CleanupEligibleSizeBytes)
 	}
 }
 

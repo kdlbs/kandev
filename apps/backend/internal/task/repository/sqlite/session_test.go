@@ -101,6 +101,129 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskSessionAgentStartAttemptPreservesEnvironmentBinding(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task-start-attempt", "session-start-attempt"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Start attempt"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	launch := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateCreated,
+		TaskEnvironmentID: "environment-not-yet-persisted",
+		Metadata:          map[string]interface{}{},
+	}
+	changed, err := repo.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, launch, models.TaskSessionStateCreated, "attempt-1",
+	)
+	if err != nil {
+		t.Fatalf("claim start attempt: %v", err)
+	}
+	if !changed {
+		t.Fatal("start attempt was not claimed")
+	}
+
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if stored.TaskEnvironmentID != "" {
+		t.Fatalf("task environment binding = %q, want unchanged empty binding", stored.TaskEnvironmentID)
+	}
+	if got := models.StringFromAny(stored.Metadata[models.SessionMetaKeyAgentStartAttemptID]); got != "attempt-1" {
+		t.Fatalf("stored attempt = %q, want attempt-1", got)
+	}
+}
+
+func TestUpdateTaskSessionAgentStartAttemptRejectsNewParkingStamp(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task-start-attempt-park", "session-start-attempt-park"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Start attempt"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	parkedAt := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	launch := &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
+		Metadata: map[string]interface{}{models.SessionMetaKeyWorkflowParking: models.WorkflowParking{
+			Stamp: "old", ParkedAt: parkedAt, SourceSessionID: sessionID,
+		}},
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyWorkflowParking, models.WorkflowParking{
+		Stamp: "new", ParkedAt: parkedAt.Add(time.Minute), SourceSessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("write new parking stamp: %v", err)
+	}
+
+	changed, err := repo.UpdateTaskSessionAgentStartAttemptIfCurrentStateForLaunch(
+		ctx, launch, models.TaskSessionStateWaitingForInput, "attempt-stale",
+	)
+	if err != nil {
+		t.Fatalf("claim stale start attempt: %v", err)
+	}
+	if changed {
+		t.Fatal("stale start attempt was committed after a new parking stamp")
+	}
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if _, exists := stored.Metadata[models.SessionMetaKeyAgentStartAttemptID]; exists {
+		t.Fatalf("stale attempt metadata was persisted: %#v", stored.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	}
+}
+
+func TestHasTaskSessionsByAgentProfileIncludesCompletedSessions(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-evidence", Title: "OpenCode evidence"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "session-opencode-evidence",
+		TaskID:         "task-opencode-evidence",
+		AgentProfileID: "profile-opencode-evidence",
+		State:          models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-opencode-execution-evidence", Title: "OpenCode execution profile evidence"}); err != nil {
+		t.Fatalf("CreateTask for execution profile evidence: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                 "session-opencode-execution-evidence",
+		TaskID:             "task-opencode-execution-evidence",
+		ExecutionProfileID: "profile-opencode-execution-evidence",
+		State:              models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession for execution profile evidence: %v", err)
+	}
+
+	got, err := repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile = %v, %v; want true, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-unused")
+	if err != nil || got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for unused profile = %v, %v; want false, nil", got, err)
+	}
+	got, err = repo.HasTaskSessionsByAgentProfile(ctx, "profile-opencode-execution-evidence")
+	if err != nil || !got {
+		t.Fatalf("HasTaskSessionsByAgentProfile for execution profile = %v, %v; want true, nil", got, err)
+	}
+}
+
 // ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
 // path resolution. It must report the same effective (environment-overridden)
 // workspace_path as GetTaskSession/ListTaskSessions above, never the stale
@@ -1831,6 +1954,36 @@ func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) 
 	require.Empty(t, stored.ExecutorID)
 }
 
+func TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-snapshot-cas", "session-snapshot-cas", "turn-snapshot-cas")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session-snapshot-cas", map[string]interface{}{"owner": "original"}))
+	stale, err := repo.GetTaskSession(ctx, "session-snapshot-cas")
+	require.NoError(t, err)
+	expectedUpdatedAt := stale.UpdatedAt
+	require.False(t, expectedUpdatedAt.IsZero())
+
+	winner, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	winner.AgentProfileID = "winning-profile"
+	require.NoError(t, repo.UpdateTaskSession(ctx, winner))
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, stale.ID, map[string]interface{}{"owner": "winning-launch"}))
+
+	stale.AgentProfileID = "original-profile"
+	changed, err := repo.UpdateTaskSessionIfCurrentSnapshot(
+		ctx, stale, stale.State, expectedUpdatedAt, map[string]interface{}{"owner": "original"},
+	)
+	require.NoError(t, err)
+	require.False(t, changed, "a same-state row update must supersede snapshot rollback")
+
+	stored, err := repo.GetTaskSession(ctx, stale.ID)
+	require.NoError(t, err)
+	require.Equal(t, stale.State, stored.State)
+	require.Equal(t, "winning-profile", stored.AgentProfileID)
+	require.Equal(t, "winning-launch", stored.Metadata["owner"])
+}
+
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -2292,10 +2445,18 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	seedRepoLink(t, repo, "ws-recover", "repo-recover", "task-recover", "session-recover", "RUNNING")
 	seedRepoLink(t, repo, "ws-recover", "repo-recover-2", "task-recover-2", "session-recover-2", "RUNNING")
 	seedRepoLink(t, repo, "ws-recover", "repo-recover-created", "task-recover-created", "session-recover-created", "CREATED")
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?
+	`), "incarnation-recover-created", "session-recover-created"); err != nil {
+		t.Fatalf("set created session incarnation: %v", err)
+	}
 
 	created, err := repo.GetTaskSession(ctx, "session-recover-created")
 	if err != nil {
 		t.Fatalf("GetTaskSession created candidate: %v", err)
+	}
+	if created.QueueIncarnationID == "" {
+		t.Fatal("created session has no incarnation")
 	}
 	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
 		TaskID:              created.TaskID,
@@ -2309,6 +2470,9 @@ func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *test
 	}
 	if recovered == nil {
 		t.Fatal("RecoverTaskSessionByCandidate created session returned nil")
+	}
+	if recovered.QueueIncarnationID != created.QueueIncarnationID {
+		t.Fatalf("recovered incarnation = %q, want %q", recovered.QueueIncarnationID, created.QueueIncarnationID)
 	}
 	if !models.HasInterruptedRecoveryPending(recovered.Metadata) {
 		t.Fatalf("created recovered metadata = %#v, want durable recovery marker", recovered.Metadata)
@@ -3269,5 +3433,29 @@ func TestHasActiveTaskSessionsByEnvironmentKeysOffEnvironmentIDNotTaskEnvironmen
 	}
 	if !hasActive {
 		t.Error("HasActiveTaskSessionsByEnvironment = false for a value present in environment_id, want true")
+	}
+}
+
+func TestListFixedProfileWaitSessions(t *testing.T) {
+	fixture := seedSessionBatchFixture(t)
+	ctx := context.Background()
+	if err := fixture.repo.SetSessionMetadataKey(ctx, "session-b1-primary", "fixed_profile_resource_wait", map[string]interface{}{"incarnation_id": "one"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.repo.SetSessionMetadataKey(ctx, "session-b1-secondary", "fixed_profile_automation_wait", map[string]interface{}{"incarnation_id": "two"}); err != nil {
+		t.Fatal(err)
+	}
+	reader, ok := any(fixture.repo).(interface {
+		ListFixedProfileWaitSessions(context.Context) ([]*models.TaskSession, error)
+	})
+	if !ok {
+		t.Fatal("repository cannot select circuit wait sessions")
+	}
+	got, err := reader.ListFixedProfileWaitSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "session-b1-primary" {
+		t.Fatalf("wait sessions = %+v", got)
 	}
 }

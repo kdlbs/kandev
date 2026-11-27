@@ -110,6 +110,19 @@ describe("getTaskPRAutomationSummary", () => {
     });
   });
 
+  it("omits active PR details when no automation option is enabled", () => {
+    const options = makeOptions();
+    options.pr_options = options.pr_options.map((item) => ({
+      ...item,
+      auto_fix_enabled: false,
+      auto_merge_enabled: false,
+    }));
+
+    expect(
+      getTaskPRAutomationSummary([makePR({ repository_id: "repo-a" })], undefined, options),
+    ).toEqual({ autoFixEnabled: false, autoMergeEnabled: false, details: [] });
+  });
+
   it("uses bounded row flags before per-PR details hydrate", () => {
     expect(
       getTaskPRAutomationSummary([], {

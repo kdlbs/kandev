@@ -17,6 +17,8 @@ import (
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -76,6 +78,8 @@ type SchedulerIntegration struct {
 	// taskContexts feeds PromptContext.HandoffContext on every run.
 	// nil-safe: when unconfigured, the handoff section is omitted.
 	taskContexts TaskContextProvider
+	// creationAttachments supplies the task's explicit creation set.
+	creationAttachments TaskCreationAttachmentReader
 }
 
 // SetTaskContextProvider wires the office task-handoffs prompt
@@ -83,6 +87,27 @@ type SchedulerIntegration struct {
 // constructed.
 func (si *SchedulerIntegration) SetTaskContextProvider(p TaskContextProvider) {
 	si.taskContexts = p
+}
+
+// TaskCreationAttachmentReader supplies the explicit ordered creation set for
+// a task-bound launch. It must never include later chat or session claims.
+type TaskCreationAttachmentReader interface {
+	ReadTaskCreationAttachments(ctx context.Context, taskID string) ([]v1.MessageAttachment, error)
+}
+
+// SetTaskCreationAttachmentReader wires the task-owned creation attachment
+// reader used for every task-bound Office launch.
+func (si *SchedulerIntegration) SetTaskCreationAttachmentReader(reader TaskCreationAttachmentReader) {
+	si.creationAttachments = reader
+}
+
+func (si *SchedulerIntegration) launchCreationAttachments(
+	ctx context.Context, taskID string,
+) ([]v1.MessageAttachment, error) {
+	if taskID == "" || si.creationAttachments == nil {
+		return nil, nil
+	}
+	return si.creationAttachments.ReadTaskCreationAttachments(ctx, taskID)
 }
 
 // NewSchedulerIntegration creates a new SchedulerIntegration.
@@ -129,6 +154,7 @@ func (si *SchedulerIntegration) Tick(ctx context.Context) { si.tick(ctx) }
 
 // tick drains up to maxRunsPerTick runs from the queue.
 func (si *SchedulerIntegration) tick(ctx context.Context) {
+	si.liftResolvedSessionRecoveryRuns(ctx)
 	si.liftParkedRoutingRuns(ctx)
 	for i := 0; i < maxRunsPerTick; i++ {
 		run, err := si.svc.ClaimNextRun(ctx)
@@ -147,6 +173,55 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 	}
 	si.recoverStaleClaimedRuns(ctx)
 	si.reapStaleCheckouts(ctx)
+}
+
+type sessionRecoveryRunStore interface {
+	ListSessionRecoveryRuns(context.Context) ([]runsmodels.Run, error)
+	ClearSessionRecoveryPark(context.Context, string, string) error
+}
+
+// liftResolvedSessionRecoveryRuns releases only runs whose task-owned block is
+// already resolved. Missing or unreadable blocks stay parked, which keeps a
+// projection gap fail closed across restart.
+func (si *SchedulerIntegration) liftResolvedSessionRecoveryRuns(ctx context.Context) {
+	store, ok := any(si.svc.repo).(sessionRecoveryRunStore)
+	if !ok {
+		return
+	}
+	lookup, ok := si.svc.taskStarter.(SessionRecoveryBlockLookup)
+	if !ok {
+		return
+	}
+	runs, err := store.ListSessionRecoveryRuns(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("list session recovery runs failed", zap.Error(err))
+		}
+		return
+	}
+	for _, run := range runs {
+		if run.SessionRecoveryBlockID == nil || *run.SessionRecoveryBlockID == "" {
+			continue
+		}
+		block, lookupErr := lookup.GetSessionRecoveryBlock(ctx, *run.SessionRecoveryBlockID)
+		if lookupErr != nil {
+			if ctx.Err() == nil {
+				si.logger.Warn("session recovery block lookup failed",
+					zap.String("run_id", run.ID), zap.Error(lookupErr))
+			}
+			continue
+		}
+		if block == nil || block.State != taskmodels.RecoveryBlockResolved {
+			continue
+		}
+		if err := store.ClearSessionRecoveryPark(ctx, run.ID, *run.SessionRecoveryBlockID); err != nil {
+			si.logger.Warn("clear resolved session recovery run failed",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		si.logger.Info("released Office run after explicit session recovery",
+			zap.String("run_id", run.ID), zap.String("block_id", *run.SessionRecoveryBlockID))
+	}
 }
 
 // liftParkedRoutingRuns clears routing-block status on runs whose
@@ -174,17 +249,148 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 }
 
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
-	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
+	cutoff := time.Now().UTC().Add(-staleClaimedRunAge)
+	candidates, err := si.svc.repo.RunsRepository().ListStaleClaimedRuns(ctx, cutoff)
 	if err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		si.logger.Error("failed to recover stale claimed runs", zap.Error(err))
+		si.logger.Error("failed to list stale claimed runs", zap.Error(err))
 		return
+	}
+	var count int64
+	for _, run := range candidates {
+		if ctx.Err() != nil {
+			return
+		}
+		if !si.canRecoverStaleClaimedRun(ctx, run) {
+			continue
+		}
+		recovered, err := si.svc.repo.RunsRepository().RecoverStaleClaimedRun(ctx, run, cutoff)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			si.logger.Warn("failed to recover stale claimed run",
+				zap.String("run_id", run.ID), zap.Error(err))
+			continue
+		}
+		if recovered {
+			count++
+		}
 	}
 	if count > 0 {
 		si.logger.Info("recovered stale claimed runs", zap.Int64("count", count))
 	}
+}
+
+func (si *SchedulerIntegration) canRecoverStaleClaimedRun(ctx context.Context, run *runsmodels.Run) bool {
+	taskID := si.extractTaskID(run.Payload)
+	if taskID == "" {
+		return si.canRecoverTasklessClaim(ctx, run)
+	}
+
+	return si.canRecoverTaskClaim(ctx, run, taskID)
+}
+
+func (si *SchedulerIntegration) canRecoverTasklessClaim(ctx context.Context, run *runsmodels.Run) bool {
+	if run.ClaimedAt == nil {
+		return false
+	}
+	sessions, err := si.svc.repo.ListRunSessions(ctx, run.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale taskless run recovery deferred because attempts could not be read",
+				zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		// A reservation created during this claim transfers recovery to the
+		// run-session lifecycle, including its completion-in-flight window.
+		if session.State == models.RunSessionStatePreparing || session.State == models.RunSessionStateRunning ||
+			session.CreatedAt.IsZero() || !session.CreatedAt.Before(*run.ClaimedAt) {
+			return false
+		}
+	}
+	// Terminal attempts from earlier claims do not own this retry. The
+	// scheduler can requeue it if the new claim never reserved an attempt.
+	return true
+}
+
+func (si *SchedulerIntegration) canRecoverTaskClaim(ctx context.Context, run *runsmodels.Run, taskID string) bool {
+	probe := si.svc.runClaimSessionProbe
+	sessions, err := si.findTaskSessionsForClaim(ctx, run, taskID, probe)
+	if err != nil {
+		si.logClaimSessionLookupFailure(ctx, run.ID, taskID, err)
+		return false
+	}
+	if len(sessions) == 0 {
+		return run.SessionID == ""
+	}
+	for _, session := range sessions {
+		if session.SessionID != "" && si.preserveSessionOwnedClaim(ctx, run.ID, session, probe) {
+			return false
+		}
+	}
+	return true
+}
+
+func (si *SchedulerIntegration) findTaskSessionsForClaim(
+	ctx context.Context, run *runsmodels.Run, taskID string, probe RunClaimSessionProbe,
+) ([]RunClaimSessionEvidence, error) {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup is unavailable",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID))
+		return nil, errors.New("run claim session lookup unavailable")
+	}
+	if run.ClaimedAt == nil {
+		return nil, errors.New("run claim timestamp is unavailable")
+	}
+	return probe.FindTaskSessionsForClaim(ctx, taskID, run.AgentProfileID, run.SessionID, *run.ClaimedAt)
+}
+
+func (si *SchedulerIntegration) logClaimSessionLookupFailure(ctx context.Context, runID, taskID string, err error) {
+	if ctx.Err() == nil {
+		si.logger.Warn("stale task run recovery deferred because session lookup failed",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func (si *SchedulerIntegration) preserveSessionOwnedClaim(
+	ctx context.Context, runID string, session RunClaimSessionEvidence, probe RunClaimSessionProbe,
+) bool {
+	if probe == nil {
+		si.logger.Warn("stale task run recovery deferred because runtime probe is unavailable",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	live, err := probe.ProbeAgentRunningForSession(ctx, session.SessionID)
+	if err != nil {
+		if ctx.Err() == nil {
+			si.logger.Warn("stale task run recovery deferred because runtime liveness is uncertain",
+				zap.String("run_id", runID), zap.String("session_id", session.SessionID), zap.Error(err))
+		}
+		return true
+	}
+	if live {
+		si.logger.Debug("stale run recovery deferred for live task session",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	if session.TurnStartedAfterClaim {
+		// A turn accepted after this claim proves launch even after its process
+		// stopped and before Office completion settles the run.
+		si.logger.Debug("stale run recovery deferred for task turn owned by claim",
+			zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+		return true
+	}
+	si.logger.Debug("stale run recovery found no live or current task turn",
+		zap.String("run_id", runID), zap.String("session_id", session.SessionID))
+	return false
 }
 
 // reapStaleCheckouts is the backstop for task checkouts that never got
@@ -207,9 +413,8 @@ func (si *SchedulerIntegration) reapStaleCheckouts(ctx context.Context) {
 	}
 }
 
-// processRun runs guard checks, checkout, budget check, resolves executor,
-// builds prompt, logs the result, and marks the run finished.
-func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run) {
+// processRun admits a run, checks out its task, resolves execution, and launches it.
+func (si *SchedulerIntegration) processRun(ctx context.Context, run *runsmodels.Run) {
 	runID := run.ID
 	agentInstanceID := run.AgentProfileID
 
@@ -220,62 +425,8 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		"reason":           run.Reason,
 	})
 
-	// Guard: check agent status. AC-OFFICE-BUDGET-001.13 gives the two ways
-	// this lookup can fail different dispositions: a genuine "no such
-	// agent" (soft-deleted or never existed) is cancelled, never retried or
-	// escalated, since an orphaned run has no workspace and therefore no
-	// ceiling that could ever be evaluated; a transient lookup error is
-	// deferred/retried on the same terms as an evaluator fault and, at
-	// MaxRetryCount, failed without escalation (AC-OFFICE-BUDGET-006.4) --
-	// neither disposition may queue a run for any other agent
-	// (AC-OFFICE-BUDGET-001.17), so neither uses the generic
-	// HandleRunFailure/escalateFailure path, which does exactly that.
-	agent, err := si.svc.GetAgentFromConfig(ctx, agentInstanceID)
-	if err != nil {
-		si.logger.Error("failed to get agent instance",
-			zap.String("run_id", runID), zap.Error(err))
-		if errors.Is(err, sql.ErrNoRows) {
-			si.cancelUnresolvableAgentRun(ctx, run)
-			return
-		}
-		si.deferWorkspaceLookupFailure(ctx, run)
-		return
-	}
-
-	// Pause gate sits before the agent-active check (F47): a paused
-	// workspace should finish the run as workspace_paused, not
-	// agent_inactive, regardless of the agent's own status. A gate-read
-	// error requeues the run (nothing about the run itself failed) so
-	// the next tick tries again.
-	paused, gateErr := si.svc.pauseGateState(ctx, agent.WorkspaceID)
-	if gateErr != nil {
-		pause.RecordGateError("process_run")
-		si.logger.Warn("process run: pause gate read failed",
-			zap.String("run_id", runID), zap.Error(gateErr))
-		if _, reqErr := si.svc.repo.RequeueClaimedRun(ctx, runID); reqErr != nil {
-			si.logger.Warn("process run: requeue after gate error failed",
-				zap.String("run_id", runID), zap.Error(reqErr))
-		}
-		return
-	}
-	if paused {
-		pause.RecordBlocked("process_run")
-		// This run may have been requeued after an earlier launch marked
-		// the agent working (see the comment on the mark-before-launch
-		// call below); the CAS makes this a safe no-op otherwise.
-		si.svc.clearAgentWorking(ctx, agent.ID, runID)
-		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeWorkspacePaused)
-		return
-	}
-
-	if !isAgentActive(agent.Status) {
-		si.logger.Info("run skipped (agent not active)",
-			zap.String("run_id", runID),
-			zap.String("agent_status", string(agent.Status)))
-		if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive); err != nil {
-			si.logger.Error("failed to finish agent-inactive run",
-				zap.String("run_id", runID), zap.Error(err))
-		}
+	agent := si.admitRunAgent(ctx, run)
+	if agent == nil {
 		return
 	}
 
@@ -344,10 +495,59 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	si.prepareAndLaunch(ctx, run, agent, taskID, execCfg)
 }
 
+// Agent admission resolves identity, honors workspace pause, then checks agent status.
+func (si *SchedulerIntegration) admitRunAgent(ctx context.Context, run *runsmodels.Run) *models.AgentInstance {
+	runID := run.ID
+	// Missing agents cancel the run; transient lookup failures defer without escalation.
+	agent, err := si.svc.GetAgentFromConfig(ctx, run.AgentProfileID)
+	if err != nil {
+		si.logger.Error("failed to get agent instance",
+			zap.String("run_id", runID), zap.Error(err))
+		if errors.Is(err, sql.ErrNoRows) {
+			si.cancelUnresolvableAgentRun(ctx, run)
+			return nil
+		}
+		si.deferWorkspaceLookupFailure(ctx, run)
+		return nil
+	}
+
+	paused, gateErr := si.svc.pauseGateState(ctx, agent.WorkspaceID)
+	if gateErr != nil {
+		pause.RecordGateError("process_run")
+		si.logger.Warn("process run: pause gate read failed",
+			zap.String("run_id", runID), zap.Error(gateErr))
+		if _, reqErr := si.svc.repo.RequeueClaimedRun(ctx, runID); reqErr != nil {
+			si.logger.Warn("process run: requeue after gate error failed",
+				zap.String("run_id", runID), zap.Error(reqErr))
+		}
+		return nil
+	}
+	if paused {
+		pause.RecordBlocked("process_run")
+		// The run-owned CAS preserves any successor's working marker.
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
+		_, _ = si.svc.FinishRun(ctx, runID, RunOutcomeWorkspacePaused)
+		return nil
+	}
+
+	if !isAgentActive(agent.Status) {
+		si.logger.Info("run skipped (agent not active)",
+			zap.String("run_id", runID),
+			zap.String("agent_status", string(agent.Status)))
+		if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive); err != nil {
+			si.logger.Error("failed to finish agent-inactive run",
+				zap.String("run_id", runID), zap.Error(err))
+		}
+		return nil
+	}
+
+	return agent
+}
+
 // prepareAndLaunch builds the skill manifest, env vars, prompt, and launches the
 // agent. Extracted from processRun to keep it within funlen limits.
 func (si *SchedulerIntegration) prepareAndLaunch(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, taskID string, execCfg *ExecutorConfig,
 ) {
 	runCtx, err := (&officeruntime.ContextBuilder{
@@ -405,9 +605,19 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.String("run_id", run.ID),
 		zap.Int("env_count", len(env)))
 
+	creationAttachments, err := si.launchCreationAttachments(ctx, taskID)
+	if err != nil {
+		si.logger.Warn("creation attachment read failed; retrying run",
+			zap.String("run_id", run.ID), zap.String("task_id", taskID), zap.Error(err))
+		si.releaseCheckoutIfNeeded(ctx, run)
+		_ = si.svc.HandleRunFailure(ctx, run, err)
+		return
+	}
 	launchCtx := LaunchContext{
 		ExecutorID:           execCfg.Type,
+		CausingRunID:         run.ID,
 		Prompt:               prompt,
+		Attachments:          creationAttachments,
 		Env:                  env,
 		ProfileID:            profileID,
 		AdditionalSkillSlugs: decisionSkillSlugs(runCtx.AvailableActions),
@@ -471,7 +681,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 // Extracted from prepareAndLaunch to keep that function within funlen limits.
 func (si *SchedulerIntegration) assembleAgentPrompt(
 	ctx context.Context,
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	taskID string,
 	runCtx officeruntime.RunContext,
@@ -527,7 +737,7 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // Reading the persisted field closes that race for every caller instead
 // of relying on ordering between two independent derivations.
 func (si *SchedulerIntegration) loadContinuationSummary(
-	ctx context.Context, run *models.Run, agentID, taskID string,
+	ctx context.Context, run *runsmodels.Run, agentID, taskID string,
 ) string {
 	if run == nil || taskID != "" || agentID == "" {
 		return ""
@@ -544,7 +754,7 @@ func (si *SchedulerIntegration) loadContinuationSummary(
 // what the agent saw. Errors are logged at warn — the run still
 // proceeds because the artifact persistence is purely diagnostic.
 func (si *SchedulerIntegration) persistPromptArtifacts(
-	ctx context.Context, run *models.Run, prompt, summaryInjected string,
+	ctx context.Context, run *runsmodels.Run, prompt, summaryInjected string,
 ) {
 	if run == nil || run.ID == "" {
 		return
@@ -590,7 +800,7 @@ func (si *SchedulerIntegration) resolveProfileForRun(_ context.Context, _, _ str
 }
 
 func (si *SchedulerIntegration) mintRuntimeToken(
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	runCtx officeruntime.RunContext,
 ) (string, error) {
@@ -609,7 +819,7 @@ func (si *SchedulerIntegration) mintRuntimeToken(
 
 // checkoutTask performs the atomic task checkout guard. Returns false if the
 // caller should abort processing (tree-gated or checkout failed).
-func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *models.Run, taskID, agentInstanceID string) bool {
+func (si *SchedulerIntegration) checkoutTask(ctx context.Context, run *runsmodels.Run, taskID, agentInstanceID string) bool {
 	if taskID == "" {
 		return true
 	}
@@ -650,7 +860,7 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 // runtime launcher. Returns false if the run could not be launched; the
 // failure is already handled by the selected launch path.
 func (si *SchedulerIntegration) launchAgent(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, taskID, executorType string,
 	launch LaunchContext,
 ) bool {
@@ -678,7 +888,8 @@ func (si *SchedulerIntegration) launchAgent(
 			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
 				"phase": "adapter.invoke", "error_message": err.Error(),
 			})
-			si.failTasklessRun(ctx, run, agent, err.Error())
+			si.releaseCheckoutIfNeeded(ctx, run)
+			_ = si.svc.HandleRunFailure(ctx, run, err)
 			return false
 		}
 		IncLoopLaunch(agent.WorkspaceID)
@@ -738,6 +949,10 @@ func (si *SchedulerIntegration) launchAgent(
 		return false
 	}
 	if err != nil {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
+			si.releaseCheckoutIfNeeded(ctx, run)
+			return false
+		}
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
@@ -763,12 +978,10 @@ func (si *SchedulerIntegration) launchAgent(
 // (the same status the routed dispatch path uses for the identical
 // disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
 // the scheduler's own wake-up loop from ever picking the run back up on
-// its own. There is no reconciliation path back from the orchestrator's
-// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism), so
-// the run stays parked until an operator finds it and clears the routing
-// block by hand.
-func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *models.Run) {
+// its own. The orchestrator's ceiling replay owns reconciliation: it settles
+// the exact run when the launch is admitted, ready or terminal events recover
+// failed settlement writes, and a terminal drop fails the parked run.
+func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *runsmodels.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
 		"phase":  "deferred",
@@ -810,6 +1023,87 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 	}
 }
 
+type circuitSuspensionSignal interface {
+	CircuitSuspendedUntil() time.Time
+}
+
+// deferCircuitSuspension preserves retry budget when no provider call was made.
+func (si *SchedulerIntegration) deferCircuitSuspension(ctx context.Context, run *runsmodels.Run, launchErr error) bool {
+	var signal circuitSuspensionSignal
+	if run == nil || !errors.As(launchErr, &signal) {
+		return false
+	}
+	until := signal.CircuitSuspendedUntil()
+	var err error
+	if until.IsZero() {
+		err = si.svc.repo.ParkRunForProviderCapacity(ctx, run.ID, routing.StatusBlockedActionRequired, time.Time{})
+	} else {
+		err = si.svc.repo.ScheduleRetry(ctx, run.ID, until, run.RetryCount)
+	}
+	if err != nil {
+		si.logger.Error("failed to defer circuit-suspended run", zap.String("run_id", run.ID), zap.Error(err))
+	}
+	return true
+}
+
+type sessionRecoveryRequiredSignal interface {
+	RecoveryReason() string
+}
+
+func sessionRecoveryDetails(err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	var signal sessionRecoveryRequiredSignal
+	if !errors.As(err, &signal) {
+		return "", false
+	}
+	reason := signal.RecoveryReason()
+	if reason == "" {
+		reason = "unknown_failure"
+	}
+	return reason, true
+}
+
+// parkSessionRecoveryRun is the autonomous boundary for Office launch
+// failures. It preserves the run and skips HandleRunFailure, whose retry
+// schedule would otherwise dispatch the same native session again.
+func (si *SchedulerIntegration) parkSessionRecoveryRun(
+	ctx context.Context, run *runsmodels.Run, launchErr error,
+) bool {
+	reason, required := sessionRecoveryDetails(launchErr)
+	if !required || run == nil || run.SessionID == "" {
+		return false
+	}
+	blockID := "session:" + run.SessionID
+	if reader, ok := si.svc.taskStarter.(SessionRecoveryBlockReader); ok {
+		block, err := reader.GetOpenSessionRecoveryBlock(ctx, run.SessionID)
+		if err != nil {
+			si.logger.Warn("failed to load canonical session recovery block; parking with session reference",
+				zap.String("run_id", run.ID), zap.String("session_id", run.SessionID), zap.Error(err))
+		} else if block != nil {
+			blockID = block.ID
+			if block.Reason != "" {
+				reason = block.Reason
+			}
+		}
+	}
+	if err := si.svc.repo.ParkRunForSessionRecovery(ctx, run.ID, blockID, reason); err != nil {
+		si.logger.Error("failed to park Office run for session recovery",
+			zap.String("run_id", run.ID), zap.String("session_id", run.SessionID), zap.Error(err))
+		return false
+	}
+	si.svc.AppendRunEvent(ctx, run.ID, "session.recovery_required", "warning", map[string]interface{}{
+		"session_id": run.SessionID,
+		"block_id":   blockID,
+		"reason":     reason,
+	})
+	si.logger.Warn("Office run parked for explicit session recovery",
+		zap.String("run_id", run.ID), zap.String("session_id", run.SessionID),
+		zap.String("block_id", blockID), zap.String("reason", reason))
+	return true
+}
+
 // failTasklessRun terminally fails a run that launchAgent determined has
 // no task_id and no run-session launcher. This is a scheduler wiring failure,
 // not an agent failure, so
@@ -839,7 +1133,7 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 // are auto-dismissed via the existing "_auto" sentinel (WO-35 Review
 // round 2, Finding 2).
 func (si *SchedulerIntegration) failTasklessRun(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	wrote, err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg)
@@ -906,7 +1200,7 @@ func (si *SchedulerIntegration) failTasklessRun(
 // itself does not) to restore that live UI update (WO-35 Review round 2,
 // Finding 1).
 func (si *SchedulerIntegration) failUnlaunchableRun(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
 		"phase":                   "scheduler.launch",
@@ -938,15 +1232,24 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 // invoked — parked and error-handled outcomes are "handled" but not
 // "launched", and callers must not treat them as if a process is running.
 func (si *SchedulerIntegration) tryRoutingDispatch(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	taskID string, launch LaunchContext,
 ) (handled bool, launched bool) {
+	if agent.ExecutionAgentProfileID != "" {
+		// A dynamic-bound Office agent owns provider order through its bound
+		// profile; the legacy workspace-routing dispatcher must not override it.
+		return false, false
+	}
 	rd := si.svc.routingDispatcher
 	if rd == nil {
 		return false, false
 	}
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
+		if si.deferCircuitSuspension(ctx, run, err) || si.parkSessionRecoveryRun(ctx, run, err) {
+			si.releaseCheckoutIfNeeded(ctx, run)
+			return true, false
+		}
 		si.logger.Error("routing dispatch failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
@@ -986,7 +1289,7 @@ const checkoutContendedRetryDelay = 60 * time.Second
 // tryCheckout attempts to acquire an exclusive lock on the task. Returns true
 // if the checkout succeeded or was not needed, false if blocked.
 func (si *SchedulerIntegration) tryCheckout(
-	ctx context.Context, run *models.Run, taskID, agentID string,
+	ctx context.Context, run *runsmodels.Run, taskID, agentID string,
 ) bool {
 	acquired, err := si.svc.repo.CheckoutTaskForRun(ctx, taskID, agentID, run.ID)
 	if err != nil {
@@ -1021,7 +1324,7 @@ func (si *SchedulerIntegration) tryCheckout(
 // silently dropped. Bounded by MaxRetryCount so a stuck holder can't
 // spin this forever; past that it escalates exactly like any other
 // exhausted retry.
-func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, run *models.Run, taskID string) {
+func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, run *runsmodels.Run, taskID string) {
 	si.svc.AppendRunEvent(ctx, run.ID, "checkout.contended", "info", map[string]interface{}{
 		"task_id":     taskID,
 		"retry_count": run.RetryCount,
@@ -1047,7 +1350,7 @@ func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, ru
 // never actually held the checkout (an escalated contention loser, a
 // stale/inactive-agent cancel) must not clear a different, currently-active
 // agent's live lock out from under it (Review round 4, BLOCKING FINDING 1).
-func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run *models.Run) {
+func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run *runsmodels.Run) {
 	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
@@ -1082,7 +1385,7 @@ func isAgentActive(status models.AgentStatus) bool {
 // is configured to skip idle periodic wakes and has no actionable tasks
 // assigned. Returns false (do not skip) on any DB error to fail open.
 func (si *SchedulerIntegration) checkIdleSkip(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 ) bool {
 	if !shared.IsPeriodicTasklessWake(run.Reason) {
 		return false
@@ -1122,6 +1425,7 @@ func (si *SchedulerIntegration) buildPromptContext(
 	pc := &PromptContext{Reason: reason}
 	pc.OneTimeInstructions = parsed[RunPayloadOneTimeInstructionsKey]
 	applyRoutineCatchUpContext(pc, reason, contextSnapshot)
+	si.enrichRoutineWorkContext(ctx, pc, reason, contextSnapshot)
 
 	if taskID := parsed["task_id"]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
@@ -1157,6 +1461,22 @@ func (si *SchedulerIntegration) buildPromptContext(
 
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+		if parsed["stage_type"] != "" {
+			pc.StageType = si.svc.resolveGateCommentStage(ctx, parsed)
+		}
+	}
+
+	if reason == RunReasonHandoffCompleted {
+		pc.HandoffDeliveryTaskID = parsed["delivery_task_id"]
+		pc.HandoffDeliveryTitle = parsed["delivery_title"]
+		pc.HandoffDeliveryState = parsed["delivery_state"]
+		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+	}
+
+	if reason == RunReasonTaskBlockerFailed ||
+		strings.Contains(payload, `"blocker_failure_alerts"`) ||
+		strings.Contains(contextSnapshot, `"blocker_failure_alerts"`) {
+		si.enrichBlockerFailedContext(ctx, pc, payload, contextSnapshot)
 	}
 
 	if reason == RunReasonAgentError {

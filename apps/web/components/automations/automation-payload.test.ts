@@ -7,11 +7,18 @@ vi.mock("@/app/actions/workspaces", () => ({
 }));
 
 import {
+  automationDraftRevision,
+  reconcileSavedMCPSelection,
+  mcpSelectionForUpdate,
   buildCreatePayload,
   buildUpdatePayload,
+  canonicalPluginTools,
+  normalizeRetryPolicyForTaskMode,
+  prContinuationPayload,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
+  retryPolicyAfterModeChange,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
@@ -31,6 +38,18 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    followUpPrompt: "",
+    prContinuationStepId: "",
+    prMergedAction: "keep",
+    prClosedAction: "keep",
+    retryPolicy: {
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    },
+    pluginTools: [],
     ...overrides,
   };
 }
@@ -198,6 +217,119 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     });
   });
 
+  it("omits plugin tools on unrelated updates and sends explicit selections", () => {
+    const form = baseForm();
+    expect(buildUpdatePayload(form, [])).not.toHaveProperty("plugin_tools");
+    expect(buildCreatePayload("ws-1", form, [], [])).toHaveProperty("plugin_tools", []);
+
+    const selection = [
+      {
+        plugin_id: "kandev-security",
+        installation_id: "installation-1",
+        policy_version: "policy-1",
+        tool_names: ["list_findings"],
+      },
+    ];
+    expect(buildUpdatePayload(form, [], selection)).toMatchObject({ plugin_tools: selection });
+    expect(buildUpdatePayload(form, [], [])).toMatchObject({ plugin_tools: [] });
+    expect(buildUpdatePayload(baseForm({ taskMode: "normal_task" }), [], selection)).toMatchObject({
+      plugin_tools: [],
+    });
+  });
+
+  it("compares plugin tool approvals without depending on tool order", () => {
+    const left = [
+      {
+        plugin_id: "kandev-security",
+        installation_id: "installation-1",
+        policy_version: "policy-1",
+        tool_names: ["list_findings", "complete_report"],
+      },
+    ];
+    const right = [{ ...left[0], tool_names: ["complete_report", "list_findings"] }];
+    expect(canonicalPluginTools(left)).toEqual(canonicalPluginTools(right));
+  });
+});
+
+describe("save boundary normalization", () => {
+  it("never saves a hidden workflow or repeat-run choice for a managed conversation", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      workflowId: "wf-1",
+      continuationPolicy: "reuse_per_pr",
+      followUpPrompt: "Review",
+      prMergedAction: "archive",
+    });
+    for (const payload of [
+      buildCreatePayload("ws-1", form, [], []),
+      buildUpdatePayload(form, []),
+    ]) {
+      expect(payload.workflow_id).toBe("");
+      expect(payload.continuation_policy).toBe("new_task");
+      expect(payload.follow_up_prompt).toBe("");
+      expect(payload.pr_merged_action).toBe("keep");
+    }
+  });
+
+  it("creates a disabled automation when Enabled is off", () => {
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: false }), [], []).enabled).toBe(false);
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: true }), [], []).enabled).toBe(true);
+  });
+});
+
+describe("managed destination and retry payloads", () => {
+  it("persists only the portable managed destination identity", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      managedDestination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+    });
+
+    expect(buildCreatePayload("ws-1", form, [], [])).toMatchObject({
+      task_mode: "managed_conversation",
+      managed_destination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+      repository_ids: [],
+    });
+    expect(buildUpdatePayload(form, [])).toMatchObject({
+      task_mode: "managed_conversation",
+      managed_destination: {
+        plugin_id: "kandev-plugin-coordinator",
+        instance_key: "daily-brief",
+        revision: 3,
+      },
+      repository_ids: [],
+    });
+  });
+  it("serializes canonical disabled retry policy for managed create and update", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      retryPolicy: {
+        mode: "finite",
+        max_retries: "4",
+        delay_seconds: "30",
+        backoff: "exponential",
+        history_mode: "timeline",
+      },
+    });
+    const disabledPolicy = {
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    };
+
+    expect(buildCreatePayload("ws-1", form, [], []).retry_policy).toEqual(disabledPolicy);
+    expect(buildUpdatePayload(form, []).retry_policy).toEqual(disabledPolicy);
+  });
+
   it("does not resolve stale repository selections for non-selected modes", async () => {
     const result = await resolveRepositoryIdsForMode(
       "ws-1",
@@ -208,5 +340,181 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
 
     expect(result.ids).toEqual([]);
     expect(createRepositoryAction).not.toHaveBeenCalled();
+  });
+  it("normalizes managed retry drafts and does not restore them for task targets", () => {
+    const enabled = {
+      mode: "finite" as const,
+      max_retries: "4",
+      delay_seconds: "30",
+      backoff: "exponential" as const,
+      history_mode: "timeline" as const,
+    };
+
+    const managed = normalizeRetryPolicyForTaskMode("managed_conversation", enabled);
+    expect(managed).toEqual({
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    });
+    expect(normalizeRetryPolicyForTaskMode("normal_task", managed)).toEqual(managed);
+  });
+  it("sends decimal retry policy values unchanged", () => {
+    const policy = {
+      mode: "finite" as const,
+      max_retries: "0007",
+      delay_seconds: "3600",
+      backoff: "exponential" as const,
+      history_mode: "timeline" as const,
+    };
+    const form = baseForm({ retryPolicy: policy });
+    expect(buildCreatePayload("ws-1", form, [], []).retry_policy).toEqual(policy);
+    expect(buildUpdatePayload(form, []).retry_policy).toEqual(policy);
+  });
+});
+
+describe("retryPolicyAfterModeChange", () => {
+  it("sets a valid finite retry count after disabled mode", () => {
+    const disabled = { ...baseForm().retryPolicy, mode: "disabled" as const, max_retries: "0" };
+    expect(retryPolicyAfterModeChange(disabled, "finite")).toMatchObject({
+      mode: "finite",
+      max_retries: "1",
+    });
+    expect(retryPolicyAfterModeChange({ ...disabled, max_retries: "00" }, "finite")).toMatchObject({
+      max_retries: "1",
+    });
+  });
+});
+
+describe("automation MCP selection", () => {
+  const selection: import("@/lib/types/automation").AutomationMCPSelection = {
+    builtin_packages: ["core", "configuration"],
+    definition_ids: ["reports"],
+  };
+  it("includes an explicit selection in native creation", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 0 });
+    expect(buildCreatePayload("workspace", form, [], [])).toHaveProperty(
+      "mcp_selection",
+      selection,
+    );
+  });
+  it("preserves omission on unrelated updates and conditions changed selections", () => {
+    const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 3 });
+    expect(buildUpdatePayload(form, [])).not.toHaveProperty("mcp_selection");
+    expect(buildUpdatePayload(form, [], undefined, selection)).toMatchObject({
+      mcp_selection: selection,
+      expected_mcp_selection_revision: 3,
+    });
+  });
+});
+
+describe("automation draft revision", () => {
+  it("ignores the server selection token but tracks package edits", async () => {
+    const { automationDraftRevision } = await import("./automation-payload");
+    const form = Object.assign(baseForm(), { mcpSelectionRevision: 0 });
+    expect(automationDraftRevision(form)).toBe(
+      automationDraftRevision({ ...form, mcpSelectionRevision: 1 }),
+    );
+    expect(automationDraftRevision(form)).not.toBe(
+      automationDraftRevision({
+        ...form,
+        mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+      }),
+    );
+  });
+});
+
+it("treats an absent MCP draft like the saved null selection", () => {
+  const form = { ...baseForm(), mcpSelection: undefined };
+  expect(automationDraftRevision(form)).toEqual(
+    automationDraftRevision({ ...form, mcpSelection: null }),
+  );
+});
+
+it("applies canonical MCP save values without losing in-flight edits", () => {
+  const submitted = baseForm({
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+    mcpSelectionRevision: 1,
+  });
+  const saved = {
+    mcp_selection: null,
+    mcp_selection_revision: 2,
+  } as import("@/lib/types/automation").Automation;
+  expect(reconcileSavedMCPSelection(submitted, submitted, saved).mcpSelection).toBeNull();
+  const edited = {
+    ...submitted,
+    mcpSelection: { builtin_packages: ["core", "configuration"], definition_ids: [] },
+  } as FormState;
+  expect(reconcileSavedMCPSelection(edited, submitted, saved)).toMatchObject({
+    mcpSelection: edited.mcpSelection,
+    mcpSelectionRevision: 2,
+  });
+});
+it("omits MCP grants from managed conversation payloads", () => {
+  const form = baseForm({
+    taskMode: "managed_conversation",
+    mcpSelection: { builtin_packages: ["core"], definition_ids: [] },
+  });
+  for (const payload of [
+    buildCreatePayload("workspace", form, [], []),
+    buildUpdatePayload(form, [], undefined, form.mcpSelection!),
+  ]) {
+    expect(payload).not.toHaveProperty("mcp_selection");
+    expect(payload).not.toHaveProperty("expected_mcp_selection_revision");
+  }
+});
+
+it("resubmits the displayed selection when changing task mode", () => {
+  const saved = baseForm({ mcpSelection: { builtin_packages: ["core"], definition_ids: [] } });
+  expect(mcpSelectionForUpdate({ ...saved, taskMode: "normal_task" }, saved)).toEqual(
+    saved.mcpSelection,
+  );
+});
+
+it("carries the editor revision when switching to a managed conversation", () => {
+  const form = baseForm({ taskMode: "managed_conversation", mcpSelectionRevision: 3 });
+  const payload = buildUpdatePayload(form, [], undefined, undefined, true);
+  expect(payload).not.toHaveProperty("mcp_selection");
+  expect(payload.expected_mcp_selection_revision).toBe(3);
+});
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.3
+describe("prContinuationPayload", () => {
+  const perPR = {
+    continuationPolicy: "reuse_per_pr" as const,
+    taskMode: "normal_task" as const,
+    followUpPrompt: "Review only new commits",
+    prContinuationStepId: "step-review",
+    prMergedAction: "archive" as const,
+    prClosedAction: "delete" as const,
+  };
+
+  it("saves the per-PR options for reuse_per_pr", () => {
+    const form = baseForm(perPR);
+    const expected = {
+      follow_up_prompt: "Review only new commits",
+      pr_continuation_step_id: "step-review",
+      pr_merged_action: "archive",
+      pr_closed_action: "delete",
+    };
+    expect(buildCreatePayload("ws-1", form, [], [])).toMatchObject({
+      continuation_policy: "reuse_per_pr",
+      ...expected,
+    });
+    expect(buildUpdatePayload(form, [])).toMatchObject(expected);
+  });
+
+  it("clears options that no longer apply before saving", () => {
+    expect(prContinuationPayload(baseForm({ ...perPR, continuationPolicy: "new_task" }))).toEqual({
+      follow_up_prompt: "",
+      pr_continuation_step_id: "",
+      pr_merged_action: "keep",
+      pr_closed_action: "keep",
+    });
+    expect(
+      prContinuationPayload(baseForm({ ...perPR, taskMode: "automation_run" }))
+        .pr_continuation_step_id,
+    ).toBe("");
   });
 });

@@ -1,5 +1,8 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPriority } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
+
+const DEFAULT_SESSION_LAUNCH_TIMEOUT_MS = 60_000;
 
 export type SessionIntent =
   | "prepare"
@@ -9,7 +12,7 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
-export type LaunchActivationSource = "user_action" | "session_open";
+export type LaunchActivationSource = "user_action" | "session_open" | "session_focus";
 
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
@@ -19,6 +22,7 @@ export type MessageAttachment = {
   name?: string;
   size_bytes?: number;
   delivery_mode?: "prompt" | "path";
+  comment_id?: string;
 };
 
 export type LaunchSessionRequest = {
@@ -38,6 +42,7 @@ export type LaunchSessionRequest = {
   auto_start?: boolean;
   attachments?: MessageAttachment[];
   activation_source?: LaunchActivationSource;
+  mcp_server_ids?: string[];
 };
 
 export type LaunchSessionResponse = {
@@ -60,8 +65,39 @@ export async function launchSession(
 ): Promise<LaunchSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
-  const effectiveTimeout = timeout ?? (request.intent === "resume" ? 30_000 : 15_000);
-  return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
+  const effectiveTimeout = timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS;
+  const response = await client.request<LaunchSessionResponse>(
+    "session.launch",
+    request,
+    effectiveTimeout,
+  );
+  if (
+    request.intent === "restore_workspace" &&
+    response.success &&
+    response.activation_disposition !== "queued" &&
+    response.activation_disposition !== "suppressed" &&
+    !response.agent_execution_id?.trim()
+  ) {
+    throw new Error(t("task:failedToRestoreWorkspace"));
+  }
+  return response;
+}
+
+export type ForkConversationResponse = {
+  task_id: string;
+  session_id: string;
+  state: string;
+};
+
+export async function forkConversation(request: {
+  task_id: string;
+  session_id: string;
+  turn_id: string;
+  request_id: string;
+}): Promise<ForkConversationResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client not available");
+  return client.request<ForkConversationResponse>("session.fork", request, 60_000);
 }
 
 export type EnsureSessionResponse = {
@@ -76,6 +112,7 @@ export type EnsureSessionResponse = {
     | "created_prepare"
     | "created_start"
     | "skipped_terminal_pr"
+    | "awaiting_manual_start"
     | "queued"
     | "existing_queued";
   newly_created: boolean;
@@ -110,6 +147,6 @@ export async function ensureTaskSession(
       ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
       ...(opts?.activationSource !== undefined ? { activation_source: opts.activationSource } : {}),
     },
-    opts?.timeout ?? 15_000,
+    opts?.timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS,
   );
 }

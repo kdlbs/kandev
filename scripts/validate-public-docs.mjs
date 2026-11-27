@@ -1030,25 +1030,37 @@ async function assertHeadingFragment(file, href, target, rawFragment) {
   }
 
   const markdown = await fs.readFile(target, "utf8");
-  if (!collectHeadingAnchors(markdown).has(fragment)) {
+  if (!collectPageAnchors(markdown).has(fragment)) {
     throw new Error(`${file} links to missing heading: ${href}`);
   }
 }
 
 /**
- * Collect the GitHub-style identifiers emitted for Markdown headings.
+ * Collect GitHub-style heading identifiers and explicit named anchors.
  *
  * Duplicate headings receive the same numeric suffix used by rehype-slug.
  *
  * @param {string} markdown Markdown page source.
- * @returns {Set<string>} Published heading identifiers.
+ * @returns {Set<string>} Published fragment identifiers.
  */
-function collectHeadingAnchors(markdown) {
-  const source = stripMarkdownCode(markdown, { keepInlineCode: true });
+function collectPageAnchors(markdown) {
+  const visibleSource = stripMarkdownCode(markdown, { keepInlineCode: true }).replace(
+    /<!--[\s\S]*?-->/g,
+    "",
+  );
+  const anchorSource = stripMarkdownCode(markdown).replace(/<!--[\s\S]*?-->/g, "");
   const anchors = new Set();
   const counts = new Map();
 
-  for (const match of source.matchAll(/^ {0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/gm)) {
+  for (const match of anchorSource.matchAll(
+    /<a\b[^>]*\bid\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>\s*<\/a>/gi,
+  )) {
+    anchors.add(match[1] ?? match[2]);
+  }
+
+  for (const match of visibleSource.matchAll(
+    /^ {0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/gm,
+  )) {
     const base = stripHeadingMarkup(match[1])
       .toLowerCase()
       .replace(/[^\p{L}\p{N}\s_-]/gu, "")

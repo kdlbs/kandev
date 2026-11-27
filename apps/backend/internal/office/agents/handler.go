@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/routing"
@@ -59,16 +61,24 @@ func RegisterRoutes(group *gin.RouterGroup, svc *AgentService, log *logger.Logge
 	group.GET("/agents/:id/memory/export", h.exportMemory)
 }
 
-// AgentAuthMiddleware returns a gin.HandlerFunc that extracts and validates agent JWTs.
-// Requests without a JWT are treated as UI/admin requests and pass through.
+// AgentAuthMiddleware returns a gin.HandlerFunc that accepts globally verified
+// user PATs and extracts and validates Office agent JWTs.
 func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
+		authorization := c.GetHeader("Authorization")
+		if authorization == "" || !strings.HasPrefix(authorization, "Bearer ") {
 			c.Next()
 			return
 		}
-		token := strings.TrimPrefix(auth, "Bearer ")
+		token := strings.TrimPrefix(authorization, "Bearer ")
+		if auth.IsPATFormat(strings.TrimSpace(token)) {
+			if _, ok := authn.FromGin(c); !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
+			c.Next()
+			return
+		}
 		claims, err := svc.ValidateAgentJWT(token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
@@ -231,10 +241,10 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		}
 	}
 	if req.AgentProfileID != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "agent_profile_id no longer selects an Office runtime; update the agent routing override or workspace tier profiles",
-		})
-		return
+		if err := h.svc.ApplyProfileConfiguration(ctx, agent, *req.AgentProfileID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
@@ -349,6 +359,8 @@ func respondRoutingValidation(c *gin.Context, err error) {
 // Clients can translate or handle these codes without matching backend text.
 func agentValidationErrorCode(err error) string {
 	switch {
+	case errors.Is(err, ErrAgentNameAlreadyExists):
+		return "agent_name_already_exists"
 	case errors.Is(err, ErrAgentCEOReportsTo):
 		return "agent_ceo_reports_to"
 	case errors.Is(err, ErrAgentReportsToInvalid):

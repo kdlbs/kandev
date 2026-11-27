@@ -57,7 +57,7 @@ describe("HTML preview process API", () => {
         path: "/site/index.html",
         version: 4,
       }),
-    ).toBe("http://api.test/port-proxy/session%2F1/43127/site/index.html?v=4");
+    ).toBe("http://api.test/port-proxy/session%2F1/43127/site/index.html?kandev_preview_version=4");
   });
 
   it("encodes reserved characters in each preview path segment", () => {
@@ -67,6 +67,8 @@ describe("HTML preview process API", () => {
         path: "/site/report#1.html",
         version: 5,
       }),
-    ).toBe("http://api.test/port-proxy/session-1/43127/site/report%231.html?v=5");
+    ).toBe(
+      "http://api.test/port-proxy/session-1/43127/site/report%231.html?kandev_preview_version=5",
+    );
   });
 });

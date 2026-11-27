@@ -95,6 +95,7 @@ function useMobileWorkflowSessionFocus(activeTaskId: string | null) {
         updatedAt: response.task?.updated_at,
         workflowStepId: response.task?.workflow_step_id,
         entryIdentity: response.workflow_entry_identity,
+        focusDisposition: response.workflow_focus_disposition,
       });
     },
     [bindWorkflowSessionFocus, cancelFocus, reconcileWorkflowSessionFocus],
@@ -288,7 +289,7 @@ export function MobileTaskMoveOptionsSurface({
         </SheetHeader>
       )}
       <div
-        className="min-h-0 flex-1 overflow-y-auto p-4"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
         data-vaul-no-drag={presentation === "drawer" ? true : undefined}
         data-testid="workflow-move-options"
       >

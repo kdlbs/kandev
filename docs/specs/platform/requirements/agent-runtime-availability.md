@@ -2,185 +2,78 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-08-11
+updated: 2026-09-27
 owners:
   - kandev
 ---
-# Agent Runtime Availability Requirements
+
+# Agent runtime availability requirements
 
 ## Overview
 
-Kandev's standalone `agentctl` process is a core runtime dependency, but the application backend can remain reachable after that child exits. In that state the browser WebSocket still looks connected while agent actions, task updates, and workspace tools stop progressing. Users need an authoritative explanation and a supported recovery path without losing the last known task or workspace data.
+The platform owns availability and replacement of the local standalone agent runtime.
+A failed agentctl must not require a healthy backend to restart.
+This revision extends the existing outage contract for issue #3962 and PR #3598.
+The backend, application data, and independently healthy remote executors remain available during local recovery.
+Runtime recovery does not imply that interrupted agent work can safely resume.
 
 ## Requirements
 
-### REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001: Agent Runtime Availability
+### REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001: Runtime availability
 
-**Intent:** Kandev's standalone `agentctl` process is a core runtime dependency, but the application backend can remain reachable after that child exits. In that state the browser WebSocket still looks connected while agent actions, task updates, and workspace tools stop progressing. Users need an authoritative explanation and a supported recovery path without losing the last known task or workspace data.
+**Intent:** Users receive accurate runtime status and a safe recovery action without losing their application session.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.1:** Kandev exposes one install-wide local agent-runtime availability snapshot: `available` or `unavailable`.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.2:** The runtime becomes `available` only after the standalone `agentctl` process passes its health check and authentication handshake.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.3:** An unexpected `agentctl` exit atomically changes the snapshot to `unavailable`, records the stable reason `agentctl_exited` and occurrence time, and publishes that snapshot to connected browsers.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.4:** Intentional shutdown does not publish an outage.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.5:** A newly loaded or reconnected browser receives the latest snapshot even when it missed the original exit event.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.6:** While unavailable, every authenticated application route shows one persistent, non-dismissible alert explaining that the local agent runtime stopped, agent actions and workspace tools may not update, saved data remains intact, and Kandev must restart to recover.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.7:** The alert is independent of the **Show status bar** Appearance preference and remains visible when route data is empty or stale. It is not a transient toast.
-- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.8:** When the local restart capability is supported, the alert offers **Restart Kandev** and reuses the existing supervised restart progress flow. Otherwise it gives localized terminal or service-manager guidance. A failed restart request leaves the alert visible and exposes the failure.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.1:** Kandev shall expose a local runtime snapshot with available, recovering, or unavailable status.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.2:** A replacement runtime shall become available only after authentication, ownership checks, and required consumer rebinding succeed.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.3:** An unexpected runtime exit shall publish recovering status and fence affected operations before replacement begins.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.4:** Intentional backend shutdown shall stop recovery and shall not launch another runtime or publish a spurious outage.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.5:** New or reconnected browsers shall receive the latest snapshot and shall reject older updates from the same backend boot.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.6:** Every authenticated route shall preserve last-known data and show persistent recovery or failure feedback while the runtime is not available.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.7:** Recovery feedback shall remain visible with the optional status bar hidden. Phone controls shall fit the viewport and remain touch-accessible.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.8:** After recovery exhaustion, an authorized administrator shall be able to retry runtime recovery without restarting the backend. Unauthorized users shall see status without a mutation control.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.9:** Successful runtime replacement shall preserve the backend boot identity and browser connection. Healthy remote executions shall not be restarted because the local runtime failed.
 
-## Migrated source detail
+### REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002: Bounded runtime replacement
 
-## Why
+**Intent:** Infrastructure can recover automatically without a crash loop, competing owner, or unsafe command retry.
 
-Kandev's standalone `agentctl` process is a core runtime dependency, but the
-application backend can remain reachable after that child exits. In that state
-the browser WebSocket still looks connected while agent actions, task updates,
-and workspace tools stop progressing. Users need an authoritative explanation
-and a supported recovery path without losing the last known task or workspace
-data.
+#### Acceptance criteria
 
-## What
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.1:** Concurrent exit, health, and retry signals shall produce at most one replacement attempt at a time.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.2:** Automatic replacement shall stop after three unsuccessful or short-lived starts, or when an outage exceeds sixty seconds. Stable recovery resets the start budget.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.3:** Recovery shall not replace or terminate a process when its ownership or death remains uncertain. It shall expose the blocked reason.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.4:** Requests and callbacks from a retired runtime shall not modify a successor. Mutations interrupted by replacement shall not be automatically retried.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.5:** Recovery shall preserve owned worktrees, native state, and journals. Port numbers alone shall not authorize process cleanup.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.6:** Runtime recovery shall work for a locally launched or previously adopted local control server, with survival enabled or disabled.
 
-- Kandev exposes one install-wide local agent-runtime availability snapshot:
-  `available` or `unavailable`.
-- The runtime becomes `available` only after the standalone `agentctl` process
-  passes its health check and authentication handshake.
-- An unexpected `agentctl` exit atomically changes the snapshot to
-  `unavailable`, records the stable reason `agentctl_exited` and occurrence
-  time, and publishes that snapshot to connected browsers.
-- Intentional shutdown does not publish an outage.
-- A newly loaded or reconnected browser receives the latest snapshot even when
-  it missed the original exit event.
-- While unavailable, every authenticated application route shows one
-  persistent, non-dismissible alert explaining that the local agent runtime
-  stopped, agent actions and workspace tools may not update, saved data remains
-  intact, and Kandev must restart to recover.
-- The alert is independent of the **Show status bar** Appearance preference and
-  remains visible when route data is empty or stale. It is not a transient
-  toast.
-- When the local restart capability is supported, the alert offers **Restart
-  Kandev** and reuses the existing supervised restart progress flow. Otherwise
-  it gives localized terminal or service-manager guidance. A failed restart
-  request leaves the alert visible and exposes the failure.
-- The browser retains last-known task, session, workspace, and message state
-  while the runtime is unavailable. The availability event never clears those
-  stores.
-- The alert clears only when a fresh backend boot reports a healthy authenticated
-  `agentctl`; browser WebSocket reconnection alone does not clear it.
+### REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003: Session reconciliation after replacement
 
-## API surface
+**Intent:** Restoring infrastructure shall not repeat uncertain work or hide an interrupted session.
 
-The boot payload and `/api/v1/app-state` initial state include:
+#### Acceptance criteria
 
-```json
-{
-  "agentRuntime": {
-    "status": "unavailable",
-    "reason": "agentctl_exited",
-    "occurred_at": "2026-08-08T14:22:52Z"
-  }
-}
-```
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.1:** Recovery shall reconcile each affected session using its original identity and retained outcomes before clearing its admission block.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.2:** Retained output shall appear once before a recovered terminal result releases subsequent work.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.3:** Unknown prompt or external-action outcomes shall remain visibly uncertain without automatic resend, tool replay, or replacement conversation.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.4:** A healthy replacement may admit independent new work while unrecoverable prior sessions remain individually blocked.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.5:** Stop shall remain reachable during recovery. If the original process cannot be controlled safely, Stop shall report that limitation without falsely claiming cancellation.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.6:** Office, automation, queue drain, Send Now, and manual session actions shall retain the same uncertainty and authorization fences.
 
-`reason` and `occurred_at` are omitted while available. Unexpected exits publish
-the same shape as the install-wide WebSocket action
-`system.agent_runtime.status_changed`. The reason is a stable enum for UI
-selection; raw process errors, stack traces, PIDs, and exit details remain in
-diagnostic logs.
+## Compatibility and exclusions
 
-The existing `/api/v1/system/restart-capability`, `/api/v1/system/restart`, and
-`boot_id` contracts remain the recovery API. This feature does not change the
-general backend health endpoint.
+Existing requirement IDs 001.1-001.8 retain their availability scope with explicitly revised recovery behavior.
+The previous restart-required behavior is replaced by bounded in-process recovery.
+A full supervised Kandev restart remains an optional operator fallback, never an automatic repair action.
+Initial backend startup failure retains its existing behavior.
+No new runtime feature flag is introduced. Complete the package before release.
+Remote executor restart policies, arbitrary shell interception, and the unproven Git staging explanation in #3962 are excluded.
 
-## State machine
+## Related records
 
-| Current state | Event | Next state | User result |
-| --- | --- | --- | --- |
-| startup | Health and auth handshake succeed | `available` | No alert |
-| `available` | Child exits unexpectedly | `unavailable` | Persistent alert and recovery guidance |
-| `unavailable` | Browser reconnects or reloads | `unavailable` | Snapshot is replayed; alert remains |
-| `unavailable` | Supervisor starts a fresh healthy backend and child | `available` | New boot removes the alert |
-| any | Intentional backend shutdown stops child | no outage transition | No stale failure is emitted |
-
-The in-memory snapshot is monotonic within one backend boot: an unexpected exit
-cannot return to `available` because this repair does not restart `agentctl` in
-process.
-
-## Failure modes
-
-- If the runtime-status event cannot be delivered, boot hydration and replay on
-  user subscription provide the current snapshot on reload or reconnect.
-- If restart capability lookup fails, the alert stays visible and presents
-  manual restart guidance instead of assuming the launch mode.
-- If a supervised restart request fails, the existing backend remains in the
-  unavailable state and the UI exposes the request error without dismissing the
-  alert.
-- If the browser WebSocket is also offline, the existing connectivity warning
-  remains independent. Both conditions may be visible because they describe
-  different failures.
-- If `agentctl` fails before startup completes, normal backend startup failure
-  behavior applies; no browser is served an inaccurate available snapshot.
-
-## Persistence guarantees
-
-Availability is process-local operational state, not database history. It is
-initialized from the current launch, retained for the lifetime of that backend,
-and replayed to clients. Kandev does not persist crash history or restore an
-unavailable marker after a successful full restart. Existing task, workspace,
-message, and session persistence is unchanged.
-
-## Responsive and mobile contract
-
-- Desktop and tablet render the alert in flow at the top of the route-content
-  column, above route data and below no route-owned chrome.
-- Phone uses the same in-flow alert rather than a toast, drawer, or second
-  persistent bottom bar. Copy and actions stack vertically, stay within the
-  viewport, and do not introduce document horizontal overflow.
-- The restart action is at least 44 px on phone. The alert remains above the
-  route's single scroll owner and does not cover bottom navigation or safe-area
-  content.
-- The alert uses `role="alert"`, a textual heading and explanation, and does not
-  rely on color alone.
-
-## Scenarios
-
-- **GIVEN** a healthy running Kandev, **WHEN** `agentctl` exits unexpectedly,
-  **THEN** every connected browser receives `unavailable` and shows one
-  persistent alert while preserving last-known application data.
-- **GIVEN** the runtime became unavailable before a browser connected, **WHEN**
-  the browser loads or subscribes after WebSocket reconnect, **THEN** it receives
-  the current unavailable snapshot and shows the same alert.
-- **GIVEN** **Show status bar** is off, **WHEN** the runtime becomes
-  unavailable, **THEN** the alert is still visible on every authenticated route.
-- **GIVEN** supervised restart is supported, **WHEN** the user chooses **Restart
-  Kandev**, **THEN** the existing restart flow waits for a changed `boot_id` and
-  the fresh healthy boot clears the alert.
-- **GIVEN** restart is unsupported, **WHEN** the alert renders, **THEN** it gives
-  localized terminal or service-manager guidance and does not offer a broken
-  restart action.
-- **GIVEN** Kandev is intentionally shutting down, **WHEN** the launcher stops
-  `agentctl`, **THEN** no unavailable event is emitted.
-- **GIVEN** a phone viewport with sparse or stale route data, **WHEN** the runtime
-  is unavailable, **THEN** the alert and any restart action fit without overlap,
-  horizontal scrolling, or an inaccessible touch target.
-
-## Out of scope
-
-- Restarting `agentctl` inside the existing backend process or rebinding its
-  launch token, PID, lifecycle manager, control clients, and active executions.
-- Automatically restarting all of Kandev without an operator action.
-- Changing `/health` readiness semantics, container/service restart policies,
-  or browser WebSocket retry behavior.
-- Persisted crash history, crash counters, raw diagnostics in the UI, or a new
-  operational dashboard.
-- Declaring remote executors unavailable or disabling every application action;
-  the alert describes the local standalone runtime dependency.
-
-## Decision record
-
-[Publish immutable agent events and explicit runtime failure state](../../../decisions/2026-08-08-agentctl-crash-containment.md)
-
-## Implementation plan
-
-[Backend failure containment](../../../plans/backend-failure-containment/plan.md)
+- [Runtime replacement design](../system-design/agent-runtime-availability.md)
+- [Runtime replacement decision](../../../decisions/2026-09-27-agentctl-runtime-replacement.md)
+- [Durable delivery](durable-agent-delivery.md)
+- [Implementation package](../../../plans/agentctl-runtime-replacement/plan.md)
+- [Historical containment package](../../../plans/backend-failure-containment/plan.md)

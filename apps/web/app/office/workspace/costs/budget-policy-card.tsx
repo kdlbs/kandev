@@ -45,15 +45,22 @@ function getBudgetStatus(pct: number): { label: string; className: string } {
   };
 }
 
-export function BudgetPolicyCard({ policy, spentSubcents = 0, onDelete }: Props) {
+export function BudgetPolicyCard({ policy, spentSubcents, onDelete }: Props) {
   const { t } = useTranslation();
-  const pct =
-    policy.limitSubcents > 0
-      ? Math.min(100, Math.round((spentSubcents / policy.limitSubcents) * 100))
-      : 0;
-  const remaining = Math.max(0, policy.limitSubcents - spentSubcents);
-  const status = getBudgetStatus(pct);
-  const barColor = getBarColor(pct);
+  let pct: number | null = null;
+  if (spentSubcents !== undefined) {
+    pct =
+      policy.limitSubcents > 0
+        ? Math.min(100, Math.round((spentSubcents / policy.limitSubcents) * 100))
+        : 0;
+  }
+  const remaining =
+    spentSubcents === undefined ? null : Math.max(0, policy.limitSubcents - spentSubcents);
+  const status =
+    pct === null
+      ? { label: t("common:unknown"), className: "bg-muted text-muted-foreground" }
+      : getBudgetStatus(pct);
+  const barColor = pct === null ? undefined : getBarColor(pct);
 
   return (
     <Card>
@@ -85,15 +92,27 @@ export function BudgetPolicyCard({ policy, spentSubcents = 0, onDelete }: Props)
           <div className="flex justify-between text-sm">
             <span>{t("office:observed")}</span>
             <span>
-              {formatDollars(spentSubcents)} ({pct}%)
+              {spentSubcents === undefined ? (
+                t("common:unavailable")
+              ) : (
+                <>
+                  {formatDollars(spentSubcents)} ({pct}%)
+                </>
+              )}
             </span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
-            <div className={cn("h-full rounded-full", barColor)} style={{ width: `${pct}%` }} />
+            {pct !== null && (
+              <div className={cn("h-full rounded-full", barColor)} style={{ width: `${pct}%` }} />
+            )}
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>{t("office:budgetAmount", { amount: formatDollars(policy.limitSubcents) })}</span>
-            <span>{t("office:remainingAmount", { amount: formatDollars(remaining) })}</span>
+            <span>
+              {t("office:remainingAmount", {
+                amount: remaining === null ? t("common:unavailable") : formatDollars(remaining),
+              })}
+            </span>
           </div>
           <div className="flex gap-2 text-xs text-muted-foreground mt-1">
             {/* Both enums resolve through the shared label maps. An UNMAPPED

@@ -85,3 +85,16 @@ func (d *Dispatcher) HandlerCount() int {
 	defer d.mu.RUnlock()
 	return len(d.handlers)
 }
+
+// Actions returns the currently registered action names in no particular
+// order. Intended for tests that need to enumerate the full registered
+// surface, such as a completeness table over every action.
+func (d *Dispatcher) Actions() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	actions := make([]string, 0, len(d.handlers))
+	for action := range d.handlers {
+		actions = append(actions, action)
+	}
+	return actions
+}

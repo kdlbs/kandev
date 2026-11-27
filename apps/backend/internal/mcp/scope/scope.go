@@ -44,6 +44,15 @@ type IdentityLookup interface {
 	IdentityForUser(ctx context.Context, userID string) (authn.Identity, bool)
 }
 
+// CoordinatorLookup resolves a coordinator conversation task to its owning
+// coordinator (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+// Implemented by *coordinator.Service. ok is false when taskID is not the
+// current conversation_task_id of any coordinator — an orphaned or archived
+// conversation task must resolve to no coordinator and be refused.
+type CoordinatorLookup interface {
+	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
+}
+
 // unownedScopeUserID is the owner attached when the stream's own workspace has
 // no owner: workspaces created before auth was enabled, and any created since
 // by an internal (unscoped) caller, since CreateWorkspace only stamps an owner
@@ -67,6 +76,21 @@ type Resolver struct {
 	// rather than fixed at wiring time.
 	enforced func() bool
 	logger   *logger.Logger
+
+	// coordinators resolves a coordinator conversation task to its
+	// coordinator, for principalSurface. nil (unset) means the coordinator
+	// feature is off or this resolver instance was never wired with it — a
+	// coordinator-origin task then resolves to no coordinator and is refused
+	// (fail closed), set via SetCoordinatorLookup rather than a NewResolver
+	// parameter so existing callers are unaffected.
+	coordinators CoordinatorLookup
+}
+
+// SetCoordinatorLookup wires the coordinator lookup used by principalSurface.
+// Guarded by the caller on the coordinator feature flag; a Resolver with no
+// lookup set refuses every coordinator-origin task.
+func (r *Resolver) SetCoordinatorLookup(lookup CoordinatorLookup) {
+	r.coordinators = lookup
 }
 
 // NewResolver builds the resolver. enforced must report false while

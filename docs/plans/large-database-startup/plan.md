@@ -91,3 +91,10 @@ on a 669k-event journal). Batched mirrored-event commits by a fixed event count
 across sessions (~40x per-event cost reduction) and threaded a cancellable
 startup context through the boot sync path. See that work order for full
 verification receipts.
+
+## Throughput follow-up
+
+The [database maintenance throughput package](../database-maintenance-throughput/plan.md)
+addresses backup rebuilding and cleanup idle time observed after PR #4418. It does
+not change this package's historical verification results. The automatic live worker
+is running; live physical compaction has not been performed by this session.

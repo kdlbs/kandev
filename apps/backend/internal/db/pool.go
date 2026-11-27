@@ -5,9 +5,9 @@ import "github.com/jmoiron/sqlx"
 // Pool provides separate read and write database connections.
 //
 // For SQLite with WAL mode, this enables concurrent reads while serializing
-// writes through a single connection. The writer pool uses MaxOpenConns(1) to
-// avoid SQLITE_BUSY on write contention, while the reader pool allows multiple
-// concurrent connections for SELECT queries.
+// writes through a single connection. Factory-created writer transactions acquire
+// the writer at BEGIN, including transactions which only read. Independent writers
+// can contend; the separate reader pool supports concurrent WAL snapshots.
 //
 // For PostgreSQL, both Writer and Reader return the same *sqlx.DB since pgx
 // handles connection pooling internally.

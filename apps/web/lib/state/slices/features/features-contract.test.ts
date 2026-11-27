@@ -16,16 +16,41 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
-  it("keeps browser-owned LSP continuity disabled by default", () => {
-    expect(defaultFeatureFlags.lspBrowserContinuity).toBe(false);
+  it("omits the graduated interrupted-conversation continuation flag", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("providerInterruptionContinuation");
+  });
+  it("omits retired Office session identity from frontend defaults", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
+  });
+
+  it("omits the retired LSP browser continuity toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("lspBrowserContinuity");
   });
 
   it("keeps dynamic agent routing disabled by default", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
-  it("keeps canvases disabled by default", () => {
+  it("omits the retired dynamic circuit backoff toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("dynamicCircuitBackoffEscalation");
+  });
+
+  it("waits for the backend before exposing canvases", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
+  });
+
+  it("keeps Integrated control opt-in in the frontend", () => {
+    expect(defaultFeatureFlags.integratedControl).toBe(false);
+  });
+
+  it("keeps the background-work browser fallback false until hydration", () => {
+    // Shipped profiles enable the feature, but the browser must not invent a
+    // default of its own before the authoritative value arrives.
+    expect(defaultFeatureFlags.agentBackgroundWork).toBe(false);
+  });
+
+  it("omits the graduated remote executor plugins flag", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("remoteExecutorPlugins");
   });
 
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {

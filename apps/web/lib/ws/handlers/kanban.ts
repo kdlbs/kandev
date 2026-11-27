@@ -69,11 +69,13 @@ type KanbanUpdateTask = {
   workflowStepId: string;
   title: string;
   description?: string;
+  flag_note?: string;
   position?: number;
   state?: KanbanTask["state"];
   priority?: KanbanTask["priority"];
   repository_id?: string;
   repositories?: KanbanTask["repositories"];
+  initial_workspace_layout?: "repository" | "task_root";
   is_ephemeral?: boolean;
   wip_admitted?: boolean;
   queued_for_step_id?: string;
@@ -116,6 +118,7 @@ function preserveMultiSnapshotFields(
   | "autoStartFailed"
   | "workspaceOrphaned"
   | "priority"
+  | "flagNote"
 > {
   return {
     primarySessionId: preserveIfUndefined(t.primarySessionId, fallback?.primarySessionId),
@@ -134,6 +137,7 @@ function preserveMultiSnapshotFields(
     autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
     workspaceOrphaned: preserveIfUndefined(t.workspaceOrphaned, fallback?.workspaceOrphaned),
     priority: preserveIfUndefined(t.priority, fallback?.priority),
+    flagNote: t.flagNote ?? fallback?.flagNote,
   };
 }
 
@@ -351,8 +355,11 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               workflowStepId: task.workflowStepId,
               title: task.title,
               description: task.description,
+              flagNote: preserveIfUndefined(task.flag_note, existing?.flagNote),
               position: task.position ?? 0,
               state: task.state,
+              initialWorkspaceLayout:
+                task.initial_workspace_layout ?? existing?.initialWorkspaceLayout,
               ...repoFields,
               primarySessionId: existing?.primarySessionId,
               primarySessionState: existing?.primarySessionState,

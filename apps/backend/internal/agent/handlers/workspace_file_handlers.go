@@ -11,14 +11,22 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/workspacepath"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle ExecutionLookup
-	logger    *logger.Logger
+	lifecycle         ExecutionLookup
+	logger            *logger.Logger
+	recoveryArtifacts WorkspaceRecoveryArtifactProvider
+}
+
+type WorkspaceRecoveryArtifactProvider interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	ListTaskEnvironmentRecoveryArtifacts(context.Context, string) ([]recoveryartifact.Registered, error)
 }
 
 type workspaceContentSearchRequest struct {
@@ -28,16 +36,47 @@ type workspaceContentSearchRequest struct {
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
-func NewWorkspaceFileHandlers(lm ExecutionLookup, log *logger.Logger) *WorkspaceFileHandlers {
-	return &WorkspaceFileHandlers{
+func NewWorkspaceFileHandlers(lm ExecutionLookup, log *logger.Logger, providers ...WorkspaceRecoveryArtifactProvider) *WorkspaceFileHandlers {
+	handlers := &WorkspaceFileHandlers{
 		lifecycle: lm,
 		logger:    log.WithFields(zap.String("component", "workspace-file-handlers")),
 	}
+	if len(providers) > 0 {
+		handlers.recoveryArtifacts = providers[0]
+	}
+	return handlers
+}
+
+func (h *WorkspaceFileHandlers) refreshRecoveryArtifactExclusions(
+	ctx context.Context,
+	sessionID string,
+	client *agentctl.Client,
+) error {
+	if h.recoveryArtifacts == nil {
+		return nil
+	}
+	paths := []string{}
+	session, err := h.recoveryArtifacts.GetTaskSession(ctx, sessionID)
+	if err == nil && session != nil && session.TaskEnvironmentID != "" {
+		registered, listErr := h.recoveryArtifacts.ListTaskEnvironmentRecoveryArtifacts(ctx, session.TaskEnvironmentID)
+		if listErr == nil {
+			paths = recoveryartifact.VerifiedLegacyArtifactPaths(registered)
+		} else {
+			h.logger.Warn("recovery artifact registry could not be read", zap.Error(listErr), zap.String("session_id", sessionID))
+		}
+	} else if err != nil {
+		h.logger.Warn("session recovery artifact scope could not be read", zap.Error(err), zap.String("session_id", sessionID))
+	}
+	if err := client.SetWorkspaceRecoveryExclusions(ctx, paths); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RegisterHandlers registers workspace file handlers with the dispatcher
 func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileTreeGet, h.wsGetFileTree)
+	d.RegisterFunc(ws.ActionWorkspaceRootFilesList, h.wsListWorkspaceRootFiles)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGet, h.wsGetFileContent)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentGetRef, h.wsGetFileContentAtRef)
 	d.RegisterFunc(ws.ActionWorkspaceFileContentUpdate, h.wsUpdateFileContent)
@@ -46,6 +85,36 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileRename, h.wsRenameFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
 	d.RegisterFunc(ws.ActionWorkspaceContentSearch, h.wsSearchContent)
+}
+
+func (h *WorkspaceFileHandlers) wsListWorkspaceRootFiles(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "No agent found for session: "+err.Error(), nil)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+	if err := h.refreshRecoveryArtifactExclusions(ctx, req.SessionID, client); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Workspace artifact filter could not be refreshed", nil)
+	}
+	listing, err := client.ListWorkspaceRootFiles(ctx)
+	if err != nil {
+		h.logger.Error("failed to list workspace root files", zap.Error(err), zap.String("session_id", req.SessionID))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fmt.Sprintf("Failed to list workspace root files: %v", err), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, listing)
 }
 
 // wsGetFileTree handles workspace.tree.get action
@@ -77,6 +146,9 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 	defer releaseClient()
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
+	}
+	if err := h.refreshRecoveryArtifactExclusions(ctx, req.SessionID, client); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Workspace artifact filter could not be refreshed", nil)
 	}
 
 	// Request file tree from agentctl
@@ -342,6 +414,9 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	if client == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Agent client not available", nil)
 	}
+	if err := h.refreshRecoveryArtifactExclusions(ctx, req.SessionID, client); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Workspace artifact filter could not be refreshed", nil)
+	}
 
 	// Default limit
 	limit := req.Limit
@@ -398,6 +473,9 @@ func (h *WorkspaceFileHandlers) wsSearchContent(
 			msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"Agent client not available", nil,
 		)
+	}
+	if err := h.refreshRecoveryArtifactExclusions(ctx, req.SessionID, client); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Workspace artifact filter could not be refreshed", nil)
 	}
 	response, err := client.SearchWorkspaceContent(ctx, req.Query, req.LimitPerRepo)
 	if err != nil {

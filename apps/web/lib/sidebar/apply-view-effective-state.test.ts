@@ -277,6 +277,7 @@ describe("applyView — effective state bubbling (integration)", () => {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -368,6 +369,7 @@ describe("applyView — effective state consistency (integration)", () => {
       filters: [],
       sort: { key: "state", direction: "asc" },
       group: "state",
+      groupIndent: true,
       collapsedGroups: [],
     };
 
@@ -393,6 +395,7 @@ describe("applyView — effective state consistency (integration)", () => {
       filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "Visible" }],
       sort: { key: "state", direction: "asc" },
       group: "state",
+      groupIndent: true,
       collapsedGroups: [],
     };
 

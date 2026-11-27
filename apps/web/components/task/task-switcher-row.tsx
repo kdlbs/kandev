@@ -2,11 +2,15 @@
 
 import { memo, type ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
+import { TaskFlagIndicator } from "./task-flag-indicator";
+import { useOpenTaskFlag } from "./task-flag-editor-provider";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import { dispatchSidebarRowClick } from "./task-switcher-click";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
+import { useUnreadDotLinger } from "./use-unread-dot-linger";
+import { shouldShowUnreadDot } from "./task-unread-dot-visibility";
 
 export type SubtaskToggleInfo = {
   subtaskCount: number;
@@ -30,6 +34,12 @@ export type TaskRowProps = {
   /** False when the list is grouped by repository and the header already names it. */
   showRepository?: boolean;
   taskRowPresentation?: SidebarTaskRowPresentation;
+  /** The unread task dot setting; unread dots show only while it is on. */
+  unreadMessagesEnabled: boolean;
+  /** How long the open task keeps its unread dot after it is selected; 0 hides it at once. */
+  unreadDotHideDelayMs: number;
+  /** The open task's displayed session, which never keeps that task's dot. */
+  displayedSessionId: string | null;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
@@ -50,11 +60,9 @@ export type TaskRowProps = {
   isPinned?: boolean;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
-  archivingTaskId?: string | null;
-  isArchiving?: boolean;
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceKey?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceKey?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;
@@ -67,7 +75,11 @@ function archiveAware<T>(value: T | undefined, isArchived: boolean): T | undefin
   return isArchived ? undefined : value;
 }
 
-function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
+type SelectedTaskRowProps = Omit<TaskRowProps, "activeTaskId" | "selectedTaskId"> & {
+  isSelected: boolean;
+};
+
+function getContextMenuProps(props: SelectedTaskRowProps, isArchived: boolean) {
   return {
     nestCandidateTasks: props.nestCandidateTasks,
     getNestCandidateTasks: props.getNestCandidateTasks,
@@ -91,7 +103,6 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
     isPinned: isArchived ? false : props.isPinned,
     pinnedTaskIds: props.pinnedTaskIds,
     isDeleting: props.deletingTaskId === props.task.id,
-    isArchiving: props.isArchiving && props.archivingTaskId === props.task.id,
     selectedTaskIds: archiveAware(props.selectedTaskIds, isArchived),
     onBulkArchive: archiveAware(props.onBulkArchive, isArchived),
     onBulkDelete: props.onBulkDelete,
@@ -103,16 +114,18 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
 }
 
 type TaskRowItemProps = Pick<
-  TaskRowProps,
+  SelectedTaskRowProps,
   | "task"
   | "isSubTask"
   | "depth"
   | "subtaskToggle"
-  | "activeTaskId"
-  | "selectedTaskId"
+  | "isSelected"
   | "showActivityTime"
   | "showRepository"
   | "taskRowPresentation"
+  | "unreadMessagesEnabled"
+  | "unreadDotHideDelayMs"
+  | "displayedSessionId"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -120,18 +133,42 @@ type TaskRowItemProps = Pick<
   | "deletingTaskId"
   | "isPinned"
   | "stepsByWorkflowId"
-> & { isArchived: boolean; archiveConfirmation?: ReactNode };
+> & { isArchived: boolean; archiveConfirmation?: ReactNode; flag?: ReactNode };
+
+/** Applies the dot setting, open-task rule, and post-selection linger. */
+function useTaskRowUnreadDot(
+  unreadSessionIds: string[] | undefined,
+  isSelected: boolean,
+  enabled: boolean,
+  hideDelayMs: number,
+  displayedSessionId: string | null,
+): boolean {
+  const lingering = useUnreadDotLinger(
+    isSelected,
+    enabled && (unreadSessionIds?.length ?? 0) > 0,
+    hideDelayMs,
+  );
+  return shouldShowUnreadDot({
+    enabled,
+    unreadSessionIds,
+    isSelected,
+    lingering,
+    displayedSessionId,
+  });
+}
 
 function TaskRowItem({
   task,
   isSubTask,
   depth,
   subtaskToggle,
-  activeTaskId,
-  selectedTaskId,
+  isSelected,
   showActivityTime,
   showRepository,
   taskRowPresentation,
+  unreadMessagesEnabled,
+  unreadDotHideDelayMs,
+  displayedSessionId,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -141,14 +178,21 @@ function TaskRowItem({
   stepsByWorkflowId,
   isArchived,
   archiveConfirmation,
+  flag,
 }: TaskRowItemProps) {
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
-  const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
+  const hasUnreadMessages = useTaskRowUnreadDot(
+    task.unreadSessionIds,
+    isSelected,
+    unreadMessagesEnabled,
+    unreadDotHideDelayMs,
+    displayedSessionId,
+  );
   const stepId = task.workflowStepId;
-  const isDeleting = deletingTaskId === task.id;
 
   return (
     <TaskItem
+      flag={flag}
       isMultiSelected={!isArchived && (selectedTaskIds?.has(task.id) ?? false)}
       onSelect={(e) =>
         dispatchSidebarRowClick(
@@ -172,7 +216,7 @@ function TaskRowItem({
       interrupted={task.interrupted}
       parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
-      isPendingArchive={task.isPendingArchive}
+      isPendingRemoval={task.isPendingRemoval}
       isSelected={isSelected}
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
@@ -196,8 +240,11 @@ function TaskRowItem({
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}
       launchQueue={task.launchQueue}
+      quotaWait={task.quotaWait}
+      waitReason={task.waitReason}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
+      hasUnreadMessages={hasUnreadMessages}
       isSubTask={isSubTask}
       isOnLastWorkflowStep={!!stepId && taskSteps?.at(-1)?.id === stepId}
       depth={depth}
@@ -205,16 +252,39 @@ function TaskRowItem({
       subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
       onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
       onClick={() => onSelectTask(task.id)}
-      isDeleting={isDeleting}
+      isDeleting={deletingTaskId === task.id}
       isPinned={isArchived ? false : isPinned}
       archiveConfirmation={archiveConfirmation}
     />
   );
 }
 
-export const TaskRow = memo(function TaskRow(props: TaskRowProps) {
+export const TaskRow = memo(function TaskRow({
+  activeTaskId,
+  selectedTaskId,
+  displayedSessionId,
+  ...props
+}: TaskRowProps) {
+  const isSelected = props.task.id === activeTaskId || props.task.id === selectedTaskId;
+  return (
+    <SelectedTaskRow
+      {...props}
+      isSelected={isSelected}
+      displayedSessionId={isSelected ? displayedSessionId : null}
+    />
+  );
+});
+
+const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProps) {
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
+  const openFlag = useOpenTaskFlag();
+  const flag = task.flagNote ? (
+    <TaskFlagIndicator
+      note={task.flagNote}
+      onOpen={openFlag && ((invoker) => openFlag(task, invoker, true))}
+    />
+  ) : undefined;
   return (
     <TaskItemWithContextMenu
       task={task}
@@ -226,6 +296,7 @@ export const TaskRow = memo(function TaskRow(props: TaskRowProps) {
       <TaskRowItem
         {...props}
         isArchived={isArchived}
+        flag={flag}
         isSubTask={isSubTask}
         depth={depth}
         subtaskToggle={subtaskToggle}

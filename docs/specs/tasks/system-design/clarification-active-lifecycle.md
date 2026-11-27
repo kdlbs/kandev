@@ -23,8 +23,8 @@ The task system owns clarification bundle authority, turn scoping, response pers
 
 | Requirement | Design source |
 | --- | --- |
-| `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Extracted from the legacy design sections below. |
-| `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Extracted from the legacy design sections below. |
+| `REQ-TASKS-CLARIFICATION-LIFECYCLE-001` | Data model, frontend clarification selection, API surface, and state machine. |
+| `REQ-TASKS-CLARIFICATION-SCENARIOS-001` | Frontend clarification selection, failure modes, and persistence guarantees. |
 
 
 ## Data model
@@ -54,6 +54,49 @@ No schema change.
   the legacy rule that missing status means pending.
 - `TaskSession.pending_action` and `TaskStatusSummary.pending_action` remain bounded derived fields.
   They are reconstructable and never become independent clarification state.
+
+## Frontend clarification selection
+
+`apps/web/lib/utils/pending-clarification.ts` supplies the single-question,
+bundle, and boolean selectors. Chat passes durable conversational-turn authority
+and the session projection through `useProcessedMessages`. Pending-input hooks
+reuse the same selectors.
+
+The selector applies these rules in order:
+
+1. An explicit `pendingAction` other than `clarification`, including null,
+   suppresses active discovery. This signal can account for an attempted
+   successor that visible turn history does not yet contain.
+2. A null `currentTurnId` suppresses active discovery. It represents loaded
+   history without an eligible turn, or a session that cannot accept input.
+3. A string `currentTurnId` limits candidates to that exact turn. Detachment
+   cannot broaden the candidate set, including after newer-turn messages disappear.
+4. With undefined turn authority, an explicit `clarification` projection permits
+   the existing message-based fallback. Other scoped inputs remain inert.
+5. Legacy callers without a scope retain their existing newest-message-turn
+   fallback. Detached metadata cannot cross that inferred boundary either.
+
+Within eligible candidates, missing status retains its legacy pending meaning.
+Bundle selection uses the selected row's exact `pending_id`. Arrival completeness
+counts terminal siblings, but only pending siblings become response controls.
+Resolving one bundle cannot reactivate a superseded bundle. Another pending
+bundle in the same authoritative turn remains eligible when projection permits it.
+
+`agent_disconnected` affects delivery and presentation after ownership is
+established. A current detached bundle with a `clarification` projection remains
+answerable even when its durable turn has completed. Turn completion alone is
+distinct from a terminal session. An explicit clean projection still takes precedence.
+
+Historical questions remain visible through `filterVisibleMessages`. Their
+existing answer-as-new-message action uses ordinary admission, as specified by
+the [late-answer decision](../../../decisions/2026-09-18-late-clarification-messages.md).
+Desktop and phone consume the same selection result within their existing chat
+surfaces. This correction introduces no presentation primitive or localized copy.
+
+Verification covers a detached older bundle beside an answered or rejected
+newer bundle while the newer turn remains open. It also covers empty newer-turn
+message history, clean projection over a visible detached predecessor, hydration
+fallbacks, current detached bundles, and mixed pending/terminal siblings.
 
 ## API surface
 
@@ -104,6 +147,24 @@ about an earlier question. See [late-answer delivery](clarification-response-rel
 for transcript actions and inactive-response fallback. That path does not claim
 the historical bundle or revive its operational authority.
 
+## Peer messages during a live question
+
+`message_task_kandev` in queued mode checks `SessionHasLiveClarification` before
+prompting a session that is not running. It repeats the check on the selected
+session after workflow preparation, which can choose a different primary
+session, and releases any start admission before queueing. While an `active_live` bundle owns the
+turn, the message goes to the session queue rather than through `PromptTask`;
+the queue drain already refuses to dispatch behind a live clarification and
+delivers the message after the answer, or after the bundle detaches. Without
+this check the peer prompt would become the newer turn that moves the bundle to
+`superseded_history` before the user answers. Interrupt-mode messages from a
+parent are unchanged. Launchers that do not implement the check keep the direct
+prompt. A repository error during the live-clarification lookup fails closed:
+the peer message is queued instead of risking a superseding prompt while the
+question's ownership cannot be read. After a live answer, the agent finishes
+its existing turn and the ready event drains the peer message; the answer alone
+does not inject the peer message into a running turn.
+
 ## State machine
 
 One clarification bundle has five operational states:
@@ -148,6 +209,15 @@ its publish call can return before subscribers run. The agent therefore cannot e
 acknowledgement before an armed watchdog can observe and cancel itself. Terminal clarification message
 publication remains after successful delivery; watchdog registration does not publish those messages
 early.
+
+An exact MCP retry registers and pins its in-memory waiter before reading durable state. A
+`response_delivery_pending` claim is provisional, so the retry joins live delivery instead of
+returning that answer immediately. Clearing the durable marker alone does not permit an early
+response while the same live confirmation callback is still arming the watchdog. Registered
+waiters retain their original entry through map removal; session cancellation atomically preserves
+an in-flight confirmation so a later retry can join it. Confirmation failure returns an error, and
+detached-delivery ownership continues to prevent a second tool response. A finalized outcome with
+no live confirmation can be replayed through its exact retry identity.
 
 Each watchdog has an armed phase and a fallback-recovery phase. Independent live stream activity
 cancels either phase, and service shutdown cancels all phases. Once fallback owns the per-session

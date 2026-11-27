@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -31,10 +32,18 @@ async function seedPinnedQueueTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (!task.session_id) throw new Error("queued-message fixture did not start a session");
+  await session.expectChatResponseVisible("simple mock response", 0, { timeout: 45_000 });
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "seed prompt should finish",
+    30_000,
+  );
 
   await session.sendMessage("/slow 30s");
-  await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-  await waitForComposerQueueMode(testPage);
+  await waitForComposerQueueMode(testPage, 30_000);
 
   const editor = testPage.locator(".tiptap.ProseMirror").first();
   await typeWhileBusy(testPage, editor, "queued while pinned");
@@ -77,29 +86,33 @@ test.describe("Message queue pin", () => {
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
   });
 
-  test("unpinned queue stays collapsed across navigation", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
+  test.describe("unpinned queue without retries", () => {
+    test.describe.configure({ retries: 0 });
 
-    const { taskId } = await seedPinnedQueueTask(
+    test("unpinned queue stays collapsed across navigation", async ({
       testPage,
       apiClient,
       seedData,
-      "Unpinned queue navigation",
-    );
+    }) => {
+      test.setTimeout(120_000);
 
-    // Open the panel (without pinning), then navigate away and back.
-    await testPage.getByTestId("queue-chip").click();
-    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible({ timeout: 5_000 });
-    await testPage.goto("/");
-    await testPage.waitForLoadState("networkidle");
-    await testPage.goto(`/t/${taskId}`);
+      const { taskId } = await seedPinnedQueueTask(
+        testPage,
+        apiClient,
+        seedData,
+        "Unpinned queue navigation",
+      );
 
-    // Without a pin the queue starts collapsed: chip visible, panel hidden.
-    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible();
+      // Open the panel (without pinning), then navigate away and back.
+      await testPage.getByTestId("queue-chip").click();
+      await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible({ timeout: 5_000 });
+      await testPage.goto("/");
+      await testPage.waitForLoadState("networkidle");
+      await testPage.goto(`/t/${taskId}`);
+
+      // Without a pin the queue starts collapsed: chip visible, panel hidden.
+      await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible();
+    });
   });
 });

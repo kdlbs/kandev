@@ -182,7 +182,7 @@ export function useTaskPluginLinkActions(
   );
 }
 
-export function useSidebarLinkActions(store: StoreApi) {
+export function useSidebarLinkActions(store: StoreApi, pageTasks: KanbanState["tasks"] = []) {
   const [linkingPullRequestTask, setLinkingPullRequestTask] = useState<SidebarLinkTarget | null>(
     null,
   );
@@ -196,7 +196,9 @@ export function useSidebarLinkActions(store: StoreApi) {
   const getLinkTarget = useCallback(
     (taskId: string, fallbackTitle?: string): SidebarLinkTarget => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task =
+        pageTasks.find((task) => task.id === taskId) ??
+        findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       return {
         id: taskId,
         title: task?.title ?? fallbackTitle ?? t("task:thisTask"),
@@ -206,7 +208,7 @@ export function useSidebarLinkActions(store: StoreApi) {
         repositories: task?.repositories,
       };
     },
-    [store],
+    [pageTasks, store],
   );
 
   const handleLinkPullRequestTask = useCallback(

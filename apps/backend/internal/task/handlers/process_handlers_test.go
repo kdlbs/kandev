@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -37,11 +38,31 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (*mockRepository) EnsureManagedConversation(context.Context, managed.EnsureRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
+}
+
+func (*mockRepository) ChangeManagedConversationState(context.Context, managed.StateRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
+}
+
+func (m *mockRepository) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, fmt.Errorf("field updates are not supported by this test repository")
+}
+
+func (m *mockRepository) CommitWorkspaceRecoveryErrorIfCurrent(
+	ctx context.Context,
+	observation models.WorkspaceRecoveryErrorObservation,
+	errorValue models.LastAgentError,
+) (bool, string, error) {
+	return false, "", nil
+}
+
 func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
 	return false, nil
 }
 
-func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string) (bool, error) {
+func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string, string) (bool, error) {
 	return true, nil
 }
 
@@ -60,6 +81,9 @@ func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
 	return nil, nil
 }
 func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
@@ -130,11 +154,8 @@ func (m *mockRepository) ListUnarchivedTasksWithActiveSessions(ctx context.Conte
 func (m *mockRepository) GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+func (m *mockRepository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
 	return nil, nil
-}
-func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
-	return false, nil
 }
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
@@ -210,6 +231,10 @@ func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (
 func (m *mockRepository) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
 	return nil, nil
 }
+func (m *mockRepository) ReplaceTaskRepositories(context.Context, string, func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error) {
+	return nil, fmt.Errorf("complete repository replacement is unsupported by this handler fixture")
+}
+
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
@@ -259,6 +284,9 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*models.Wo
 }
 func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
+}
+func (m *mockRepository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow field updates are not configured in this fixture")
 }
 func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
@@ -318,6 +346,16 @@ func (m *mockRepository) CompleteActiveClarificationBundle(
 ) ([]*models.Message, bool, error) {
 	return nil, false, nil
 }
+func (m *mockRepository) CompleteActiveClarificationBundleWithAttachments(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+	[]models.ClarificationAttachmentClaim,
+	models.ClarificationAttachmentScope,
+) ([]*models.Message, bool, []string, error) {
+	return nil, false, nil, nil
+}
 func (m *mockRepository) FinalizeClarificationResponseDelivery(
 	context.Context,
 	string,
@@ -336,6 +374,9 @@ func (m *mockRepository) RestoreActiveClarificationBundle(
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
+}
+func (m *mockRepository) UpdatePermissionPresentation(context.Context, models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	return nil, false, nil
 }
 func (m *mockRepository) ClaimPermissionResolution(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
 	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
@@ -968,17 +1009,19 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 }
 
-func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T) {
+func TestSessionConfigurationFeedbackPickerHTTP(t *testing.T) {
 	tests := []struct {
 		name       string
 		path       string
 		body       string
+		requested  string
 		assertions func(*testing.T, models.SessionRuntimeConfig, map[string]interface{})
 	}{
 		{
-			name: "model",
-			path: "/api/v1/task-sessions/session-idle/set-model",
-			body: `{"model_id":"claude-opus-4-8"}`,
+			name:      "model",
+			path:      "/api/v1/task-sessions/session-idle/set-model",
+			body:      `{"model_id":"claude-opus-4-8"}`,
+			requested: "claude-opus-4-8",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
 				t.Helper()
 				if cfg.Model != "claude-opus-4-8" {
@@ -987,9 +1030,10 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			},
 		},
 		{
-			name: "dynamic model option",
-			path: "/api/v1/task-sessions/session-idle/set-config-option",
-			body: `{"config_id":"model","value":"claude-opus-4-8"}`,
+			name:      "dynamic model option",
+			path:      "/api/v1/task-sessions/session-idle/set-config-option",
+			body:      `{"config_id":"model","value":"claude-opus-4-8"}`,
+			requested: "claude-opus-4-8",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
 				t.Helper()
 				if cfg.Model != "claude-opus-4-8" || cfg.ConfigOptions["model"] != "claude-opus-4-8" {
@@ -998,9 +1042,10 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			},
 		},
 		{
-			name: "mode",
-			path: "/api/v1/task-sessions/session-idle/set-mode",
-			body: `{"mode_id":"acceptEdits"}`,
+			name:      "mode",
+			path:      "/api/v1/task-sessions/session-idle/set-mode",
+			body:      `{"mode_id":"acceptEdits"}`,
+			requested: "acceptEdits",
 			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, metadata map[string]interface{}) {
 				t.Helper()
 				if cfg.Mode != "acceptEdits" || metadata[models.SessionMetaKeySessionMode] != "acceptEdits" {
@@ -1054,11 +1099,69 @@ func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T
 			if resp.Code != http.StatusOK {
 				t.Fatalf("expected idle session update to succeed, got %d: %s", resp.Code, resp.Body.String())
 			}
+			var response struct {
+				ConfigurationResult struct {
+					Status    string `json:"status"`
+					Requested string `json:"requested"`
+					Confirmed bool   `json:"confirmed"`
+				} `json:"configuration_result"`
+			}
+			if err := json.Unmarshal(resp.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if response.ConfigurationResult.Status != "saved_for_launch" ||
+				response.ConfigurationResult.Requested != tt.requested ||
+				response.ConfigurationResult.Confirmed {
+				t.Fatalf("configuration result = %+v, want saved_for_launch for %q", response.ConfigurationResult, tt.requested)
+			}
 			cfg, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 			if !ok {
 				t.Fatalf("expected persisted runtime config overrides, got %+v", session.Metadata)
 			}
 			tt.assertions(t, cfg, session.Metadata)
+		})
+	}
+}
+
+func TestSessionConfigurationFeedbackStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		result lifecycle.SessionConfigurationResult
+		live   bool
+		want   string
+	}{
+		{
+			name: "saved for launch",
+			want: "saved_for_launch",
+		},
+		{
+			name:   "live value without evidence",
+			result: lifecycle.SessionConfigurationResult{ExecutionID: "exec-1"},
+			live:   true,
+			want:   "unconfirmed",
+		},
+		{
+			name: "provider confirmation",
+			result: lifecycle.SessionConfigurationResult{
+				Requested: "model-requested", Effective: "model-effective", Confirmed: true, ExecutionID: "exec-1",
+			},
+			live: true,
+			want: "applied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newSessionConfigurationFeedback("model", "model-requested", tt.result, tt.live)
+			if got.Status != tt.want {
+				t.Fatalf("status = %q, want %q", got.Status, tt.want)
+			}
+			if tt.live && got.ExecutionID != "exec-1" {
+				t.Fatalf("execution_id = %q, want exec-1", got.ExecutionID)
+			}
+			if got.Confirmed != tt.result.Confirmed || got.Effective != tt.result.Effective {
+				t.Fatalf("feedback = %+v, does not preserve provider result %+v", got, tt.result)
+			}
 		})
 	}
 }

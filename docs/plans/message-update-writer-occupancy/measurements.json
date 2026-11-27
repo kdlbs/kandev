@@ -1,0 +1,509 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T15:37:44.510766+01:00",
+  "git_head": "b8b740f128",
+  "machine": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 5 7640HS with Radeon 760M Graphics",
+    "online_logical_cpus": 11,
+    "go": "go version go1.24.4 linux/amd64",
+    "shared_host_variance": true
+  },
+  "fixture": {
+    "database": "disposable file-backed SQLite from testing.T.TempDir and db.OpenSQLite",
+    "benchmark": "BenchmarkWriterMessageUpdate/bytes=16777216",
+    "message_bytes": 16777216,
+    "sessions": 8,
+    "updates_per_sample": 128,
+    "samples": 3,
+    "order": "reservation restored then fixed path within each pair"
+  },
+  "runs": [
+    {
+      "pair": 1,
+      "variant": "reservation-restored",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-1-reservation-restored.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 118613952,
+      "workload": {
+        "elapsed_seconds": 15.182585392,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 5,
+            "total_ms": 10007.701774000001,
+            "max_ms": 2004.48532,
+            "p50_ms": 2000.937103,
+            "p95_ms": 2001.096239,
+            "p99_ms": 2001.096239
+          },
+          "health.call.ok": {
+            "count": 4,
+            "total_ms": 4169.836321000001,
+            "max_ms": 1581.625656,
+            "p50_ms": 734.378276,
+            "p95_ms": 1542.151897,
+            "p99_ms": 1542.151897
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 116727.70479799998,
+            "max_ms": 5584.981938,
+            "p50_ms": 658.554194,
+            "p95_ms": 2379.83767,
+            "p99_ms": 4648.390581
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 101658.51148899998,
+            "max_ms": 5478.673019,
+            "p50_ms": 547.025782,
+            "p95_ms": 2152.499375,
+            "p99_ms": 4431.212395
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 15066.871903000012,
+            "max_ms": 285.003094,
+            "p50_ms": 105.114738,
+            "p95_ms": 190.279535,
+            "p99_ms": 227.32508
+          },
+          "sidebar.call.ok": {
+            "count": 151,
+            "total_ms": 3100.7465039999997,
+            "max_ms": 49.384976,
+            "p50_ms": 18.878428,
+            "p95_ms": 38.874725,
+            "p99_ms": 48.148838
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 152,
+        "writer_wait_ms": 115771.608848
+      }
+    },
+    {
+      "pair": 1,
+      "variant": "fixed",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-1-fixed.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 65026742,
+      "workload": {
+        "elapsed_seconds": 8.323422695,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 2,
+            "total_ms": 4000.55323,
+            "max_ms": 2000.51622,
+            "p50_ms": 2000.03701,
+            "p95_ms": 2000.03701,
+            "p99_ms": 2000.03701
+          },
+          "health.call.ok": {
+            "count": 4,
+            "total_ms": 3322.6249559999997,
+            "max_ms": 1384.501315,
+            "p50_ms": 906.166893,
+            "p95_ms": 933.771594,
+            "p99_ms": 933.771594
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 65109.97327300001,
+            "max_ms": 2358.049361,
+            "p50_ms": 335.03955,
+            "p95_ms": 1346.113485,
+            "p99_ms": 1929.220028
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 56835.301103,
+            "max_ms": 2309.827719,
+            "p50_ms": 255.92901,
+            "p95_ms": 1306.232128,
+            "p99_ms": 1897.706308
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 8268.512817,
+            "max_ms": 210.856902,
+            "p50_ms": 49.172992,
+            "p95_ms": 175.610542,
+            "p99_ms": 188.58276
+          },
+          "sidebar.call.ok": {
+            "count": 83,
+            "total_ms": 743.5636470000001,
+            "max_ms": 20.3259,
+            "p50_ms": 7.876775,
+            "p95_ms": 15.678279,
+            "p99_ms": 19.187644
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 149,
+        "writer_wait_ms": 64138.648755
+      }
+    },
+    {
+      "pair": 2,
+      "variant": "reservation-restored",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-2-reservation-restored.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 105170716,
+      "workload": {
+        "elapsed_seconds": 13.461850888,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 6,
+            "total_ms": 12010.538436,
+            "max_ms": 2005.100223,
+            "p50_ms": 2000.375248,
+            "p95_ms": 2003.892557,
+            "p99_ms": 2003.892557
+          },
+          "health.call.ok": {
+            "count": 1,
+            "total_ms": 451.158587,
+            "max_ms": 451.158587,
+            "p50_ms": 451.158587,
+            "p95_ms": 451.158587,
+            "p99_ms": 451.158587
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 104588.28257899999,
+            "max_ms": 4110.790612,
+            "p50_ms": 605.342474,
+            "p95_ms": 2311.036306,
+            "p99_ms": 2888.597289
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 91175.406084,
+            "max_ms": 4024.556798,
+            "p50_ms": 494.246917,
+            "p95_ms": 2166.332764,
+            "p99_ms": 2805.538296
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 13401.242911999998,
+            "max_ms": 283.132045,
+            "p50_ms": 94.541991,
+            "p95_ms": 176.612185,
+            "p99_ms": 239.055699
+          },
+          "sidebar.call.ok": {
+            "count": 134,
+            "total_ms": 1791.9896529999996,
+            "max_ms": 47.207898,
+            "p50_ms": 11.756708,
+            "p95_ms": 25.778968,
+            "p99_ms": 34.829765
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 142,
+        "writer_wait_ms": 103610.694722
+      }
+    },
+    {
+      "pair": 2,
+      "variant": "fixed",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-2-fixed.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 49377908,
+      "workload": {
+        "elapsed_seconds": 6.320371864,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 1,
+            "total_ms": 2000.819856,
+            "max_ms": 2000.819856,
+            "p50_ms": 2000.819856,
+            "p95_ms": 2000.819856,
+            "p99_ms": 2000.819856
+          },
+          "health.call.ok": {
+            "count": 4,
+            "total_ms": 3303.8862360000003,
+            "max_ms": 1462.137705,
+            "p50_ms": 658.215374,
+            "p95_ms": 1120.076369,
+            "p99_ms": 1120.076369
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 49317.97192899999,
+            "max_ms": 1739.995975,
+            "p50_ms": 311.355238,
+            "p95_ms": 992.66591,
+            "p99_ms": 1271.918562
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 43023.29672099998,
+            "max_ms": 1718.713507,
+            "p50_ms": 251.748237,
+            "p95_ms": 912.47509,
+            "p99_ms": 1214.754153
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 6272.833505,
+            "max_ms": 121.597011,
+            "p50_ms": 37.18824,
+            "p95_ms": 101.64152,
+            "p99_ms": 116.510335
+          },
+          "sidebar.call.ok": {
+            "count": 63,
+            "total_ms": 642.7457019999999,
+            "max_ms": 17.349636,
+            "p50_ms": 9.948246,
+            "p95_ms": 16.251475,
+            "p99_ms": 17.256453
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 144,
+        "writer_wait_ms": 48310.845809
+      }
+    },
+    {
+      "pair": 3,
+      "variant": "reservation-restored",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-3-reservation-restored.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 103540749,
+      "workload": {
+        "elapsed_seconds": 13.253215467,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 4,
+            "total_ms": 8001.873577,
+            "max_ms": 2000.751578,
+            "p50_ms": 2000.398021,
+            "p95_ms": 2000.656691,
+            "p99_ms": 2000.656691
+          },
+          "health.call.ok": {
+            "count": 4,
+            "total_ms": 4235.061667,
+            "max_ms": 1919.389692,
+            "p50_ms": 983.769321,
+            "p95_ms": 1101.407761,
+            "p99_ms": 1101.407761
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 102785.90135900002,
+            "max_ms": 6073.814268,
+            "p50_ms": 685.657855,
+            "p95_ms": 1787.054275,
+            "p99_ms": 2325.170273
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 89577.61637099998,
+            "max_ms": 6005.248701,
+            "p50_ms": 563.612069,
+            "p95_ms": 1727.150483,
+            "p99_ms": 2147.707987
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 13206.393433000005,
+            "max_ms": 355.82246,
+            "p50_ms": 79.130729,
+            "p95_ms": 189.164803,
+            "p99_ms": 322.445265
+          },
+          "sidebar.call.ok": {
+            "count": 132,
+            "total_ms": 1131.0148270000009,
+            "max_ms": 23.032722,
+            "p50_ms": 7.897843,
+            "p95_ms": 14.177498,
+            "p99_ms": 17.962085
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 152,
+        "writer_wait_ms": 101791.29001
+      }
+    },
+    {
+      "pair": 3,
+      "variant": "fixed",
+      "log": "docs/plans/message-update-writer-occupancy/runs/pair-3-fixed.log",
+      "command": "python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$/^bytes=16777216$' -benchtime=128x -count=1",
+      "go_benchmark_ns_per_op": 47836013,
+      "workload": {
+        "elapsed_seconds": 6.12300942,
+        "instrumented": true,
+        "measurements": {
+          "health.call.deadline": {
+            "count": 1,
+            "total_ms": 2000.115325,
+            "max_ms": 2000.115325,
+            "p50_ms": 2000.115325,
+            "p95_ms": 2000.115325,
+            "p99_ms": 2000.115325
+          },
+          "health.call.ok": {
+            "count": 3,
+            "total_ms": 2875.451829,
+            "max_ms": 1289.421043,
+            "p50_ms": 833.099607,
+            "p95_ms": 833.099607,
+            "p99_ms": 833.099607
+          },
+          "message_update.call.ok": {
+            "count": 128,
+            "total_ms": 47635.482823999984,
+            "max_ms": 1798.815602,
+            "p50_ms": 296.803864,
+            "p95_ms": 966.397542,
+            "p99_ms": 1086.714543
+          },
+          "message_update.entry.ok": {
+            "count": 128,
+            "total_ms": 41550.54849599998,
+            "max_ms": 1750.257143,
+            "p50_ms": 239.487181,
+            "p95_ms": 921.723264,
+            "p99_ms": 1047.574125
+          },
+          "message_update.span.commit.ok": {
+            "count": 128,
+            "total_ms": 6082.360265999999,
+            "max_ms": 130.537333,
+            "p50_ms": 39.847924,
+            "p95_ms": 94.323355,
+            "p99_ms": 121.886089
+          },
+          "sidebar.call.ok": {
+            "count": 61,
+            "total_ms": 527.9940869999999,
+            "max_ms": 19.966992,
+            "p50_ms": 7.904456,
+            "p95_ms": 15.070449,
+            "p99_ms": 16.86227
+          }
+        },
+        "message_bytes": 16777216,
+        "sessions": 8,
+        "unsettled_observations": 0,
+        "updates": 128,
+        "workload": "message_update",
+        "writer_wait_count": 140,
+        "writer_wait_ms": 46411.713913
+      }
+    }
+  ],
+  "paired_comparison": [
+    {
+      "pair": 1,
+      "reservation_restored_seconds": 15.182585392,
+      "fixed_seconds": 8.323422695,
+      "elapsed_reduction_percent": 45.2,
+      "reservation_restored_entry_p50_ms": 547.025782,
+      "fixed_entry_p50_ms": 255.92901,
+      "reservation_restored_entry_p95_ms": 2152.499375,
+      "fixed_entry_p95_ms": 1306.232128,
+      "reservation_restored_span_p50_ms": 105.114738,
+      "fixed_span_p50_ms": 49.172992,
+      "reservation_restored_span_p95_ms": 190.279535,
+      "fixed_span_p95_ms": 175.610542,
+      "reservation_restored_health_deadlines": 5,
+      "fixed_health_deadlines": 2,
+      "reservation_restored_sidebar_errors": 0,
+      "fixed_sidebar_errors": 0
+    },
+    {
+      "pair": 2,
+      "reservation_restored_seconds": 13.461850888,
+      "fixed_seconds": 6.320371864,
+      "elapsed_reduction_percent": 53.0,
+      "reservation_restored_entry_p50_ms": 494.246917,
+      "fixed_entry_p50_ms": 251.748237,
+      "reservation_restored_entry_p95_ms": 2166.332764,
+      "fixed_entry_p95_ms": 912.47509,
+      "reservation_restored_span_p50_ms": 94.541991,
+      "fixed_span_p50_ms": 37.18824,
+      "reservation_restored_span_p95_ms": 176.612185,
+      "fixed_span_p95_ms": 101.64152,
+      "reservation_restored_health_deadlines": 6,
+      "fixed_health_deadlines": 1,
+      "reservation_restored_sidebar_errors": 0,
+      "fixed_sidebar_errors": 0
+    },
+    {
+      "pair": 3,
+      "reservation_restored_seconds": 13.253215467,
+      "fixed_seconds": 6.12300942,
+      "elapsed_reduction_percent": 53.8,
+      "reservation_restored_entry_p50_ms": 563.612069,
+      "fixed_entry_p50_ms": 239.487181,
+      "reservation_restored_entry_p95_ms": 1727.150483,
+      "fixed_entry_p95_ms": 921.723264,
+      "reservation_restored_span_p50_ms": 79.130729,
+      "fixed_span_p50_ms": 39.847924,
+      "reservation_restored_span_p95_ms": 189.164803,
+      "fixed_span_p95_ms": 94.323355,
+      "reservation_restored_health_deadlines": 4,
+      "fixed_health_deadlines": 1,
+      "reservation_restored_sidebar_errors": 0,
+      "fixed_sidebar_errors": 0
+    }
+  ],
+  "aggregate": {
+    "reservation_restored_elapsed_seconds": [
+      15.182585392,
+      13.461850888,
+      13.253215467
+    ],
+    "fixed_elapsed_seconds": [
+      8.323422695,
+      6.320371864,
+      6.12300942
+    ],
+    "reservation_restored_health_deadlines": 15,
+    "fixed_health_deadlines": 4,
+    "reservation_restored_writer_wait_count": 446,
+    "fixed_writer_wait_count": 433
+  },
+  "limitations": [
+    "The fixed path completed sooner in all three pairs, but every fixed-path workload still had at least one health deadline.",
+    "Samples were collected on a shared host; timing magnitude is workload-specific and is not a test threshold.",
+    "The experiment does not attribute the historical production incident writer or show that all 503s are resolved."
+  ]
+}

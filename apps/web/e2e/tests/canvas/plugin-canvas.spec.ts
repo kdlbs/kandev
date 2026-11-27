@@ -10,14 +10,39 @@ import {
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
   listCanvasReleases,
+  readCanvasFeature,
   removeCanvas,
+  removeCanvasSource,
   seedCanvasWorkspacePreview,
   seedTaskCanvas,
   waitForSessionWorkspace,
   writeCanvasSource,
 } from "./canvas-fixture";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
+  test("hides canvas routes and navigation after an explicit opt-out", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    const restore = await backend.useEnv({ KANDEV_FEATURES_CANVASES: "false" });
+    try {
+      await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+      await expect(testPage.getByRole("button", { name: /canvases/i })).toHaveCount(0);
+      const response = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/workspaces/${encodeURIComponent(seedData.workspaceId)}/canvases`,
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      await restore();
+    }
+  });
+
   test("canvas setup opens the task dialog directly from the empty sidebar", async ({
     testPage,
     apiClient,
@@ -30,12 +55,9 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     try {
       await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
       await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 20_000 });
-      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible({
-        timeout: 20_000,
-      });
-
       const sectionHeader = testPage.getByRole("button", { name: /canvases/i }).first();
       await sectionHeader.click();
+      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible();
       const setup = testPage.getByTestId("sidebar-canvases-empty");
       await expect(setup).toBeVisible();
 
@@ -139,12 +161,11 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
   test("discovers and operates an owner-created task canvas from the workbench", async ({
     testPage,
     apiClient,
-    backend,
     seedData,
   }) => {
     test.setTimeout(150_000);
 
-    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    expect(await readCanvasFeature(apiClient)).toBe(true);
     let canvasId: string | undefined;
     let workspacePreview: Awaited<ReturnType<typeof seedCanvasWorkspacePreview>> | undefined;
     try {
@@ -302,6 +323,16 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
       await fixture.getByTestId("canvas-fixture-move").dispatchEvent("click");
       await expect(fixture.getByTestId("canvas-fixture-move-status")).toHaveText(/moved:/);
+      // The move response precedes its asynchronous session lifecycle updates.
+      await expect
+        .poll(
+          async () => {
+            const metadata = (await apiClient.getTask(seeded.taskId)).metadata ?? {};
+            return Object.hasOwn(metadata, "manual_move_lifecycle_pending");
+          },
+          { timeout: 60_000, message: "Waiting for the canvas task move lifecycle to settle" },
+        )
+        .toBe(false);
 
       await fixture.getByTestId("canvas-fixture-continue").dispatchEvent("click");
       await expect(fixture.getByTestId("canvas-fixture-message-status")).toHaveText("accepted");
@@ -372,7 +403,6 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await workspacePreview?.cleanup();
-      await releaseFeature();
     }
   });
 
@@ -398,7 +428,8 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
       await testPage.reload();
       await testPage.goto(`/t/${encodeURIComponent(seeded.taskId)}`);
-      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
+      await new SessionPage(testPage).waitForDockviewReady();
+      await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
       await expect
         .poll(
           () =>
@@ -549,6 +580,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
     let canvasId: string | undefined;
+    const sourceWorkspacePaths: string[] = [];
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true, {
         noPermissions: true,
@@ -560,6 +592,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         seeded.taskId,
         seeded.taskSessionId,
       );
+      sourceWorkspacePaths.push(workspacePath);
       writeCanvasSource(workspacePath, seeded.canvas, { minimalPermissions: true });
       const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
         canvas_id: seeded.canvas.id,
@@ -577,6 +610,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         seeded.taskId,
         reviewSession.session_id,
       );
+      sourceWorkspacePaths.push(reviewWorkspacePath);
       writeCanvasSource(reviewWorkspacePath, seeded.canvas, { minimalPermissions: true });
       await waitForSessionDone(
         apiClient,
@@ -630,6 +664,11 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         }));
       expect(scrollMetrics.scrollHeight).toBeLessThanOrEqual(scrollMetrics.clientHeight);
     } finally {
+      if (canvasId) {
+        for (const workspacePath of sourceWorkspacePaths) {
+          removeCanvasSource(workspacePath, canvasId);
+        }
+      }
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }

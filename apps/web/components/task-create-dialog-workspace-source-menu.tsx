@@ -19,7 +19,7 @@ import {
 } from "@/components/task-create-dialog-repository-picker";
 import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
 import { applyRepositorySet } from "@/components/task-create-dialog-repository-sets";
-import type { TaskRepositorySetsConfig } from "@/components/task-create-dialog-types";
+import type { TaskRepositorySetsConfig, TaskRepoRow } from "@/components/task-create-dialog-types";
 import type { LocalRepository, Repository, RepositorySet } from "@/lib/types/http";
 import type {
   RemoteRepository,
@@ -33,6 +33,7 @@ export type WorkspaceSourceMenuView = "menu" | "repository" | "folder" | "set";
 export type WorkspaceSourceMenuProps = {
   repositories: Repository[];
   discoveredRepositories: LocalRepository[];
+  selectedLocalRows?: TaskRepoRow[];
   accessible: UseRemoteRepositoriesResult;
   workspaceId: string | null;
   remoteOriginMode?: boolean;
@@ -46,6 +47,7 @@ export type WorkspaceSourceMenuProps = {
   onPasteRemote: (url: string) => void;
   onSelectFolder: (path: string) => void;
   onCreateRepository?: () => void;
+  onOpenRepositoryPicker?: () => void;
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
   repositoryCreationOpen?: boolean;
@@ -112,7 +114,15 @@ export function WorkspaceSourceMenuContent({
 }) {
   const { t } = useTranslation();
   if (view === "menu") {
-    return <WorkspaceSourceMenuOptions {...props} onViewChange={onViewChange} />;
+    return (
+      <WorkspaceSourceMenuOptions
+        {...props}
+        onViewChange={(next) => {
+          if (next === "repository") props.onOpenRepositoryPicker?.();
+          onViewChange(next);
+        }}
+      />
+    );
   }
   return (
     <div className="flex min-w-0 flex-col" data-testid={`workspace-source-view-${view}`}>
@@ -231,6 +241,7 @@ function SourceViewBody({
       <RepositoryPicker
         repositories={props.repositories}
         discoveredRepositories={props.discoveredRepositories}
+        selectedLocalRows={props.selectedLocalRows}
         accessible={props.accessible}
         workspaceId={props.workspaceId}
         remoteOriginMode={props.remoteOriginMode}

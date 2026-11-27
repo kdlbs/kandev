@@ -2,10 +2,17 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // fakeWorkspaceGroupMembershipReader is a test double for
@@ -13,13 +20,17 @@ import (
 // active group members regardless of what the real office schema would say.
 type fakeWorkspaceGroupMembershipReader struct {
 	memberTaskIDs map[string]bool
+	read          func(context.Context) (map[string]bool, error)
 }
 
 func (f fakeWorkspaceGroupMembershipReader) HasWorkspaceGroupForTask(_ context.Context, taskID string) (bool, error) {
 	return f.memberTaskIDs[taskID], nil
 }
 
-func (f fakeWorkspaceGroupMembershipReader) GetActiveWorkspaceGroupTaskIDs(_ context.Context, taskIDs []string) (map[string]bool, error) {
+func (f fakeWorkspaceGroupMembershipReader) GetActiveWorkspaceGroupTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	if f.read != nil {
+		return f.read(ctx)
+	}
 	out := make(map[string]bool, len(taskIDs))
 	for _, id := range taskIDs {
 		if f.memberTaskIDs[id] {
@@ -27,6 +38,75 @@ func (f fakeWorkspaceGroupMembershipReader) GetActiveWorkspaceGroupTaskIDs(_ con
 		}
 	}
 	return out, nil
+}
+
+func TestBuildRunnerMutabilityViewsPreservesNonCancellationReadDiagnostics(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		deadline  bool
+		readError func(context.Context, context.CancelFunc) error
+		wantWarn  int
+	}{
+		{
+			name:     "wrapped deadline remains a warning",
+			deadline: true,
+			readError: func(ctx context.Context, _ context.CancelFunc) error {
+				<-ctx.Done()
+				return fmt.Errorf("workspace group read deadline: %w", ctx.Err())
+			},
+			wantWarn: 1,
+		},
+		{
+			name: "database failure concurrent with cancellation remains a warning",
+			readError: func(_ context.Context, cancel context.CancelFunc) error {
+				cancel()
+				return errors.New("sqlite busy")
+			},
+			wantWarn: 1,
+		},
+		{
+			name: "wrapped request cancellation stays quiet",
+			readError: func(_ context.Context, cancel context.CancelFunc) error {
+				cancel()
+				return fmt.Errorf("workspace group read: %w", context.Canceled)
+			},
+			wantWarn: 0,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			svc, _, _, _ := newRunnerSwitchTestService(t)
+			core, observed := observer.New(zapcore.DebugLevel)
+			log, err := logger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("create observer logger: %v", err)
+			}
+			svc.logger = log
+			ctx, cancel := context.WithCancel(context.Background())
+			if testCase.deadline {
+				cancel()
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+			}
+			defer cancel()
+			readCalls := 0
+			svc.SetWorkspaceGroupMembershipReader(fakeWorkspaceGroupMembershipReader{
+				read: func(readCtx context.Context) (map[string]bool, error) {
+					readCalls++
+					return nil, testCase.readError(readCtx, cancel)
+				},
+			})
+
+			views := svc.BuildRunnerMutabilityViews(ctx, []*models.Task{{ID: "task-cancel-log"}})
+			if _, ok := views["task-cancel-log"]; !ok {
+				t.Fatal("BuildRunnerMutabilityViews omitted the requested task")
+			}
+			if readCalls != 1 {
+				t.Fatalf("workspace group read count = %d, want 1", readCalls)
+			}
+			if got := observed.FilterLevelExact(zapcore.WarnLevel).Len(); got != testCase.wantWarn {
+				t.Fatalf("warning count = %d, want %d", got, testCase.wantWarn)
+			}
+		})
+	}
 }
 
 // seedRunnerMutabilityViewsTasks creates one workspace/workflow and seven

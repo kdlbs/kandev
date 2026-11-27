@@ -98,10 +98,10 @@ hold while the toggle is on, with the off path governed by
 `AC-OFFICE-IDENTITY-GRADUATION-001.7` and `-002.7`; nothing in REQ-001 or REQ-002
 requires removing the conditional early. REQ-003 binds in both.
 
-**This capability's implementation delivers the default-on release only**:
-`AC-OFFICE-IDENTITY-GRADUATION-004.1`, `-004.2`, `-004.3` and all of REQ-003. The
-retirement criteria (`-004.5` … `-004.10`) define the successor release and are
-not built here; `-004.4` forbids delivering both at once.
+The first implementation delivered the default-on release:
+`AC-OFFICE-IDENTITY-GRADUATION-004.1`, `-004.2`, `-004.3` and all of REQ-003.
+The successor retirement release implements `-004.5` through `-004.10` while
+preserving `-004.4`: the two changes belong to distinct releases.
 
 ### REQ-OFFICE-IDENTITY-GRADUATION-001: Per-agent session binding is unconditional
 
@@ -333,6 +333,6 @@ release; only after that does the flag identity disappear, permanently.
 
 ## System design
 
-No paired system design is required: this capability removes a conditional and
-retires an identity, adding no new component, model, contract or control flow. It
-preserves [`task-session-identity-01.md`](../system-design/task-session-identity-01.md).
+The [graduation design](../system-design/session-identity-graduation.md) covers
+flag retirement and preserves the existing
+[session identity design](../system-design/task-session-identity-01.md).

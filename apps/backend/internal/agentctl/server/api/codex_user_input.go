@@ -1,0 +1,213 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
+	"github.com/kandev/kandev/internal/common/logger"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	mcp "github.com/kandev/kandev/internal/mcp/server"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+)
+
+func newCodexUserInputRequestHandler(
+	cfg *config.InstanceConfig,
+	backend *mcp.ChannelBackendClient,
+	log *logger.Logger,
+) adapter.UserInputRequestHandler {
+	return func(ctx context.Context, request *adapter.UserInputRequest) (*adapter.UserInputResponse, error) {
+		questions, err := clarificationQuestions(request.Questions)
+		if err != nil {
+			return nil, err
+		}
+		payload := struct {
+			clarificationprotocol.NativeQuestionScope
+			TaskID            string                           `json:"task_id"`
+			Questions         []clarificationprotocol.Question `json:"questions"`
+			AllowFreeTextOnly bool                             `json:"allow_free_text_only,omitempty"`
+		}{
+			NativeQuestionScope: clarificationprotocol.NativeQuestionScope{SessionID: cfg.SessionID},
+			TaskID:              cfg.TaskID,
+			Questions:           questions,
+			AllowFreeTextOnly:   true,
+		}
+		var result clarificationprotocol.Response
+		if request.ScopedCancellation {
+			payload.NativeRequestID = request.ItemID
+			if err := requestScopedClarification(ctx, backend, payload.NativeQuestionScope, payload, &result, log); err != nil {
+				return nil, err
+			}
+			return normalizeClarificationResponse(request.Questions, result)
+		}
+		if err := backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, &result); err != nil {
+			if ctx.Err() != nil {
+				go notifyCodexQuestionCancellation(backend, cfg.SessionID, log)
+			}
+			return nil, err
+		}
+		return normalizeClarificationResponse(request.Questions, result)
+	}
+}
+
+func requestScopedClarification(
+	ctx context.Context, backend *mcp.ChannelBackendClient, scope clarificationprotocol.NativeQuestionScope,
+	payload any, result *clarificationprotocol.Response, log *logger.Logger,
+) error {
+	if scope.PendingID() == "" {
+		return errors.New("missing native clarification identity")
+	}
+	ctx = mcporigin.WithTrustedInternalCall(ctx)
+	for {
+		err := backend.RequestPayload(ctx, ws.ActionMCPAskUserQuestion, payload, result)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			go notifyNativeQuestionCancellation(backend, scope, log)
+			return ctx.Err()
+		}
+		if !errors.Is(err, mcp.ErrKandevCallOutcomeUnknown) {
+			return err
+		}
+	}
+}
+
+func notifyNativeQuestionCancellation(backend *mcp.ChannelBackendClient, scope clarificationprotocol.NativeQuestionScope, log *logger.Logger) {
+	ctx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.Background()), 10*time.Second)
+	defer cancel()
+	if err := backend.RequestPayload(ctx, ws.ActionMCPCancelNativeClarification, scope, nil); err != nil {
+		log.Warn("failed to cancel native clarification", zap.String("session_id", scope.SessionID), zap.Error(err))
+	}
+}
+
+func clarificationQuestions(questions []adapter.UserInputQuestion) ([]clarificationprotocol.Question, error) {
+	if len(questions) == 0 {
+		return nil, errors.New("codex user input request has no questions")
+	}
+	result := make([]clarificationprotocol.Question, 0, len(questions))
+	for _, question := range questions {
+		if question.IsSecret {
+			return nil, fmt.Errorf("secret Codex user input question %q cannot be stored in Kandev chat", question.ID)
+		}
+		allowCustomText := question.IsOther
+		converted := clarificationprotocol.Question{
+			ID:              question.ID,
+			Title:           question.Header,
+			Prompt:          question.Prompt,
+			AllowCustomText: &allowCustomText,
+			Options:         make([]clarificationprotocol.Option, 0, len(question.Options)),
+		}
+		for _, option := range question.Options {
+			converted.Options = append(converted.Options, clarificationprotocol.Option{
+				ID:          option.OptionID,
+				Label:       option.Label,
+				Description: option.Description,
+			})
+		}
+		result = append(result, converted)
+	}
+	return result, nil
+}
+
+func normalizeClarificationResponse(
+	questions []adapter.UserInputQuestion,
+	response clarificationprotocol.Response,
+) (*adapter.UserInputResponse, error) {
+	if response.Rejected {
+		return &adapter.UserInputResponse{Rejected: true}, nil
+	}
+	if len(response.Answers) != len(questions) {
+		return nil, errors.New("clarification response must answer every Codex question exactly once")
+	}
+	questionsByID := make(map[string]adapter.UserInputQuestion, len(questions))
+	for _, question := range questions {
+		questionsByID[question.ID] = question
+	}
+	answers := make(map[string]adapter.UserInputAnswer, len(response.Answers))
+	for _, answer := range response.Answers {
+		question, exists := questionsByID[answer.QuestionID]
+		if !exists {
+			return nil, fmt.Errorf("clarification response contains unknown Codex question ID %q", answer.QuestionID)
+		}
+		if _, duplicate := answers[answer.QuestionID]; duplicate {
+			return nil, fmt.Errorf("clarification response repeats Codex question ID %q", answer.QuestionID)
+		}
+		normalized, err := normalizeClarificationAnswer(question, answer)
+		if err != nil {
+			return nil, err
+		}
+		answers[answer.QuestionID] = normalized
+	}
+	if len(answers) != len(questionsByID) {
+		return nil, errors.New("clarification response is missing a Codex question answer")
+	}
+	return &adapter.UserInputResponse{Answers: answers}, nil
+}
+
+func normalizeClarificationAnswer(
+	question adapter.UserInputQuestion,
+	answer clarificationprotocol.Answer,
+) (adapter.UserInputAnswer, error) {
+	if len(answer.SelectedOptions) > 1 {
+		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response selected multiple options for Codex question %q", answer.QuestionID)
+	}
+	if answer.CustomText != "" && (!question.IsOther || len(answer.SelectedOptions) != 0) {
+		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response contains unsupported custom text for Codex question %q", answer.QuestionID)
+	}
+	if len(answer.SelectedOptions) == 0 && strings.TrimSpace(answer.CustomText) == "" {
+		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response left Codex question %q unanswered", answer.QuestionID)
+	}
+	if len(answer.SelectedOptions) == 1 && !userInputOfferedOption(question, answer.SelectedOptions[0]) {
+		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response selected an unoffered option for Codex question %q", answer.QuestionID)
+	}
+	return adapter.UserInputAnswer{
+		OptionIDs:   append([]string(nil), answer.SelectedOptions...),
+		CustomText:  answer.CustomText,
+		Attachments: codexUserInputAttachments(answer.Attachments),
+	}, nil
+}
+
+func codexUserInputAttachments(attachments []clarificationprotocol.AnswerAttachment) []adapter.UserInputAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]adapter.UserInputAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, adapter.UserInputAttachment{
+			AttachmentID: attachment.AttachmentID,
+			Type:         attachment.Type,
+			Name:         attachment.Name,
+			MimeType:     attachment.MimeType,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+			Path:         attachment.Path,
+		})
+	}
+	return out
+}
+
+func userInputOfferedOption(question adapter.UserInputQuestion, selectedID string) bool {
+	for _, option := range question.Options {
+		if option.OptionID == selectedID {
+			return true
+		}
+	}
+	return false
+}
+
+func notifyCodexQuestionCancellation(backend *mcp.ChannelBackendClient, sessionID string, log *logger.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := backend.RequestPayload(ctx, ws.ActionMCPClarificationTimeout, map[string]string{"session_id": sessionID}, nil); err != nil {
+		log.Warn("failed to cancel Codex clarification after provider resolution",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}

@@ -13,3 +13,14 @@ func TestInstanceModes(t *testing.T) {
 		t.Errorf("IsInstanceMode(%q) = true, want false", External)
 	}
 }
+
+// TestCoordinator_IsAnInstanceMode proves the coordinator MCP mode value is
+// accepted by the agentctl instance API, wired in by task 03.
+func TestCoordinator_IsAnInstanceMode(t *testing.T) {
+	if Coordinator != "coordinator" {
+		t.Errorf("Coordinator = %q, want %q", Coordinator, "coordinator")
+	}
+	if !IsInstanceMode(Coordinator) {
+		t.Errorf("IsInstanceMode(%q) = false, want true", Coordinator)
+	}
+}

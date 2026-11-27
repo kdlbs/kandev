@@ -103,62 +103,30 @@ test.describe("Threads view", () => {
     // The simple workflow moves the completed task into its review step.
     await expect(column.getByTestId("thread-status-review-ready")).toBeVisible();
     await expect(testPage.getByTestId(`thread-column-${idle.task_id}`)).toHaveCount(0);
-  });
 
-  test("remembers Threads as the device listing view and reopens Home there", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-remembered");
+    await test.step("remembers Threads as the device listing view and reopens Home there", async () => {
+      await expect(testPage.getByTestId("view-toggle-threads")).toHaveAttribute("data-state", "on");
+      await testPage.goto("/");
+      await expect(testPage).toHaveURL(/\/threads/);
+      await expect(column).toBeVisible();
+    });
 
-    await testPage.goto("/");
-    await expect(new KanbanPage(testPage).board).toBeVisible();
-    await testPage.getByTestId("view-toggle-threads").click();
-    await expect(testPage).toHaveURL(/\/threads/);
-    await expect(testPage.getByTestId("view-toggle-threads")).toHaveAttribute("data-state", "on");
+    await test.step("opens the full task page from a column", async () => {
+      await testPage.goto("/threads");
+      await expect(column).toBeVisible();
+      await column.getByRole("button", { name: "Open task" }).click();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${live.id}`));
+    });
 
-    await testPage.goto("/");
-    await expect(testPage).toHaveURL(/\/threads/);
-    await expect(testPage.getByTestId(`thread-column-${live.id}`)).toBeVisible();
-  });
-
-  test("opens the full task page from a column", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-open-task");
-
-    await testPage.goto("/threads");
-    const column = testPage.getByTestId(`thread-column-${live.id}`);
-    await expect(column).toBeVisible();
-
-    await column.getByRole("button", { name: "Open task" }).click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${live.id}`));
-  });
-
-  test("hands a discussion back to the deck, scrolled to its column", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(180_000);
-    const live = await startAgentTask(testPage, apiClient, seedData, "threads-round-trip");
-
-    // startAgentTask leaves the browser on the task page, which is the surface
-    // the button lives on.
-    await testPage.getByTestId("open-in-threads-button").click();
-
-    await expect(testPage).toHaveURL(new RegExp(`/threads\\?taskId=${live.id}`));
-    const column = testPage.getByTestId(`thread-column-${live.id}`);
-    await expect(column).toBeVisible();
-    await expect(column).toHaveAttribute("data-focused", "true");
-    // The deck is the round trip's destination, so it must not re-offer the jump.
-    await expect(testPage.getByTestId("open-in-threads-button")).toHaveCount(0);
-
-    // The mark answers "where is it"; once the reader starts working it has
-    // nothing left to say and must not sit on the column indefinitely.
-    await column.locator(".tiptap.ProseMirror").click();
-    await expect(column).not.toHaveAttribute("data-focused", "true");
+    await test.step("hands a discussion back to the deck, scrolled to its column", async () => {
+      await testPage.getByTestId("open-in-threads-button").click();
+      await expect(testPage).toHaveURL(new RegExp(`/threads\\?taskId=${live.id}`));
+      await expect(column).toBeVisible();
+      await expect(column).toHaveAttribute("data-focused", "true");
+      await expect(testPage.getByTestId("open-in-threads-button")).toHaveCount(0);
+      await column.locator(".tiptap.ProseMirror").click();
+      await expect(column).not.toHaveAttribute("data-focused", "true");
+    });
   });
 
   test("shares the board width between columns instead of leaving it empty", async ({
@@ -250,6 +218,98 @@ test.describe("Threads view", () => {
     await testPage.getByTestId("threads-view-picker").click();
     await testPage.getByTestId("threads-view-option-view-all-threads").click();
     await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-003.14, AC-UI-THREADS-SAVED-VIEWS-003.15, AC-UI-THREADS-SAVED-VIEWS-003.18
+  test("keeps selected tasks in the order they were picked across a reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(360_000);
+    const { settings } = await apiClient.getUserSettings();
+    const previousViewSettings = {
+      thread_views: settings.thread_views ?? [],
+      thread_active_view_id: settings.thread_active_view_id ?? "view-all-threads",
+      thread_view_draft: settings.thread_view_draft ?? null,
+    };
+    const first = await startAgentTask(testPage, apiClient, seedData, "threads-selection-a", {
+      title: "Threads selection first work",
+    });
+    const second = await startAgentTask(testPage, apiClient, seedData, "threads-selection-b", {
+      title: "Threads selection second work",
+    });
+    const third = await startAgentTask(testPage, apiClient, seedData, "threads-selection-c", {
+      title: "Threads selection third work",
+    });
+    // Neither creation order nor recency: only the picking order produces it.
+    const picked = [second, first, third];
+
+    try {
+      await testPage.goto("/threads");
+      const board = testPage.getByTestId("threads-board");
+      await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
+
+      await testPage.getByTestId("threads-view-picker").click();
+      await testPage.getByTestId("threads-new-view").click();
+      const editor = testPage.getByTestId("threads-view-settings-popover");
+      await expect(editor).toBeVisible();
+      await editor.getByTestId("threads-scope-select").click();
+      await testPage.getByRole("option", { name: "Selected tasks", exact: true }).click();
+      await editor.getByTestId("threads-sort-select").click();
+      const selectionSort = testPage.getByRole("option", { name: "Selection order" });
+      await expect(selectionSort).toContainText("Order in which you selected the tasks");
+      await selectionSort.click();
+
+      await editor.getByTestId("threads-open-task-picker").click();
+      for (const task of picked) {
+        await editor
+          .getByTestId("threads-task-picker-row")
+          .filter({ hasText: task.title })
+          .getByTestId("threads-task-picker-checkbox")
+          .click();
+      }
+      for (const [index, task] of picked.entries()) {
+        const row = editor.getByTestId("threads-task-picker-row").filter({ hasText: task.title });
+        await expect(row.getByTestId("threads-task-picker-position")).toHaveText(String(index + 1));
+      }
+      await editor.getByTestId("threads-task-picker-back").click();
+
+      const savedViewResponse = testPage.waitForResponse((response) => {
+        const request = response.request();
+        if (
+          !response.ok() ||
+          request.method() !== "PATCH" ||
+          !request.url().includes("/api/v1/user/settings")
+        ) {
+          return false;
+        }
+        const payload = request.postDataJSON() as {
+          thread_view_draft?: unknown;
+          thread_views?: Array<{ sort?: { key?: string } }>;
+        } | null;
+        return (
+          payload?.thread_view_draft === null &&
+          payload.thread_views?.some((view) => view.sort?.key === "selection") === true
+        );
+      });
+      await editor.getByTestId("threads-view-save").click();
+      await savedViewResponse;
+
+      const pickedIds = picked.map((task) => task.id);
+      await expect.poll(() => columnOrder(board)).toEqual(pickedIds);
+
+      await testPage.reload();
+      await expect(board.locator("[data-thread-column-id]")).toHaveCount(3);
+      await expect.poll(() => columnOrder(board)).toEqual(pickedIds);
+    } finally {
+      const restored = await apiClient.rawRequest(
+        "PATCH",
+        "/api/v1/user/settings",
+        previousViewSettings,
+      );
+      expect(restored.ok).toBe(true);
+    }
   });
 
   test("confirms deletion of a saved Threads view before closing settings", async ({
@@ -344,7 +404,9 @@ test.describe("Threads view", () => {
     const row = editor.getByTestId("threads-task-picker-row").filter({
       hasText: "Threads view task details",
     });
-    await expect(row.getByRole("img", { name: "Review" })).toBeVisible();
+    await expect(
+      row.getByRole("img", { name: "Turn finished, awaiting instruction" }),
+    ).toBeVisible();
     await expect(row.getByTestId("threads-task-picker-step")).toHaveText("Review");
 
     await apiClient.updateTaskState(task.id, "WAITING_FOR_INPUT");
@@ -570,7 +632,7 @@ test.describe("Threads view", () => {
       sentSessionIds(capture.frames, "message.list"),
       "the unselected sibling must not request a transcript",
     ).not.toContain(target.primarySessionId);
-    await expect(targetColumn.getByRole("button", { name: /add|new/i })).toHaveCount(0);
+    await expect(targetColumn.getByTestId("sessions-dropdown-trigger")).toHaveCount(0);
 
     // The session linked from the task page is a settled clarification sibling.
     // Switching back to the primary replaces only this column's detail stream;

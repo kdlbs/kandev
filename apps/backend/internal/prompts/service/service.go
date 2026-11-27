@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/prompts/models"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
@@ -21,7 +25,9 @@ var (
 )
 
 type Service struct {
-	repo promptstore.Repository
+	repo     promptstore.Repository
+	eventBus bus.EventBus
+	logger   *logger.Logger
 }
 
 type PromptReferenceExpansion struct {
@@ -42,6 +48,12 @@ const (
 	// allocations.
 	maxPromptReferenceCandidateNameBytes    = 1 << 20
 	maxPromptReferenceCandidateContentBytes = 16 << 20
+)
+
+// Saved-prompt size limits, in bytes after whitespace trimming.
+const (
+	MaxPromptNameBytes    = maxPromptNameBytes
+	MaxPromptContentBytes = maxPromptContentBytes
 )
 
 func NewService(repo promptstore.Repository) *Service {
@@ -76,7 +88,22 @@ func (s *Service) GetPromptByName(ctx context.Context, name string) (*models.Pro
 	return prompt, nil
 }
 
+func (s *Service) GetPromptByID(ctx context.Context, id string) (*models.Prompt, error) {
+	prompt, err := s.repo.GetPromptByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
+		return nil, ErrPromptNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return prompt, nil
+}
+
 func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
+	return s.createPrompt(ctx, name, content)
+}
+
+func (s *Service) createPrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
 	name = strings.TrimSpace(name)
 	content = strings.TrimSpace(content)
 	if !validPromptFields(name, content) {
@@ -95,15 +122,16 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 		}
 		return nil, translateNameConflict(err)
 	}
+	s.publishChanged(ctx)
 	return prompt, nil
 }
 
-// translateNameConflict closes the TOCTOU window between assertNameAvailable
-// and the write: the SQLite UNIQUE index on custom_prompts.name is the only
-// authoritative guard, and a concurrent write that loses the race surfaces a
-// "UNIQUE constraint failed" driver error which would otherwise fall through
-// to a generic 500.
+// translateNameConflict maps authoritative unique-name constraints on both databases.
 func translateNameConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "custom_prompts_name_key" {
+		return ErrPromptAlreadyExists
+	}
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return ErrPromptAlreadyExists
 	}
@@ -128,18 +156,48 @@ func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID strin
 }
 
 func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *string, content *string) (*models.Prompt, error) {
-	prompt, err := s.repo.GetPromptByID(ctx, promptID)
-	if err != nil {
-		return nil, ErrPromptNotFound
+	return s.UpdatePromptAtRevision(ctx, promptID, nil, name, content)
+}
+
+// UpdatePromptAtRevision rejects an operator save based on an obsolete prompt revision.
+func (s *Service) UpdatePromptAtRevision(
+	ctx context.Context,
+	promptID string,
+	expectedUpdatedAt *time.Time,
+	name, content *string,
+) (*models.Prompt, error) {
+	if name == nil && content == nil {
+		return s.GetPromptByID(ctx, promptID)
 	}
+	prompt, err := s.GetPromptByID(ctx, promptID)
+	if err != nil {
+		return nil, err
+	}
+	if prompt.IsSynced() {
+		return nil, ErrPromptSyncManaged
+	}
+	if expectedUpdatedAt != nil && !prompt.UpdatedAt.Equal(*expectedUpdatedAt) {
+		return nil, promptstore.ErrPromptWriteRejected
+	}
+	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
+		return nil, translateNameConflict(err)
+	}
+	s.publishChanged(ctx)
+	return prompt, nil
+}
+
+func (s *Service) applyPromptFields(ctx context.Context, prompt *models.Prompt, name, content *string) error {
 	if name != nil {
 		trimmed := strings.TrimSpace(*name)
 		if trimmed == "" || len(trimmed) > maxPromptNameBytes {
-			return nil, ErrInvalidPrompt
+			return ErrInvalidPrompt
 		}
 		if trimmed != prompt.Name {
 			if err := s.assertNameAvailable(ctx, trimmed, prompt.ID); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		prompt.Name = trimmed
@@ -147,21 +205,29 @@ func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *strin
 	if content != nil {
 		trimmed := strings.TrimSpace(*content)
 		if trimmed == "" || len(trimmed) > maxPromptContentBytes {
-			return nil, ErrInvalidPrompt
+			return ErrInvalidPrompt
 		}
 		prompt.Content = trimmed
 	}
-	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
-		return nil, translateNameConflict(err)
-	}
-	return prompt, nil
+	return nil
 }
 
 func (s *Service) DeletePrompt(ctx context.Context, promptID string) error {
 	if promptID == "" {
 		return ErrInvalidPrompt
 	}
-	return s.repo.DeletePrompt(ctx, promptID)
+	existing, err := s.repo.GetPromptByID(ctx, promptID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if existing.IsSynced() {
+		return ErrPromptSyncManaged
+	}
+	if err := s.repo.DeletePrompt(ctx, promptID); err != nil {
+		return err
+	}
+	s.publishChanged(ctx)
+	return nil
 }
 
 // ResolvePromptContent returns the stored prompt content by name, falling back
@@ -185,6 +251,20 @@ func (s *Service) ResolvePromptReferences(ctx context.Context, content string) (
 	if !strings.Contains(content, "@") {
 		return nil, nil
 	}
+	trie, err := s.loadReferenceTrie(ctx)
+	if err != nil {
+		return nil, err
+	}
+	expansions := make([]PromptReferenceExpansion, 0)
+	if err := collectPromptReferences(content, trie, map[string]bool{}, map[string]bool{}, &expansions, 0); err != nil {
+		return nil, err
+	}
+	return expansions, nil
+}
+
+// loadReferenceTrie builds the reference-matching trie over the current
+// saved prompts within the reference candidate budgets.
+func (s *Service) loadReferenceTrie(ctx context.Context) (*promptReferenceTrieNode, error) {
 	prompts, truncated, err := s.repo.ListPromptsForReferenceExpansion(
 		ctx,
 		maxPromptReferenceNames,
@@ -216,11 +296,7 @@ func (s *Service) ResolvePromptReferences(ctx context.Context, content string) (
 	if validPromptCount > maxPromptReferenceNames {
 		return nil, ErrPromptReferenceLimit
 	}
-	expansions := make([]PromptReferenceExpansion, 0)
-	if err := collectPromptReferences(content, trie, map[string]bool{}, map[string]bool{}, &expansions, 0); err != nil {
-		return nil, err
-	}
-	return expansions, nil
+	return trie, nil
 }
 
 type promptReferenceTrieNode struct {

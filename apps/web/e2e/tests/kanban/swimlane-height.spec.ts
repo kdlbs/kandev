@@ -206,6 +206,7 @@ test("live content grows the lane after drag cancellation and shrinks after remo
 }) => {
   // @covers AC-UI-ADAPTIVE-KANBAN-002.5, AC-UI-ADAPTIVE-KANBAN-002.7
   await testPage.setViewportSize({ width: 1440, height: 900 });
+  await testPage.clock.install();
   await withHeightWorkflows(apiClient, seedData, async (second) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -227,7 +228,10 @@ test("live content grows the lane after drag cancellation and shrinks after remo
     for (const task of added) await expect(kanban.taskCard(task.id)).toBeAttached();
     expect((await column.boundingBox())!.height).toBe(200);
     await testPage.keyboard.press("Escape");
+    await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(0);
+    await testPage.clock.runFor(1000);
     await testPage.mouse.up();
+    await expect(testPage).toHaveURL(/\/$/);
     await expect.poll(async () => (await column.boundingBox())!.height).toBeGreaterThan(200);
     expect((await column.boundingBox())!.height).toBeLessThan(800);
     const lane = testPage.getByTestId("desktop-kanban-lane-grid").filter({ has: column });

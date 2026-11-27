@@ -98,9 +98,11 @@ function WorkflowOptions({
           >
             <IconLayoutKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{workflow.name}</span>
-            <Badge variant="secondary" className="h-5 shrink-0 px-1.5 tabular-nums">
-              {workflow.taskCount}
-            </Badge>
+            {workflow.taskCount !== null && (
+              <Badge variant="secondary" className="h-5 shrink-0 px-1.5 tabular-nums">
+                {workflow.taskCount}
+              </Badge>
+            )}
             <SelectionCheck active={isActive} />
           </button>
         );

@@ -19,7 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/internal/secrets"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func testLogger(t *testing.T) *logger.Logger {
@@ -40,6 +40,7 @@ type fakeRuntime struct {
 	mu sync.Mutex
 
 	running       map[string]bool
+	remote        *pluginsdk.RemotePlugin
 	startErr      map[string]error
 	restartCounts map[string]int
 
@@ -126,7 +127,13 @@ func (r *fakeRuntime) Get(id string) (*pluginsdk.RemotePlugin, bool) {
 	if !r.running[id] {
 		return nil, false
 	}
-	return nil, true
+	return r.remote, true
+}
+
+func (r *fakeRuntime) setRemote(remote *pluginsdk.RemotePlugin) {
+	r.mu.Lock()
+	r.remote = remote
+	r.mu.Unlock()
 }
 
 func (r *fakeRuntime) Ping(id string) error {

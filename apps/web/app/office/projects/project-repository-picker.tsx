@@ -34,6 +34,11 @@ type Props = {
   onSelect: (value: string) => void;
   /** Optional render override for the trigger. Defaults to "+ Add repository". */
   triggerLabel?: string;
+  /**
+   * Dialog-local portal target. The project-detail consumer omits it and uses
+   * the default document body, where no clipping ancestor exists.
+   */
+  portalContainer?: HTMLElement | null;
 };
 
 type RepoOption = { key: string; value: string; name: string; path: string };
@@ -57,6 +62,7 @@ export function ProjectRepositoryPicker({
   exclude,
   onSelect,
   triggerLabel,
+  portalContainer,
 }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -118,13 +124,19 @@ export function ProjectRepositoryPicker({
         </TooltipTrigger>
         <TooltipContent>{t("office:pickAWorkspaceRepoADiscovered")}</TooltipContent>
       </Tooltip>
-      <PopoverContent className="w-[420px] p-0" align="start" portal={false}>
+      <PopoverContent
+        className="w-[420px] max-w-[calc(100vw-2rem)] p-0"
+        align="start"
+        collisionPadding={16}
+        portalContainer={portalContainer}
+        style={{ maxHeight: "var(--radix-popover-content-available-height)" }}
+      >
         <RepositoryDiscoveryControls
           workspaceId={workspaceId}
           enabled={open}
           presentation="picker"
         />
-        <Command>
+        <Command className="min-h-0">
           <CommandInput
             placeholder={t("office:searchOrPasteAUrlOr")}
             value={query}
@@ -182,7 +194,7 @@ function PickerCommandList({
 }) {
   const { t } = useTranslation();
   return (
-    <CommandList>
+    <CommandList className="min-h-0">
       <CommandEmpty>
         {discoveryLoading ? t("office:searchingYourMachine") : t("office:noMatches")}
       </CommandEmpty>

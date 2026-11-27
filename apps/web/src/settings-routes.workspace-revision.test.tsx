@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { render, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
@@ -30,7 +30,8 @@ vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => ({
   listExecutors: (...args: unknown[]) => listExecutorsMock(...args),
 }));
 
-import { SettingsRouteBootstrap } from "./settings-routes";
+import { ACTIVE_WORKSPACE_COOKIE, scopedCookieName } from "@/lib/routing/route-bootstrap";
+import { SettingsRouteBootstrap } from "./settings-routes.bootstrap";
 
 const SETTINGS_WORKSPACE_ID = "ws-settings-1";
 const SETTINGS_WORKSPACES_RESPONSE = {
@@ -45,6 +46,10 @@ const SETTINGS_WORKSPACES_RESPONSE = {
   ],
   total: 1,
 };
+
+afterEach(() => {
+  document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
+});
 
 function makeWrapper(initialActiveId: string | null) {
   let captured: StoreApi<AppState> | null = null;
@@ -76,6 +81,35 @@ function stubApis() {
 // Consumers keyed on that revision (the Failed-inbox cache) could then render
 // a stale, pre-switch snapshot after navigating through Settings.
 describe("SettingsRouteBootstrap", () => {
+  it("does not overwrite workspace changes made while settings are loading", async () => {
+    stubApis();
+    const existing = SETTINGS_WORKSPACES_RESPONSE.workspaces[0];
+    const created = { ...existing, id: "ws-created", name: "Created during load" };
+    const renamed = { ...existing, name: "Renamed during load" };
+    let releaseExecutors!: (value: { executors: [] }) => void;
+    listExecutorsMock.mockReturnValueOnce(
+      new Promise<{ executors: [] }>((resolve) => {
+        releaseExecutors = resolve;
+      }),
+    );
+    listWorkspacesMock
+      .mockResolvedValueOnce(SETTINGS_WORKSPACES_RESPONSE)
+      .mockResolvedValue({ workspaces: [created, renamed], total: 2 });
+    const { Wrapper, getStore } = makeWrapper(SETTINGS_WORKSPACE_ID);
+    render(<SettingsRouteBootstrap pathname="/settings" />, { wrapper: Wrapper });
+    await act(async () => {
+      getStore()!.getState().setWorkspaces([created, renamed]);
+      releaseExecutors({ executors: [] });
+    });
+    await waitFor(() => expect(getStore()!.getState().settingsData.executorsLoaded).toBe(true));
+    expect(
+      getStore()!
+        .getState()
+        .workspaces.items.map(({ id, name }) => ({ id, name })),
+    ).toEqual([created, renamed].map(({ id, name }) => ({ id, name })));
+    expect(getStore()!.getState().workspaces.activeId).toBe(SETTINGS_WORKSPACE_ID);
+  });
+
   it("routes the resolved active workspace through setActiveWorkspace, bumping activeIdRevision", async () => {
     stubApis();
     listWorkspacesMock.mockResolvedValue(SETTINGS_WORKSPACES_RESPONSE);
@@ -98,6 +132,28 @@ describe("SettingsRouteBootstrap", () => {
 
     await waitFor(() => {
       expect(listWorkspacesMock).toHaveBeenCalled();
+    });
+    expect(getStore()?.getState().workspaces.activeId).toBe(SETTINGS_WORKSPACE_ID);
+    expect(getStore()?.getState().workspaces.activeIdRevision ?? 0).toBe(0);
+  });
+
+  // The active-workspace cookie is shared by every tab on the origin, so a
+  // sibling tab on another workspace rewrites it. Opening Settings must keep
+  // the workspace this tab already had, or "Kandev" home lands elsewhere.
+  it("keeps this tab's active workspace when the shared cookie names another one", async () => {
+    stubApis();
+    const otherWorkspace = { ...SETTINGS_WORKSPACES_RESPONSE.workspaces[0], id: "ws-other" };
+    listWorkspacesMock.mockResolvedValue({
+      workspaces: [otherWorkspace, ...SETTINGS_WORKSPACES_RESPONSE.workspaces],
+      total: 2,
+    });
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=ws-other; path=/`;
+
+    const { Wrapper, getStore } = makeWrapper(SETTINGS_WORKSPACE_ID);
+    render(<SettingsRouteBootstrap pathname="/settings" />, { wrapper: Wrapper });
+
+    await waitFor(() => {
+      expect(getStore()?.getState().workspaces.items).toHaveLength(2);
     });
     expect(getStore()?.getState().workspaces.activeId).toBe(SETTINGS_WORKSPACE_ID);
     expect(getStore()?.getState().workspaces.activeIdRevision ?? 0).toBe(0);

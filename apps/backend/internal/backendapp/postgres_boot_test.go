@@ -121,12 +121,6 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if _, err := services.Sentry.ListInstances(context.Background(), "boot-workspace"); err != nil {
 		t.Fatalf("Sentry persistence is unavailable after PostgreSQL boot: %v", err)
 	}
-	if services.AzureDevOps == nil {
-		t.Fatal("Azure DevOps service is unavailable after PostgreSQL boot")
-	}
-	if _, err := services.AzureDevOps.GetConfigForWorkspace(context.Background(), "boot-workspace"); err != nil {
-		t.Fatalf("Azure DevOps persistence is unavailable after PostgreSQL boot: %v", err)
-	}
 	if services.WorkflowSync == nil {
 		t.Fatal("workflow sync service is unavailable after PostgreSQL boot")
 	}
@@ -139,6 +133,9 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	if err := runInitialAgentSetup(context.Background(), services.User, agentSettingsController, log); err != nil {
 		t.Fatalf("run initial agent setup with postgres: %v", err)
 	}
+	t.Run("background_work_settlement", func(t *testing.T) {
+		assertPostgresBackgroundWorkSettlement(t, services.Task, repos.Task)
+	})
 }
 
 type postgresConnInfo struct {

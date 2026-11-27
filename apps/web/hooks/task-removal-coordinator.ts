@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { fetchTask } from "@/lib/api";
+import { confirmSidebarDeletion } from "@/lib/sidebar/confirm-sidebar-deletion";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { softNavigate } from "@/lib/routing/client-router";
 import {
@@ -166,6 +167,7 @@ function beginRemovalOperation(
     taskIds: [...removalTaskIds],
     requestIds,
     departure,
+    cascade: opts?.cascade === true,
   });
   if (!token) return null;
   return {
@@ -203,6 +205,7 @@ function beginUnselectedRemovalOperation(
     taskIds: [...removalTaskIds],
     requestIds,
     departure: null,
+    cascade: opts?.cascade === true,
   });
   if (!token) return null;
   return {
@@ -492,6 +495,8 @@ async function settleAndReconcileRemoval(params: {
     settled.succeededRequests,
     removalIdsByRequest,
   );
+  if (action === "delete")
+    confirmSidebarDeletion(deps.store, succeededRemovalIds, operation.workspaceId);
   const activeSucceeded = operation.departure
     ? succeededRemovalIds.has(operation.departure.taskId)
     : false;

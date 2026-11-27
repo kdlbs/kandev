@@ -40,6 +40,7 @@ async function seedExpansionTask(
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }
@@ -139,7 +140,7 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,
@@ -282,11 +283,8 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await waitForDiffText(testPage, "HUNK_TOP");
     await waitForDiffText(testPage, "HUNK_BOTTOM", 5_000);
 
-    // Shiki renders each token as a <span style="color: #RRGGBB"> inside the
-    // diff's shadow DOM. If the worker pool is broken or the @pierre/diffs ↔
-    // Shiki contract changes, lines still render as plain text without inline
-    // color styles. Highlighting is async (worker pool), so poll instead of
-    // reading once.
+    // Pierre applies dual-theme token colors through shadow-root CSS variables,
+    // so check computed colors instead of relying on inline token styles.
     await expect
       .poll(
         () =>
@@ -295,8 +293,11 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
             const shadow = container?.shadowRoot;
             if (!shadow) return -1;
             let count = 0;
-            for (const span of shadow.querySelectorAll<HTMLElement>("span[style]")) {
-              if (/color\s*:/i.test(span.getAttribute("style") ?? "")) count++;
+            for (const line of shadow.querySelectorAll<HTMLElement>("[data-line]")) {
+              const lineColor = getComputedStyle(line).color;
+              for (const span of line.querySelectorAll<HTMLElement>("span")) {
+                if (getComputedStyle(span).color !== lineColor) count++;
+              }
             }
             return count;
           }),
@@ -400,6 +401,10 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     const expandAllBtn = testPage.getByRole("button", { name: "Expand all" });
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
+    await expect(testPage.getByRole("button", { name: "Collapse unchanged" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // After expanding, all original lines should be visible — pick a line
     // from the middle of the previously collapsed region.

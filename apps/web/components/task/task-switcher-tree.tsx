@@ -1,7 +1,9 @@
 "use client";
 
-import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
+import type { GroupKey } from "@/lib/state/slices/ui/sidebar-view-types";
+import { sidebarTaskOccurrenceKey } from "@/lib/sidebar/visible-task-order";
 import {
   SortableTaskLevel,
   SortableTaskNode,
@@ -11,6 +13,7 @@ import {
 import { GroupHeader } from "./task-switcher-group";
 import { TaskRow, type SubtaskToggleInfo, type TaskRowProps } from "./task-switcher-row";
 import type { TaskSwitcherItem } from "./task-switcher-types";
+import { useTranslation } from "react-i18next";
 
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
@@ -25,6 +28,7 @@ export type TaskRowBaseProps = Omit<
 >;
 
 type TaskTreeContext = {
+  occurrenceScope: string;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   collapsedSubs: Set<string>;
   onToggleSubtasks?: (parentTaskId: string) => void;
@@ -81,6 +85,7 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   if (
     previous.task !== next.task ||
     previous.depth !== next.depth ||
+    previous.ctx.occurrenceScope !== next.ctx.occurrenceScope ||
     previous.isDraggable !== next.isDraggable ||
     previous.ctx.rowProps !== next.ctx.rowProps ||
     previous.ctx.getNestCandidateTasks !== next.ctx.getNestCandidateTasks ||
@@ -98,16 +103,33 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
   return nodeSubtreeEqual(previous.task.id, previous.ctx, next.ctx, new Set());
 }
 
+function useOccurrenceSelection(
+  callback: TaskRowProps["onToggleSelectTask"],
+  occurrenceKey: string,
+) {
+  const handler = useCallback(
+    (id: string) => callback?.(id, occurrenceKey),
+    [callback, occurrenceKey],
+  );
+  return callback ? handler : undefined;
+}
+
 const TaskTreeNode = memo(function TaskTreeNode({
   task,
   depth,
   ctx,
   isDraggable,
 }: TaskTreeNodeProps) {
+  const { t } = useTranslation();
+  const occurrenceKey = sidebarTaskOccurrenceKey(ctx.occurrenceScope, task.id);
+  const { onToggleSelectTask, onSelectTaskRange } = ctx.rowProps;
+  const toggleSelection = useOccurrenceSelection(onToggleSelectTask, occurrenceKey);
+  const selectRange = useOccurrenceSelection(onSelectTaskRange, occurrenceKey);
   const subs = ctx.subTasksByParentId.get(task.id);
-  const hasSubs = !!subs?.length;
+  const subtaskCount =
+    task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
+  const hasSubs = subtaskCount > 0 || !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const subtaskCount = hasSubs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0;
   const handleToggleSubtasks = useCallback(
     () => ctx.onToggleSubtasks?.(task.id),
     [ctx.onToggleSubtasks, task.id],
@@ -128,7 +150,12 @@ const TaskTreeNode = memo(function TaskTreeNode({
   const handle = (
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
-    <div className="relative">
+    <div className="relative" data-sidebar-occurrence={occurrenceKey}>
+      {task.continuationParentTitle && (
+        <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
+          {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
+        </div>
+      )}
       <TaskRow
         task={task}
         depth={depth}
@@ -137,6 +164,8 @@ const TaskTreeNode = memo(function TaskTreeNode({
         isPinned={isRoot && ctx.pinnedSet.has(task.id)}
         {...ctx.rowProps}
         getNestCandidateTasks={ctx.getNestCandidateTasks}
+        onToggleSelectTask={toggleSelection}
+        onSelectTaskRange={selectRange}
         getNestHierarchyTasks={ctx.getNestHierarchyTasks}
         onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
       />
@@ -144,7 +173,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
     </div>
   );
   const nested =
-    !subsHidden && hasSubs ? (
+    !subsHidden && !!subs?.length ? (
       <TaskTreeLevel parentTaskId={task.id} tasks={subs} depth={depth + 1} ctx={ctx} />
     ) : undefined;
   return (
@@ -195,6 +224,7 @@ function getReorderHandler(parentTaskId: string | null, ctx: TaskTreeContext) {
 }
 
 export type GroupSectionProps = {
+  grouping?: GroupKey;
   group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
@@ -205,6 +235,7 @@ export type GroupSectionProps = {
   collapsedSubtaskParentIds?: string[];
   onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
+  groupIndent?: boolean;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
@@ -241,22 +272,7 @@ function sameTaskSubtree(
 }
 
 function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
-  if (
-    previous.group !== next.group ||
-    previous.rowProps !== next.rowProps ||
-    previous.getNestHierarchyTasks !== next.getNestHierarchyTasks ||
-    previous.pinnedSet !== next.pinnedSet ||
-    previous.isCollapsed !== next.isCollapsed ||
-    previous.onToggleGroup !== next.onToggleGroup ||
-    previous.collapsedSubtaskParentIds !== next.collapsedSubtaskParentIds ||
-    previous.onToggleSubtasks !== next.onToggleSubtasks ||
-    previous.showHeader !== next.showHeader ||
-    previous.onReorderGroup !== next.onReorderGroup ||
-    previous.onReorderSubtasks !== next.onReorderSubtasks ||
-    previous.onNestTask !== next.onNestTask
-  ) {
-    return false;
-  }
+  if (!groupSectionOptionsEqual(previous, next)) return false;
   return (
     previous.subTasksByParentId === next.subTasksByParentId ||
     sameTaskSubtree(
@@ -265,6 +281,25 @@ function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps)
       previous.subTasksByParentId,
       next.subTasksByParentId,
     )
+  );
+}
+
+function groupSectionOptionsEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
+  return (
+    previous.grouping === next.grouping &&
+    previous.group === next.group &&
+    previous.rowProps === next.rowProps &&
+    previous.getNestHierarchyTasks === next.getNestHierarchyTasks &&
+    previous.pinnedSet === next.pinnedSet &&
+    previous.isCollapsed === next.isCollapsed &&
+    previous.onToggleGroup === next.onToggleGroup &&
+    previous.collapsedSubtaskParentIds === next.collapsedSubtaskParentIds &&
+    previous.onToggleSubtasks === next.onToggleSubtasks &&
+    previous.showHeader === next.showHeader &&
+    previous.groupIndent === next.groupIndent &&
+    previous.onReorderGroup === next.onReorderGroup &&
+    previous.onReorderSubtasks === next.onReorderSubtasks &&
+    previous.onNestTask === next.onNestTask
   );
 }
 
@@ -309,11 +344,15 @@ export const GroupSection = memo(function GroupSection({
   collapsedSubtaskParentIds,
   onToggleSubtasks,
   showHeader,
+  groupIndent = true,
   onReorderGroup,
   onReorderSubtasks,
   onNestTask,
 }: GroupSectionProps) {
-  const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
+  const sectionId = useId();
+  const headerId = `${sectionId}-header`;
+  const bodyId = `${sectionId}-body`;
+  const totalCount = group.matchingCount ?? countGroupTasks(group.tasks, subTasksByParentId);
   const groupTasks = useMemo(
     () => flattenGroupTasks(group.tasks, subTasksByParentId),
     [group.tasks, subTasksByParentId],
@@ -327,6 +366,7 @@ export const GroupSection = memo(function GroupSection({
   const renderTree = (nestTargetIds: Set<string>) => {
     if (isCollapsed) return null;
     const ctx: TaskTreeContext = {
+      occurrenceScope: group.key,
       subTasksByParentId,
       collapsedSubs: new Set(collapsedSubtaskParentIds ?? []),
       onToggleSubtasks,
@@ -340,17 +380,34 @@ export const GroupSection = memo(function GroupSection({
       nestTargetIds,
       externalDragContext: true,
     };
-    return <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />;
+    return (
+      <div
+        id={bodyId}
+        role={showHeader ? "group" : undefined}
+        aria-labelledby={showHeader ? headerId : undefined}
+        className={showHeader && groupIndent ? "ml-5" : undefined}
+      >
+        <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />
+      </div>
+    );
   };
 
   return (
-    <div data-testid="sidebar-group" data-group-key={group.key}>
+    <div
+      data-testid="sidebar-group"
+      data-group-key={group.key}
+      className={showHeader ? "pb-1 last:pb-0" : undefined}
+    >
       {showHeader && (
         <GroupHeader
+          id={headerId}
+          controlsId={bodyId}
           label={group.label}
+          color={group.color}
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}
+          isContinuation={group.isContinuation}
           onToggle={() => onToggleGroup?.(group.key)}
         />
       )}

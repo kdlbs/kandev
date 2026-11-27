@@ -14,17 +14,19 @@ import (
 
 // WorkspaceStreamCallbacks defines callbacks for workspace stream events
 type WorkspaceStreamCallbacks struct {
-	OnShellOutput   func(data string)
-	OnShellExit     func(code int)
-	OnGitStatus     func(update *GitStatusUpdate)
-	OnGitCommit     func(notification *GitCommitNotification)
-	OnGitReset      func(notification *GitResetNotification)
-	OnBranchSwitch  func(notification *GitBranchSwitchNotification)
-	OnFileChange    func(notification *FileChangeNotification)
-	OnProcessOutput func(output *types.ProcessOutput)
-	OnProcessStatus func(status *types.ProcessStatusUpdate)
-	OnConnected     func()
-	OnError         func(err string)
+	OnShellOutput  func(data string)
+	OnShellExit    func(code int)
+	OnGitStatus    func(update *GitStatusUpdate)
+	OnGitCommit    func(notification *GitCommitNotification)
+	OnGitReset     func(notification *GitResetNotification)
+	OnBranchSwitch func(notification *GitBranchSwitchNotification)
+	OnFileChange   func(notification *FileChangeNotification)
+	// OnWorktreeInventory receives change-only linked-worktree snapshots.
+	OnWorktreeInventory func(inventory *WorktreeInventory)
+	OnProcessOutput     func(output *types.ProcessOutput)
+	OnProcessStatus     func(status *types.ProcessStatusUpdate)
+	OnConnected         func()
+	OnError             func(err string)
 }
 
 // WorkspaceStream represents an active workspace stream connection
@@ -54,10 +56,15 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		return nil, fmt.Errorf("workspace stream already connected")
 	}
 	c.mu.Unlock()
-
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/workspace/stream"
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
+	streamCtx, cancel, err := c.RuntimeBoundContext(ctx)
 	if err != nil {
+		return nil, err
+	}
+
+	const wsRoute = "/api/v1/workspace/stream"
+	conn, _, err := c.dialWebSocket(streamCtx, wsRoute, c.wsAuthHeaders())
+	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
 	}
 
@@ -75,6 +82,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	if c.closed {
 		c.mu.Unlock()
 		_ = conn.Close()
+		cancel()
 		return nil, fmt.Errorf("agentctl client closed during workspace stream dial")
 	}
 	// Re-check after dial: two concurrent StreamWorkspace callers can both pass
@@ -83,6 +91,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	if c.workspaceStreamConn != nil {
 		c.mu.Unlock()
 		_ = conn.Close()
+		cancel()
 		return nil, fmt.Errorf("workspace stream already connected")
 	}
 	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
@@ -97,10 +106,11 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	c.workspaceStream = stream
 	c.mu.Unlock()
 
-	c.logger.Info("connected to workspace stream", zap.String("url", wsURL))
+	c.logger.Info("connected to workspace stream", zap.String("path", wsRoute))
 
 	go func() {
 		defer stream.wg.Done()
+		defer cancel()
 		c.readWorkspaceStream(conn, stream, callbacks)
 	}()
 	go func() {
@@ -114,14 +124,15 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 // workspaceTracedTypes contains message types that are low-volume and worth tracing.
 // High-volume types (shell_output, process_output, shell_input, ping, pong) are excluded.
 var workspaceTracedTypes = map[types.WorkspaceMessageType]bool{
-	types.WorkspaceMessageTypeGitStatus:     true,
-	types.WorkspaceMessageTypeGitCommit:     true,
-	types.WorkspaceMessageTypeGitReset:      true,
-	types.WorkspaceMessageTypeBranchSwitch:  true,
-	types.WorkspaceMessageTypeFileChange:    true,
-	types.WorkspaceMessageTypeProcessStatus: true,
-	types.WorkspaceMessageTypeConnected:     true,
-	types.WorkspaceMessageTypeError:         true,
+	types.WorkspaceMessageTypeGitStatus:         true,
+	types.WorkspaceMessageTypeGitCommit:         true,
+	types.WorkspaceMessageTypeGitReset:          true,
+	types.WorkspaceMessageTypeBranchSwitch:      true,
+	types.WorkspaceMessageTypeFileChange:        true,
+	types.WorkspaceMessageTypeWorktreeInventory: true,
+	types.WorkspaceMessageTypeProcessStatus:     true,
+	types.WorkspaceMessageTypeConnected:         true,
+	types.WorkspaceMessageTypeError:             true,
 }
 
 // readWorkspaceStream is the read loop for the workspace WebSocket stream.

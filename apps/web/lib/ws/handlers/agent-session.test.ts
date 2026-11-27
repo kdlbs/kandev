@@ -1,17 +1,33 @@
-/* eslint-disable max-lines -- comprehensive session-state handler tests */
+/* eslint-disable max-lines, sonarjs/no-duplicate-string -- comprehensive session-state handler tests */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
+import { fetchTaskSession } from "@/lib/api/domains/session-api";
+import type * as SessionApi from "@/lib/api/domains/session-api";
+import {
+  flushFocusWork,
+  notifySibling,
+  notifyState,
+  response,
+  withSiblings,
+} from "./task-primary-focus.test-helpers";
+
+vi.mock("@/lib/api/domains/session-api", async (original) => ({
+  ...(await original<typeof SessionApi>()),
+  fetchTaskSession: vi.fn(),
+}));
 const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
+const AGENTCTL_READY_ACTION = "session.agentctl_ready";
 const CURRENT_INCARNATION = `incarnation-2`;
 const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
@@ -26,12 +42,14 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
+    contextWindow: { bySessionId: {} },
     setTaskSession: vi.fn(),
     setTaskSessionsForTask: vi.fn(),
     upsertTaskSessionFromEvent: vi.fn(),
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    invalidateConfirmedConfigOptions: vi.fn(),
     setResumeSkipped: vi.fn(),
     clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),
@@ -40,6 +58,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     queue: { bySessionId: {}, metaBySessionId: {} },
     setQueueEntries: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
+    invalidateGitStatusInventory: vi.fn(),
     bumpSessionGitCheckoutGeneration: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -813,6 +832,214 @@ describe("session.state_changed name propagation", () => {
   });
 });
 
+describe("session.state_changed native compaction metadata", () => {
+  it("patches an existing gauge without inventing a new one", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 12_171,
+            remaining: 259_829,
+            efficiency: 4,
+            compactionCount: 1,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: {
+          context_compaction_count: 2,
+          context_compaction_reporting: {
+            source: "copilot_native",
+            availability: "available",
+            coverage: "partial",
+            revision: 2,
+          },
+        },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({
+        size: 272_000,
+        used: 12_171,
+        compactionCount: 2,
+        compactionReporting: expect.objectContaining({ coverage: "partial", revision: 2 }),
+      }),
+    );
+  });
+
+  it("does not create a zero-token gauge for a count-only update", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: { bySessionId: {} },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_compaction_count: 1 },
+      }),
+    );
+
+    expect(setContextWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed context window clears", () => {
+  it("clears an existing gauge on explicit null while retaining the lifetime count", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            compactionCount: 2,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_window: null, context_compaction_count: 2 },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ size: 0, used: 0, compactionCount: 2 }),
+    );
+  });
+
+  it("clears an existing gauge from a full snapshot null while retaining the count", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: {
+        bySessionId: {
+          "s-1": {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            compactionCount: 2,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        session_metadata: { context_window: null, context_compaction_count: 2 },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ size: 0, used: 0, compactionCount: 2 }),
+    );
+  });
+});
+
+describe("session.state_changed retained compaction counts", () => {
+  it("uses the retained session count when the first gauge arrives late", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({
+      setContextWindow,
+      contextWindow: { bySessionId: {} },
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            metadata: {
+              context_compaction_count: 5,
+              context_compaction_reporting: {
+                source: "copilot_native",
+                availability: "available",
+                coverage: "observed",
+                revision: 3,
+              },
+            },
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: {
+          context_window: {
+            size: 272_000,
+            used: 9_695,
+            remaining: 262_305,
+            efficiency: 4,
+            source: "acp",
+          },
+          context_compaction_count: 2,
+        },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({
+        compactionCount: 5,
+        compactionReporting: expect.objectContaining({ revision: 3 }),
+      }),
+    );
+  });
+
+  it("merges a partial metadata patch into the session row", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const store = makeStore({ upsertTaskSessionFromEvent });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        metadata: { context_compaction_count: 3 },
+      }),
+    );
+
+    const call = upsertTaskSessionFromEvent.mock.calls.at(-1);
+    expect(call?.[1]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ context_compaction_count: 3 }),
+      }),
+    );
+  });
+});
+
 describe("session.state_changed context window provenance", () => {
   it("retains the backend context-window source", () => {
     const setContextWindow = vi.fn();
@@ -1046,28 +1273,16 @@ describe("session.state_changed → active session switching with pins", () => {
     vi.clearAllMocks();
   });
 
-  it("adopts the replacement when the pinned active session is already terminal", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-new", new_state: "STARTING" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+  it("adopts the replacement when the pinned active session is already terminal", async () => {
+    const store = withSiblings("COMPLETED");
+    store.getState().removeTaskSession("t1", "latest");
+    store.getState().setActiveSession("t1", "old");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifySibling(store);
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("latest");
+    expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 
   it("does not adopt another session when a non-terminal pin was orphaned by active-session drift", () => {
@@ -1098,95 +1313,117 @@ describe("session.state_changed → active session switching with pins", () => {
   });
 });
 
+describe("session.state_changed during restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
+  it.each([true, false])(
+    "preserves only the restarting selection and pin (target pending: %s)",
+    async (restartingTarget) => {
+      const store = withSiblings("RUNNING");
+      store.getState().removeTaskSession("t1", "latest");
+      store.getState().setActiveSession("t1", "old");
+      getSessionRestartStore(store).setState(new Set([restartingTarget ? "old" : "other"]), true);
+      vi.mocked(fetchTaskSession).mockResolvedValue(response("CANCELLED"));
+      notifyState(store, "CANCELLED", "2026-11-19T12:00:00Z");
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe(restartingTarget ? "old" : "next");
+      expect(store.getState().tasks.pinnedSessionId).toBe(restartingTarget ? "old" : null);
+    },
+  );
+});
+
 describe("session.state_changed → active session handoff on terminal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("hands off when the current active session transitions to terminal", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
+  it("hands off after confirming completion, inheriting readiness before focus", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "latest");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "STARTING" });
+    store.setState({ sessionAgentctl: { itemsBySessionId: {} } });
+    store.getState().setSessionAgentctlStatus("old", {
+      status: "ready",
+      agentExecutionId: "old-execution",
+      updatedAt: "2026-11-19T12:00:00Z",
     });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().sessionAgentctl.itemsBySessionId.next).toBeUndefined();
+    let readyAtSelection: boolean | undefined;
+    const stop = store.subscribe((state) => {
+      if (state.tasks.activeSessionId === "next" && readyAtSelection === undefined)
+        readyAtSelection = state.sessionAgentctl.itemsBySessionId.next?.status === "ready";
     });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+    try {
+      await flushFocusWork();
+      expect(store.getState().tasks.activeSessionId).toBe("next");
+      expect(readyAtSelection).toBe(true);
+      expect(
+        store.getState().sessionAgentctl.itemsBySessionId.next?.agentExecutionId,
+      ).toBeUndefined();
+    } finally {
+      stop();
+    }
   });
 
-  // The per-task list here still shows s-old as RUNNING (pre-event state), so
-  // pickReplacementSessionId returns s-old itself. This exercises the
-  // `replacement !== sessionId` guard — without it, we'd set activeSessionId
-  // to the same session that just became terminal.
-  it("does not hand off when the only candidate is the terminating session itself", () => {
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+  it("keeps the completed conversation when it is the only stored session", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "next");
+    store.getState().removeTaskSession("t1", "latest");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.old.state).toBe("COMPLETED");
   });
 
-  it("does not hand off when all other sessions for the task are terminal", () => {
+  it("keeps the completed conversation when all siblings are terminal", async () => {
+    const store = withSiblings("RUNNING");
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.next, state: "CANCELLED" });
+    store
+      .getState()
+      .setTaskSession({ ...store.getState().taskSessions.items.latest, state: "FAILED" });
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:01Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("old");
+    expect(store.getState().taskSessions.items.next.state).toBe("CANCELLED");
+    expect(store.getState().taskSessions.items.latest.state).toBe("FAILED");
+  });
+});
+
+describe("session.state_changed → failed start keeps focus", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the active session when it fails to start or resume", () => {
     const store = makeStore({
       tasks: {
         activeTaskId: "t-1",
-        activeSessionId: "s-old",
+        activeSessionId: "s-resume",
         pinnedSessionId: null,
         lastSessionByTaskId: {},
       },
       taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
+        items: { "s-resume": { id: "s-resume", task_id: "t-1", state: "STARTING" } },
       },
       taskSessionsByTask: {
         itemsByTaskId: {
           "t-1": [
-            { id: "s-done", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
+            { id: "s-resume", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+            {
+              id: "s-waiting",
+              task_id: "t-1",
+              state: "WAITING_FOR_INPUT",
+              started_at: "",
+              updated_at: "",
+            },
           ],
         },
       },
@@ -1197,7 +1434,7 @@ describe("session.state_changed → active session handoff on terminal", () => {
       id: "m",
       type: "notification",
       action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+      payload: { task_id: "t-1", session_id: "s-resume", new_state: "FAILED" },
     });
 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
@@ -1209,79 +1446,31 @@ describe("session.state_changed → respects user-pinned session", () => {
     vi.clearAllMocks();
   });
 
-  it("hands off when the pinned active session reaches a terminal state", () => {
-    // Genuine RUNNING→COMPLETED transition: previousState is non-terminal,
-    // so the workflow handoff should still fire even though the session
-    // is pinned.
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "RUNNING", started_at: "", updated_at: "" },
-            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
-          ],
-        },
-      },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
-    expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  it("hands off when the pinned active session reaches a terminal state", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().removeTaskSession("t1", "latest");
+    store.getState().setActiveSession("t1", "old");
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
+    expect(store.getState().tasks.pinnedSessionId).toBeNull();
   });
 
-  it("hands off to the promoted primary when the new session is not yet in the per-task list", () => {
-    // Race that produced the reported bug: a workflow step switch to a step
-    // with a different agent profile promotes the new primary via task.updated
-    // (reflected on the kanban task) BEFORE the old session's terminal
-    // state_changed arrives, so s-new is not yet present in taskSessionsByTask.
-    // pickReplacementSessionId finds no in-list successor, so focus must follow
-    // the switch by falling back to the task's authoritative primary session.
-    const store = makeStore({
-      tasks: {
-        activeTaskId: "t-1",
-        activeSessionId: "s-old",
-        pinnedSessionId: "s-old",
-        lastSessionByTaskId: {},
-      },
-      taskSessions: {
-        items: { "s-old": { id: "s-old", task_id: "t-1", state: "RUNNING" } },
-      },
+  it("hands off to a promoted primary missing from the per-task list", async () => {
+    const store = withSiblings("RUNNING");
+    store.getState().setActiveSession("t1", "old");
+    store.setState(({ kanban, taskSessions, taskSessionsByTask }) => ({
+      kanban: { ...kanban, tasks: [{ ...kanban.tasks[0], primarySessionId: "next" }] },
       taskSessionsByTask: {
-        itemsByTaskId: {
-          "t-1": [
-            { id: "s-old", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
-          ],
-        },
+        ...taskSessionsByTask,
+        itemsByTaskId: { t1: [taskSessions.items.old] },
       },
-      kanban: { tasks: [{ id: "t-1", primarySessionId: "s-new" }] },
-      kanbanMulti: { snapshots: {} },
-    });
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler({
-      id: "m",
-      type: "notification",
-      action: STATE_CHANGED_EVENT,
-      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
-    });
-
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
+    }));
+    vi.mocked(fetchTaskSession).mockResolvedValue(response("COMPLETED"));
+    notifyState(store, "COMPLETED", "2026-11-19T12:00:00Z");
+    await flushFocusWork();
+    expect(store.getState().tasks.activeSessionId).toBe("next");
   });
 
   it("does not hand off when a pinned terminal session receives a replay state_changed", () => {
@@ -1447,12 +1636,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",
@@ -1484,12 +1673,43 @@ describe("session.state_changed → agentctl ready fallback", () => {
       completeWorkspaceRestoration,
       bumpWorkspaceFilesRefresh,
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("clears a failed workspace restore when the matching agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "error",
+      details: "The workspace restore was interrupted.",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
     });
@@ -1557,12 +1777,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",
@@ -1596,6 +1816,132 @@ describe("session.state_changed → agentctl ready fallback", () => {
       }),
     );
     expect(bumpSessionGitCheckoutGeneration).toHaveBeenCalledWith("s-1");
+  });
+
+  it("keeps the launched workspace as the relative-link base after sibling materialization", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const setTaskSession = vi.fn();
+    const setWorktree = vi.fn();
+    const clearLegacyGitStatusEntry = vi.fn();
+    const invalidateGitStatusInventory = vi.fn();
+    const existing = {
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      repository_id: "primary-repo",
+      worktree_id: "primary-worktree",
+      worktree_path: "/task-root/master",
+      worktree_branch: "main",
+      workspace_path: "/task-root/master",
+      agent_workspace_path: "/task-root/master",
+    };
+    const store = makeStore({
+      taskSessions: { items: { "s-1": existing } },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      clearLegacyGitStatusEntry,
+      invalidateGitStatusInventory,
+      bumpSessionGitCheckoutGeneration: vi.fn(),
+      upsertTaskSessionFromEvent,
+      setWorktree,
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_repository_id: "secondary-repo",
+        worktree_path: "/task-root/secondary",
+        worktree_branch: "main",
+        task_workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+      },
+    });
+
+    expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({
+        workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+      }),
+    );
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace_path: TASK_ROOT,
+        agent_workspace_path: "/task-root/master",
+        worktree_path: "/task-root/master",
+      }),
+    );
+    expect(setWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sibling-worktree", repositoryId: "secondary-repo" }),
+    );
+    expect(clearLegacyGitStatusEntry).toHaveBeenCalledWith("s-1");
+    expect(invalidateGitStatusInventory).toHaveBeenCalledWith("s-1");
+  });
+
+  it("keeps a valid unnamed root snapshot when attachment does not promote the root", () => {
+    const clearLegacyGitStatusEntry = vi.fn();
+    const invalidateGitStatusInventory = vi.fn();
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            repository_id: "root-repo",
+            worktree_id: "root-worktree",
+            worktree_path: TASK_ROOT,
+            worktree_branch: "main",
+            workspace_path: TASK_ROOT,
+          },
+        },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["root-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      clearLegacyGitStatusEntry,
+      invalidateGitStatusInventory,
+      bumpSessionGitCheckoutGeneration: vi.fn(),
+      upsertTaskSessionFromEvent: vi.fn(),
+      setWorktree: vi.fn(),
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_path: "/task-root/secondary",
+        worktree_branch: "main",
+        task_workspace_path: TASK_ROOT,
+        agent_workspace_path: TASK_ROOT,
+      },
+    });
+
+    expect(clearLegacyGitStatusEntry).not.toHaveBeenCalled();
+    expect(invalidateGitStatusInventory).toHaveBeenCalledWith("s-1");
   });
 
   it("does not call upsertTaskSessionFromEvent when agentctl payload omits task_environment_id", () => {

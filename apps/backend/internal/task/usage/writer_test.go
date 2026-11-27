@@ -363,6 +363,44 @@ func TestSubscribe_PublishedEvent_IsRecordedWithoutBlockingThePublisher(t *testi
 	})
 }
 
+func TestProcessEventPublishesUsageInvalidationAfterCommit(t *testing.T) {
+	repo := &fakeUsageRepo{}
+	w := NewWriter(repo, nil, nil)
+	eb := bus.NewMemoryEventBus(logger.Default())
+	t.Cleanup(eb.Close)
+	if err := w.Subscribe(eb); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	var invalidation *bus.Event
+	committedBeforePublish := false
+	_, err := eb.Subscribe(events.BuildSessionUsageUpdatedWildcardSubject(), func(_ context.Context, event *bus.Event) error {
+		invalidation = event
+		committedBeforePublish = repo.rowCount() == 1
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe usage invalidation: %v", err)
+	}
+
+	payload := validPayload("evt-committed")
+	payload.SessionID = "session-1"
+	payload.TurnID = "turn-1"
+	w.processEvent(context.Background(), payload)
+	if invalidation == nil {
+		t.Fatal("no usage invalidation published")
+	}
+	if !committedBeforePublish {
+		t.Fatal("usage invalidation was published before the ledger write returned successfully")
+	}
+	if invalidation.Type != events.SessionUsageUpdated || invalidation.Subject != events.BuildSessionUsageUpdatedSubject("session-1") {
+		t.Fatalf("invalidation type/subject = %q/%q", invalidation.Type, invalidation.Subject)
+	}
+	data, ok := invalidation.Data.(map[string]string)
+	if !ok || data["task_id"] != "task-1" || data["session_id"] != "session-1" || data["turn_id"] != "turn-1" {
+		t.Fatalf("invalidation payload = %#v", invalidation.Data)
+	}
+}
+
 // TestStartStop_Idempotent pins that calling Start or Stop more than once
 // is a safe no-op (matches the internal/integrations/healthpoll shape).
 func TestStartStop_Idempotent(t *testing.T) {

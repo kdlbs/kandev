@@ -12,7 +12,12 @@ const settings: StorageMaintenanceSettings = {
   quarantine_retention_hours: 168,
   workspaces: { enabled: true, dependency_cleanup_enabled: false },
   kandev_containers: { enabled: true },
-  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  go_cache: {
+    enabled: false,
+    max_bytes: 16106127360,
+    adopted_path: "",
+    allow_cleanup_while_busy: false,
+  },
   docker: {
     dedicated_daemon_acknowledged: true,
     build_cache_enabled: true,
@@ -456,7 +461,7 @@ describe("StoragePolicyCard interactions", () => {
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
-    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(19);
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(20);
   });
 });
 
@@ -505,5 +510,38 @@ describe("Go cache section copy", () => {
     expect(
       screen.getByText(`New host-local executions use ${capabilities.managed_go_cache_path}.`),
     ).toBeTruthy();
+  });
+
+  it("shows the busy-cleanup warning and saves the Go-only policy switch", () => {
+    const onChange = vi.fn();
+    renderCard(false, onChange);
+
+    expect(screen.getByTestId("storage-go-cache-busy-warning").textContent).toContain(
+      "Active builds may fail and need a retry.",
+    );
+    const toggle = screen.getByTestId("storage-go-cache-allow-busy");
+    expect(toggle.getAttribute("data-state")).toBe("unchecked");
+    expect(toggle.className).toContain("max-md:!h-11");
+    fireEvent.click(toggle);
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...settings,
+      go_cache: { ...settings.go_cache, allow_cleanup_while_busy: true },
+    });
+  });
+
+  it("marks the section dirty when the persisted busy-cleanup choice changes", () => {
+    const draft = {
+      ...settings,
+      go_cache: { ...settings.go_cache, allow_cleanup_while_busy: true },
+    };
+    renderCard(false, vi.fn(), draft, settings);
+
+    expect(
+      screen.getByTestId("storage-policy-section-go-cache").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("storage-go-cache-allow-busy").getAttribute("data-settings-dirty"),
+    ).toBe("true");
   });
 });

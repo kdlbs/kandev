@@ -237,6 +237,32 @@ func TestMapUserSettingsStateNormalizesLastSeenDisplay(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateNormalizesMessageTimeDisplay(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  string
+	}{
+		{value: usermodels.MessageTimeDisplayAbsoluteShort, want: usermodels.MessageTimeDisplayAbsoluteShort},
+		{value: usermodels.MessageTimeDisplayAbsoluteLong, want: usermodels.MessageTimeDisplayAbsoluteLong},
+		{value: "future", want: usermodels.MessageTimeDisplayRelative},
+		{value: "", want: usermodels.MessageTimeDisplayRelative},
+	} {
+		state := mapUserSettingsState(userdto.UserSettingsResponse{
+			Settings: userdto.UserSettingsDTO{MessageTimeDisplay: test.value},
+		}, "workspace-1")
+		if got := state["messageTimeDisplay"]; got != test.want {
+			t.Errorf("messageTimeDisplay = %#v, want %q", got, test.want)
+		}
+	}
+}
+
+func TestMapUserSettingsStateDefaultsAgentTabCloseBehavior(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "workspace-1")
+	if got := state["agentTabCloseBehavior"]; got != usermodels.AgentTabCloseBehaviorDeleteSession {
+		t.Fatalf("agentTabCloseBehavior = %#v, want %q", got, usermodels.AgentTabCloseBehaviorDeleteSession)
+	}
+}
+
 // TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID verifies boot state carries the
 // default utility agent profile id, the field the Settings UI actually writes.
 func TestMapUserSettingsStateIncludesDefaultUtilityAgentProfileID(t *testing.T) {
@@ -319,5 +345,25 @@ func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T
 	}
 	if simplified, ok := got["simplified"].(bool); !ok || !simplified {
 		t.Fatalf("simplified = %#v, want true", got["simplified"])
+	}
+}
+
+// TestMapUserSettingsStateIncludesPromptSuggestions verifies boot state carries the prompt suggestion flag.
+func TestMapUserSettingsStateIncludesPromptSuggestions(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{PromptSuggestions: true},
+	}, "workspace-1")
+
+	if got, ok := state["promptSuggestions"].(bool); !ok || !got {
+		t.Fatalf("promptSuggestions = %#v, want true", state["promptSuggestions"])
+	}
+}
+
+func TestMarkdownPreviewBootProjection(t *testing.T) {
+	for _, value := range []bool{true, false} {
+		state := mapUserSettingsState(userdto.UserSettingsResponse{Settings: userdto.UserSettingsDTO{MarkdownPreviewByDefault: value}}, "workspace-1")
+		if state["markdownPreviewByDefault"] != value {
+			t.Fatalf("boot = %#v", state["markdownPreviewByDefault"])
+		}
 	}
 }

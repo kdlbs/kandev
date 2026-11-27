@@ -20,6 +20,28 @@ type settingsScanner struct {
 	revision int64
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+func TestTasksListGroupLegacySettingsRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: `{"tasks_list_group":"state","tasks_list_sort":"title_asc"}`, revision: 7}, DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TasksListGroup != "workflow_step" || settings.Revision != 7 || settings.TasksListSort != "title_asc" {
+		t.Fatalf("legacy settings = (%q, %d, %q)", settings.TasksListGroup, settings.Revision, settings.TasksListSort)
+	}
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tasks_list_group"] != "workflow_step" {
+		t.Fatalf("persisted group = %v", payload["tasks_list_group"])
+	}
+}
+
 // upsertUserSettingsForTest writes settings via UpsertUserSettingsPreservingTaskCreateLastUsed at the current stored revision.
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
@@ -95,8 +117,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read migrated settings: %v", err)
 	}
-	if settings.Revision != 0 {
-		t.Fatalf("migrated revision = %d, want 0", settings.Revision)
+	if settings.Revision != 2 {
+		t.Fatalf("migrated revision = %d, want 2", settings.Revision)
 	}
 	settings.AppStatusBarEnabled = true
 	settings.UpdatedAt = now.Add(time.Second)
@@ -104,8 +126,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("write migrated settings: %v", err)
 	}
-	if updated.Revision != 1 {
-		t.Fatalf("updated revision = %d, want 1", updated.Revision)
+	if updated.Revision != 3 {
+		t.Fatalf("updated revision = %d, want 3", updated.Revision)
 	}
 
 	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -116,8 +138,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read settings after migration replay: %v", err)
 	}
-	if replayed.Revision != 1 {
-		t.Fatalf("revision after migration replay = %d, want 1", replayed.Revision)
+	if replayed.Revision != 3 {
+		t.Fatalf("revision after migration replay = %d, want 3", replayed.Revision)
 	}
 	if !replayed.AppStatusBarEnabled {
 		t.Fatal("status bar preference was not preserved across migration replay")
@@ -161,12 +183,14 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 
 // TestScanUserSettingsSidebarDefaults verifies the canonical default sidebar view and that explicit sidebar settings are preserved.
 func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	groupIndent := true
 	defaultView := models.SidebarView{
 		ID:              "view-all-tasks",
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
@@ -343,6 +367,62 @@ func TestScanUserSettingsUnreadDividerDefault(t *testing.T) {
 			}
 			if settings.UnreadDivider != tt.want {
 				t.Fatalf("UnreadDivider = %v, want %v", settings.UnreadDivider, tt.want)
+			}
+		})
+	}
+}
+
+// TestScanUserSettingsUnreadTaskDotDefault verifies unread_task_dot defaults to false
+// independently of unread_divider and honors explicit values.
+func TestScanUserSettingsUnreadTaskDotDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings disable the dot", raw: `{}`, want: false},
+		{name: "enabled divider leaves the dot disabled", raw: `{"unread_divider":true}`, want: false},
+		{name: "explicit false disables the dot", raw: `{"unread_task_dot":false}`, want: false},
+		{name: "explicit true enables the dot without the divider", raw: `{"unread_divider":false,"unread_task_dot":true}`, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.UnreadTaskDot != tt.want {
+				t.Fatalf("UnreadTaskDot = %v, want %v", settings.UnreadTaskDot, tt.want)
+			}
+		})
+	}
+}
+
+// TestScanUserSettingsUnreadTaskDotHideDelay verifies the hide delay defaults
+// to five seconds and that an out-of-range stored value falls back to it.
+func TestScanUserSettingsUnreadTaskDotHideDelay(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "missing delay uses the default", raw: `{}`, want: 2},
+		{name: "zero hides at once", raw: `{"unread_task_dot_hide_delay_seconds":0}`, want: 0},
+		{name: "maximum is kept", raw: `{"unread_task_dot_hide_delay_seconds":60}`, want: 60},
+		{name: "above maximum uses the default", raw: `{"unread_task_dot_hide_delay_seconds":61}`, want: 2},
+		{name: "negative uses the default", raw: `{"unread_task_dot_hide_delay_seconds":-1}`, want: 2},
+		{name: "non-integer uses the default", raw: `{"unread_task_dot_hide_delay_seconds":"7"}`, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.UnreadTaskDotHideDelaySeconds != tt.want {
+				t.Fatalf("UnreadTaskDotHideDelaySeconds = %d, want %d", settings.UnreadTaskDotHideDelaySeconds, tt.want)
 			}
 		})
 	}
@@ -1163,12 +1243,15 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testin
 	}
 	upsertUserSettingsForTest(t, repo, ctx, settings)
 
-	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	got, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		Branch:         "feature",
 		AgentProfileID: "agent-2",
 	})
 	if err != nil {
 		t.Fatalf("update task-create last-used: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed update")
 	}
 
 	if got.TaskCreateLastUsed.RepositoryID != "repo-1" {
@@ -1215,11 +1298,14 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkflowHistory(t *tes
 	}
 	upsertUserSettingsForTest(t, repo, ctx, settings)
 
-	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	got, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		WorkflowIDsByWorkspace: map[string]string{"workspace-3": "workflow-3"},
 	})
 	if err != nil {
 		t.Fatalf("update task-create workflow history: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed update")
 	}
 
 	if got.TaskCreateLastUsed.RepositoryID != "repo-1" {
@@ -1248,7 +1334,7 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkspaceSourceSnapsho
 	}
 
 	ctx := context.Background()
-	_, err = repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	patch := models.TaskCreateLastUsed{
 		WorkspaceSourcesByWorkspace: map[string][]models.TaskCreateLastUsedSource{
 			"workspace-a": {
 				{Kind: "folder", LocalPath: "/work/assets", DisplayName: "assets"},
@@ -1256,9 +1342,14 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkspaceSourceSnapsho
 			},
 			"workspace-empty": {},
 		},
-	})
-	if err != nil {
-		t.Fatalf("update source snapshots: %v", err)
+	}
+	first, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, patch)
+	if err != nil || !changed {
+		t.Fatalf("update source snapshots: changed = %v, err = %v", changed, err)
+	}
+	second, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, patch)
+	if err != nil || changed || first.Revision != second.Revision {
+		t.Fatalf("identical source snapshot should not advance the settings revision: changed = %v, err = %v", changed, err)
 	}
 
 	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
@@ -1303,11 +1394,14 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(
 	}
 	upsertUserSettingsForTest(t, repo, ctx, settings)
 
-	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+	got, changed, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
 		RepositoryID: "repo-after",
 	})
 	if err != nil {
 		t.Fatalf("update task-create last-used: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected changed update")
 	}
 
 	if got.TaskCreateLastUsed.RepositoryID != "repo-after" {
@@ -1326,13 +1420,16 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(
 
 // TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields verifies the generated Postgres update patches task-create fields with jsonb_set.
 func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T) {
-	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+	query, setArgs, diffArgs, hasPatch := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		RepositoryID:      "repo-1",
 		Branch:            "feature",
 		AgentProfileID:    "agent-1",
 		ExecutorProfileID: "exec-1",
 	})
 
+	if !hasPatch {
+		t.Fatal("expected a patch")
+	}
 	if strings.Contains(query, "json(") || strings.Contains(query, "json_extract") {
 		t.Fatalf("postgres update must not use sqlite JSON functions: %s", query)
 	}
@@ -1349,14 +1446,30 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 		!strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
 		t.Fatalf("postgres update should patch task-create fields: %s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	if len(setArgs) != 4 || len(diffArgs) != 4 {
+		t.Fatalf("expected set and comparison args per task-create field, got %d/%d", len(setArgs), len(diffArgs))
+	}
+	if !strings.Contains(query, "IS DISTINCT FROM") {
+		t.Fatalf("postgres update should compare current choices: %s", query)
+	}
+}
+
+// TestBuildPostgresTaskCreateLastUsedUpdateSkipsUnsafeWorkspaceKeys verifies
+// unsafe-only workflow maps do not produce an empty conditional update.
+func TestBuildPostgresTaskCreateLastUsedUpdateSkipsUnsafeWorkspaceKeys(t *testing.T) {
+	query, setArgs, diffArgs, hasPatch := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace.with.dot": "workflow-dot",
+		},
+	})
+	if hasPatch {
+		t.Fatalf("unsafe-only patch must be a no-op: query=%s set=%#v diff=%#v", query, setArgs, diffArgs)
 	}
 }
 
 // TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries verifies the generated Postgres update patches workflow history entries.
 func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *testing.T) {
-	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+	query, setArgs, diffArgs, _ := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		WorkflowIDsByWorkspace: map[string]string{
 			"workspace-1": "workflow-1",
 			"workspace-2": "workflow-2",
@@ -1372,13 +1485,13 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *t
 	if !strings.Contains(query, "{workflow_ids_by_workspace}") {
 		t.Fatalf("postgres update should initialize the workflow history object: %s", query)
 	}
-	if len(args) != 4 {
-		t.Fatalf("expected workspace and workflow args per entry, got %d", len(args))
+	if len(setArgs) != 4 || len(diffArgs) != 4 {
+		t.Fatalf("expected set and comparison args per entry, got %d/%d", len(setArgs), len(diffArgs))
 	}
 }
 
 func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkspaceSourceSnapshots(t *testing.T) {
-	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+	query, args, diffArgs, changed := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		WorkspaceSourcesByWorkspace: map[string][]models.TaskCreateLastUsedSource{
 			"workspace-1": {{Kind: "folder", LocalPath: "/work/assets"}},
 		},
@@ -1388,7 +1501,7 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkspaceSourceSnapshots(t 
 		!strings.Contains(query, "ARRAY['task_create_last_used','workspace_sources_by_workspace',?::text]") {
 		t.Fatalf("postgres update should patch workspace source snapshots: %s", query)
 	}
-	if len(args) != 2 || args[0] != "workspace-1" || args[1] != `[{"kind":"folder","local_path":"/work/assets"}]` {
+	if !changed || !reflect.DeepEqual(args, diffArgs) || len(args) != 2 || args[0] != "workspace-1" || args[1] != `[{"kind":"folder","local_path":"/work/assets"}]` {
 		t.Fatalf("unexpected workspace source args: %#v", args)
 	}
 }
@@ -1435,7 +1548,7 @@ func TestMakeTaskCreateLastUsedJSONSetArgsPreservesWorkspaceSnapshotPresence(t *
 
 // TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange verifies the generated Postgres update clears the branch when the repository changes.
 func TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange(t *testing.T) {
-	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+	query, setArgs, diffArgs, _ := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
 		RepositoryID: "repo-after",
 	})
 
@@ -1447,11 +1560,14 @@ func TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange(t *
 		strings.Contains(query, "{task_create_last_used,executor_profile_id}") {
 		t.Fatalf("postgres update should not patch profile fields: %s", query)
 	}
-	if len(args) != 2 {
-		t.Fatalf("expected repository and empty branch args, got %d", len(args))
+	if len(setArgs) != 2 || len(diffArgs) != 2 {
+		t.Fatalf("expected set and comparison args for repository and branch, got %d/%d", len(setArgs), len(diffArgs))
 	}
-	if args[0] != "repo-after" || args[1] != "" {
-		t.Fatalf("expected repo-after and empty branch args, got %#v", args)
+	if setArgs[0] != "repo-after" || setArgs[1] != "" {
+		t.Fatalf("expected repo-after and empty branch set args, got %#v", setArgs)
+	}
+	if diffArgs[0] != "repo-after" || diffArgs[1] != "" {
+		t.Fatalf("expected repo-after and empty branch comparison args, got %#v", diffArgs)
 	}
 }
 
@@ -1531,6 +1647,7 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		ExecutorProfileID: "exec-1",
 	}
 	settings.JiraSavedViews = json.RawMessage(`[{"id":"view-1"}]`)
+	settings.JiraDefaultViewID = "view-1"
 	settings.GitLabSavedPresets = json.RawMessage(`[{"id":"preset-1"}]`)
 	settings.SidebarDraft = &models.SidebarViewDraft{
 		BaseViewID: "view-1",
@@ -1565,6 +1682,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if string(got.JiraSavedViews) != `[{"id":"view-1"}]` {
 		t.Fatalf("expected Jira saved views to round-trip, got %s", string(got.JiraSavedViews))
+	}
+	if got.JiraDefaultViewID != "view-1" {
+		t.Fatalf("expected Jira default view ID to round-trip, got %q", got.JiraDefaultViewID)
 	}
 	if string(got.GitLabSavedPresets) != `[{"id":"preset-1"}]` {
 		t.Fatalf("expected GitLab presets to round-trip, got %s", string(got.GitLabSavedPresets))

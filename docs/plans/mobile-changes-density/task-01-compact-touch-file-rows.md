@@ -123,3 +123,18 @@ DropdownMenu primitives, and mobile UI language contextual-action pattern.
 - Catalog validation: **299 decisions and 1112 specifications**. Specification linter tests: **36 passed**. Full specification lint and `git diff --check`: **passed**.
 - Four fresh, inspected, compressed screenshots cover phone flat/tree lists, the action sheet, and desktop. Assets use disposable E2E data and remain outside the product branch.
 - Rendered hierarchy matches UI-01/UI-02. No new API, persistence, or locale keys. Public review guide updated with the menu entry point.
+
+
+PR #3598 CI follow-up, 2026-10-06: run `37450559149`, shard 8 job
+`112233810027`, exposed a virtualized-heading test race in the deep-tree
+scenario. Its first-attempt screenshot showed the populated list scrolled
+below the Unstaged heading; the heading was outside the rendered window.
+The shared section-expansion helper now scrolls the actual timeline owner
+to its heading inside the existing visibility deadline. The deep-tree test
+starts at the bottom explicitly, verifies the heading is not rendered, and
+then exercises that helper before the existing filename/action containment
+and diff checks. This regression failed before the helper fix, including
+the spec's former forced retry. The spec now respects the runner's retry
+setting instead of overriding `--retries 0`.
+
+`cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-changes-panel.spec.ts -- --retries 0 --trace=retain-on-failure`: all nine tests passed in 1.3 minutes, including the new initial-scroll regression. Focused Prettier and ESLint passed. Production UI, geometry assertions, and deadlines are unchanged; exact pushed-head CI is pending.

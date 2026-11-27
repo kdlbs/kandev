@@ -51,3 +51,9 @@ authenticated colocated contract and have executor-specific evidence.
 - Global npm cache cleanup was rejected because it removes unrelated user data.
 - Automatic version rollback was rejected because it changes the selected runtime without operator consent.
 - Registry replacement was rejected because Kandev must preserve operator network policy.
+
+## Later qualification
+
+[Bounded managed npm startup retry](2026-10-02-bounded-managed-npm-startup-retry.md)
+replaces automatic execution-tree deletion with non-destructive metadata retry.
+Explicit maintenance retains scoped executor-local repair.

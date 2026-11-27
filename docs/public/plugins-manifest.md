@@ -131,6 +131,11 @@ agent_tools:
       destructive_hint: false
       idempotent_hint: true
 
+Automation tools use the same declaration with `surfaces: [automation]`. They
+do not require `managed_agent_tools`; the workspace owner approves exact tools
+per private automation, and the approval expires when the plugin installation or
+configuration changes.
+
 ui: # optional native frontend plugin
   bundle: "/ui/bundle.js" # root-relative
   styles: ["/ui/plugin.css"] # optional, root-relative
@@ -140,6 +145,64 @@ ui: # optional native frontend plugin
       description: "Open the Acme panel"
       allow_in_editor: false # optional; true lets it fire while typing
 ```
+
+An instance read sets `invocation_scope: instance` and may opt into
+`coordinator` and `external` contexts:
+
+```yaml
+agent_tools:
+  - name: get_provider_usage
+    description: Read the cached instance-wide provider usage snapshot.
+    surfaces: [kanban-task, office-task, automation, coordinator, external]
+    invocation_scope: instance
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+```
+
+A declaration that names `coordinator` must use `invocation_scope: instance`.
+A declaration that names `external` must use `invocation_scope: instance` or
+`workspace`. Both surfaces require `annotations.read_only_hint: true`.
+Configuration surfaces remain unsupported. External instance reads carry no
+task, session, or workspace identity. Coordinator calls require an exact
+version-2 conversation binding; a phase-1 or version-1 binding grants no
+plugin reads.
+
+A workspace read sets `invocation_scope: workspace` and may use the
+`external`, `kanban-task`, and `office-task` surfaces:
+
+```yaml
+agent_tools:
+  - name: read_workspace_settings
+    description: Read one workspace's settings.
+    surfaces: [kanban-task, external]
+    invocation_scope: workspace
+    input_schema:
+      type: object
+      properties:
+        key: { type: string }
+    annotations:
+      read_only_hint: true
+```
+
+Workspace declarations cannot use `automation`, `coordinator`, or
+`managed-conversation`. A declaration that names `external` must set
+`annotations.read_only_hint: true`, and its `input_schema` must have a
+top-level `type: object`. The host reserves the top-level input property
+`kandev_workspace_id`; a declaration that uses it is rejected at install.
+
+On the external surface, Kandev adds `kandev_workspace_id` as a required string
+argument. Clients discover IDs with the `list_workspaces_kandev` tool. Kandev
+checks the caller's current workspace read permission on every call, removes
+the argument before dispatch, and passes only the verified workspace ID to the
+plugin. Task-backed calls use the execution workspace and do not advertise the
+argument. Set `min_kandev_version: "0.100.0"` or later for a workspace
+declaration.
 
 ## Isolated web applications
 
@@ -181,6 +244,40 @@ package can declare both `runtime.type: binary` and `ui.web_apps` when its web
 app needs a managed backend. Use [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application)
 for a complete authoring path.
 
+## Notification content formatters
+
+This additive extension is under development and is not present in published
+SDK `0.1.0`. A plugin must validate the supporting host/SDK pair before release;
+the SDK-wide minimum host version alone does not prove formatter support.
+
+```yaml
+notification_formatters:
+  - key: text
+    contract_version: 1
+    provider_types: [apprise]
+    management_actions: [content.prepare]
+actions:
+  - key: content.prepare
+    scope: notification_provider
+    max_body_bytes: 131072
+```
+
+The formatter key must be unique, the contract version must be `1`, and
+`runtime.type` must be `binary`. Supported provider types are `apprise`,
+`webhook`, `webpush`, `system`, and `local`. Every management action must be
+declared with `scope: notification_provider` and a body cap of at most 128 KiB;
+every action with that scope must belong to a formatter declaration. The host
+also caps the complete formatter management request at 128 KiB, its response at
+512 KiB, and its lifetime at five seconds.
+
+The host authorizes provider ownership and exact candidate/active installation
+and binding context. The formatter may prepare immutable text configuration but
+cannot select itself, change subscriptions, read receiver credentials, or send
+notifications through this extension. See the
+[browser and Go formatter contract](../plans/plugins/PLUGIN-API.md#notification-content-formatters)
+for the management envelope, owner-isolated editor slot, activation CAS,
+preview, cancellation, and whole-pair fallback rules.
+
 ## Field reference
 
 > **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
@@ -201,33 +298,54 @@ for a complete authoring path.
 | `repo_url`                         | no                                   | string                                | Absolute `http(s)` URL to the plugin's source repository. Rendered as a "Repo" link in Settings > Plugins (both the installed list and the plugin detail). Any other scheme (e.g. `javascript:`) is rejected at registration. Distinct from the marketplace card's `repo_url`, which the registry derives from `plugins.yaml`; declare this in the manifest so sideloaded and directly-installed plugins also carry the link.                                                                                                                                                                                                                                                    |
 | `runtime.type`                     | conditionally                        | string                                | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed**; see "Managed vs. legacy" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `runtime.executables`              | required when `runtime.type: binary` | map\<string,string\>                  | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`.                                                                                                                                                                                                                                                                                                                                                                                   |
-| `min_kandev_version`               | conditionally                        | string                                | Lowest released Kandev version this plugin supports. A manifest declaring `capabilities.api_read: messages` (for Go `Messages().List` or the browser conversation facade) must set at least `0.91.1`; `access: admin` actions have the same floor. One capability-aware validator enforces missing, malformed, and lower values at manifest/archive/install/boot boundaries in stamped, development, and E2E builds; equal or higher values pass. Release values use up to three dotted numeric segments (`0.78.0`) and may have a leading `v`. |
+| `min_kandev_version`               | conditionally                        | string                                | Lowest released Kandev version this plugin supports. A manifest declaring `capabilities.api_read: messages` (for Go `Messages().List` or the browser conversation facade) must set at least `0.91.1`; `access: admin` actions have the same floor. A manifest declaring `agent_tools[].invocation_scope: workspace` must set at least `0.100.0`, and the `coordinator`/`external` surfaces require at least `0.99.0`. One capability-aware validator enforces missing, malformed, and lower values at manifest/archive/install/boot boundaries in stamped, development, and E2E builds; equal or higher values pass. Release values use up to three dotted numeric segments (`0.78.0`) and may have a leading `v`. |
 | `capabilities.events`              | no                                   | string[]                              | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `capabilities.api_read`            | no                                   | string[]                              | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below.                                                                                                                                                                                                                                                                                                             |
-| `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`. Undeclared writes return gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `capabilities.api_read`            | no                                   | string[]                              | Gates the Host data API's read-only accessors and exact query resources. Entries include `tasks`, `sessions`, `messages`, `interactions`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`, `managed_agent_conversations`, `automations`, `task_inbox`, `task_directives`, `task_relations`, `task_transitions`, `change_requests`, `source_issues`, and `usage`. Calling a matching accessor or exact manager without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
+| `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`; `workspaces`, `workflows`, and `repositories` permit their typed exact administration calls when the matching Host v2 workspace grant is active. `execution` permits exact run, stop, turn cancellation, recovery, mode, and pending-transition commands when separately approved for a workspace; `interactions` permits exact permission and clarification responses only with a Host-issued human response receipt; `human_responses` permits account linking and, when separately approved for a workspace, receipts for the linked Kandev user; `managed_agent_conversations` permits exact lifecycle and input writes when separately approved for a workspace; `automations` permits exact managed-conversation schedule operations when separately approved for a workspace; `source_issues` permits linked Jira/Linear comments and transitions through native workspace credentials when separately approved for a workspace; `managed_agent_tools` permits the managed agent-tool surface when separately approved for a workspace. Undeclared writes return gRPC `PermissionDenied`. |
 | `capabilities.state`               | no                                   | bool                                  | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `capabilities.secrets`             | no                                   | bool                                  | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `capabilities.agent_invoke`        | no                                   | bool                                  | Gates `Host.InvokeUtilityAgent`, a one-shot completion. No options, or an empty `UtilityAgentOptions.ProfileID`, uses the current default profile from Settings > Utility Agents. A non-empty profile ID selects that exact eligible global, enabled, non-CLI profile whose agent supports sessionless inference. The host does not read plugin configuration or utility-agent records for selection. Calling without this capability returns gRPC `PermissionDenied`; a missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference explicit profile returns gRPC `FailedPrecondition` without fallback. See [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md). |
 | `capabilities.agent_conversation`  | no                                   | bool                                  | Gates the optional `pluginsdk.AgentConversations(host)` manager. `Ensure` creates or repairs a hidden ephemeral task/session for one `(plugin, workspace, conversation key)`, `Dispatch` sends an idempotent prompt, and `Delete` removes the matching plugin-owned conversation. Calls without this capability return gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                   |
 | `capabilities.auth`                | no                                   | bool                                  | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie, so the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject; a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
 | `capabilities.user_state`          | no                                   | bool                                  | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required; every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record.                                                                                                                 |
+| `capabilities.executor_provider`   | required with `executor_providers` | bool                                  | Enables the optional remote executor provider contract. Requires `runtime.type: binary` and at least one `executor_providers` declaration. Kandev exposes providers from active, compatible plugins whose processes implement the complete contract. Disabled, incompatible, or unavailable providers cannot accept new operations.                                                                                                                                                                                                                                                                                                    |
 | `webhooks[].key`                   | yes                                  | string                                | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `webhooks[].description`           | no                                   | string                                | Free-form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `webhooks[].method`                | no                                   | string                                | **Informational only**: kandev does not validate or enforce the inbound HTTP method against this value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `webhooks[].access`                | no                                   | string                                | `public` (default) allows anonymous callers; `authenticated` requires a Kandev identity. Cookie-authenticated browser calls remain subject to Kandev's same-origin policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `webhooks[].max_body_bytes`        | no                                   | int                                   | Request-body limit for this key. Defaults to 4 MiB. Public webhooks cannot exceed 4 MiB; authenticated webhooks can request up to 16 MiB. Plugins using this field should declare the first supporting `min_kandev_version`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `notification_formatters[]` | no | object[] | Optional content-only extensions; requires managed binary runtime. See Notification content formatters above. |
+| `notification_formatters[].key` | yes\* | string | Unique formatter key, using the action-key vocabulary. |
+| `notification_formatters[].contract_version` | yes\* | int | Must be `1`. |
+| `notification_formatters[].provider_types` | yes\* | string[] | Nonempty subset of `apprise`, `webhook`, `webpush`, `system`, and `local`. |
+| `notification_formatters[].management_actions` | no | string[] | Explicit action keys with `scope: notification_provider` and body cap at most 128 KiB. |
 | `actions[]`                        | no                                   | object[]                              | Authenticated, manifest-declared browser actions. They are distinct from public webhooks: the host validates the action key, limits the JSON body, authorizes the declared resource, and passes only a verified context to the plugin.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `actions[].key`                    | yes\*                                | string                                | Unique non-empty action key, used at `POST /api/plugins/{id}/actions/{key}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` | Resource selector the host authorizes. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `actions[].scope`                  | yes\*                                | `workspace` \| `task` \| `repository` \| `notification_provider` | Resource selector the host authorizes. Notification provider actions require an owning formatter declaration and the exact management context above. A task-scoped invocation may additionally name one repository attached to that verified task. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored. |
 | `actions[].access`                 | no                                   | `authenticated` \| `admin`            | Defaults to `authenticated`. `admin` is enforced before the action envelope is read and requires `min_kandev_version: "0.91.1"` or later so older hosts cannot silently treat it as authenticated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `actions[].max_body_bytes`         | yes\*                                | int                                   | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `sidebar_groupings[]` | no | object[] | Complete saved-sidebar providers, independent of `ui.bundle`. At most 16; requires `min_kandev_version` at least `0.103.0` (unreleased). |
+| `sidebar_groupings[].id` | yes\* | string | Unique plugin-local ID matching the manifest ID grammar, at most 128 bytes. The plugin ID must also be at most 128 bytes when declaring a grouping. Saved identity is `plugin:<plugin-id>:<id>`. |
+| `sidebar_groupings[].label` | yes\* | string | Nonblank UTF-8 selector label, at most 256 bytes. |
+| `sidebar_groupings[].label_key` | no | string | Optional translation key, at most 256 bytes; `label` is the fallback. |
+| `sidebar_groupings[].action` | yes\* | string | Names a declared workspace-scoped action with authenticated access, not an admin action or public webhook. See [complete saved-sidebar groupings](plugins-authoring.md#complete-saved-sidebar-groupings) for the bounded snapshot contract. |
 | `repository_providers`             | no                                   | string[]                              | Provider IDs this plugin owns while active. An active provider can register native repository discovery/URL inspection and may supply transient Git credentials. Native first-use task creation requires a workspace-scoped `repositories.inspect` action; Kandev invokes the active owner on the server and validates its descriptor before persistence. Plugin-originated task creation must use the authenticated plugin task-create path so the plugin reauthorizes the descriptor before Host Tasks.Create. Duplicate ownership is rejected.                                                                                                                                |
+| `executor_providers[]`             | no                                   | object[]                              | Declares a remote executor provider implemented by the complete optional Go SDK interface. Requires `capabilities.executor_provider: true` and `runtime.type: binary`. See "Remote executor providers" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `executor_providers[].key`         | yes\*                                | string                                | Unique lowercase provider key, matching `^[a-z][a-z0-9_-]{0,63}$`. Kandev forms the provider identity as `plugin:<plugin-id>:<key>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `executor_providers[].display_name`| yes\*                                | string                                | Non-empty provider label, up to 100 characters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `executor_providers[].description` | yes\*                                | string                                | Non-empty provider description, up to 1024 characters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `executor_providers[].contract_version` | yes\*                           | int                                   | Must be a contract version supported by the host. The current host supports version `1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `executor_providers[].supported_state_versions` | yes\*                  | int[]                                 | One to sixteen unique positive state versions the plugin can read. The host uses these values when it checks whether an installed plugin can manage retained resources.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `executor_providers[].profile_schema` | yes\*                              | object                                | Scalar-only object schema for provider profile fields. It supports `string`, `boolean`, `number`, and `integer` fields. String fields can use `secret: true`; secret values are delivered to provider operations and must not be persisted in resource state.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `executor_providers[].resource_state_schema` | yes\*                      | object                                | Scalar-only object schema for bounded, durable, non-secret provider state. Secret fields are not allowed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `executor_providers[].capabilities` | yes\*                               | object                                | Declares `terminal`, `files`, `git`, `embedded_editor`, `preview`, `reattach`, and `retention`. Retention is `unknown`, `ephemeral`, `bounded`, or `persistent`; `bounded` requires `maximum_lifetime_seconds`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `reference_sources[]`              | no                                   | object[]                              | Dynamic composer-reference source. Each entry declares `source`, `provider`, `kind`, `display_name`, and `kind_label`; `order` is optional. Candidate identity is not trusted: Kandev reauthorizes the canonical reference when it is submitted.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `auth_providers[]`                 | no                                   | object[]                              | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values; the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`.                                                                                                                                                                                                                                                                                                                             |
 | `config_schema`                    | no                                   | object                                | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `agent_tools`                      | no                                   | object[]                              | Task-aware MCP tools implemented by the managed plugin's optional `AgentToolPlugin` SDK interface. Each declaration has a local `name`, `description`, `surfaces`, required `input_schema`, optional `output_schema`, and optional MCP annotation hints. At most 16 tools are allowed.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `agent_tools`                      | no                                   | object[]                              | MCP tools implemented by the managed plugin's optional `AgentToolPlugin` SDK interface. Each declaration has a local `name`, `description`, `surfaces`, optional `invocation_scope`, required `input_schema`, optional `output_schema`, and optional MCP annotation hints. At most 16 tools are allowed.                                                                                                                                                                                                                                                                                                                                                                        |
 | `agent_tools[].name`               | yes\*                                | string                                | Plugin-local name matching `^[a-z0-9][a-z0-9_]{0,31}$`. Kandev derives the global MCP name; authors cannot choose it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `agent_tools[].surfaces`           | yes\*                                | string[]                              | One or both of `kanban-task` and `office-task`. Plugin tools are not exposed to `configuration` or `external` MCP surfaces.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `agent_tools[].surfaces`           | yes\*                                | string[]                              | Any of `kanban-task`, `office-task`, `managed-conversation`, `automation`, `coordinator`, and `external`. Managed-conversation declarations also require `capabilities.api_write: [managed_agent_tools]`; the host exposes only per-instance selections. Automation declarations are opt-in: a workspace owner must select exact tools in a private automation editor and save, and plugin/config changes require reselection. Coordinator declarations are exposed only through an exact version-2 conversation binding and require `invocation_scope: instance`. External declarations are exposed only through the configured external MCP endpoint over its trusted in-process transport; endpoint authentication follows the deployment setting, and the call carries no task identity. `external` accepts `invocation_scope: instance` or `workspace`; `coordinator` and `external` require `read_only_hint: true`. Plugin tools are never exposed to `configuration` MCP surfaces. No agent provider currently passes the managed restriction gate, so managed turns fail before launch until provider evidence is added. |
+| `agent_tools[].invocation_scope`   | no                                   | `task` \| `instance` \| `workspace`   | Defaults to `task`, preserving every existing declaration. `instance` marks a read that does not require task identity and may opt into the `coordinator` and `external` contexts. `workspace` marks a read that requires a host-verified workspace on `kanban-task`, `office-task`, or `external`; external calls advertise a required `kandev_workspace_id` argument and receive the verified ID. The scope does not grant Host capabilities or a workspace identity by itself. |
 | `agent_tools[].input_schema`       | yes\*                                | object                                | Compiled object-root JSON Schema, at most 64 KiB serialized. Kandev rejects unknown top-level arguments before invoking the plugin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `agent_tools[].output_schema`      | no                                   | object                                | Optional compiled object-root JSON Schema applied to structured plugin results.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `agent_tools[].annotations`        | no                                   | object                                | MCP hints: `read_only_hint`, `destructive_hint`, `idempotent_hint`, and `open_world_hint`. Omitted values use conservative host defaults.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -262,6 +380,32 @@ Kandev protocol paths, and only the capabilities and network origins that the
 host grants. Declare exact HTTPS origins in `network_origins` when the app
 needs external network access. Paths, credentials, wildcards, query strings,
 and fragments are rejected.
+
+### Host version compatibility
+
+Stamped Stable and published npm Nightly hosts enforce `min_kandev_version`
+at install time. A Nightly is below the Stable release with the same numeric
+core: `1.2.4-nightly.sha123456789abc` accepts a minimum of `1.2.3` but rejects
+`1.2.4` or a newer minimum. Manifest minimums retain the stable numeric grammar
+described above; prerelease minimums are not accepted.
+
+Empty, development, git-describe, and unknown or malformed development host
+versions retain their install-time comparison exemption. Independent manifest
+validation, including capability-specific floors, still applies on those hosts.
+
+Instance-read agent-tool contexts (`coordinator` and `external`) first appear
+in release 0.99.0. A manifest that declares either surface must set
+`min_kandev_version: "0.99.0"` or later.
+
+Workspace-scoped agent tools first appear in release 0.100.0. A manifest that
+declares `agent_tools[].invocation_scope: workspace` must set
+`min_kandev_version: "0.100.0"` or later.
+
+Complete saved-sidebar grouping declarations require
+`min_kandev_version: "0.103.0"` or later. This is an unreleased compatibility
+floor: Stable 0.102.0 does not support the contract. Coordinate publication with
+a supporting Host release. Matching development hosts still validate the declared
+minimum even when their own version comparison is exempt.
 
 ### Static web app network origins
 
@@ -319,33 +463,175 @@ binary`), so a legacy manifest can never actually be installed via `POST
 effectively removed in practice, even though the manifest schema still
 recognizes its shape.
 
+## Remote executor providers
+
+A managed plugin declares each provider in `executor_providers`. Provider keys
+are unique within a plugin. The full provider identity is
+`plugin:<plugin-id>:<key>`. The host currently supports contract version `1`.
+The plugin must implement all seven provider RPCs; a partial implementation is
+not available for profile creation or task launch.
+
+```yaml
+runtime:
+  type: binary
+  executables:
+    linux-amd64: server/plugin-linux-amd64
+
+capabilities:
+  executor_provider: true
+
+executor_providers:
+  - key: remote-sandbox
+    display_name: Remote Sandbox
+    description: Remote Linux environments for isolated sessions.
+    contract_version: 1
+    supported_state_versions: [1]
+    profile_schema:
+      type: object
+      required: [region]
+      properties:
+        region:
+          type: string
+          title: Region
+        credential:
+          type: string
+          title: Provider credential
+          secret: true
+    resource_state_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        instance_id:
+          type: string
+    capabilities:
+      terminal: true
+      files: true
+      git: true
+      embedded_editor: true
+      preview: true
+      reattach: true
+      retention: bounded
+      maximum_lifetime_seconds: 28800
+```
+
+`profile_schema` accepts one to 64 scalar fields. The resource-state schema
+uses the same field types, cannot declare secrets, and must set
+`additionalProperties: false`. The host persists only fields declared by that
+schema, after validating required fields, scalar types, enum membership, and
+numeric bounds. Numeric bounds are allowed only on `number` and `integer`
+fields, must be finite numbers, and `minimum` cannot exceed `maximum`. Each
+schema is limited to 64 KiB. State versions must be unique positive integers.
+The manifest can declare at most 16 providers.
+
+In the provider profile editor, an empty optional non-secret field is submitted
+as an empty value so an existing value can be cleared. Secret fields use
+explicit keep, replace, and clear behavior.
+
+Provider capability declarations are upper bounds. Profile validation and
+environment provisioning can reduce the effective capabilities. `bounded`
+retention requires a maximum lifetime from 1 second through 365 days. Each
+bounded resource must also return a parseable absolute expiry no later than
+that maximum lifetime. For other retention values, omit
+`maximum_lifetime_seconds`. Unknown retention makes no promise about workspace
+survival.
+
+After installation, an active plugin with a compatible provider contract can
+create and use provider profiles without a separate feature flag or restart.
+An unavailable provider remains visible for saved profiles but cannot accept
+new operations. See [Authoring a plugin](plugins-authoring.md#remote-executor-providers)
+for provider operations, callbacks, connection leases, and cleanup behavior.
+
 ## Host data API resource vocabulary
 
 `capabilities.api_read` gates the read-only Host data accessors (ADR 0043,
-ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
-`workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Declaring a
-resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
-`Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
-`Repositories()`), or the optional `pluginsdk.ExecutorProfiles(host)` extension;
-see [Authoring a plugin](plugins-authoring.md). Calling an
-accessor for an undeclared resource returns gRPC `PermissionDenied`.
-`capabilities.api_write` currently accepts `tasks` and `messages`. `tasks`
-enables `Host.Tasks().Create` and `.Update`; `messages` enables
-`Host.Messages().Send`. The host applies the same first-party task service and
+ADR 0047). Recognized resource values include `tasks`, `sessions`, `messages`,
+`interactions`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`,
+`repositories`, `managed_agent_conversations`, `automations`, `task_inbox`, `task_directives`,
+`task_relations`, `task_transitions`, `change_requests`, `source_issues`, or
+`usage`. Declaring a resource grants
+the matching `Host` accessor, the optional
+`pluginsdk.ExecutorProfiles(host)` extension, or the exact managed conversation
+reader. Exact workspace observations use `pluginsdk.HostExactQueries(host)` and
+also require a matching workspace grant such as `host.v2.read:tasks` or
+`host.v2.read:usage`. Automation history reads use
+`pluginsdk.HostAutomationHistory(host)` and require the
+`host.v2.read:automations` grant; the `automations` resource covers definitions
+and retained run observations, not only managed-conversation schedules. The
+Host advertises per-method support and authorization;
+an RPC present in the protocol does not mean that every host has its data source.
+See [Authoring a plugin](plugins-authoring.md). Calling an accessor or exact
+manager without its resource declared returns gRPC `PermissionDenied`.
+
+```yaml
+capabilities:
+  api_read:
+    - tasks
+    - sessions
+    - interactions
+    - messages
+    - task_inbox
+    - task_relations
+    - task_transitions
+    - change_requests
+    - usage
+```
+
+Only declare the resources the plugin uses. Each exact query also requires its
+separate workspace approval; the manifest declaration alone does not grant
+access.
+`capabilities.api_write` accepts `tasks`, `messages`, `workspaces`, `workflows`,
+`repositories`, `execution`, `interactions`, `human_responses`,
+`managed_agent_conversations`, `automations`, `source_issues`, and
+`managed_agent_tools`.
+`tasks` enables `Host.Tasks().Create` and `.Update`; `messages` enables
+`Host.Messages().Send`; `execution` enables exact run, stop, turn
+cancellation, recovery, session mode, and pending-transition commands,
+subject to its workspace grant.
+`workspaces`, `workflows`, and `repositories` enable typed workspace
+administration commands, subject to their separate Host v2 workspace grants.
+`interactions` enables exact responses subject to a separate human response
+receipt from an authenticated user with session-control access. The legacy v1
+interaction response methods return `PermissionDenied` because they cannot
+carry that receipt or an observed revision. `human_responses`, with the separate
+`host.v2.write:human_responses` workspace grant, lets the plugin redeem account
+link codes (`LinkExternalIdentity`) and request receipts for the Kandev user
+linked to an external account (`RequestHumanResponseReceipt`);
+the settings page of a plugin that declares it shows a "Linked chat accounts"
+card. `managed_agent_conversations`
+enables exact lifecycle, enqueue, cancellation, and immediate-dispatch writes,
+subject to its workspace grant. `automations` enables exact managed-conversation
+schedule reads and mutations, and automation history reads, subject to their
+separate workspace grants. History reads require `api_read: automations` plus
+`host.v2.read:automations`; they expose safe definitions and retained run
+observations with bounded snapshots and exact run refresh.
+`managed_agent_tools` declares tools for the restricted managed-conversation
+surface, subject to its separate workspace grant and
+provider support gate. The host applies the same first-party task service and
 message-delivery path as its own UI/API, emits the normal events, stamps created
 rows/messages as `plugin:<id>`, and does not let a plugin supply that provenance.
 A plugin may declare a read resource without its write capability, or vice
 versa. Calling a write without the matching declaration returns gRPC
 `PermissionDenied`.
 
+`source_issues` enables exact linked Jira/Linear capability reads, comments, and
+transitions through credentials already stored for the task's workspace. Each
+read or write also requires `host.v2.read:source_issues` or
+`host.v2.write:source_issues` approval. The Host verifies the persisted task
+source link and current issue version. It does not return provider credentials
+or accept a plugin-supplied issue URL. A timeout with an unknown provider
+outcome returns an `UNCERTAIN` receipt, which the Host never resends
+automatically.
+
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
-`author_type`, `content`, `type`, `created_at`), filterable by session ids,
-task ids, a `created_at` time range (`since` inclusive / `until` exclusive,
-RFC3339), and message `types`. Content is sanitized; kandev-injected
-`<kandev-system>` blocks are stripped, exactly like the `message.added` bus
-event, so raw system prompts are never exposed. `author_type` is `user` or
-`agent` (there is no `system` author).
+`author_type`, `content`, `type`, `created_at`, `source`), filterable by
+session ids, task ids, a `created_at` time range (`since` inclusive / `until`
+exclusive, RFC3339), and message `types`. Content is sanitized;
+kandev-injected `<kandev-system>` blocks are stripped, so raw system prompts
+are never exposed through this read. `author_type` is `user` or `agent`
+(there is no `system` author). `source` is the message's persisted
+provenance, for example `plugin:<id>` on a message a plugin sent, and is empty
+when none was recorded. No other message metadata is exposed.
 
 ## Config schema validation and secret fields
 
@@ -354,7 +640,9 @@ validates submitted config against a specific subset of it before
 persisting:
 
 - `required` (an array of property names) is enforced; a `PATCH` missing a
-  required property is rejected.
+  required property is rejected. Until every required property has a value
+  (not missing, null, or a blank string), the plugin's `agent_tools` are not
+  offered to agents.
 - `type` (`string`, `boolean`, `number`, or `integer`) is checked against
   the submitted value.
 - `enum` membership is checked when present.
@@ -449,6 +737,12 @@ here.
 
 > Event list current as of 2026-07-16; regenerate from
 > `apps/backend/internal/events/types.go` if this page drifts from the code.
+
+`message.*` event payloads are the bus payloads that the native chat UI
+consumes. Their `content` is stripped of `<kandev-system>` blocks, but a
+payload may also include `raw_content` with the unstripped content, and then
+`metadata.has_hidden_prompts` is `true`. A plugin that must not handle system
+content reads only `content`, or reads messages through `Messages().List`.
 
 ## Runtime-managed fields (do not author these)
 
@@ -584,3 +878,14 @@ admitted but unclaimed runs before removing receipts.
 The displayed webhook URL uses the configured backend origin. For live Bitbucket
 delivery, expose that endpoint through an address reachable from your Bitbucket
 installation; a local development address alone is not externally reachable.
+
+### File viewer declarations
+
+`ui.file_viewers` declares up to 16 native viewers. Each entry has a unique local
+`id`, a `title`, and 1 to 32 unique `extensions`. Extension values use lowercase
+ASCII without a leading period: `[a-z0-9][a-z0-9_-]{0,31}`. Wildcards, paths, MIME
+guesses, and duplicate values are rejected. A UI bundle is required.
+
+Runtime `registerFileViewer({ id, Component })` must match a declaration. The host
+owns selection, byte delivery, external-file consent, and lifecycle cleanup.
+See [File viewer plugins](plugins-authoring.md#file-viewer-plugins).

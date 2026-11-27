@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-04
-updated: 2026-09-11
+updated: 2026-10-31
 owners:
   - Kandev
 ---
@@ -29,7 +29,10 @@ verbatim from Part 1 when Part 1 reached its file-size limit; Part 1's
 [Replay and effect-safety gate](provider-error-recovery.md#replay-and-effect-safety-gate)
 remains the authoritative gate bullet list and cross-references it here.
 
-It does not change classification rules, policy values, retry ownership, or
+Structured fields add only allowlisted, namespace-aware classifier mappings.
+Only allowlisted hard-quota signatures retain their meaning when a generic HTTP
+429 status is also present. Other quota-labeled diagnostics keep HTTP status
+precedence. These mappings do not change policy values, retry ownership, or
 candidate ordering.
 
 ## Requirement mapping
@@ -40,8 +43,8 @@ candidate ordering.
 
 Acceptance criteria `.20` and `.21` are owned by
 [Marker propagation](#marker-propagation). `.23` is owned by
-[Diagnostic text correlation](#diagnostic-text-correlation). `.22` is owned by
-[Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata).
+[Diagnostic text correlation](#diagnostic-text-correlation). `.22` and `.32`
+are owned by [Allowlisted prompt-error metadata](#allowlisted-prompt-error-metadata).
 `.24` is owned by [Failure modes](#failure-modes), which states the exclusion it
 observes. `.17` through `.19` are owned by
 [Part 2](provider-error-recovery-02.md), whose `## Input inventory` records the
@@ -64,7 +67,14 @@ the actual sanitized error rather than replacing it with a generic initial
 prompt-delivery failure. The dynamic and concrete recovery gates may disregard
 the recorded diagnostic as output only if the terminal failure classifies to
 the identical semantic code and the same generation has no later assistant
-output, thought output, partial utility result, or tool activity.
+output, thought output, partial utility result, or tool activity. A chunk
+recorded from text alone must match the terminal failure's structured-aware
+classification. When lifecycle imports the diagnostic before the stream chunk
+arrives, its structured-aware and text-only classifications must also agree.
+An allowlisted hard-quota rule remains `quota_limited` when the terminal error
+carries HTTP 429; a 429 without a matching rule remains `rate_limited`. Recovery
+must not depend on whether the chunk or the terminal failure is delivered
+first.
 
 This is a correlation rule, not broad error-text suppression. A changed code
 (for example, a 529 diagnostic followed by a 500 failure), a stale generation,
@@ -87,22 +97,16 @@ fallback-eligible. Every hop after that reads the field:
 | Hop | Carrier |
 | --- | --- |
 | agentctl boundary | `streams.AgentEvent.provider_diagnostic_candidate` |
-| lifecycle publish | `lifecycle.AgentStreamEventData.ProviderDiagnosticCandidate` (`events.go`) |
+| lifecycle evidence publish | `lifecycle.AgentStreamEventData.ProviderDiagnosticCandidate` on unbuffered `message_chunk` events (`events.go`) |
 | lifecycle activity | `lifecycle` `recordActivity` (`manager_events.go`) |
-| orchestrator stream entry | `event_handlers_streaming.go` `handleAgentStreamEvent` |
-| orchestrator message path | `event_handlers_streaming.go` `handleMessageStreamingEvent` |
+| orchestrator stream entry | `event_handlers_streaming.go` `handleAgentStreamEvent`, on original `message_chunk` and `reasoning` events |
+| orchestrator progress | original output events update foreground activity; transcript projections do not observe evidence again |
 | recovery evidence | `orchestrator/dynamic_evidence.go` `observeProviderDiagnostic` |
 
-Two consumers currently re-derive the verdict from message text instead of
-reading the carried field, and both are corrected here:
-
-- `handleAgentStreamEvent` calls `isHighConfidenceProviderDiagnostic(payload.Data.Text)`
-  to choose between `observeProviderDiagnostic` and `observePromptAttempt`. It
-  reads the carried marker instead. `isHighConfidenceProviderDiagnostic` and
-  its second classification of the same bytes are removed.
-- `handleMessageStreamingEvent` flips foreground-generating for any non-empty
-  text. A marked diagnostic chunk does not flip it, matching the turn-progress
-  suppression `recordActivity` already applies on the lifecycle side.
+The orchestrator reads the carried marker on original output events. It does
+not classify transcript projections or use their accumulated text to infer
+diagnostic evidence. Foreground activity follows the same original-event
+decision as lifecycle `recordActivity`.
 
 **What the marker is, and is not.** The marker is a *candidate* flag, and the
 word is load-bearing. No transport-level signal at the ACP boundary separates a
@@ -117,15 +121,65 @@ transport diagnostic from prose about one is
 [Diagnostic text correlation](#diagnostic-text-correlation), which runs where
 both texts are known.
 
-**Accumulation.** `.20` requires the marker carried on every streaming,
-lifecycle and evidence hop, and "carried" means the field survives on the
-in-flight event value each hop receives — which it does, because those hops
-pass the same struct. Message accumulation and flush are a different thing:
-they neither read nor act on the marker, no message-level column is added, and
-the persisted transcript row does not carry it. The diagnostic text is
-persisted and rendered as ordinary transcript content, which Part 1 already
-requires. The marker affects only turn-progress bookkeeping and recovery
-evidence, both of which are per-event.
+**Original-event observation.** Before `handleMessageChunkEvent` or
+`handleReasoningEvent` accumulates eligible output, lifecycle publishes an
+evidence copy through the existing `EventPublisher.PublishAgentStreamEvent`
+carrier. Its type remains `message_chunk` or `reasoning`; it has no transcript
+`MessageID`. The copy retains execution, session, owner, attempt and prompt
+identity. A supplied prompt generation is preserved; an absent generation is
+filled from the active execution at intake, before any delayed publication.
+For a reasoning copy, `Text` receives `ReasoningText`. User-role messages and
+empty output follow the existing admission rules and produce no evidence.
+
+Original output copies use the same per-session agent-stream subject and ordered
+consumer as tools and completion. They are not coalesced. The orchestrator
+applies its existing cancellation, terminal-execution and attempt guards before
+observing them. A marked assistant copy feeds `observeProviderDiagnostic`; an
+unmarked non-empty assistant or reasoning copy feeds `observePromptAttempt`
+and restores foreground generation. Each original output event is observed
+once. Evidence copies do not create, append or broadcast transcript records.
+Office usage consumers continue to ignore these non-usage event types.
+
+**Accumulation.** `.20` applies to the transcript path independently of the
+original-event observation path. `handleMessageChunkEvent`, visible-stream
+publish helpers and the stream coalescer do not read, store or act on the
+marker. Remove `messageBufferDiagnostic`, `flushMessageBufferOnDiagnosticChange`
+and the diagnostic key from visible coalescing. `message_streaming` and
+`thinking_streaming` are transcript projections only; they must not repeat
+output evidence or foreground-activity decisions. The marker remains available
+on the original in-flight evidence event, not on the projection or message row.
+
+For ID-less output, newline emission retains `currentMessageID`, and final
+flushes preserve the established tool, turn and protocol-ID transition
+boundaries. For protocol-ID output, `protocolRecordID` retains its stable
+mapping. A classifier match inside a word, code span or paragraph cannot
+introduce a transcript boundary. A genuine provider diagnostic stays visible
+through this same transcript path. No message-level column, persistence
+migration or frontend merge heuristic is added.
+
+This separation preserves original chunk text and ordering for `.21` and `.23`
+even when the visible transcript combines several chunks. Flushing on marker
+changes while retaining the same message ID would fix the reported cards, but
+would keep recovery semantics coupled to accumulation, contrary to `.20`.
+Narrowing the network catalogue would also change supported error surfaces
+without repairing that coupling.
+
+**Terminal ordering.** A bus publication is not acknowledgement that a remote
+consumer observed evidence. Keep the existing immutable lifecycle
+`PromptAttemptEvidence` snapshot on terminal events and the orchestrator's
+terminal-ordering reconciliation. Test delayed/asynchronous consumption as
+well as the synchronous tracking bus; no recovery decision may depend on the
+transcript flush being the evidence producer.
+
+**Dynamic streak side effects.** Original ordinary output, reasoning and tool
+events still update the current attempt's in-memory safety evidence
+synchronously. They may mark a dynamic-route streak clear as pending, but the
+raw stream callback does not perform route-state database work. The
+orchestrator coalesces the intent and persists it at semantic boundaries; a
+failed or unproven reset keeps automatic fallback closed. Transcript
+projections neither repeat evidence nor trigger another reset. Identity
+fencing, persistence retries and completion ownership are specified in the
+[dynamic unclassified fallback design](../../agents/system-design/dynamic-unclassified-fallback.md#streak-lifecycle).
 
 **Absent marker.** An event that arrives without the field is ordinary output.
 This is a deliberate behaviour change for a version-skewed remote executor
@@ -135,7 +189,7 @@ disagreeing is the exact drift AC `.20` exists to forbid, and the fail-closed
 direction costs an automatic retry, never correctness.
 
 **Concurrency.** Stream handling already serialises per session under
-`acquireCancelInFlightGuard`, and `promptAttemptEvidence` guards its own
+`lockCancelInFlightGuard`, and `promptAttemptEvidence` guards its own
 fields with a mutex. Two chunks for the same session therefore apply in
 delivery order under one lock; two chunks for different sessions are
 independent records. A marked chunk whose execution ID or prompt generation
@@ -226,7 +280,7 @@ reason.
 ## Allowlisted prompt-error metadata
 
 `providerErrorFromACPPrompt` projects a sanitised message from a terminal
-`acp.RequestError`. It gains four allowlisted fields and no others.
+`acp.RequestError`. Only explicit scalar fields are projected; raw data stays local.
 
 | Field | Source | Rule |
 | --- | --- | --- |
@@ -234,6 +288,8 @@ reason.
 | `error_kind` | `RequestError.Data["errorKind"]` | Accepted only when `Data` is a map and the value is a string of at most 64 bytes matching `[A-Za-z0-9_.-]+`. Anything else is dropped. |
 | `provider_id` | the adapter's negotiated agent id | Never parsed out of the error text. |
 | `model_id` | the session's settled model id | Omitted when no model is settled. |
+| `http_status` | `Data["statusCode"]`, when explicitly supplied | Integral HTTP error status, 400 through 599; absent/invalid is omitted. |
+| `provider_code` | `Data["errorCode"]`, when explicitly supplied | Same bounded scalar allowlist as `error_kind`; opaque, never inferred from prose or a body. |
 
 **Settled model.** A session's model is settled once the adapter has emitted a
 session-configuration or model event carrying a non-empty current model id for
@@ -243,16 +299,11 @@ and for an agent that never surfaces a model id, no model is settled and
 `model_id` is omitted. The definition is observable rather than internal
 because an omitted `modelId` in a fixture is an assertion of absence.
 
-**Where the two new fields live.** `streams.ProviderError` already carries
-`ProviderID` and `ModelID`, so `provider_id` and `model_id` need no new
-storage. It has nothing for the other two, so it gains exactly two fields:
-`RPCCode int` (`json:"rpc_code,omitempty"`) and `ErrorKind string`
-(`json:"error_kind,omitempty"`). Both are omitempty, which is what makes the
-"`0` means absent" rule above expressible on the wire without a pointer.
-`ProviderError.Valid()` is **unchanged** — it gates on `Source`, `Message` and
-`OccurredAt`, and neither new field participates, because a projection that
-carries a message but no metadata is still a valid projection. A fixture
-asserting `rpcCode` or `errorKind` is asserting content, never validity.
+**Wire compatibility.** `streams.ProviderError` carries the optional scalar
+fields with `omitempty`. `0` means absent for numeric status/RPC code, and an
+empty string means absent for kind/provider code. `ProviderError.Valid()` is
+unchanged: it requires `Source`, `Message`, and `OccurredAt`. New metadata is
+not required for old agentctl versions or message-only errors.
 
 **Contention on the settled model.** A session-configuration or model event can
 land while a terminal error is being projected. The rule is last-published-wins,
@@ -266,10 +317,11 @@ microsecond is a slightly thinner log line, not a wrong decision. This is also
 why a fixture's `model_settled` frame is ordered strictly before its
 `prompt_error` frame rather than raced against it.
 
-Raw `RequestError.Data` never crosses the boundary, and no field other than
-`errorKind` is read from it. A `Data` that is a string, an array, `nil`, or a
-map without `errorKind` yields a projection with no `error_kind`; the
-projection stays valid on its message alone.
+Raw `RequestError.Data` never crosses the boundary. Only the exact scalar
+keys `errorKind`, `statusCode`, and `errorCode` are read. These are optional,
+adapter-defined metadata, not fields guaranteed by ACP or every OpenCode
+version. Headers, bodies, prompts, arbitrary nested data, and credentials are
+not inspected or transported. Missing data stays unknown.
 
 **Call site and merge order.** The merge happens in `ProviderErrorFromError`,
 which is already the ordered extractor chain: a correlated stderr
@@ -288,16 +340,31 @@ paths in `adapter_prompt.go` return before reaching this chain and are
 unchanged; they carry their own provider-specific projections and this design
 does not add metadata to them.
 
-**Not an authorisation input.** The metadata is transported, logged, and
-assertable in fixtures. No classifier rule keys on it in this version. Making
-`errorKind` outrank the message-text catalogue would let a gateway authorise
-dynamic recovery through a field no fixture constrains yet, so it is deferred
-to a later contract change.
+**Structured normalization.** Existing normalized `routingerr.Error` values
+take precedence without mutation. Otherwise provider HTTP statuses precede
+message rules. A valid but unmapped HTTP error remains unknown; prose cannot
+relabel it as authentication. ACP's documented authentication-required code
+`-32000` is distinct from HTTP status and generic JSON-RPC internal errors.
+Known typed kinds are interpreted only in their adapter namespace; generic
+`AI_APICallError`, `APIError`, or internal errors carry no authentication
+meaning. Opaque provider codes are retained without an unverified mapping.
+Absent or non-specific structured signals retain the existing text catalogue.
+
+Kanban, Office, retained-turn and diagnostic-correlation consumers use the same
+safe projection and central classifier. The existing retry/fallback policy,
+execution/generation fences, diagnostic text matching, and output/effect guards
+remain authoritative. Metadata does not bypass them or repair old attempts.
+
+Manual ACP runtime preservation follows the separate
+[response-provenance continuity contract](acp-prompt-error-continuity.md).
+Structured classification supplies diagnostics and supported automatic-recovery
+or capacity-continuation evidence; it does not replace the remote-response,
+current-turn, connection, cancellation, or effect gates.
 
 ## Failure modes
 
-- Metadata present but the message unclassifiable: the projection carries the
-  metadata, the diagnostic stays ordinary output, recovery fails closed.
+- Non-specific metadata and an unclassifiable message stay unknown; metadata
+  alone does not establish safe replay or authenticate an account.
 - The marker is absent from a skewed remote: manual recovery, as above.
 - The terminal message classifies to nothing because the signature lives only
   in `RequestError.Data`: the projection carries whatever allowlisted metadata
@@ -364,7 +431,7 @@ to a later contract change.
 ## Out of scope
 
 Carried from the requirement's `## Out of scope` and owned by this part:
-classifier rules keyed on `errorKind` or the JSON-RPC code, tightening the
+interpretation of unrecognized `errorKind` or JSON-RPC codes, tightening the
 overloaded signature, UI rendering of the marker, retry policy changes, and the
 remaining gateway usage adapters. Fixture and capture exclusions live in
 [Part 2](provider-error-recovery-02.md#out-of-scope).
@@ -373,3 +440,8 @@ One further exclusion belongs to this part: extending the clearing rule so tool
 activity clears the recorded diagnostic code. The effect fence already fails
 such an attempt, so the change would alter a mechanism without altering an
 outcome; [Marker propagation](#marker-propagation) records why.
+
+## Implementation Plans
+
+The transcript/evidence separation repair is tracked in
+[Provider diagnostic message continuity](../../../plans/provider-diagnostic-message-continuity/plan.md).

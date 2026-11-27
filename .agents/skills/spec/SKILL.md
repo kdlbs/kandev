@@ -109,6 +109,9 @@ contracts are independent.
 
 ### 4. Write system design
 
+Apply the [solution simplicity (KISS) rules](../plan/SKILL.md#solution-simplicity-kiss)
+to technical choices.
+
 Create or update this file when the change needs a technical design:
 
 ```text
@@ -122,6 +125,10 @@ requirement.
 Describe stable components, models, contracts, flow, failure behavior,
 persistence, security, and observability when they apply. Link to global ADRs.
 Do not copy requirement or ADR text.
+
+For shared blocking or coalesced work, specify who executes the operation, what
+cancellation of that caller does, and how other waiters proceed. Name a
+verification case for the cancellation boundary.
 
 Cover all runtime boundaries that implement the owned outcome. A provider-owned
 design can include backend services, storage, projections, frontend components,
@@ -167,6 +174,9 @@ Review the artifacts before you run the linter:
   Use `rg` to confirm exact symbols before the artifact is complete.
 - New files do not copy the legacy `Migrated source detail` wrapper.
 - New artifacts appear in the catalog command output for the owning system.
+- Before adding prose to an existing specification, check its current byte
+  count against the applicable limit in `structure-and-ownership.md`; keep
+  enough headroom for the edit or split the document at a contract boundary.
 
 Run:
 

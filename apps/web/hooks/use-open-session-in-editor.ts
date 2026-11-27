@@ -19,22 +19,20 @@ type OpenEditorOptions = {
 };
 
 /**
- * Parse an `internal://vscode?goto=file:line:col` sentinel URL.
+ * Decode the private path-only goto query once, with independent coordinates.
  * Returns goto info or null if no file param.
  */
 function parseInternalVscodeURL(url: string): { file: string; line: number; col: number } | null {
-  const qIdx = url.indexOf("?goto=");
-  if (qIdx === -1) return null;
+  const params = new URL(url).searchParams;
+  const file = params.get("goto");
+  if (!file) return null;
 
-  const goto_ = url.slice(qIdx + 6);
-  if (!goto_) return null;
-
-  // Format: file:line:col or file:line or file
-  const parts = goto_.split(":");
+  const line = parseInt(params.get("line") ?? "0", 10) || 0;
+  const column = parseInt(params.get("column") ?? "0", 10) || 0;
   return {
-    file: parts[0],
-    line: parseInt(parts[1] ?? "0", 10) || 0,
-    col: parseInt(parts[2] ?? "0", 10) || 0,
+    file,
+    line: line > 0 ? line : 0,
+    col: line > 0 && column > 0 ? column : 0,
   };
 }
 

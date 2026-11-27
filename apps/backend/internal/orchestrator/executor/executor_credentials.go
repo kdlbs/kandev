@@ -301,6 +301,15 @@ func (e *Executor) configureManagedGitCredentials(
 		if hasManagedContributionDestination(infos) {
 			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
 		}
+		if e.githubCredentialPolicyResolver == nil {
+			// Without either service, workspace credential management is inactive.
+			return nil
+		}
+		for _, info := range infos {
+			if info != nil && managedGitCredentialProviderForProfile(info.Repository, true, req.Env, profileEnvVars) == gitHubProviderID {
+				return errors.New("managed GitHub credentials require the Git credential broker")
+			}
+		}
 		return nil
 	}
 	scopes, helpers, err := e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, true, profileEnvVars)
@@ -311,27 +320,6 @@ func (e *Executor) configureManagedGitCredentials(
 		return nil
 	}
 	return e.configureGitCredentialEnvironment(req, scopes, helpers)
-}
-
-func (e *Executor) resolveManagedGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	infos []*repoInfo,
-) (bool, error) {
-	if e.githubCredentialPolicyResolver == nil || !includesGitHubRepository(infos) {
-		return true, nil
-	}
-	policy, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
-	if err != nil {
-		return false, fmt.Errorf("resolve task Git credential policy: %w", err)
-	}
-	if policy.Mode != taskGitCredentialsModeExecutor {
-		return true, nil
-	}
-	if err := removeManagedGitCredentials(req); err != nil {
-		return false, err
-	}
-	return false, nil
 }
 
 // PreflightManagedGitCredentials validates every task repository binding that
@@ -442,15 +430,6 @@ func executorProfileHasGitHubToken(execConfig executorConfig) bool {
 		return false
 	}
 	return strings.TrimSpace(authSecrets["gh_cli_env"]) != ""
-}
-
-func (e *Executor) issueGitCredentialScopes(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	infos []*repoInfo,
-	githubManaged bool,
-) ([]githubCredentialScope, map[string]struct{}, error) {
-	return e.issueGitCredentialScopesWithProfileEnv(ctx, req, infos, githubManaged, nil)
 }
 
 func (e *Executor) issueGitCredentialScopesWithProfileEnv(
@@ -651,15 +630,6 @@ func isHTTPSCredentialHelperKey(key string) bool {
 func isManagedGitHubCredentialHelper(value string) bool {
 	return value == gitCredentialHelper || value == legacyShimGitCredentialHelper ||
 		value == legacyGitHubCredentialHelper
-}
-
-func (e *Executor) issueGitCredentialScope(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	info *repoInfo,
-	githubManaged bool,
-) (*githubCredentialScope, error) {
-	return e.issueGitCredentialScopeWithProfileEnv(ctx, req, info, githubManaged, nil)
 }
 
 func (e *Executor) issueGitCredentialScopeWithProfileEnv(
@@ -865,10 +835,10 @@ func managedGitCredentialProviderForProfile(
 	if providerID == "" {
 		providerID = gitHubProviderID
 	}
-	// Native GitLab and Azure DevOps credentials keep their existing executor
-	// paths. The generic broker is reserved for managed GitHub credentials and
-	// manifest-owned plugin providers.
-	if providerID == gitLabProviderID || providerID == providerAzureDevOps {
+	// Native GitLab credentials keep their existing executor path. The generic
+	// broker is reserved for managed GitHub credentials and manifest-owned
+	// plugin providers.
+	if providerID == gitLabProviderID {
 		return ""
 	}
 	if providerID == gitHubProviderID && (!githubManaged || hasExplicitGitHubTokenForRepository(env, profileEnvVars, repository)) {

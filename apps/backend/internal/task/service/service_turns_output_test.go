@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -133,6 +134,75 @@ func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 	}
 }
 
+func TestConfigurationCommandFeedbackCompletionIsTransient(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turn := &models.Turn{
+		ID: "turn-configuration-command", TaskSessionID: sessionID, TaskID: "task-123", StartedAt: time.Now().UTC(),
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	userMessage := &models.Message{
+		ID: "message-configuration-command", TaskSessionID: sessionID, TaskID: turn.TaskID,
+		TurnID: turn.ID, AuthorType: models.MessageAuthorUser, Type: models.MessageTypeMessage,
+		Content: "/model Mock Smart",
+	}
+	if err := repo.CreateMessage(ctx, userMessage); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	eventBus.ClearEvents()
+	result := &streams.ConfigurationCommandResult{
+		Status: "applied", ConfigID: "model", Requested: "Mock Smart", Effective: "Mock Smart", Confirmed: true,
+	}
+	if err := svc.CompleteTurnWithConfigurationResult(ctx, turn.ID, result); err != nil {
+		t.Fatalf("CompleteTurnWithConfigurationResult: %v", err)
+	}
+
+	var completed map[string]interface{}
+	for _, published := range eventBus.GetPublishedEvents() {
+		if published.Type != events.TurnCompleted {
+			continue
+		}
+		data, ok := published.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("turn.completed data has type %T", published.Data)
+		}
+		completed = data
+		break
+	}
+	if completed == nil {
+		t.Fatal("turn.completed event was not published")
+	}
+	if got, ok := completed["configuration_result"].(*streams.ConfigurationCommandResult); !ok || got == nil || *got != *result {
+		t.Fatalf("turn.completed configuration_result = %#v, want %+v", completed["configuration_result"], result)
+	}
+	receipt, ok := completed["conversation_receipt"].(*models.ConversationMutationReceipt)
+	if !ok || receipt == nil {
+		t.Fatalf("conversation_receipt = %#v, want mutation receipt", completed["conversation_receipt"])
+	}
+	var receiptResult *streams.ConfigurationCommandResult
+	for _, operation := range receipt.Operations {
+		if operation.Entity == models.ConversationEntityTurn && operation.ID == turn.ID {
+			receiptResult = operation.ConfigurationCommandResult
+			break
+		}
+	}
+	if receiptResult == nil || *receiptResult != *result {
+		t.Fatalf("receipt configuration result = %+v, want %+v", receiptResult, result)
+	}
+
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if _, exists := persisted.Metadata["configuration_result"]; exists {
+		t.Fatal("configuration result was persisted in turn metadata")
+	}
+}
+
 // A turn that ends in a recoverable agent failure carries the error entry as
 // its outcome, so its completion must report had_output=true even though the
 // recovery/status message does not count as agent output. Otherwise the
@@ -180,6 +250,52 @@ func TestCompleteTurn_ErrorTerminatedTurnReportsHadOutput(t *testing.T) {
 	if !got {
 		t.Error("had_output = false, want true (error-terminated turn must suppress the notice)")
 	}
+}
+
+// A synthetic lifecycle turn can legitimately complete with no agent output.
+// Its ownership marker must reach the live event so clients do not present it
+// as an empty user turn.
+func TestCompleteTurn_PublishesLifecycleOnlyOwnershipMetadata(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	turn, err := svc.createCompletedTurn(ctx, session)
+	if err != nil {
+		t.Fatalf("createCompletedTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+	if err := svc.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+
+	hadOutput, found := lastTurnCompletedHadOutput(t, eventBus)
+	if !found {
+		t.Fatal("expected a turn.completed event")
+	}
+	if hadOutput {
+		t.Fatal("had_output = true, want false for lifecycle-only history")
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TurnCompleted {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("turn.completed data is %T, want map", event.Data)
+		}
+		metadata, ok := data["metadata"].(map[string]interface{})
+		if !ok || metadata[models.TurnMetaKeyLifecycleOnly] != true {
+			t.Fatalf("turn.completed metadata = %#v, want lifecycle_only=true", data["metadata"])
+		}
+		return
+	}
+	t.Fatal("turn.completed event not found")
 }
 
 // AbandonOpenTurns sweeps orphan turns on resume; it must report had_output=true

@@ -16,6 +16,10 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
+import type {
+  DynamicProfileReference,
+  UtilityAgentReference,
+} from "@/lib/types/agent-profile-errors";
 import { t as translate } from "@/lib/i18n";
 import {
   mergeOptionsByNewest,
@@ -67,6 +71,38 @@ export function shouldSyncProfileSaveResponse(
   currentSaved: AgentProfile,
 ): boolean {
   return isProfileRevisionNewer(response, currentSaved);
+}
+
+function changedCursorMcpAuthPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorMcpAuthEnabled ?? true;
+  return draftValue === (savedProfile.cursorMcpAuthEnabled ?? true) ? undefined : draftValue;
+}
+
+function changedCursorPluginsMcpPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftValue = draft.cursorPluginsMcpEnabled ?? true;
+  return draftValue === (savedProfile.cursorPluginsMcpEnabled ?? true) ? undefined : draftValue;
+}
+
+function sameStringSet(left: string[] = [], right: string[] = []): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+}
+
+function changedCopilotPlugins(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): string[] | undefined {
+  const draftValue = draft.copilotSelectedPlugins ?? [];
+  if (sameStringSet(draftValue, savedProfile.copilotSelectedPlugins)) return undefined;
+  return [...draftValue].sort();
 }
 
 export function useProfileEditorState(
@@ -168,11 +204,83 @@ type ProfileEditorActionsOptions = {
   setSaveStatus: (s: SaveStatus) => void;
   markProfileSubmitted: (profile: AgentProfile | null) => void;
   acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
-  settingsAgents: Agent[];
-  syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
-  onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
+  onProfileConflict?: (conflict: ProfileConflictReferences) => void;
 };
+
+// The 409 body names the references in snake_case; the delete server action
+// exposes the same lists in camelCase. Reading both keeps this parser working
+// for either shape and for older backends that omit one of them.
+export type ProfileConflictReferences = {
+  utilityAgents: UtilityAgentReference[];
+  dynamicProfiles: DynamicProfileReference[];
+};
+
+function asReferences<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+export function profileConflictReferences(source: unknown): ProfileConflictReferences {
+  const body = (source ?? {}) as {
+    utility_agents?: unknown;
+    dynamic_profiles?: unknown;
+    utilityAgents?: unknown;
+    dynamicProfiles?: unknown;
+  };
+  return {
+    utilityAgents: asReferences<UtilityAgentReference>(body.utility_agents ?? body.utilityAgents),
+    dynamicProfiles: asReferences<DynamicProfileReference>(
+      body.dynamic_profiles ?? body.dynamicProfiles,
+    ),
+  };
+}
+
+function providerUpdateFields(draft: AgentProfile) {
+  const isOpenAI = (draft.providerKind ?? "") === "openai_compatible";
+  return {
+    provider_kind: draft.providerKind ?? "",
+    provider_base_url: isOpenAI ? (draft.providerBaseUrl ?? "") : "",
+    provider_api_key_secret_id: isOpenAI ? (draft.providerApiKeySecretId ?? "") : "",
+  };
+}
+
+function changedEnabledPreference(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): boolean | undefined {
+  const draftEnabled = draft.enabled ?? true;
+  const savedEnabled = savedProfile.enabled ?? true;
+  return draftEnabled !== savedEnabled ? draftEnabled : undefined;
+}
+
+function buildProfileUpdatePatch(
+  draft: AgentProfile,
+  savedProfile: AgentProfile,
+): Parameters<typeof updateAgentProfileAction>[1] {
+  return {
+    name: draft.name,
+    model: draft.model,
+    fallback_model: draft.fallbackModel ?? "",
+    auto_fallback: draft.autoFallback ?? false,
+    require_exact_model: draft.requireExactModel ?? false,
+    mode: draft.mode,
+    config_options: draft.configOptions ?? {},
+    ...permissionsToProfilePatch(draft),
+    cli_passthrough: draft.cliPassthrough,
+    cursor_mcp_auth_enabled: changedCursorMcpAuthPreference(draft, savedProfile),
+    cursor_plugins_mcp_enabled: changedCursorPluginsMcpPreference(draft, savedProfile),
+    mcp_selection_mode: draft.mcpSelectionMode,
+    mcp_selected_servers: draft.mcpSelectedServers,
+    copilot_selected_plugins: changedCopilotPlugins(draft, savedProfile),
+    // Omit an unchanged enabled value so a profile editor save cannot
+    // resurrect a concurrent list-toggle response from its stale draft.
+    enabled: changedEnabledPreference(draft, savedProfile),
+    cli_flags: draft.cliFlags,
+    command_prefix: draft.commandPrefix ?? "",
+    ...providerUpdateFields(draft),
+    env_vars: draft.envVars ?? [],
+  };
+}
 
 export function useProfileSave({
   agent,
@@ -181,11 +289,10 @@ export function useProfileSave({
   setSaveStatus,
   markProfileSubmitted,
   acceptProfileSaveResponse,
-  settingsAgents,
-  syncAgentsToStore,
   toast,
-  onUtilityConflict,
+  onProfileConflict,
 }: ProfileEditorActionsOptions) {
+  const storeApi = useAppStoreApi();
   // eslint-disable-next-line complexity
   return async (force = false) => {
     if (!draft.name.trim()) {
@@ -212,62 +319,25 @@ export function useProfileSave({
     try {
       const updated = await updateAgentProfileAction(
         draft.id,
-        {
-          name: draft.name,
-          model: draft.model,
-          fallback_model: draft.fallbackModel ?? "",
-          auto_fallback: draft.autoFallback ?? false,
-          require_exact_model: draft.requireExactModel ?? false,
-          mode: draft.mode,
-          config_options: draft.configOptions ?? {},
-          ...permissionsToProfilePatch(draft),
-          cli_passthrough: draft.cliPassthrough,
-          // Omit an unchanged enabled value so a profile editor save cannot
-          // resurrect a concurrent list-toggle response from its stale draft.
-          enabled:
-            (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
-              ? (draft.enabled ?? true)
-              : undefined,
-          cli_flags: draft.cliFlags,
-          command_prefix: draft.commandPrefix ?? "",
-          provider_kind: draft.providerKind ?? "",
-          provider_base_url:
-            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
-          provider_api_key_secret_id:
-            (draft.providerKind ?? "") === "openai_compatible"
-              ? (draft.providerApiKeySecretId ?? "")
-              : "",
-          env_vars: draft.envVars ?? [],
-        },
+        buildProfileUpdatePatch(draft, savedProfile),
         force,
       );
       if (acceptProfileSaveResponse(updated, submitted)) {
-        const nextAgents = settingsAgents.map((agentItem: Agent) =>
-          agentItem.id === agent.id
-            ? {
-                ...agentItem,
-                profiles: agentItem.profiles.map((p: AgentProfile) =>
-                  p.id === updated.id ? updated : p,
-                ),
-              }
-            : agentItem,
-        );
-        syncAgentsToStore(nextAgents);
+        publishProfileSaveResponse(storeApi, agent.id, updated);
       }
       setSaveStatus("success");
     } catch (error) {
       markProfileSubmitted(null);
-      if (
-        error instanceof ApiError &&
-        error.status === 409 &&
-        Array.isArray((error.body as { utility_agents?: unknown[] } | null)?.utility_agents)
-      ) {
-        onUtilityConflict?.(
-          (error.body as { utility_agents: Array<{ id: string; name: string }> }).utility_agents,
-        );
+      let conflictOpened = false;
+      if (error instanceof ApiError && error.status === 409) {
+        const references = profileConflictReferences(error.body);
+        if (references.utilityAgents.length > 0 || references.dynamicProfiles.length > 0) {
+          onProfileConflict?.(references);
+          conflictOpened = true;
+        }
       }
       setSaveStatus("error");
-      if (!isHandledApiError(error)) {
+      if (!conflictOpened && !isHandledApiError(error)) {
         toast({
           title: translate("agents:failedToSaveProfile"),
           description: errorMessage(error),
@@ -277,6 +347,27 @@ export function useProfileSave({
       throw error;
     }
   };
+}
+
+function publishProfileSaveResponse(
+  storeApi: ReturnType<typeof useAppStoreApi>,
+  agentId: string,
+  updated: AgentProfile,
+) {
+  const state = storeApi.getState();
+  const owner = state.settingsAgents.items.find((item) => item.id === agentId);
+  if (!owner?.profiles.some((profile) => profile.id === updated.id)) return;
+
+  const nextOwner = {
+    ...owner,
+    profiles: owner.profiles.map((profile) => (profile.id === updated.id ? updated : profile)),
+  };
+  state.setSettingsAgents(
+    state.settingsAgents.items.map((item) => (item.id === agentId ? nextOwner : item)),
+  );
+  state.setAgentProfiles(
+    reconcileAgentProfileOptions(state.agentProfiles.items, [{ ...owner, profiles: [updated] }]),
+  );
 }
 
 export function preserveNewerProfileDraft(
@@ -320,12 +411,14 @@ export function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
+      const references = profileConflictReferences(result);
       setConflict({
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
-        utilityAgents: result.utilityAgents,
+        utilityAgents: references.utilityAgents,
+        dynamicProfiles: references.dynamicProfiles,
       });
     } else if (!result.handled) {
       toast({
@@ -342,12 +435,14 @@ export function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
+      const references = profileConflictReferences(result);
       setConflict({
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
         automations: result.automations,
-        utilityAgents: result.utilityAgents,
+        utilityAgents: references.utilityAgents,
+        dynamicProfiles: references.dynamicProfiles,
       });
     } else if (result.status === "error" && !result.handled) {
       toast({

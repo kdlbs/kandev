@@ -1,0 +1,5572 @@
+[
+  {
+    "url": "http://localhost:48429/?workflowId=journey-workflow-0",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "user.subscribe",
+          "bytes": 101
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "system.agent_runtime.status_changed",
+          "bytes": 224
+        },
+        {
+          "direction": "in",
+          "action": "user.subscribe",
+          "bytes": 186
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/plugins",
+          "status": 200,
+          "ms": 386.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-update/status",
+          "status": 200,
+          "ms": 391.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 376.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 374.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 361.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 360.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 304.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 300.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 296.6000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 295.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 295.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflow/templates",
+          "status": 200,
+          "ms": 294.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 289.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/task-prs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 287.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 284.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 285.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 283
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 282.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 282.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/health",
+          "status": 200,
+          "ms": 293.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 187
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+          "status": 200,
+          "ms": 152.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+          "status": 200,
+          "ms": 272.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 163.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 171.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 177.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 177.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 178.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+          "status": 200,
+          "ms": 286.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+          "status": 200,
+          "ms": 209.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 405.3999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 412.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+          "status": 200,
+          "ms": 229.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+          "status": 200,
+          "ms": 228.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 102.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+          "status": 200,
+          "ms": 97.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/info",
+          "status": 200,
+          "ms": 87.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 87.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+          "status": 200,
+          "ms": 86.90000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 232.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+          "status": 200,
+          "ms": 379.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+          "status": 200,
+          "ms": 378.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 238.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/opencode-acp/logo?variant=light",
+          "status": 200,
+          "ms": 237.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/codex-acp/logo?variant=light",
+          "status": 200,
+          "ms": 238.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/cursor-acp/logo?variant=light",
+          "status": 200,
+          "ms": 237.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/grok-acp/logo?variant=light",
+          "status": 200,
+          "ms": 237.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/mock-agent/logo?variant=light",
+          "status": 200,
+          "ms": 237
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/gemini/logo?variant=light",
+          "status": 200,
+          "ms": 236.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/auggie/logo?variant=light",
+          "status": 200,
+          "ms": 237.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/copilot-acp/logo?variant=light",
+          "status": 200,
+          "ms": 236.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/amp-acp/logo?variant=light",
+          "status": 200,
+          "ms": 236.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/qwen-acp/logo?variant=light",
+          "status": 200,
+          "ms": 236
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/iflow-acp/logo?variant=light",
+          "status": 200,
+          "ms": 235.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/droid-acp/logo?variant=light",
+          "status": 200,
+          "ms": 235.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/pi-acp/logo?variant=light",
+          "status": 200,
+          "ms": 235.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/kilocode-acp/logo?variant=light",
+          "status": 200,
+          "ms": 235.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/kimi-acp/logo?variant=light",
+          "status": 200,
+          "ms": 235.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/kiro-acp/logo?variant=light",
+          "status": 200,
+          "ms": 234.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/qoder-acp/logo?variant=light",
+          "status": 200,
+          "ms": 234.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/trae-acp/logo?variant=light",
+          "status": 200,
+          "ms": 234.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/omp-acp/logo?variant=light",
+          "status": 200,
+          "ms": 234.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/devin-acp/logo?variant=light",
+          "status": 200,
+          "ms": 234
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/hermes-acp/logo?variant=light",
+          "status": 200,
+          "ms": 233.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/goose-acp/logo?variant=light",
+          "status": 200,
+          "ms": 233.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/muse-acp/logo?variant=light",
+          "status": 200,
+          "ms": 233.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/minimax-acp/logo?variant=light",
+          "status": 200,
+          "ms": 233.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 386.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 380.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 173.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 637.8999996185303
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "http://localhost:48429/api/v1/agent-update/status",
+        "bytes": 12072,
+        "ms": 6
+      },
+      {
+        "name": "http://localhost:48429/api/plugins",
+        "bytes": 14,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 5.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 2.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 1.4000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 1.7000007629394531
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflow/templates",
+        "bytes": 38243,
+        "ms": 5.300000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/system/health",
+        "bytes": 765,
+        "ms": 52.70000076293945
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/task-prs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 15,
+        "ms": 2.299999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51188,
+        "ms": 1.7000007629394531
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+        "bytes": 3453,
+        "ms": 2
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 231.4000005722046
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+        "bytes": 396148,
+        "ms": 110.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+        "bytes": 397716,
+        "ms": 121.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 217
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 5.699999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 4.399999618530273
+      },
+      {
+        "name": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 3.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 6.700000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 16,
+        "ms": 7.600000381469727
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+        "bytes": 3453,
+        "ms": 1.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 185.30000019073486
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+        "bytes": 396148,
+        "ms": 93.69999980926514
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+        "bytes": 397716,
+        "ms": 94.39999961853027
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 1.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/d47bec3b-cd06-4803-bc2d-83d65b1d5410/snapshot",
+        "bytes": 3453,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 163.69999980926514
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-1/snapshot",
+        "bytes": 396148,
+        "ms": 99.79999923706055
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-2/snapshot",
+        "bytes": 397716,
+        "ms": 104.69999980926514
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 169.80000019073486
+      },
+      {
+        "name": "http://localhost:48429/api/v1/system/info",
+        "bytes": 274,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 13,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+        "bytes": 70,
+        "ms": 9.399999618530273
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/codex-acp/logo?variant=light",
+        "bytes": 1624,
+        "ms": 2
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/opencode-acp/logo?variant=light",
+        "bytes": 578,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/cursor-acp/logo?variant=light",
+        "bytes": 543,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/grok-acp/logo?variant=light",
+        "bytes": 752,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/mock-agent/logo?variant=light",
+        "bytes": 133,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/auggie/logo?variant=light",
+        "bytes": 3352,
+        "ms": 2.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/gemini/logo?variant=light",
+        "bytes": 588,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/copilot-acp/logo?variant=light",
+        "bytes": 1949,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/amp-acp/logo?variant=light",
+        "bytes": 1683,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/qwen-acp/logo?variant=light",
+        "bytes": 1594,
+        "ms": 2.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/iflow-acp/logo?variant=light",
+        "bytes": 133,
+        "ms": 2.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/droid-acp/logo?variant=light",
+        "bytes": 133,
+        "ms": 2.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/kilocode-acp/logo?variant=light",
+        "bytes": 652,
+        "ms": 3.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/pi-acp/logo?variant=light",
+        "bytes": 479,
+        "ms": 3.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/kimi-acp/logo?variant=light",
+        "bytes": 1956,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/kiro-acp/logo?variant=light",
+        "bytes": 133,
+        "ms": 2.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/qoder-acp/logo?variant=light",
+        "bytes": 6196,
+        "ms": 4
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/trae-acp/logo?variant=light",
+        "bytes": 377,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/omp-acp/logo?variant=light",
+        "bytes": 629,
+        "ms": 3.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/devin-acp/logo?variant=light",
+        "bytes": 1405,
+        "ms": 2.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/hermes-acp/logo?variant=light",
+        "bytes": 287,
+        "ms": 4.300000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/goose-acp/logo?variant=light",
+        "bytes": 1803,
+        "ms": 4.09999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/muse-acp/logo?variant=light",
+        "bytes": 211,
+        "ms": 4
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/minimax-acp/logo?variant=light",
+        "bytes": 139,
+        "ms": 3.90000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 2.40000057220459
+      }
+    ],
+    "visibleText": "Kandev\n/\nDefault Workspace\nNew Task\nQuick Chat\nQuick terminal\nHome\nInbox\nAutomations\nIntegrations\nTASKS\nAll tasks\nUnassigned\n1000\nJourney task 0010\n2m ago\nJourney task 0011\n2m ago\nJourney task 0012\n2m ago\nJourney task 0013\n2m ago\nJourney task 0014\n2m ago\nJourney task 0015\n2m ago\nJourney task 0016\n2m ago\nJourney task 0017\n2m ago\nJourney task 0018\n2m ago\nJourney task 0019\n2m ago\nJourney task 0020\n2m ago\nJourney task 0021\n2m ago\nJourney task 0022\n2m ago\nJourney task 0023\n2m ago\nJourney task 0024\n2m ago\nJourney task 0025\n2m ago\nJourney task 0026\n2m ago\nJourney task 0027\n2m ago\nJourney task 0028\n2m ago\nJourney task 0029\n2m ago\nJourney task 0030\n2m ago\nJourney task 0031\n2m ago\nJourney task 0032\n2m ago\nJourney task 0033\n2m ago\nJourney task 0034\n2m ago\nJourney task 0035\n2m ago\nJourney task 0036\n2m ago\nJourney task 0037\n2m ago\nJourney task 0038\n2m ago\nJourney task 0039\n2m ago\nJourney task 0040\n2m ago\nJourney task 0041\n2m ago\nJourney task 0042\n2m ago\nJourney task 0043\n2m ago\nJourney task 0044\n2m ago\nJourney task 0045\n2m ago\nJourney task 0046\n2m ago\nJourney task 0047\n2m ago\nJourney task 0048\n2m ago\nPrevious\nPage 1 of 10\nNext\nSettings\nHome\nSetup Issues\nMulti-select\nJourney board 0\n495\nReady\n495\n\nJourney task 0000\n\nSynthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description. Synthetic task description.\n\nJourney task 0001"
+  },
+  {
+    "url": "http://localhost:48429/tasks/journey-task-0000",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0000",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0000",
+          "bytes": 130
+        },
+        {
+          "direction": "out",
+          "action": "user.subscribe",
+          "bytes": 101
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0000",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.session.status",
+          "session_id": "journey-task-0000-session-0",
+          "task_id": "journey-task-0000",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.focus",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 142
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0000",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "system.agent_runtime.status_changed",
+          "bytes": 224
+        },
+        {
+          "direction": "in",
+          "action": "user.subscribe",
+          "bytes": 186
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0000-session-0",
+          "task_id": "journey-task-0000",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 364
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.focus",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 203
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "task.session.status",
+          "session_id": "journey-task-0000-session-0",
+          "task_id": "journey-task-0000",
+          "bytes": 573
+        },
+        {
+          "direction": "out",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.walkthrough.get",
+          "task_id": "journey-task-0000",
+          "bytes": 136
+        },
+        {
+          "direction": "out",
+          "action": "task.plan.get",
+          "task_id": "journey-task-0000",
+          "bytes": 129
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0000-session-0",
+          "task_id": "journey-task-0000",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0000",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 213
+        },
+        {
+          "direction": "in",
+          "action": "task.walkthrough.get",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "task.plan.get",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0000-session-0",
+          "task_id": "journey-task-0000",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0000",
+          "bytes": 212
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 177
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 358
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/plugins",
+          "status": 200,
+          "ms": 77.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-update/status",
+          "status": 200,
+          "ms": 80.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 75.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+          "status": 200,
+          "ms": 76.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 72.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 72.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 71.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 71.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 71.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 37.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 35.70000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 34.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 33.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 32
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 28.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 27
+        },
+        {
+          "path": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 55.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 64.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 77.40000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 80.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 87.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/editors",
+          "status": 200,
+          "ms": 98.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 102.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0",
+          "status": 200,
+          "ms": 99.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/info",
+          "status": 200,
+          "ms": 89.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+          "status": 200,
+          "ms": 93.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 89.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+          "status": 200,
+          "ms": 89.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000",
+          "status": 200,
+          "ms": 94.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 359.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+          "status": 200,
+          "ms": 115
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+          "status": 200,
+          "ms": 114.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+          "status": 200,
+          "ms": 98.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+          "status": 200,
+          "ms": 363.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 73.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 234.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0/processes",
+          "status": 200,
+          "ms": 310
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 277.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 127
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 123.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0000/ci-options",
+          "status": 200,
+          "ms": 123.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+          "status": 200,
+          "ms": 122.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions/journey-task-0000-session-0/usage",
+          "status": 200,
+          "ms": 122.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions/journey-task-0000-session-0/usage/turns?limit=1",
+          "status": 200,
+          "ms": 122.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 111.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/environment/live",
+          "status": 404,
+          "ms": 106.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 105.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/prompts",
+          "status": 200,
+          "ms": 76.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0/turns",
+          "status": 200,
+          "ms": 75.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 264.3999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+          "status": 200,
+          "ms": 300
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0000/environment/live",
+          "status": 404,
+          "ms": 6.899999618530273
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "http://localhost:48429/api/v1/agent-update/status",
+        "bytes": 12072,
+        "ms": 7.399999618530273
+      },
+      {
+        "name": "http://localhost:48429/api/plugins",
+        "bytes": 14,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+        "bytes": 4769,
+        "ms": 3.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51188,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+        "bytes": 174620,
+        "ms": 271.1000003814697
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 234.0999994277954
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 5.90000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 1.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 16,
+        "ms": 2.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/editors",
+        "bytes": 2101,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 2.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0",
+        "bytes": 4832,
+        "ms": 2.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000",
+        "bytes": 1567,
+        "ms": 11.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+        "bytes": 4769,
+        "ms": 5.800000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 179.19999980926514
+      },
+      {
+        "name": "http://localhost:48429/api/v1/system/info",
+        "bytes": 274,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 13,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+        "bytes": 70,
+        "ms": 5.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+        "bytes": 4769,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+        "bytes": 4769,
+        "ms": 2.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions",
+        "bytes": 4769,
+        "ms": 2.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 2.299999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0/processes",
+        "bytes": 2,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0000/ci-options",
+        "bytes": 2296,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.7000007629394531
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+        "bytes": 14,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions/journey-task-0000-session-0/usage",
+        "bytes": 358,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/sessions/journey-task-0000-session-0/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/environment/live",
+        "bytes": 40,
+        "ms": 3.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/prompts",
+        "bytes": 19120,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0000-session-0/turns",
+        "bytes": 60913,
+        "ms": 3.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 2.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+        "bytes": 174620,
+        "ms": 216.29999923706055
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0000/environment/live",
+        "bytes": 40,
+        "ms": 2
+      }
+    ],
+    "visibleText": "Kandev\n/\nDefault Workspace\nNew Task\nQuick Chat\nQuick terminal\nHome\nInbox\nAutomations\nIntegrations\nTASKS\nAll tasks\nUnassigned\n1000\nJourney task 0010\n2m ago\nJourney task 0011\n2m ago\nJourney task 0012\n2m ago\nJourney task 0013\n2m ago\nJourney task 0014\n2m ago\nJourney task 0015\n2m ago\nJourney task 0016\n2m ago\nJourney task 0017\n2m ago\nJourney task 0018\n2m ago\nJourney task 0019\n2m ago\nJourney task 0020\n2m ago\nJourney task 0021\n2m ago\nJourney task 0022\n2m ago\nJourney task 0023\n2m ago\nJourney task 0024\n2m ago\nJourney task 0025\n2m ago\nJourney task 0026\n2m ago\nJourney task 0027\n2m ago\nJourney task 0028\n2m ago\nJourney task 0029\n2m ago\nJourney task 0030\n2m ago\nJourney task 0031\n2m ago\nJourney task 0032\n2m ago\nJourney task 0033\n2m ago\nJourney task 0034\n2m ago\nJourney task 0035\n2m ago\nJourney task 0036\n2m ago\nJourney task 0037\n2m ago\nJourney task 0038\n2m ago\nJourney task 0039\n2m ago\nJourney task 0040\n2m ago\nJourney task 0041\n2m ago\nJourney task 0042\n2m ago\nJourney task 0043\n2m ago\nJourney task 0044\n2m ago\nJourney task 0045\n2m ago\nJourney task 0046\n2m ago\nJourney task 0047\n2m ago\nJourney task 0048\n2m ago\nPrevious\nPage 1 of 10\nNext\nSettings\nJourney task 0000\nReady\nPreparing workspace...\nConnecting terminal...\nAgent 1\nFiles\nChanges\nTerminal\n\nSynthetic agent message 150. data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data dat"
+  },
+  {
+    "url": "http://localhost:48429/tasks/journey-task-0001",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 130
+        },
+        {
+          "direction": "out",
+          "action": "user.subscribe",
+          "bytes": 101
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 142
+        },
+        {
+          "direction": "in",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 191
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 177
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "system.agent_runtime.status_changed",
+          "bytes": 224
+        },
+        {
+          "direction": "in",
+          "action": "user.subscribe",
+          "bytes": 186
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 206
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 364
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 202
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 572
+        },
+        {
+          "direction": "out",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.walkthrough.get",
+          "task_id": "journey-task-0001",
+          "bytes": 136
+        },
+        {
+          "direction": "out",
+          "action": "task.plan.get",
+          "task_id": "journey-task-0001",
+          "bytes": 129
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 213
+        },
+        {
+          "direction": "in",
+          "action": "task.walkthrough.get",
+          "bytes": 153
+        },
+        {
+          "direction": "in",
+          "action": "task.plan.get",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 211
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 206
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 4470
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 4470
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 357
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 358
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/plugins",
+          "status": 200,
+          "ms": 89.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-update/status",
+          "status": 200,
+          "ms": 92.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 86.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 88
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 83
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 83.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 81.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 81.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 81.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 36.70000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 35.40000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 33.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 32.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 31.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 28.600000381469727
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 27.200000762939453
+        },
+        {
+          "path": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 38.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 50.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 61.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 69.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 70
+        },
+        {
+          "path": "http://localhost:48429/api/v1/editors",
+          "status": 200,
+          "ms": 88.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 78.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0",
+          "status": 200,
+          "ms": 76.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 70.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/info",
+          "status": 200,
+          "ms": 67.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 67.40000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+          "status": 200,
+          "ms": 67.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 72.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 86
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 86.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 307.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 70.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 42
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+          "status": 200,
+          "ms": 312.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 207.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/processes",
+          "status": 200,
+          "ms": 518.6999998092651
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 474.70000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 474.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 473.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 473.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 473.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 472.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 472.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 472.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 304.70000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+          "status": 200,
+          "ms": 299.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 300.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 300.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage",
+          "status": 200,
+          "ms": 299.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage/turns?limit=1",
+          "status": 200,
+          "ms": 299.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 293.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 289
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 288.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 274.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7",
+          "status": 200,
+          "ms": 274.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 273.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage",
+          "status": 200,
+          "ms": 273
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage/turns?limit=1",
+          "status": 200,
+          "ms": 272.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 268.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 263.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 256.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6",
+          "status": 200,
+          "ms": 257.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 255.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage",
+          "status": 200,
+          "ms": 255.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage/turns?limit=1",
+          "status": 200,
+          "ms": 255.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 252.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 248.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 235.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5",
+          "status": 200,
+          "ms": 241.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 234.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage",
+          "status": 200,
+          "ms": 234.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage/turns?limit=1",
+          "status": 200,
+          "ms": 234.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 231.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 227.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 220.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4",
+          "status": 200,
+          "ms": 221.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 219.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage",
+          "status": 200,
+          "ms": 219.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage/turns?limit=1",
+          "status": 200,
+          "ms": 218.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 216.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 212.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 205.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+          "status": 200,
+          "ms": 206.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 204.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage",
+          "status": 200,
+          "ms": 204.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage/turns?limit=1",
+          "status": 200,
+          "ms": 204.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 202.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 197.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 186.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage/turns?limit=1",
+          "status": 200,
+          "ms": 184.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage",
+          "status": 200,
+          "ms": 184.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 185.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2",
+          "status": 200,
+          "ms": 187.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 181.60000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 175.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 167.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 166.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1",
+          "status": 200,
+          "ms": 168
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage",
+          "status": 200,
+          "ms": 166.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage/turns?limit=1",
+          "status": 200,
+          "ms": 166
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 163.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 158.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/prompts",
+          "status": 200,
+          "ms": 84.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/turns",
+          "status": 200,
+          "ms": 86.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 817.3000001907349
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7/turns",
+          "status": 200,
+          "ms": 579.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+          "status": 200,
+          "ms": 753.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6/turns",
+          "status": 200,
+          "ms": 506.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5/turns",
+          "status": 200,
+          "ms": 443.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4/turns",
+          "status": 200,
+          "ms": 379.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+          "status": 200,
+          "ms": 315.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2/turns",
+          "status": 200,
+          "ms": 254
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1/turns",
+          "status": 200,
+          "ms": 192.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 307.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 131.20000076293945
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "http://localhost:48429/api/v1/agent-update/status",
+        "bytes": 12072,
+        "ms": 6.700000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/plugins",
+        "bytes": 14,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37996,
+        "ms": 6.199999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 3.799999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 2
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 2.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 2.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 0.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+        "bytes": 174620,
+        "ms": 276
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 240.39999961853027
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 5.300000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 2.09999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 2.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 16,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/editors",
+        "bytes": 2101,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 2.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0",
+        "bytes": 4833,
+        "ms": 3.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 15.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 6.90000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 185.19999980926514
+      },
+      {
+        "name": "http://localhost:48429/api/v1/system/info",
+        "bytes": 274,
+        "ms": 3.299999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 13,
+        "ms": 5.600000381469727
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+        "bytes": 70,
+        "ms": 8.90000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 7.699999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 7
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 4.800000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 2
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/processes",
+        "bytes": 2,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.19999980926513672
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2295,
+        "ms": 2.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+        "bytes": 14,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage",
+        "bytes": 358,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+        "bytes": 40,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7",
+        "bytes": 4833,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage",
+        "bytes": 358,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6",
+        "bytes": 4833,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage",
+        "bytes": 358,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5",
+        "bytes": 4833,
+        "ms": 2.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage",
+        "bytes": 358,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.40000057220458984
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.2000007629394531
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4",
+        "bytes": 4834,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage",
+        "bytes": 358,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.40000057220458984
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+        "bytes": 4834,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.4000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage",
+        "bytes": 358,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.39999961853027344
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2",
+        "bytes": 4834,
+        "ms": 5.799999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 3.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 3.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage",
+        "bytes": 358,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.7999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1",
+        "bytes": 4834,
+        "ms": 3.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage",
+        "bytes": 358,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.40000057220458984
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/prompts",
+        "bytes": 19120,
+        "ms": 1.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/turns",
+        "bytes": 60913,
+        "ms": 3.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 1.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+        "bytes": 174620,
+        "ms": 239.9000005722046
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7/turns",
+        "bytes": 60913,
+        "ms": 2.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6/turns",
+        "bytes": 60913,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5/turns",
+        "bytes": 60913,
+        "ms": 3.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4/turns",
+        "bytes": 60913,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+        "bytes": 60913,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2/turns",
+        "bytes": 60913,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1/turns",
+        "bytes": 60913,
+        "ms": 2.799999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 2.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+        "bytes": 40,
+        "ms": 1.1999998092651367
+      }
+    ],
+    "visibleText": "Kandev\n/\nDefault Workspace\nNew Task\nQuick Chat\nQuick terminal\nHome\nInbox\nAutomations\nIntegrations\nTASKS\nAll tasks\nUnassigned\n1000\nJourney task 0010\n2m ago\nJourney task 0011\n2m ago\nJourney task 0012\n2m ago\nJourney task 0013\n2m ago\nJourney task 0014\n2m ago\nJourney task 0015\n2m ago\nJourney task 0016\n2m ago\nJourney task 0017\n2m ago\nJourney task 0018\n2m ago\nJourney task 0019\n2m ago\nJourney task 0020\n2m ago\nJourney task 0021\n2m ago\nJourney task 0022\n2m ago\nJourney task 0023\n2m ago\nJourney task 0024\n2m ago\nJourney task 0025\n2m ago\nJourney task 0026\n2m ago\nJourney task 0027\n2m ago\nJourney task 0028\n2m ago\nJourney task 0029\n2m ago\nJourney task 0030\n2m ago\nJourney task 0031\n2m ago\nJourney task 0032\n2m ago\nJourney task 0033\n2m ago\nJourney task 0034\n2m ago\nJourney task 0035\n2m ago\nJourney task 0036\n2m ago\nJourney task 0037\n2m ago\nJourney task 0038\n2m ago\nJourney task 0039\n2m ago\nJourney task 0040\n2m ago\nJourney task 0041\n2m ago\nJourney task 0042\n2m ago\nJourney task 0043\n2m ago\nJourney task 0044\n2m ago\nJourney task 0045\n2m ago\nJourney task 0046\n2m ago\nJourney task 0047\n2m ago\nJourney task 0048\n2m ago\nPrevious\nPage 1 of 10\nNext\nSettings\nJourney task 0001\nReady\nPreparing workspace...\nConnecting terminal...\n8\nAgent 1\n1\nAgent 8\n2\nAgent 7\n3\nAgent 6\n4\nAgent 5\n5\nAgent 4\n6\nAgent 3\n7\nAgent 2\nFiles\nChanges\nTerminal\n\nSynthetic agent message 150. data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data d"
+  },
+  {
+    "url": "http://localhost:48429/tasks/journey-task-0001?sessionId=journey-task-0001-session-3",
+    "probe": {
+      "frames": [
+        {
+          "direction": "out",
+          "action": "user.subscribe",
+          "bytes": 101
+        },
+        {
+          "direction": "in",
+          "action": "system.agent_runtime.status_changed",
+          "bytes": 224
+        },
+        {
+          "direction": "out",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 241
+        },
+        {
+          "direction": "in",
+          "action": "user.subscribe",
+          "bytes": 186
+        },
+        {
+          "direction": "out",
+          "action": "github.task_pr.sync",
+          "task_id": "journey-task-0001",
+          "bytes": 135
+        },
+        {
+          "direction": "out",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 130
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0000-session-0",
+          "bytes": 181
+        },
+        {
+          "direction": "in",
+          "action": "session.focus",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 202
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "task.session.status",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 573
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 364
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "github.task_pr.sync",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "task.subscribe",
+          "task_id": "journey-task-0001",
+          "bytes": 190
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "out",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "task.walkthrough.get",
+          "task_id": "journey-task-0001",
+          "bytes": 136
+        },
+        {
+          "direction": "out",
+          "action": "task.plan.get",
+          "task_id": "journey-task-0001",
+          "bytes": 129
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "automation.list",
+          "bytes": 155
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 142
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 146
+        },
+        {
+          "direction": "out",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 241
+        },
+        {
+          "direction": "out",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 240
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.file_review.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 213
+        },
+        {
+          "direction": "in",
+          "action": "task.walkthrough.get",
+          "bytes": 153
+        },
+        {
+          "direction": "in",
+          "action": "task.plan.get",
+          "bytes": 147
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 150
+        },
+        {
+          "direction": "in",
+          "action": "automation.list",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-3",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "task.preview_feedback.list",
+          "task_id": "journey-task-0001",
+          "bytes": 212
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-7",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 4470
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-6",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-5",
+          "task_id": "journey-task-0001",
+          "bytes": 537
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 363
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-4",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-2",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 206
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 4471
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-1",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "session.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 207
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.subscribe",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 364
+        },
+        {
+          "direction": "out",
+          "action": "message.list",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 167
+        },
+        {
+          "direction": "in",
+          "action": "session.poll_mode_changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 179
+        },
+        {
+          "direction": "in",
+          "action": "session.state_changed",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 4470
+        },
+        {
+          "direction": "in",
+          "action": "message.queue.get",
+          "session_id": "journey-task-0001-session-0",
+          "task_id": "journey-task-0001",
+          "bytes": 538
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "out",
+          "action": "workspace.tree.get",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 167
+        },
+        {
+          "direction": "out",
+          "action": "session.cumulative_diff",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 152
+        },
+        {
+          "direction": "out",
+          "action": "session.git.commits",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 148
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88938
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88938
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88938
+        },
+        {
+          "direction": "in",
+          "action": "message.list",
+          "bytes": 88939
+        },
+        {
+          "direction": "in",
+          "action": "workspace.tree.get",
+          "bytes": 297
+        },
+        {
+          "direction": "in",
+          "action": "session.cumulative_diff",
+          "bytes": 192
+        },
+        {
+          "direction": "in",
+          "action": "session.git.commits",
+          "bytes": 178
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-3",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-7",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-6",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-5",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-4",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-2",
+          "bytes": 358
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-1",
+          "bytes": 356
+        },
+        {
+          "direction": "in",
+          "action": "session.conversation.changed",
+          "session_id": "journey-task-0001-session-0",
+          "bytes": 358
+        }
+      ],
+      "fetches": [
+        {
+          "path": "http://localhost:48429/api/plugins",
+          "status": 200,
+          "ms": 32.59999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 30.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 30.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-update/status",
+          "status": 200,
+          "ms": 35.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 29.800000190734863
+        },
+        {
+          "path": "http://localhost:48429/api/v1/executors",
+          "status": 200,
+          "ms": 29.600000381469727
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 31.200000762939453
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/available",
+          "status": 200,
+          "ms": 29.300000190734863
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 33.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/system/info",
+          "status": 200,
+          "ms": 43.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents",
+          "status": 200,
+          "ms": 32
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 17.600000381469727
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+          "status": 200,
+          "ms": 21.300000190734863
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 11
+        },
+        {
+          "path": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 8.90000057220459
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+          "status": 200,
+          "ms": 8.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 74.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 61.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 60
+        },
+        {
+          "path": "http://localhost:48429/api/v1/user/settings",
+          "status": 200,
+          "ms": 59.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/editors",
+          "status": 200,
+          "ms": 58.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+          "status": 200,
+          "ms": 58.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 57.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 55.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 44.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 49.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 50.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 193.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories?include_scripts=true",
+          "status": 200,
+          "ms": 29
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces",
+          "status": 200,
+          "ms": 28.899999618530273
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+          "status": 200,
+          "ms": 28.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+          "status": 200,
+          "ms": 29.700000762939453
+        },
+        {
+          "path": "http://localhost:48429/api/v1/user/settings",
+          "status": 200,
+          "ms": 28.800000190734863
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/messages?limit=50&sort=desc",
+          "status": 200,
+          "ms": 28.699999809265137
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+          "status": 200,
+          "ms": 28.899999618530273
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+          "status": 200,
+          "ms": 117.09999942779541
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/processes",
+          "status": 200,
+          "ms": 599.6000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 543.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 542
+        },
+        {
+          "path": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+          "status": 200,
+          "ms": 540.8000001907349
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 536.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 535.7999992370605
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 535.1999998092651
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 534.8000001907349
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 534.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 534
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 533.6999998092651
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 533.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 320.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+          "status": 200,
+          "ms": 315.3999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage",
+          "status": 200,
+          "ms": 315.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 316.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage/turns?limit=1",
+          "status": 200,
+          "ms": 314.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 320.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 308.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 304.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 303.70000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+          "status": 200,
+          "ms": 541.8000001907349
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 280.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7",
+          "status": 200,
+          "ms": 281.3999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 279.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage",
+          "status": 200,
+          "ms": 279.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage/turns?limit=1",
+          "status": 200,
+          "ms": 279.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 275
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 281.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 269
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 261.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6",
+          "status": 200,
+          "ms": 262.69999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 261.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage",
+          "status": 200,
+          "ms": 260.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage/turns?limit=1",
+          "status": 200,
+          "ms": 260.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 258.3999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 262.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 253.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 245.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5",
+          "status": 200,
+          "ms": 246.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 244.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage",
+          "status": 200,
+          "ms": 244.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage/turns?limit=1",
+          "status": 200,
+          "ms": 244
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 240.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 234.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 246
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 226.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4",
+          "status": 200,
+          "ms": 227.0999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage",
+          "status": 200,
+          "ms": 224.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 225.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage/turns?limit=1",
+          "status": 200,
+          "ms": 224.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 221.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 226.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 215.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 207.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2",
+          "status": 200,
+          "ms": 207.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 206.29999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage",
+          "status": 200,
+          "ms": 205.89999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage/turns?limit=1",
+          "status": 200,
+          "ms": 205.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 203.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 207
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 198.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 190.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1",
+          "status": 200,
+          "ms": 191.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 189.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage",
+          "status": 200,
+          "ms": 189.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage/turns?limit=1",
+          "status": 200,
+          "ms": 188.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 186.5999994277954
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 190.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 181.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage",
+          "status": 200,
+          "ms": 166.9000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage/turns?limit=1",
+          "status": 200,
+          "ms": 166.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+          "status": 200,
+          "ms": 169.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+          "status": 200,
+          "ms": 168.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0",
+          "status": 200,
+          "ms": 171
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+          "status": 200,
+          "ms": 161.39999961853027
+        },
+        {
+          "path": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+          "status": 200,
+          "ms": 155
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+          "status": 200,
+          "ms": 169.4000005722046
+        },
+        {
+          "path": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 204,
+          "ms": 77.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/prompts",
+          "status": 200,
+          "ms": 82.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+          "status": 200,
+          "ms": 82.10000038146973
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 601.8999996185303
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7/turns",
+          "status": 200,
+          "ms": 601.1000003814697
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6/turns",
+          "status": 200,
+          "ms": 532.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5/turns",
+          "status": 200,
+          "ms": 460.79999923706055
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4/turns",
+          "status": 200,
+          "ms": 384.20000076293945
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2/turns",
+          "status": 200,
+          "ms": 309.19999980926514
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1/turns",
+          "status": 200,
+          "ms": 240.5
+        },
+        {
+          "path": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/turns",
+          "status": 200,
+          "ms": 230.80000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+          "status": 200,
+          "ms": 234.30000019073486
+        },
+        {
+          "path": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+          "status": 404,
+          "ms": 142.5
+        }
+      ]
+    },
+    "resources": [
+      {
+        "name": "http://localhost:48429/api/v1/agent-update/status",
+        "bytes": 12072,
+        "ms": 8
+      },
+      {
+        "name": "http://localhost:48429/api/plugins",
+        "bytes": 14,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 11.800000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 5.699999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 3.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 2.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/executors",
+        "bytes": 1372,
+        "ms": 2.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/available",
+        "bytes": 51215,
+        "ms": 3.799999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/system/info",
+        "bytes": 274,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents",
+        "bytes": 5998,
+        "ms": 4.800000190734863
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions",
+        "bytes": 37999,
+        "ms": 6.199999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 176.89999961853027
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/quick-terminal-tabs?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 13,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/quick-chats",
+        "bytes": 70,
+        "ms": 2.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 1.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/user/settings",
+        "bytes": 4519,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/editors",
+        "bytes": 2101,
+        "ms": 0.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+        "bytes": 4834,
+        "ms": 2
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 149,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/jira/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 3.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/linear/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/sentry/instances?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 16,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3",
+        "bytes": 4834,
+        "ms": 3.09999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows/journey-workflow-0/snapshot",
+        "bytes": 776682,
+        "ms": 117.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories?include_scripts=true",
+        "bytes": 29,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces",
+        "bytes": 559,
+        "ms": 2.299999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workflows?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921&include_hidden=true",
+        "bytes": 1239,
+        "ms": 2.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+        "bytes": 60913,
+        "ms": 4.399999618530273
+      },
+      {
+        "name": "http://localhost:48429/api/v1/user/settings",
+        "bytes": 4519,
+        "ms": 3.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/messages?limit=50&sort=desc",
+        "bytes": 44445,
+        "ms": 3.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/processes",
+        "bytes": 2,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 1.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/status?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 361,
+        "ms": 0.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/gitlab/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-mrs",
+        "bytes": 15,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/sidebar/query",
+        "bytes": 174620,
+        "ms": 261.5999994277954
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.39999961853027344
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.4000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 10.699999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/task-prs",
+        "bytes": 14,
+        "ms": 1.0999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage",
+        "bytes": 358,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-3/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+        "bytes": 40,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7",
+        "bytes": 4833,
+        "ms": 2.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 10.100000381469727
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.8999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage",
+        "bytes": 358,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-7/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 2.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6",
+        "bytes": 4833,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 1.2999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 10.199999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage",
+        "bytes": 358,
+        "ms": 1.4000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-6/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5",
+        "bytes": 4833,
+        "ms": 2.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 13.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage",
+        "bytes": 358,
+        "ms": 1.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-5/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 2.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.7999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4",
+        "bytes": 4834,
+        "ms": 2.3999996185302734
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 10.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 3.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage",
+        "bytes": 358,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-4/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 2.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.1000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2",
+        "bytes": 4834,
+        "ms": 2.09999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 8.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage",
+        "bytes": 358,
+        "ms": 1.2000007629394531
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-2/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.1999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.40000057220458984
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1",
+        "bytes": 4834,
+        "ms": 2.200000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 9.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 1.5999994277954102
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage",
+        "bytes": 358,
+        "ms": 1.7999992370605469
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-1/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.6999998092651367
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0",
+        "bytes": 4833,
+        "ms": 9.699999809265137
+      },
+      {
+        "name": "http://localhost:48429/api/v1/workspaces/df759b8a-44c9-4971-9b0f-849f9e7a4921/repositories",
+        "bytes": 29,
+        "ms": 8.40000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001",
+        "bytes": 1567,
+        "ms": 17.700000762939453
+      },
+      {
+        "name": "http://localhost:48429/api/v1/github/tasks/journey-task-0001/ci-options",
+        "bytes": 2296,
+        "ms": 6.90000057220459
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage",
+        "bytes": 358,
+        "ms": 3.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/sessions/journey-task-0001-session-0/usage/turns?limit=1",
+        "bytes": 55,
+        "ms": 4.600000381469727
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agents/claude-acp/logo?variant=light",
+        "bytes": 1638,
+        "ms": 0.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/agent-profiles/5535d636-7169-4e49-a3d8-381be59819b2/mcp-config",
+        "bytes": 81,
+        "ms": 1.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/azure-devops/config?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 0,
+        "ms": 1.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/prompts",
+        "bytes": 19120,
+        "ms": 1.6000003814697266
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-3/turns",
+        "bytes": 60913,
+        "ms": 3.3000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-7/turns",
+        "bytes": 60913,
+        "ms": 2.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-6/turns",
+        "bytes": 60913,
+        "ms": 4.399999618530273
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-5/turns",
+        "bytes": 60913,
+        "ms": 2.59999942779541
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-4/turns",
+        "bytes": 60913,
+        "ms": 3.5
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-2/turns",
+        "bytes": 60913,
+        "ms": 3.8000001907348633
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-1/turns",
+        "bytes": 60913,
+        "ms": 3.799999237060547
+      },
+      {
+        "name": "http://localhost:48429/api/v1/task-sessions/journey-task-0001-session-0/turns",
+        "bytes": 60913,
+        "ms": 3
+      },
+      {
+        "name": "http://localhost:48429/api/v1/clarification-inbox?workspace_id=df759b8a-44c9-4971-9b0f-849f9e7a4921",
+        "bytes": 67,
+        "ms": 1.9000005722045898
+      },
+      {
+        "name": "http://localhost:48429/api/v1/tasks/journey-task-0001/environment/live",
+        "bytes": 40,
+        "ms": 1.3000001907348633
+      }
+    ],
+    "visibleText": "Kandev\n/\nDefault Workspace\nNew Task\nQuick Chat\nQuick terminal\nHome\nInbox\nAutomations\nIntegrations\nTASKS\nAll tasks\nUnassigned\n1000\nJourney task 0010\n2m ago\nJourney task 0011\n2m ago\nJourney task 0012\n2m ago\nJourney task 0013\n2m ago\nJourney task 0014\n2m ago\nJourney task 0015\n2m ago\nJourney task 0016\n2m ago\nJourney task 0017\n2m ago\nJourney task 0018\n2m ago\nJourney task 0019\n2m ago\nJourney task 0020\n2m ago\nJourney task 0021\n2m ago\nJourney task 0022\n2m ago\nJourney task 0023\n2m ago\nJourney task 0024\n2m ago\nJourney task 0025\n2m ago\nJourney task 0026\n2m ago\nJourney task 0027\n2m ago\nJourney task 0028\n2m ago\nJourney task 0029\n2m ago\nJourney task 0030\n2m ago\nJourney task 0031\n2m ago\nJourney task 0032\n2m ago\nJourney task 0033\n2m ago\nJourney task 0034\n2m ago\nJourney task 0035\n2m ago\nJourney task 0036\n2m ago\nJourney task 0037\n2m ago\nJourney task 0038\n2m ago\nJourney task 0039\n2m ago\nJourney task 0040\n2m ago\nJourney task 0041\n2m ago\nJourney task 0042\n2m ago\nJourney task 0043\n2m ago\nJourney task 0044\n2m ago\nJourney task 0045\n2m ago\nJourney task 0046\n2m ago\nJourney task 0047\n2m ago\nJourney task 0048\n2m ago\nPrevious\nPage 1 of 10\nNext\nSettings\nJourney task 0001\nReady\nPreparing workspace...\nConnecting terminal...\n5\nAgent 4\n1\nAgent 8\n2\nAgent 7\n3\nAgent 6\n4\nAgent 5\n6\nAgent 3\n7\nAgent 2\n8\nAgent 1\nFiles\nChanges\nTerminal\n\nSynthetic agent message 150. data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data data d"
+  }
+]

@@ -30,6 +30,7 @@ function stepFromPayload(step: any) {
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
     stage_type: step.stage_type,
@@ -82,6 +83,8 @@ function applyWorkflowCreated(state: AppState, payload: WorkflowPayload): AppSta
           id: payload.id,
           workspaceId: payload.workspace_id,
           name: payload.name,
+          source: payload.source,
+          source_path: payload.source_path,
           hidden: isHidden,
           style: payload.style,
         },
@@ -101,6 +104,8 @@ function applyWorkflowUpdated(state: AppState, payload: WorkflowPayload): AppSta
           description: payload.description,
           prompt: payload.prompt,
           agent_profile_id: payload.agent_profile_id,
+          source: payload.source ?? item.source,
+          source_path: payload.source_path ?? item.source_path,
           hidden: payload.hidden !== undefined ? Boolean(payload.hidden) : item.hidden,
           style: payload.style ?? item.style,
         }

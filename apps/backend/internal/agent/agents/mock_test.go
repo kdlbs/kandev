@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"github.com/stretchr/testify/require"
 	"regexp"
 	"testing"
 
@@ -164,6 +165,17 @@ func TestNewMockAgentWithID_AppliesIdentityOverrides(t *testing.T) {
 	}
 }
 
+func TestMockAgent_AntigravityIdentityUsesCuratedProfileSettings(t *testing.T) {
+	agent := NewMockAgentWithID(AntigravityACPAgentID, "Antigravity ACP Agent", "Antigravity")
+	setting, ok := agent.PermissionSettings()[PermissionKeyAntigravitySkipPermissions]
+	if !ok {
+		t.Fatal("Antigravity mock identity is missing its curated CLI flag setting")
+	}
+	if setting.CLIFlag != "--dangerously-skip-permissions" || setting.Default {
+		t.Fatalf("Antigravity mock setting = %#v, want disabled dangerous skip-permissions flag", setting)
+	}
+}
+
 func TestNewMockAgent_DefaultIdentity(t *testing.T) {
 	a := NewMockAgent()
 	if a.ID() != "mock-agent" {
@@ -198,4 +210,12 @@ func TestMockAgent_PassthroughConfig_PromptPattern(t *testing.T) {
 	if re.MatchString(initialPromptLine) {
 		t.Fatalf("expected PromptPattern not to match prompt echo %q", initialPromptLine)
 	}
+}
+
+func TestMockRemotePassthroughUsesTargetBinary(t *testing.T) {
+	agent := NewMockAgent()
+	agent.SetBinaryPath("/backend/bin/mock-agent")
+	command := agent.BuildPassthroughCommand(PassthroughOptions{Runtime: agentruntime.RuntimeSSH, Prompt: "remote prompt"})
+	require.Equal(t, "mock-agent", command.Args()[0])
+	require.Contains(t, command.Args(), "remote prompt")
 }

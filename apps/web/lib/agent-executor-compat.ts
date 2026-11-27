@@ -4,7 +4,13 @@ import { createDebugLogger } from "@/lib/debug/log";
 
 const debug = createDebugLogger("executor-compat");
 
-const REMOTE_EXECUTOR_TYPES = new Set(["local_docker", "remote_docker", "sprites", "k8s"]);
+const REMOTE_EXECUTOR_TYPES = new Set([
+  "local_docker",
+  "remote_docker",
+  "sprites",
+  "k8s",
+  "plugin_remote",
+]);
 const HOST_AGENT_EXECUTOR_TYPES = new Set(["local", "local_pc", "worktree"]);
 
 /**

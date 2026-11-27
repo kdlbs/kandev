@@ -14,7 +14,11 @@ func (p *StandardPassthrough) PassthroughConfig() PassthroughConfig {
 
 // BuildPassthroughCommand builds a CLI command for passthrough mode.
 func (p *StandardPassthrough) BuildPassthroughCommand(opts PassthroughOptions) Command {
-	b := p.Cfg.PassthroughCmd.With().
+	command := p.Cfg.PassthroughCmd
+	if !opts.BaseCommand.IsEmpty() {
+		command = opts.BaseCommand
+	}
+	b := command.With().
 		Model(p.Cfg.ModelFlag, opts.Model).
 		Settings(p.PermSettings, opts.PermissionValues).
 		Flag(withoutPermissionCLIFlagDuplicates(opts.CLIFlagTokens, p.PermSettings, opts.PermissionValues)...)

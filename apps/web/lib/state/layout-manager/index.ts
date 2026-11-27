@@ -21,7 +21,6 @@ export {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
-  PROMPT_HISTORY_PANEL_ID,
   REUSABLE_PANEL_IDS,
   SIDEBAR_LOCK,
   KNOWN_PANEL_IDS,
@@ -44,6 +43,8 @@ export {
   getPinnedTarget,
   clearPinnedTarget,
   clearAllPinnedTargets,
+  setReusableRightTarget,
+  clearReusableRightTarget,
 } from "./pinned-targets";
 
 // Presets
@@ -78,6 +79,7 @@ export {
 // Applier
 export {
   applyLayout,
+  getRootOrientation,
   getRootSplitview,
   resolveGroupIds,
   isCenterCandidateGroupId,

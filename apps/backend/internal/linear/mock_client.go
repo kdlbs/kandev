@@ -2,7 +2,9 @@ package linear
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 )
 
@@ -17,18 +19,28 @@ type MockClient struct {
 	statesByTeam map[string][]LinearWorkflowState
 	labelsByTeam map[string][]LinearLabel
 	usersByTeam  map[string][]LinearUser
-	issues       map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
+	// projectsByTeam backs ListProjects; projectContents backs
+	// GetProjectContents, keyed by project ID.
+	projectsByTeam  map[string][]LinearProject
+	projectContents map[string]string
+	issues          map[string]*LinearIssue // identifier (e.g. ENG-12) → issue
 	// issueOrder preserves insertion order so SearchIssues returns a stable
 	// sequence — Go map range is randomised, which would make any future test
 	// that asserts on result position intermittently flaky.
 	issueOrder    []string
 	getError      *APIError
 	setStateCalls []setStateCall
+	comments      []commentCall
 }
 
 type setStateCall struct {
 	IssueID string
 	StateID string
+}
+
+type commentCall struct {
+	IssueID string
+	Body    string
 }
 
 // NewMockClient seeds a default-success TestAuth so a fresh config flips to
@@ -47,6 +59,9 @@ func NewMockClient() *MockClient {
 		labelsByTeam: make(map[string][]LinearLabel),
 		usersByTeam:  make(map[string][]LinearUser),
 		issues:       make(map[string]*LinearIssue),
+
+		projectsByTeam:  make(map[string][]LinearProject),
+		projectContents: make(map[string]string),
 	}
 }
 
@@ -93,6 +108,13 @@ func (m *MockClient) SetIssueState(_ context.Context, issueID, stateID string) e
 	return nil
 }
 
+func (m *MockClient) AddComment(_ context.Context, issueID, body string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.comments = append(m.comments, commentCall{IssueID: issueID, Body: body})
+	return fmt.Sprintf("mock-comment-%d", len(m.comments)), nil
+}
+
 func (m *MockClient) ListLabels(_ context.Context, teamKey string) ([]LinearLabel, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -111,6 +133,27 @@ func (m *MockClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser,
 	return out, nil
 }
 
+func (m *MockClient) ListProjects(_ context.Context, teamKey string) ([]LinearProject, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := m.projectsByTeam[teamKey]
+	out := make([]LinearProject, len(src))
+	copy(out, src)
+	return out, nil
+}
+
+func (m *MockClient) GetProjectContents(_ context.Context, projectIDs []string) (map[string]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]string, len(projectIDs))
+	for _, id := range projectIDs {
+		if content, ok := m.projectContents[id]; ok {
+			out[id] = content
+		}
+	}
+	return out, nil
+}
+
 func (m *MockClient) ListTeams(context.Context) ([]LinearTeam, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -119,7 +162,7 @@ func (m *MockClient) ListTeams(context.Context) ([]LinearTeam, error) {
 	return out, nil
 }
 
-func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, maxResults int) (*SearchResult, error) {
+func (m *MockClient) SearchIssues(_ context.Context, filter SearchFilter, _ string, maxResults int) (*SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]LinearIssue, 0, len(m.issueOrder))
@@ -128,7 +171,16 @@ func (m *MockClient) SearchIssues(_ context.Context, _ SearchFilter, _ string, m
 		if !ok {
 			continue
 		}
-		out = append(out, *issue)
+		if len(filter.IssueIDs) > 0 && !slices.Contains(filter.IssueIDs, issue.ID) {
+			continue
+		}
+		found := *issue
+		if !filter.RequireBlockersDone {
+			// Like the GraphQL client, only a blocker-aware search reads relations.
+			found.Blockers = nil
+			found.BlockersTruncated = false
+		}
+		out = append(out, found)
 		if maxResults > 0 && len(out) >= maxResults {
 			break
 		}
@@ -183,6 +235,19 @@ func (m *MockClient) SetUsers(teamKey string, users []LinearUser) {
 	m.usersByTeam[teamKey] = cp
 }
 
+// SetProjects replaces the projects returned by ListProjects for a team and
+// records each project's markdown content for GetProjectContents.
+func (m *MockClient) SetProjects(teamKey string, projects []LinearProject, contents map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]LinearProject, len(projects))
+	copy(cp, projects)
+	m.projectsByTeam[teamKey] = cp
+	for id, content := range contents {
+		m.projectContents[id] = content
+	}
+}
+
 // AddIssue inserts (or replaces) an issue keyed by its Identifier.
 func (m *MockClient) AddIssue(issue *LinearIssue) {
 	m.mu.Lock()
@@ -210,6 +275,15 @@ func (m *MockClient) SetStateCalls() []setStateCall {
 	return out
 }
 
+// CommentCalls returns comments recorded through AddComment.
+func (m *MockClient) CommentCalls() []commentCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]commentCall, len(m.comments))
+	copy(out, m.comments)
+	return out
+}
+
 // Reset clears every seeded value back to defaults.
 func (m *MockClient) Reset() {
 	m.mu.Lock()
@@ -226,10 +300,13 @@ func (m *MockClient) Reset() {
 	m.statesByTeam = make(map[string][]LinearWorkflowState)
 	m.labelsByTeam = make(map[string][]LinearLabel)
 	m.usersByTeam = make(map[string][]LinearUser)
+	m.projectsByTeam = make(map[string][]LinearProject)
+	m.projectContents = make(map[string]string)
 	m.issues = make(map[string]*LinearIssue)
 	m.issueOrder = nil
 	m.getError = nil
 	m.setStateCalls = nil
+	m.comments = nil
 }
 
 // MockClientFactory returns a ClientFactory that always hands back the shared

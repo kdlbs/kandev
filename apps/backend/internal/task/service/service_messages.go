@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/task/previewfeedback"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -30,8 +31,19 @@ const (
 )
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
+var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
+type messageMetadataFirstWriter interface {
+	SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
 
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
@@ -392,6 +404,92 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 	return nil, err
 }
 
+// CreateCompletedUserMessageIdempotent persists a caller-owned user message in
+// an already-completed lifecycle-only turn. It never starts or adopts an active
+// conversation turn, so history-only records cannot alter turn timing.
+func (s *Service) CreateCompletedUserMessageIdempotent(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, error) {
+	if messageID == "" {
+		return nil, errors.New("message id is required for idempotent creation")
+	}
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAdmission()
+	ctx = admissionCtx
+
+	existing, found, err := s.existingCompletedUserMessage(ctx, messageID, req)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return existing, nil
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, req.TaskSessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.createCompletedTurn(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	req.TurnID = turn.ID
+	req.CompletedTurn = true
+	message, err := s.CreateMessageWithID(ctx, messageID, req)
+	if err == nil {
+		return message, nil
+	}
+	// A concurrent writer can still win between the admitted lookup and this
+	// insert. Treat a matching committed row as success.
+	existing, found, lookupErr := s.existingCompletedUserMessage(ctx, messageID, req)
+	if lookupErr == nil && found {
+		return existing, nil
+	}
+	return nil, s.rollbackCompletedUserMessageTurn(ctx, session, turn, err)
+}
+
+func (s *Service) existingCompletedUserMessage(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing completed user message: %w", err)
+	}
+	if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
+func (s *Service) rollbackCompletedUserMessageTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+	turn *models.Turn,
+	cause error,
+) error {
+	if _, rollbackErr := s.RollbackReservedTurn(ctx, session.ID, turn.ID); rollbackErr != nil {
+		return errors.Join(cause, rollbackErr)
+	}
+	return cause
+}
+
 type planCommentMessageValidator interface {
 	ValidateMessagePlanComments(
 		context.Context,
@@ -659,12 +757,33 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	return message, nil
 }
 
+// authorizeMessageCreate enforces session.prompt for an ordinary task, and
+// workspace.manage instead for a coordinator conversation task
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
+// manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
-	if req == nil || req.AuthorType == createdByAgent {
+	if req == nil {
+		return nil
+	}
+	if report, _ := ctx.Value(collaborationReportContextKey{}).(bool); report {
+		return s.authorizeTaskScopeAction(ctx, req.TaskID, authz.ScopeTaskWrite, models.CollaborationReport)
+	}
+	if s.collaborationApplies(ctx) {
+		if req.TaskID != "" {
+			return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		}
+		return s.AuthorizeSessionPromptAccess(ctx, req.TaskSessionID)
+	}
+	if req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
-		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		scope, err := s.coordinatorPromptScope(ctx, req.TaskID)
+		if err != nil {
+			return err
+		}
+		return s.authorizeTaskSessionScope(ctx, req.TaskID, req.TaskSessionID, scope)
 	}
 	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }
@@ -741,14 +860,21 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 	}
 
 	turnID := req.TurnID
+	var err error
 	if turnID == "" {
-		if turn, err := s.getOrStartTurnWithRetry(
-			ctx,
-			req.TaskSessionID,
-			id,
-			messageCreateMaxRetries,
-			messageCreateRetryDelay,
-		); err != nil {
+		var turn *models.Turn
+		if req.CompletedTurn {
+			turn, err = s.createCompletedTurn(ctx, session)
+		} else {
+			turn, err = s.getOrStartTurnWithRetry(
+				ctx,
+				req.TaskSessionID,
+				id,
+				messageCreateMaxRetries,
+				messageCreateRetryDelay,
+			)
+		}
+		if err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
@@ -993,6 +1119,63 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// DismissGitPushErrorMessage records a shared acknowledgment on one eligible
+// Git push failure. The message's stored session determines read access.
+func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID string) (string, error) {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	if message == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if message.TaskSessionID == "" {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+		return "", err
+	}
+	if message.Type != models.MessageTypeError || message.Metadata["git_operation_error"] != true || message.Metadata["operation"] != "push" {
+		return "", ErrNotGitPushErrorMessage
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return dismissedAt, nil
+	}
+
+	writer, ok := s.messages.(messageMetadataFirstWriter)
+	if !ok {
+		return "", errors.New("atomic message metadata updates are unavailable")
+	}
+	candidate := time.Now().UTC().Format(time.RFC3339Nano)
+	stored, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx,
+		message.ID,
+		message.TaskSessionID,
+		"git_operation_error_dismissed_at",
+		candidate,
+	)
+	if err != nil {
+		return "", err
+	}
+	dismissedAt, ok := stored.Metadata["git_operation_error_dismissed_at"].(string)
+	if !ok || dismissedAt == "" {
+		return "", errors.New("dismissed message is missing its acknowledgment timestamp")
+	}
+	if changed {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, stored, receipt)
+	}
+	return dismissedAt, nil
+}
+
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The prompt sequence survives message deletion and restart.
+func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
+		return false, err
+	}
+	return s.messages.HasUserPromptHistory(ctx, sessionID)
+}
+
 // RehydrateMessagePayload resolves an externalized large tool-output
 // payload (see PayloadDigest) back into message.Metadata for the explicit,
 // single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must
@@ -1024,7 +1207,11 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	return s.messages.ListMessages(ctx, sessionID)
+	messages, err := s.messages.ListMessages(ctx, sessionID)
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, err
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
@@ -1040,7 +1227,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:       limit,
 		Before:      req.Before,
 		After:       req.After,
@@ -1050,6 +1237,59 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		TaskID:      req.TaskID,
 		Around:      req.Around,
 	})
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, hasMore, err
+}
+
+// ListMessagesWithTurnWindow returns a bounded message page and, when the
+// repository supports snapshot reads, only the turn rows needed by that page.
+// Older repository implementations retain the message-only response so the
+// client can use its scoped legacy turn-history fallback.
+func (s *Service) ListMessagesWithTurnWindow(
+	ctx context.Context,
+	req ListMessagesRequest,
+) (models.MessageTurnWindow, error) {
+	if err := s.AuthorizeSessionAccess(ctx, req.TaskSessionID); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = DefaultMessagesPageSize
+	}
+	if limit > MaxMessagesPageSize {
+		limit = MaxMessagesPageSize
+	}
+	opts := models.ListMessagesOptions{
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
+	}
+	if reader, ok := s.messages.(repository.MessageTurnWindowReader); ok {
+		window, err := reader.ReadMessageTurnWindow(ctx, req.TaskSessionID, opts)
+		if err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		if err := s.projectRunningNotices(ctx, window.Messages); err != nil {
+			return models.MessageTurnWindow{}, err
+		}
+		return window, nil
+	}
+
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, opts)
+	if err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	if err := s.projectRunningNotices(ctx, messages); err != nil {
+		return models.MessageTurnWindow{}, err
+	}
+	return models.MessageTurnWindow{Messages: messages, HasMore: hasMore}, nil
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API
@@ -1130,6 +1370,43 @@ func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.
 		return writer.UpdateMessageWithConversationReceipt(ctx, message)
 	}
 	return nil, s.messages.UpdateMessage(ctx, message)
+}
+
+// SetUserMessageDeliveryStatus sets the delivery status on an exact
+// session-owned user message. It reports whether such a message exists, so a
+// caller can record the message when it is absent. Reapplying the same status
+// is a no-op and does not publish a duplicate update.
+func (s *Service) SetUserMessageDeliveryStatus(
+	ctx context.Context,
+	messageID, sessionID, status string,
+) (bool, error) {
+	if messageID == "" || sessionID == "" || status == "" {
+		return false, nil
+	}
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if message == nil || message.TaskSessionID != sessionID ||
+		message.AuthorType != models.MessageAuthorUser {
+		return false, nil
+	}
+	if message.Metadata != nil && message.Metadata[models.MessageMetaKeyDeliveryStatus] == status {
+		return true, nil
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+1)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MessageMetaKeyDeliveryStatus] = status
+	message.Metadata = metadata
+	if err := s.UpdateMessage(ctx, message); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AppendMessageContent appends additional content to an existing message.
@@ -1581,6 +1858,27 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// UpdatePermissionPresentation conditionally changes one exact permission
+// row's presentation. Only a matched update publishes a message event, so a
+// concurrent claim or replacement never produces a presentation change.
+func (s *Service) UpdatePermissionPresentation(ctx context.Context, request models.PermissionPresentationUpdate) (*models.Message, bool, error) {
+	message, updated, err := s.messages.UpdatePermissionPresentation(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to update permission presentation",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("presentation", string(request.Presentation)),
+			zap.Error(err))
+		return nil, false, err
+	}
+	if updated && message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	}
+	return message, updated, nil
 }
 
 // ClaimPermissionResolution durably serializes the first resolver before any

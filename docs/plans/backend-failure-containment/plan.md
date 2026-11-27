@@ -253,3 +253,9 @@ store state and never stop the managed E2E `agentctl`.
   logging closes the remaining diagnostic gap.
 - Automatic child restart, health-endpoint changes, historical runtime-row
   deletion, and broad UI action disabling remain outside this package.
+
+## Runtime replacement extension (2026-09-27)
+
+The [runtime replacement package](../agentctl-runtime-replacement/plan.md) adds in-process agentctl recovery to PR #3598.
+Its six work orders are pending. Prior implementation results remain historical and do not verify this extension.
+The new package explicitly replaces the old mandatory-backend-restart availability policy while preserving durable uncertainty guards.

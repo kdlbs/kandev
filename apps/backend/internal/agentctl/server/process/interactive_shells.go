@@ -14,10 +14,11 @@ import (
 
 // UserShellOptions contains optional parameters for starting a user shell.
 type UserShellOptions struct {
-	Label          string            // Display name (e.g., "Terminal" or script name)
-	InitialCommand string            // Command to run after shell starts
-	Closable       *bool             // Whether the terminal can be closed (nil = auto-determine)
-	Env            map[string]string // Extra env exported into the shell (e.g. executor-profile vars)
+	Label              string            // Display name (e.g., "Terminal" or script name)
+	InitialCommand     string            // Command to run after shell starts
+	InitialCommandOnce bool              // Do not replay the command from a cached shell entry
+	Closable           *bool             // Whether the terminal can be closed (nil = auto-determine)
+	Env                map[string]string // Extra env exported into the shell (e.g. executor-profile vars)
 }
 
 // CreateUserShellResult contains the result of creating a new user shell.
@@ -160,7 +161,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 	r.userShellsMu.RUnlock()
 
 	initialCommand := opts.InitialCommand
-	if initialCommand == "" && existingEntry != nil {
+	if initialCommand == "" && existingEntry != nil && !opts.InitialCommandOnce {
 		initialCommand = existingEntry.InitialCommand
 	}
 
@@ -190,6 +191,9 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 	r.userShellsMu.Lock()
 	if existingEntry != nil {
 		existingEntry.ProcessID = info.ID
+		if opts.InitialCommandOnce {
+			existingEntry.InitialCommand = ""
+		}
 		r.userShells[key] = existingEntry
 	} else {
 		closable := true
@@ -199,7 +203,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		r.userShells[key] = &userShellEntry{
 			ProcessID:      info.ID,
 			Label:          opts.Label,
-			InitialCommand: opts.InitialCommand,
+			InitialCommand: initialCommandForShellEntry(opts),
 			Closable:       closable,
 			CreatedAt:      time.Now().UTC(),
 		}
@@ -215,10 +219,17 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		zap.String("shell", req.Command[0]),
 		zap.String("working_dir", workingDir),
 		zap.String("label", label),
-		zap.String("initial_command", initialCommand),
+		zap.Bool("has_initial_command", initialCommand != ""),
 		zap.Bool("deferred_start", info.OSPID == 0))
 
 	return info, nil
+}
+
+func initialCommandForShellEntry(opts *UserShellOptions) string {
+	if opts == nil || opts.InitialCommandOnce {
+		return ""
+	}
+	return opts.InitialCommand
 }
 
 // StartEnvForTesting returns the environment recorded for a process's deferred

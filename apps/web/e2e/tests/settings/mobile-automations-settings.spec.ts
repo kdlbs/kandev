@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 test.describe("Automation deletion confirmation on mobile", () => {
@@ -25,6 +26,7 @@ test.describe("Automation deletion confirmation on mobile", () => {
 
     const confirmation = testPage.getByTestId("automation-delete-confirm-dialog");
     await expect(confirmation).toBeVisible();
+    await waitForFiniteAnimations(confirmation);
     await expect(confirmation).toContainText(
       "This will permanently delete Mobile Delete Automation. This action cannot be undone.",
     );
@@ -67,5 +69,37 @@ test.describe("Automation deletion confirmation on mobile", () => {
     await expect(testPage.getByText("Mobile Delete Automation")).not.toBeVisible({
       timeout: 10_000,
     });
+  });
+  test("keeps retry controls usable on a phone", async ({ testPage, seedData, apiClient }) => {
+    const automation = await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Mobile Retry Settings",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+
+    await testPage.goto(
+      `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
+    );
+    await expect(testPage.getByTestId("automation-editor")).toBeVisible({ timeout: 15_000 });
+
+    const retryModes = testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true });
+    await expect(retryModes).toBeVisible();
+    const finite = retryModes.getByRole("radio", { name: "Fixed number of times" });
+    await finite.tap();
+    await expect(finite).toBeChecked();
+    // Phones stack the retry modes full width with touch-sized targets.
+    const finiteBox = await finite.boundingBox();
+    expect(finiteBox).not.toBeNull();
+    expect(finiteBox!.height).toBeGreaterThanOrEqual(44);
+    const modesBox = await testPage.getByTestId("automation-retry-modes").boundingBox();
+    expect(modesBox).not.toBeNull();
+    expect(finiteBox!.width).toBeGreaterThanOrEqual(modesBox!.width - 8);
+    await testPage.locator("#automation-retry-max").fill("2");
+    await testPage.getByRole("radio", { name: "Managed conversation" }).tap();
+    await expect(testPage.locator("#automation-retry-finite")).toHaveCount(0);
+    await testPage.getByRole("radio", { name: "Normal task" }).tap();
+    await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile managed retry settings");
   });
 });

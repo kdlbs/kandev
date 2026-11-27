@@ -26,3 +26,23 @@ func (r *Repository) migrateTaskSessionsRollupColumnsToBigint() {
 	r.migrate.Apply("task_sessions.tokens_out.bigint",
 		`ALTER TABLE task_sessions ALTER COLUMN tokens_out TYPE BIGINT`)
 }
+
+func (r *Repository) migrateTaskUsageObservationColumns() {
+	for _, column := range []struct {
+		name string
+		sql  string
+	}{
+		{"provider_thread_id", `ALTER TABLE task_usage_events ADD COLUMN provider_thread_id TEXT NOT NULL DEFAULT ''`},
+		{"provider_turn_id", `ALTER TABLE task_usage_events ADD COLUMN provider_turn_id TEXT NOT NULL DEFAULT ''`},
+		{"provider_response_id", `ALTER TABLE task_usage_events ADD COLUMN provider_response_id TEXT NOT NULL DEFAULT ''`},
+		{"native_scope", `ALTER TABLE task_usage_events ADD COLUMN native_scope TEXT NOT NULL DEFAULT ''`},
+		{"measurement_source", `ALTER TABLE task_usage_events ADD COLUMN measurement_source TEXT NOT NULL DEFAULT ''`},
+		{"usage_completeness", `ALTER TABLE task_usage_events ADD COLUMN usage_completeness TEXT NOT NULL DEFAULT ''`},
+		{"usage_schema_version", `ALTER TABLE task_usage_events ADD COLUMN usage_schema_version INTEGER NOT NULL DEFAULT 0`},
+		{"reasoning_output_tokens", `ALTER TABLE task_usage_events ADD COLUMN reasoning_output_tokens BIGINT`},
+		{"reported_cache_write_tokens", `ALTER TABLE task_usage_events ADD COLUMN reported_cache_write_tokens BIGINT`},
+		{"reported_total_tokens", `ALTER TABLE task_usage_events ADD COLUMN reported_total_tokens BIGINT`},
+	} {
+		_ = r.migrate.Apply("task_usage_events."+column.name, column.sql)
+	}
+}

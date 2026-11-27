@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -109,6 +110,12 @@ func (h *WorkflowHandlers) listWorkflows(ctx context.Context, workspaceID string
 	for _, w := range workflows {
 		result.Workflows = append(result.Workflows, dto.FromWorkflow(w))
 	}
+	if includeHidden {
+		result.TaskWorkflowCoverage, err = h.service.TaskWorkflowCoverage(ctx, workspaceID)
+		if err != nil {
+			h.logger.Warn("workflow task coverage unavailable", zap.Error(err))
+		}
+	}
 	return result, nil
 }
 
@@ -207,21 +214,15 @@ const workspaceReadOnlyMsg = "this workspace is managed by Improve Kandev and is
 // Improve Kandev workspace are both immutable. Lookup errors surface as
 // ("", false) so callers keep their existing not-found handling.
 func (h *WorkflowHandlers) readOnlyWorkflowMessage(ctx context.Context, id string) (string, bool) {
-	workflow, err := h.service.GetWorkflow(ctx, id)
+	synced, workspaceReadOnly, err := h.service.WorkflowMutationReadOnly(ctx, id)
 	if err != nil {
 		return "", false
 	}
-	if workflow.Source == models.WorkflowSourceGitHub {
+	if synced {
 		return workflowReadOnlyMsg, true
 	}
-	if workflow.WorkspaceID != "" {
-		workspace, err := h.service.GetWorkspace(ctx, workflow.WorkspaceID)
-		if err != nil {
-			return "", false
-		}
-		if workspace.IsImproveKandev() {
-			return workspaceReadOnlyMsg, true
-		}
+	if workspaceReadOnly {
+		return workspaceReadOnlyMsg, true
 	}
 	return "", false
 }
@@ -241,12 +242,12 @@ func (h *WorkflowHandlers) rejectReadOnlyWorkspaceHTTP(c *gin.Context, workspace
 	if workspaceID == "" {
 		return false
 	}
-	workspace, err := h.service.GetWorkspace(c.Request.Context(), workspaceID)
+	readOnly, err := h.service.WorkspaceWorkflowMutationReadOnly(c.Request.Context(), workspaceID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return true
 	}
-	if workspace.IsImproveKandev() {
+	if readOnly {
 		c.JSON(http.StatusConflict, gin.H{"error": workspaceReadOnlyMsg})
 		return true
 	}
@@ -259,12 +260,12 @@ func (h *WorkflowHandlers) wsRejectReadOnlyWorkspace(ctx context.Context, msg *w
 	if workspaceID == "" {
 		return nil, false
 	}
-	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
+	readOnly, err := h.service.WorkspaceWorkflowMutationReadOnly(ctx, workspaceID)
 	if err != nil {
 		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
 		return errMsg, true
 	}
-	if workspace.IsImproveKandev() {
+	if readOnly {
 		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workspaceReadOnlyMsg, nil)
 		return errMsg, true
 	}
@@ -334,6 +335,7 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -343,9 +345,10 @@ func (h *WorkflowHandlers) httpGetWorkflowSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 
@@ -396,6 +399,7 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 		return
 	}
 
+	totalTasks := len(tasks)
 	tasks = applyTaskLimit(c, tasks)
 
 	taskDTOs, err := h.convertTasksWithPrimarySessions(c.Request.Context(), tasks)
@@ -405,9 +409,10 @@ func (h *WorkflowHandlers) httpGetWorkspaceSnapshot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.WorkflowSnapshotDTO{
-		Workflow: dto.FromWorkflow(workflow),
-		Steps:    steps,
-		Tasks:    taskDTOs,
+		Workflow:     dto.FromWorkflow(workflow),
+		Steps:        steps,
+		Tasks:        taskDTOs,
+		TaskCoverage: h.service.WorkflowTaskCoverage(workflow, totalTasks, len(taskDTOs)),
 	})
 }
 
@@ -528,6 +533,14 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		AgentProfileID: req.AgentProfileID,
 	})
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspaceDefaultExecutorUnavailable) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, models.ErrWorkspaceDefaultExecutorUnavailable.Error(), map[string]interface{}{
+				errorDetailKeyErrorCode: models.WorkspaceDefaultExecutorUnavailableErrorCode,
+			})
+		}
+		if errors.Is(err, models.ErrExecutorMutationDenied) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, models.ErrExecutorMutationDenied.Error(), nil)
+		}
 		h.logger.Error("failed to update workflow", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow", nil)
 	}

@@ -41,6 +41,19 @@ docs/plans/<initiative>/task-<NN>-<short-slug>.md
 
 `plan.md` is the work-package manifest. Each `task-*.md` file is one work order.
 
+## Solution simplicity (KISS)
+
+Choose the simplest solution that fully satisfies current requirements and solves
+the stated problem. Keep the design and work orders proportional to that problem.
+
+- Reuse existing patterns, components, and dependencies.
+- Avoid speculative abstractions, extra layers, configuration, and dependencies
+  for hypothetical future needs.
+- Preserve required correctness, security, compatibility, and failure handling.
+- If added complexity is necessary, identify the current requirement or concrete
+  constraint that needs it. Explain why a simpler approach is insufficient.
+- Before handoff, remove unnecessary scope, indirection, and work-order splits.
+
 ## Workflow
 
 ### 1. Map the change
@@ -56,6 +69,10 @@ Identify:
 - Existing models, repositories, services, handlers, clients, stores, and UI.
 - Existing tests and end-to-end patterns.
 - The dependency order for implementation.
+
+For scheduling, background delivery, or task/session lifecycle changes, use the
+[lifecycle evidence checklist](../tdd/references/lifecycle-evidence.md). Keep
+its scenario mapping in the current work order's results.
 
 Use `python3 scripts/list-docs.py decisions --text <capability-term> --format paths`
 to locate relevant decisions. Stop when the requirements, system design, ADRs,
@@ -96,6 +113,13 @@ State the result, the implementation order, and the reason for that order.
 
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
+Explain why the approach is the simplest sufficient solution.
+
+For a shared provider or adapter path, include a compact compatibility matrix
+covering the provider, transport, identity or capability shape, intended
+behavior, verification evidence, and unsupported-shape fallback. Shared
+implementation does not imply that every provider is supported; state
+conditional coverage explicitly.
 
 ## ASCII UI preview
 
@@ -248,10 +272,21 @@ never rely on a preceding `cd`. Confirm each referenced path exists and stays
 inside the tool or package scope, and that every changed test suite is covered
 before marking Results complete. Record actual results, not planned or stale counts.
 
+When an acceptance criterion defines a benchmark bound, keep the plan and work
+order `in_progress` until the criterion's benchmark procedure satisfies every
+bound. Record measured values and environment caveats; a missed or unmeasured
+bound is not acceptance, and an earlier or different benchmark run cannot
+substitute for it.
+
 Before marking a new plan package complete, run `git diff --check --
 docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;
 the status check catches untracked work orders. Confirm every work order names
-existing `REQ-*`/`AC-*` IDs and an existing system-design path.
+existing `REQ-*`/`AC-*` IDs and an existing system-design path. Also verify that
+every requirement named by a work order is declared by at least one of its
+referenced system designs, and that every work-order design is included by the
+plan's system-design list. Run the repository's PR-documentation coverage
+preflight when one is available; `list-docs` and specification lint alone do
+not prove this cross-reference coverage.
 
 Do not add generic QA, review, simplify, security, or full-verification tasks.
 Task checks provide pre-PR evidence. Configured PR reviewers provide semantic

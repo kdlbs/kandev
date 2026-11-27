@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -7,6 +8,14 @@ import {
   waitForWorkflowProfileSession,
 } from "./workflow-agent-switch-helpers";
 
+async function waitForTaskReview(apiClient: ApiClient, taskId: string, stepId: string) {
+  await expect
+    .poll(() => apiClient.getTask(taskId), {
+      message: "the source step's task should be in Review",
+    })
+    .toMatchObject({ state: "REVIEW", workflow_step_id: stepId });
+}
+
 test.describe("Workflow agent profile switching on mobile", () => {
   test("shows parked and newly created workflow sessions in the task session picker", async ({
     testPage,
@@ -14,7 +23,10 @@ test.describe("Workflow agent profile switching on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       "Mobile workflow session tabs",
@@ -50,13 +62,16 @@ test.describe("Workflow agent profile switching on mobile", () => {
         workflow_id: workflow.id,
         workflow_step_id: stepA.id,
         repository_ids: [seedData.repositoryId],
-        description: "Run the workflow session picker scenario",
+        // Exercise session ownership without randomized model response delays.
+        description: "/e2e:simple-message",
       },
     );
     const originalASessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
 
+    await waitForTaskReview(apiClient, task.id, stepA.id);
     await apiClient.moveTask(task.id, workflow.id, stepB.id);
     await waitForWorkflowProfileSession(apiClient, task.id, profileB.id);
+    await waitForTaskReview(apiClient, task.id, stepB.id);
     await apiClient.moveTask(task.id, workflow.id, stepAAgain.id);
 
     await expect

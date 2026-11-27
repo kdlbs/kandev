@@ -11,7 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 func adminActionPackage(t *testing.T) *bytes.Buffer {

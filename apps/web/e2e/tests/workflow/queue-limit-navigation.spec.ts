@@ -8,6 +8,14 @@ import {
 } from "./queued-session-ownership-helpers";
 
 test.describe("Queue limit navigation", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("queue-limit-navigation-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
   test("labels the global capacity queue and returns without changing the task", async ({
     testPage,
     apiClient,
@@ -99,6 +107,11 @@ test.describe("Queue limit navigation", () => {
     );
     await expect(testPage.getByTestId(`workflow-card-${scenario.workflowId}`)).toHaveAttribute(
       "data-settings-target-highlight",
+      "true",
+    );
+    // The compact list expands the targeted workflow so its step settings are editable.
+    await expect(testPage.getByTestId(`workflow-card-${scenario.workflowId}`)).toHaveAttribute(
+      "data-expanded",
       "true",
     );
 

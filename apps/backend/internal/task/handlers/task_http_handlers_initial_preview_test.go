@@ -16,8 +16,8 @@ func TestTaskCreateInitialPreviewReachesPreparation(t *testing.T) {
 	orch := &captureOrchestrator{prepErr: errors.New("stop before async dispatch")}
 	h := &TaskHandlers{orchestrator: orch, logger: newTestLogger(t)}
 	body := httpCreateTaskRequest{
-		StartAgent: true, AgentProfileID: "profile-1", Description: "submitted text",
-		Attachments: []v1.MessageAttachment{{AttachmentID: "image-1", Type: "image", MimeType: "image/png", Name: "screen.png"}},
+		StartAgent: true, AgentProfileID: "profile-1", Description: "submitted text", PlanMode: true,
+		Attachments: []v1.MessageAttachment{{AttachmentID: "image-1", Type: "image", MimeType: "image/png", Name: "screen.png", SizeBytes: 8, DeliveryMode: "prompt"}},
 	}
 	h.prepareStartAgentSession(context.Background(), &createTaskResponse{}, "task-1", body, "step-1")
 	require.Len(t, orch.requests, 1)
@@ -25,6 +25,11 @@ func TestTaskCreateInitialPreviewReachesPreparation(t *testing.T) {
 	require.NotNil(t, preview)
 	require.Equal(t, body.Description, preview.Content)
 	require.Equal(t, body.Attachments, preview.Attachments)
+	submission := orch.requests[0].InitialPromptSubmission
+	require.NotNil(t, submission)
+	require.Equal(t, body.Description, submission.Content)
+	require.True(t, submission.PlanMode)
+	require.Equal(t, []v1.MessageAttachment{{AttachmentID: "image-1", Type: "image", MimeType: "image/png", Name: "screen.png", SizeBytes: 8, DeliveryMode: "prompt"}}, submission.Attachments)
 	require.Empty(t, orch.requests[0].Prompt, "display text must not dispatch an agent prompt")
 	require.Empty(t, orch.requests[0].Attachments)
 }

@@ -1,10 +1,15 @@
 ---
-status: draft
+status: current
 system: platform
+updated: 2026-11-25
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-001
   - REQ-PLATFORM-INTERACTIVE-READS-002
   - REQ-PLATFORM-INTERACTIVE-READS-003
+  - REQ-PLATFORM-INTERACTIVE-READS-004
+  - REQ-PLATFORM-INTERACTIVE-READS-005
+  - REQ-PLATFORM-INTERACTIVE-READS-007
+  - REQ-PLATFORM-INTERACTIVE-READS-008
 ---
 
 # Interactive Read Availability System Design
@@ -25,6 +30,10 @@ remain authoritative. This design adds workload control, not a health bypass.
 | REQ-PLATFORM-INTERACTIVE-READS-001 | Query shape and metric compatibility; Performance evidence |
 | REQ-PLATFORM-INTERACTIVE-READS-002 | Admission and cancellation; Persistence and diagnostics |
 | REQ-PLATFORM-INTERACTIVE-READS-003 | Section recovery and presentation |
+| REQ-PLATFORM-INTERACTIVE-READS-004 | Clarification workload control |
+| REQ-PLATFORM-INTERACTIVE-READS-005 | Task navigation recovery |
+| REQ-PLATFORM-INTERACTIVE-READS-007 | Quiet task refresh recovery |
+| REQ-PLATFORM-INTERACTIVE-READS-008 | Delivery environment lookup |
 
 ## Query shape and metric compatibility
 
@@ -160,3 +169,331 @@ Record bounded analytics operation names and elapsed admission/execution time in
 existing structured logs on slow or failed calls. Do not log SQL, task titles,
 workspace data, credentials, or query payloads. Request timings and health logs
 provide the integration evidence; diagnostic bundles remain the collection path.
+
+## Clarification workload control
+
+The task repository owns one admission gate for `ListUnresolvedClarificationBundles`
+and `CountHiddenClarificationBundles`. Permit one operation at a time, across
+workspaces and HTTP/MCP callers sharing that repository. Acquire before SQL,
+release after rows close, and bound queue plus execution to ten seconds.
+Use the caller's earlier deadline when present. Check cancellation after
+admission before starting SQL. Match the existing analytics admission pattern;
+do not introduce a generic database scheduler or additional pool.
+
+The normal and hidden HTTP inbox handlers also impose a ten-second total read
+deadline. Carry it through authorization, listing, message hydration, and counts.
+Translate an internally expired read into sanitized HTTP 503 with `Retry-After: 2`.
+Preserve authorization and non-timeout database error handling. Caller cancellation
+must release capacity without changing required-store health. MCP keeps its
+existing error envelope, and mutating clarification responses keep their current
+ownership and transaction path.
+
+Measure the list and hidden-count query plans before changing SQL or indexes.
+`clarificationBundleTableExpr` currently groups message history before applying
+workspace conditions. Inspect its access paths on substantial unrelated history.
+Push eligible task/session restrictions into candidate selection where semantics
+permit, or add a measured dialect-safe index through existing schema replay.
+Keep the common predicate shared by listing and counts. Preserve mixed-status
+bundles, parent-question exclusion, current-turn authority, nested question IDs,
+sidecars, and cursor ordering. Do not copy a live database into a fixture.
+
+The admission test holds the admitted query at a barrier. Excess work must wait
+without borrowing connections. A task read and real `requiredstores.Health.Check`
+must succeed through the same factory-created SQLite pool. Test cancellation,
+SQL failures, missing tables, and recovery separately. PostgreSQL retains the
+same operation cap and equivalent query results.
+
+`useNeedsYouInboxController` owns one refresh coordinator for all five existing
+trigger families. Coalesce mount, reconnect, foreground, periodic, snooze, and
+WS refresh requests into one in-flight read for the active scope. Events during
+execution set one dirty marker; a trailing read refreshes the latest state.
+Use a one-second minimum between background request starts. A failed temporary
+read imposes a shared cooldown of 2, 5, 15, then 30 seconds, capped at 30 seconds.
+Honor a longer Retry-After. Events cannot reset the failure count or shorten it.
+The cooldown itself does not create an endless timer: a pending trigger can
+produce one deferred read. Retain the existing visible-only periodic trigger.
+
+Abort outstanding reads and clear pending work when workspace, identity, feature
+activation, or component lifetime changes. Keep generation guards as a second
+defense against late results. Auth and permanent lookup failures suspend automatic
+refresh until the scope changes; explicit user recovery remains available.
+Preserve the Inbox's existing rule that failed reads clear its rows and badge.
+This repair adds no speculative counts or new badge presentation.
+
+Log slow or failed clarification operations with fixed operation names, admission
+wait, execution time, and reader pool statistics. Avoid row data, metadata, SQL,
+credentials, and transcripts. Before claiming the live incident solved, correlate
+query ownership with a health-probe timeout or reproduce it on disposable data.
+One occupied inbox slot does not reserve capacity against other subsystems.
+
+## Task navigation recovery
+
+`TaskNavigationReads` remains the owner of shared task/session identity reads.
+Retain its navigation-generation and authentication/workspace scope checks.
+Add cancellation transport to `fetchTaskNavigationIdentity`, passing the request
+signal through both existing API calls. Obsolete generations cannot publish or
+start a retry. Shared consumers must not independently abort each other's read;
+the navigation owner controls cancellation at scope changes.
+
+Use one recovery owner for the selected navigation identity. Route hydration and
+`useTaskDetails` consume its attempt state and retry action. Do not add independent
+route and component retry loops. Failed session-list enrichment keeps its existing
+fallback behavior and can retry separately without discarding successful task
+details. Do not infer that an empty fallback session list is authoritative.
+
+Classify network failures and HTTP 429/502/503/504 as temporary. Recognize the
+existing persistence code through `ApiError.body.code`; `ApiError.errorCode`
+currently exposes only `error_code`. Do not change server envelopes or retry
+parse errors, aborts, authorization errors, or 404.
+
+### Bounded recovery across a health cycle
+
+One cycle includes the initial attempt and at most four automatic retries.
+The retry delays are 2, 5, 10, and 10 seconds after each preceding failure.
+Prompt failures therefore start attempts near 0, 2, 7, 17, and 27 seconds.
+The later attempts cover a complete fifteen-second health-probe interval.
+This revises the previous two-retry policy without adding another recovery owner.
+
+Cap the entire cycle at thirty seconds of visible-tab time, including attempts and delays.
+Keep the ten-second wall-time deadline for each individual attempt.
+The earlier deadline wins while the tab is visible.
+Hiding the tab pauses the cycle budget and scheduled retry delay.
+An existing attempt can settle or reach its own deadline while hidden.
+No automatic retry starts until the tab becomes visible again.
+Foreground triggers join that active cycle without renewing its budget.
+
+Keep `TaskNavigationRecoveryClock` beside `TaskNavigationReads`.
+The sidebar recovery owner also reuses this clock for the same visible-time policy.
+It owns the remaining cycle time, visibility listener, and deadline timer.
+The navigation owner disposes those resources on success, exhaustion, cancellation, and final release.
+Use a monotonic clock and fake timers in tests.
+Keep budget expiry distinct from navigation cancellation.
+Budget expiry aborts outstanding task/session work and publishes a temporary failed snapshot.
+Navigation cancellation remains an abort and cannot publish into the new scope.
+Preserve the most recent temporary error during a pending retry for classification and accessible progress.
+Visible warning timing follows quiet task refresh recovery.
+
+Honor a larger `ApiError.retryAfterSeconds` value without sending an early request.
+When its delay exceeds the remaining budget, wait only until budget exhaustion and stop.
+Do not extend the cycle, shorten the server delay, or schedule another attempt after exhaustion.
+At the deadline, success requires a completed response accepted before expiry.
+A late response cannot revive the exhausted cycle.
+
+Manual Retry starts a new bounded cycle after exhaustion.
+Repeated clicks and mixed route/component triggers share the active promise.
+Foreground recovery starts at most one new cycle per foreground episode after exhaustion.
+Ordinary rerenders and WS notifications cannot restart an exhausted cycle.
+Keep the existing optional session-list fallback and shared `TaskSessionReads` ownership rules.
+
+### Content continuity and presentation
+
+When no task content exists, show ordinary loading progress while the bounded cycle runs.
+Keep Retry disabled with its stable accessible name and leave the task-overview link usable.
+After exhaustion, enable Retry in the temporary error surface.
+Keep permanent failures in `TaskLoadErrorState` without automatic retries.
+Use neutral availability copy that does not attribute a server failure to the user's connection.
+
+Preserve the route error's temporary classification through `TaskDetailRouteState` and `taskRouteReadError`.
+In `deriveTaskDetailRouteView`, permit the current `useTaskRouteProjection` during loading and temporary failures.
+That selector already checks task identity, authentication, active workspace, archive state, and requested-session ownership.
+Do not broaden its eligibility or replay a previous route's hydration payload as fallback.
+Keep `initialState` null for a retained projection so stale data cannot overwrite newer store state.
+For loaded same-task details, preserve the current task view and selected session through failed refreshes.
+The shared read snapshot drives quiet recovery progress and an in-flow notice after exhaustion.
+On success, clear the notice without remounting the conversation or resetting a draft.
+On a permanent lookup or authorization failure, stop retention even when a projection remains cached.
+Existing invalidation still clears content when authorization or workspace scope changes.
+Retained content does not authorize a mutation, queue writes, or establish backend health.
+
+Desktop enters through the sidebar; phone enters through existing task navigation
+or a direct route. Reuse the missing-task recovery surface and `task-layout.tsx`
+as composition precedents. Both layouts use the same classification and recovery
+state. Show status, explanation, primary Retry, then the overview link.
+Phone stacks actions inside the main content area, retains the route's scroll
+owner and safe-area handling, and provides targets of at least 44px. Desktop uses
+ordinary 28px buttons. Use semantic status announcements and retain focus on the
+Retry control during attempts. Keep the overview action reachable during an initial cold-load recovery.
+After exhaustion, show the retained-content notice as one row on desktop and a wrapped block on phone.
+The notice remains in normal flow above the existing task content.
+`TaskNavigationReadFeedback` in `components/task/task-navigation-read-feedback.tsx` owns this strip.
+Place it directly below the task header and above the session tabs and panels, across the task content area.
+Replace its current absolute positioning with normal layout participation.
+Include this strip in the existing mobile header-offset calculation so the fixed phone header cannot cover it.
+Preserve the single content scroll region and keep the composer outside the notice's bounds.
+No modal, blocking overlay, or automatic page reload is needed.
+
+Add copy in all seven locale catalogs, generating the Traditional Chinese pair
+with `i18n:zh-hant`. Test temporary failure followed by success, exhausted retries,
+manual recovery, valid selected-session preservation, and navigation during an
+old pending retry. Reproduce a thirteen-second structured persistence outage and a fifteen-second boundary case with fake timers.
+Add a rendered current-projection regression that remains visible after an exhausted temporary cycle.
+Then return 404 or an authorization error and require the permanent unavailable surface.
+Cover hidden-time accounting, never-settling reads, late responses, Retry-After beyond the budget, and cleanup.
+Desktop and phone E2E cover automatic recovery without a new user event, exhaustion, manual recovery, and retained content.
+
+## Quiet task refresh recovery
+
+This section owns AC-PLATFORM-INTERACTIVE-READS-007.1 through .8.
+UI retains sidebar membership, ordering, disclosure continuity, and permission rules through its
+[sidebar design](../../ui/system-design/sidebar-archived-filter.md).
+Recovery changes neither the persistence admission gate nor mutation behavior.
+
+### Sidebar recovery ownership
+
+Keep `SidebarTaskPageCache` as the per-store owner of a query's shared read.
+Implement its bounded runner in `lib/sidebar/sidebar-task-page-recovery.ts`.
+Do not place retry timers in each `useSidebarTaskPage` consumer.
+Use the existing cache request identity, including workspace, scope, full query, and requested page.
+Preserve the separate request generation and ranking checks in the hook.
+
+A consumer lease spans the displayed query lifetime, including terminal failure.
+Release that lease on replacement, scope invalidation, disablement, or unmount.
+Do not release it after each attempt or discard the terminal record when its promise settles.
+Multiple desktop and phone mounts join the same cycle.
+Final release aborts pending attempts, disposes the clock, and removes the recovery record.
+Retain existing StrictMode restart behavior and bounded page/entity ownership.
+
+The runner selects a schedule when a cycle starts and keeps it for that cycle.
+Without eligible retained rows, it uses the task-navigation schedule: five attempts,
+with delays of 2, 5, 10, and 10 seconds, inside thirty seconds of visible time.
+With eligible retained rows, it uses the sustained schedule: nine attempts, with delays of
+2, 5, 10, 10, 20, 30, 30, and 30 seconds, inside one hundred fifty seconds of visible time.
+`SidebarTaskPageCache.request` receives a `hasRetainedRows` option from the hook.
+A matching displayed response or first page loaded from cache sets this option when a cycle starts.
+A shared record uses the sustained schedule when any consumer that starts the cycle has retained rows.
+Consumers that join an active cycle do not change its schedule or budget.
+Reuse `TaskNavigationRecoveryClock` for each budget and for hidden-tab accounting.
+Pass its existing `budgetMs` option; task navigation keeps the thirty-second default.
+Each HTTP attempt has a ten-second wall-time deadline and its own abort signal.
+Cycle expiry and cancellation abort that attempt even when a mocked transport ignores cancellation.
+Cleanup closes its deadline timer and child signal listeners.
+
+Extract shared HTTP/network classification into `lib/api/temporary-read-error.ts`.
+Keep `isTemporaryTaskNavigationError` compatible with its existing cycle-deadline handling.
+Both owners classify TypeError, HTTP 429/502/503/504, and structured `persistence_unavailable` as temporary.
+An attempt deadline is temporary. An obsolete-request abort is cancellation.
+Validation, authorization, 404, parsing, and unknown errors do not receive automatic retries.
+Honor Retry-After without extending the cycle or advancing an attempt early.
+
+Keep the hook's page request pending throughout an automatic cycle.
+Temporary attempts do not publish `sidebar:queryRefreshFailed` into component state.
+After exhaustion, publish the existing localized error once and retain eligible rows.
+The shared record distinguishes background triggers, explicit Retry, and a foreground recovery episode.
+Repeated foreground triggers join pending work and reuse an already handled episode.
+
+Live invalidations mark membership dirty without resetting the active budget or backoff.
+Preserve provisional response reconciliation and the single trailing refresh after accepted success.
+`useProvisionalSidebarRefresh` must not restart a failed cycle when pending returns to null.
+An exhausted record stores the wall-clock time at which its cycle ended.
+Explicit Retry and a later foreground episode start a new cycle immediately.
+An ordinary background admission starts a new cycle only sixty seconds or more after that time.
+Earlier background admissions reject with the stored error and send no request.
+Disclosure-sync exhaustion keeps its existing latch; only explicit Retry restarts it.
+Queued invalidations cannot bypass the cooldown. They remain available for the next admitted read.
+The cooldown uses the shared record, not a consumer timer. A background event still has to arrive;
+the record schedules no request by itself.
+No retry record makes a provisional page reusable or establishes complete local coverage.
+
+### Warning visibility
+
+`TaskNavigationReads` adds an owner-level latch for exhausted temporary recovery.
+Set it on temporary exhaustion, preserve it through explicit recovery, and clear it on success or scope invalidation.
+Permanent failures use their existing unavailable surface and invalidate retained content.
+Feed warning visibility through `TaskNavigationReadRecovery`; do not infer it from temporary classification alone.
+The route, `useTaskDetails`, and `TaskNavigationReadFeedback` consume the same owner state.
+
+During automatic recovery with eligible content, keep only a screen-reader status.
+Do not mount a visible strip, disabled Retry row, toast, or spinner that moves existing content.
+Without eligible content, keep the ordinary loading surface and reachable task-overview action.
+Show the applicable error surface only after exhaustion or an immediate permanent failure.
+
+After exhaustion, preserve the existing sidebar status slot and task-detail strip.
+Explicit recovery keeps that warning visible and disables its stable Retry control until settlement.
+Do not clear it merely because another request begins.
+Success removes the warning without remounting the conversation or changing a draft.
+Announce the start and terminal outcome of a logical cycle, not every failed HTTP attempt.
+
+### Desktop and phone
+
+Desktop reuses `SidebarTaskQueryStatus` below view controls and the in-flow `TaskNavigationReadFeedback` strip.
+Phone reuses `SessionTaskSwitcherSheet`, `MobileTaskList`, and the existing app-navigation task outlet.
+Their current drawer or menu remains the task-choice surface. Recovery opens no new overlay.
+The picker body or menu retains its current scroll owner, safe areas, dismissal, and focus return.
+The task-detail phone layout retains its header offset only while the terminal strip exists.
+Retry remains at least 44px on phones or coarse pointers and 28px on fine-pointer desktop.
+Shared state supplies identical timing, errors, and recovery actions to every presentation.
+
+### Regression evidence
+
+Use fake timers and deferred requests for provisional-page failure, all trigger families, and shared-consumer tests.
+Assert attempt counts, elapsed visible time, terminal latching, and timer cleanup.
+Cover cancellation, Retry-After, hidden tabs, never-settling requests, and permanent errors after a temporary failure.
+Keep deletion, disclosure, live reconciliation, page bounds, and access-denial regressions.
+Component tests prove that active automatic recovery reserves no visible error-strip space.
+Desktop and phone E2E cover a thirteen-second outage, exhausted recovery, manual recovery, and retained task content.
+Use existing causal waits and request counters. Keep the current permanent-error scenarios.
+
+## Delivery environment lookup
+
+`internal/delivery/sweep.go:mostRecentGitSnapshotObservationQuery` and
+`internal/delivery/observe.go:SnapshotsForPair` resolve snapshots through their
+environment owner or an existing task/session binding.
+The binding predicate uses both `task_environment_id` and `task_id`.
+The task repository owns this access path because delivery reads its tables
+after task schema initialization.
+
+Create the portable, non-unique covering index
+`idx_task_sessions_environment_task` on
+`task_sessions(task_environment_id, task_id)`.
+The environment key leads because the inner lookup receives an environment
+from each outer snapshot. No partial predicate excludes legacy empty values.
+Both SQLite and PostgreSQL use the same DDL.
+
+`internal/task/repository/sqlite/base_migrations.go:runMigrations` installs the
+index with `CREATE INDEX IF NOT EXISTS` after every session-table rebuild.
+Place the checked statement after `migrateTurnChangeHistorySchema` and before
+the final `r.migrate.Err()` check. Use the migration context and return errors.
+This position follows the environment-column addition and the legacy workflow
+step and execution-column removals. It serves fresh databases and upgrades.
+
+Do not reference the environment column from the pre-migration `initSessionSchema`
+index block. An older table can lack that column at this stage.
+Replay must also accept the identical index that an operator already created.
+
+Preserve both query predicates and their result ordering.
+The environment owner qualifies independently of capture provenance.
+For inherited environments, at least one matching session binding qualifies.
+Unrelated sibling bindings do not disqualify that environment.
+Capture provenance can be null. Deleted environment/repository bindings remain
+excluded, and repository-name and root-repository fallback rules remain intact.
+The [environment-owned Git design](../../tasks/system-design/environment-owned-git-status.md)
+continues to own those identity rules.
+
+Use a real task-schema bootstrap and the production query for SQLite plan
+coverage. Seed thousands of bindings with low task selectivity and run `ANALYZE`.
+The binding subquery must use a covering search on both keys, without a binding
+table scan. Assert plan properties rather than an exact complete plan string.
+Measure latency separately from CI assertions.
+
+Schema tests cover fresh creation, existing databases without the index,
+pre-column databases, legacy rebuilds, repeated startup, and unchanged sentinel
+rows. PostgreSQL uses an isolated schema for equivalent lifecycle and result
+coverage. Its planner can choose other efficient paths on small fixtures.
+Do not force planner settings in production.
+
+This repair adds no read pool, health timeout, retry, or scheduler policy.
+Required-store failure and recovery retain their existing contracts.
+Query-plan evidence establishes removal of this scan, not a guarantee against
+all causes of persistence overload.
+
+## Implementation plans
+
+- [Task navigation availability repair](../../../plans/task-navigation-availability/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-004 and -005.
+- [Task read resilience](../../../plans/task-read-resilience/plan.md) revises recovery timing and preserves current task content for REQ-PLATFORM-INTERACTIVE-READS-005.
+- [Quiet task refresh recovery](../../../plans/quiet-task-refresh-recovery/plan.md) adds bounded sidebar recovery and defers warnings until exhaustion.
+- [Delivery environment lookup index](../../../plans/delivery-sweep-environment-index/plan.md) covers REQ-PLATFORM-INTERACTIVE-READS-008.
+- [Sustained sidebar recovery](../../../plans/sustained-sidebar-recovery/plan.md) adds the sustained retained-row schedule and the background cooldown.
+
+## Journey loading extension
+
+[Journey data loading](journey-data-loading.md) owns the new reader-isolation, visible-detail, boot, and shared-loading work. The [delivery package](../../../plans/journey-data-efficiency/plan.md) preserves the existing completed plans and their verification history.

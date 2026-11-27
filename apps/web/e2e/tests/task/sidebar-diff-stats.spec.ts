@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+test.use({ trace: "retain-on-failure" });
+
 type GitSnapshotResponse = {
   snapshots: Array<{
     metadata?: { branch_additions?: number; branch_deletions?: number };
@@ -70,8 +72,7 @@ test.describe("Task sidebar diff stats", () => {
     test.setTimeout(180_000);
 
     // Create two tasks, each in its own worktree, each running the
-    // diff-update-setup scenario which leaves one modified, committed file
-    // and one unstaged modification → branch_additions / branch_deletions > 0.
+    // diff-update-setup scenario which leaves a non-zero branch diff.
     const taskAlpha = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Diff Alpha",
@@ -155,8 +156,10 @@ test.describe("Task sidebar diff stats", () => {
 
     await expect(alphaRow).toBeVisible({ timeout: 15_000 });
 
-    // Diff badge is rendered as "+N -N" inside a font-mono span.
-    await expect(alphaRow.getByText(/\+\d+\s+-\d+/)).toBeVisible({ timeout: 30_000 });
+    // The badge shows only non-zero counts, including one-sided changes.
+    const alphaDiffStats = alphaRow.getByTestId("sidebar-task-diff-stats");
+    await expect(alphaDiffStats).toBeVisible({ timeout: 30_000 });
+    await expect(alphaDiffStats).toHaveText(/^(?:\+[1-9]\d*(?: -[1-9]\d*)?|-[1-9]\d*)$/);
 
     // The active row keeps its diff totals visible after the row receives focus.
     // Only fine-pointer hover should swap them for the actions trigger.
@@ -178,7 +181,8 @@ test.describe("Task sidebar diff stats", () => {
       .poll(() => activeActionContainer.evaluate((element) => getComputedStyle(element).opacity))
       .toBe("0");
 
-    await activeAlphaRow.hover();
+    // The title stays clear of the trailing actions while their slot expands.
+    await activeAlphaRow.getByText("Diff Alpha", { exact: true }).hover();
     await expect(activeActionContainer).toHaveCSS("opacity", "1");
     await expect(activeDiffStats).toHaveCSS("opacity", "0");
 

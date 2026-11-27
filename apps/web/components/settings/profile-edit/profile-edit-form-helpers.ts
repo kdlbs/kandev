@@ -2,6 +2,10 @@ import type { KubernetesProfileConfigForm } from "@/components/settings/kubernet
 import { kubernetesProfileInvalidReason } from "@/components/settings/kubernetes-validation";
 import type { ProfileEnvVar } from "@/lib/types/http";
 import { rowsToEnvVars, type EnvVarRow } from "./env-vars-card";
+import {
+  dockerNetworksInvalidReasonKey,
+  type DockerNetworkFormValues,
+} from "./build-docker-network-config";
 
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
 
@@ -19,7 +23,7 @@ export function buildProfileEnvVars(
   return vars;
 }
 
-type ProfileValidationState = {
+type ProfileValidationState = DockerNetworkFormValues & {
   isKubernetes: boolean;
   name: string;
   mcpPolicyErrorKey: string | null;
@@ -39,5 +43,7 @@ export function profileSaveInvalidReason(
   if (!form.name.trim()) return t("executors:profileNameIsRequired");
   if (form.mcpPolicyErrorKey) return t(form.mcpPolicyErrorKey);
   if (form.isSprites && !form.spritesSecretId) return t("executors:spritesTokenIsRequired");
+  const networkReasonKey = dockerNetworksInvalidReasonKey(form);
+  if (networkReasonKey) return t(networkReasonKey);
   return form.isKubernetes ? kubernetesProfileInvalidReason(form.kubernetesProfile, t) : undefined;
 }

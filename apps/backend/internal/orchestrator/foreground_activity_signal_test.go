@@ -45,6 +45,24 @@ func (m *beforeDispatchAgentManager) PromptAgentWithDispatchCallback(
 	return result, err
 }
 
+func (m *beforeDispatchAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 func (r *failOnceGetTaskSessionRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	if !r.failed {
 		r.failed = true
@@ -167,9 +185,8 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type:      "message_streaming",
-			MessageID: "m1",
-			Text:      "still working on it",
+			Type: "message_chunk",
+			Text: "still working on it",
 		},
 	})
 
@@ -264,7 +281,7 @@ func TestForegroundActivitySignal_ClaimReleasePublishesCoarseGenerating(t *testi
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	eb := &recordingEventBus{}
 	svc.eventBus = eb
 
@@ -301,7 +318,7 @@ func TestForegroundActivitySignal_ModelSwitchPublishesClaimedGenerating(t *testi
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	eb := &recordingEventBus{}
 	svc.eventBus = eb
 
@@ -421,9 +438,8 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type:      "message_streaming",
-			MessageID: "m1",
-			Text:      "still working on it",
+			Type: "message_chunk",
+			Text: "still working on it",
 		},
 	})
 
@@ -519,20 +535,18 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 	}{
 		{
 			name:       "final assistant output",
-			outputType: "message_streaming",
+			outputType: "message_chunk",
 			outputData: &lifecycle.AgentStreamEventData{
-				Type:      "message_streaming",
-				MessageID: "message-1",
-				Text:      "final answer",
+				Type: "message_chunk",
+				Text: "final answer",
 			},
 		},
 		{
 			name:       "final thinking output",
-			outputType: "thinking_streaming",
+			outputType: "reasoning",
 			outputData: &lifecycle.AgentStreamEventData{
-				Type:      "thinking_streaming",
-				MessageID: "thinking-1",
-				Text:      "final reasoning",
+				Type: "reasoning",
+				Text: "final reasoning",
 			},
 		},
 		{
@@ -702,7 +716,7 @@ func TestForegroundActivitySignal_SynchronousDispatchFailureReleasesCycleClaim(t
 		promptErr:              errors.New("provider rejected prompt before acceptance"),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestCapabilities(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 
 	const (

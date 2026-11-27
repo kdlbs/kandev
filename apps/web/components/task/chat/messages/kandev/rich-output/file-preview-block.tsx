@@ -1,27 +1,45 @@
 "use client";
 
-import { useCallback, useId, useState } from "react";
+import { useCallback, useId, useMemo, useEffect, useState } from "react";
 import { IconChevronDown, IconChevronRight, IconExternalLink, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
+import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { getFileCategory, getImageMimeType } from "@/lib/utils/file-types";
 import {
   useWorkspaceFilePreview,
   type WorkspaceFilePreviewState,
 } from "@/hooks/domains/session/use-workspace-file-preview";
-import type { RichOutputFileBlock } from "./types";
+import type { FilePreviewProps } from "@/lib/rich-output/catalog";
 
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import { shouldOpenFilePreview, fileViewerCandidates } from "@/lib/plugins/file-viewer-selection";
+import { PluginFilePreview } from "@/components/task/plugin-file-preview";
+
+import { useRichOutputViewState } from "./view-state";
+
+import { parsePreviewDiff } from "./diff-preview-model";
+import { DiffPreview } from "./diff-preview";
+
+const DIFF_PATH = /\.(diff|patch)$/i;
 const TEXT_PREVIEW_CHARS = 2000;
 
 function FilePreviewContent({
-  block,
+  file,
   state,
 }: {
-  block: RichOutputFileBlock;
+  file: FilePreviewProps;
   state: WorkspaceFilePreviewState;
 }) {
   const { t } = useTranslation();
+  const content =
+    "response" in state && !state.response.is_binary ? state.response.content : undefined;
+  const diff = useMemo(
+    () => (content && DIFF_PATH.test(file.path) ? parsePreviewDiff(content) : null),
+    [content, file.path],
+  );
   if (state.kind === "loading") {
     return (
       <div className="flex min-h-20 items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -36,7 +54,7 @@ function FilePreviewContent({
     );
   }
   if (state.response.is_binary) {
-    if (getFileCategory(block.path) !== "image") {
+    if (getFileCategory(file.path) !== "image") {
       return (
         <p className="py-4 text-xs text-muted-foreground">
           {t("task:richOutputBinaryPreviewUnavailable")}
@@ -45,15 +63,15 @@ function FilePreviewContent({
     }
     return (
       <div className="flex justify-center py-2">
-        <img
-          src={`data:${getImageMimeType(block.path)};base64,${state.response.content}`}
-          alt={block.title || block.path}
-          className="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
-          draggable={false}
+        <ImagePreviewDialog
+          src={`data:${getImageMimeType(file.path)};base64,${state.response.content}`}
+          alt={file.title || file.path}
+          thumbnailClassName="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
         />
       </div>
     );
   }
+  if (diff) return <DiffPreview diff={diff} />;
   const clipped = state.response.content.slice(0, TEXT_PREVIEW_CHARS);
   const wasClipped = state.response.content.length > TEXT_PREVIEW_CHARS;
   return (
@@ -68,23 +86,46 @@ function FilePreviewContent({
   );
 }
 
-type FilePreviewBlockProps = {
-  block: RichOutputFileBlock;
+type NativeFilePreviewProps = FilePreviewProps & {
   sessionId?: string;
   onOpenFile?: (path: string, repo?: string) => void;
 };
 
-export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBlockProps) {
+function expandByDefault(path: string, pluginPreview: boolean, expandImages: boolean) {
+  if (pluginPreview) return fileViewerCandidates(path).length > 0;
+  return DIFF_PATH.test(path) || (getFileCategory(path) === "image" && expandImages);
+}
+
+export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePreviewProps) {
   const { t } = useTranslation();
   const previewId = useId();
-  const [expanded, setExpanded] = useState(false);
-  const { load, state } = useWorkspaceFilePreview(sessionId, block.path, block.repo);
+  usePluginRegistry();
+  const eligible = shouldOpenFilePreview(file.path);
+  // Keep the permission-aware route if a plugin disappears while this card is open.
+  const [pluginPreview, setPluginPreview] = useState(eligible);
+  if (eligible && !pluginPreview) setPluginPreview(true);
+  const fileCategory = getFileCategory(file.path);
+  const defaultExpanded = useOptionalAppStore(
+    (store) => store.imagePreviewsExpandedByDefault,
+    true,
+  );
+  const [expanded, setExpanded] = useRichOutputViewState(
+    JSON.stringify([file.repo, file.path]),
+    expandByDefault(file.path, pluginPreview, defaultExpanded),
+  );
+  const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
+
+  useEffect(() => {
+    if (!pluginPreview && expanded && state.kind === "idle") void load();
+  }, [pluginPreview, expanded, load, state.kind]);
 
   const handleToggle = useCallback(() => {
     const next = !expanded;
+    if (!pluginPreview && next && (fileCategory !== "image" || state.kind === "error")) {
+      void load();
+    }
     setExpanded(next);
-    if (next && (state.kind === "idle" || state.kind === "error")) void load();
-  }, [expanded, load, state.kind]);
+  }, [pluginPreview, expanded, fileCategory, state.kind, load]);
 
   return (
     <article
@@ -95,14 +136,14 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <IconFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <div className="min-w-0">
-            {block.title && <p className="truncate text-xs font-medium">{block.title}</p>}
-            <p className="truncate font-mono text-[11px] text-muted-foreground" title={block.path}>
-              {block.repo ? `${block.repo}:` : ""}
-              {block.path}
+            {file.title && <p className="truncate text-xs font-medium">{file.title}</p>}
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={file.path}>
+              {file.repo ? `${file.repo}:` : ""}
+              {file.path}
             </p>
-            {block.caption && (
+            {file.caption && (
               <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-                {block.caption}
+                {file.caption}
               </p>
             )}
           </div>
@@ -111,7 +152,7 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
           <Button
             type="button"
             variant="ghost"
-            className="cursor-pointer gap-1.5 px-2.5"
+            className="cursor-pointer gap-1.5 px-2.5 max-md:h-12 [@media(pointer:coarse)]:h-12"
             aria-expanded={expanded}
             aria-controls={previewId}
             onClick={handleToggle}
@@ -128,8 +169,8 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
             <Button
               type="button"
               variant="ghost"
-              className="cursor-pointer gap-1.5 px-2.5"
-              onClick={() => onOpenFile(block.path, block.repo)}
+              className="cursor-pointer gap-1.5 px-2.5 max-md:h-12 [@media(pointer:coarse)]:h-12"
+              onClick={() => onOpenFile(file.path, file.repo)}
               data-testid="rich-output-file-open"
             >
               <IconExternalLink className="size-4" />
@@ -140,7 +181,16 @@ export function FilePreviewBlock({ block, sessionId, onOpenFile }: FilePreviewBl
       </div>
       {expanded && (
         <div id={previewId} className="border-t border-border/50 px-3 py-2">
-          <FilePreviewContent block={block} state={state} />
+          {pluginPreview && sessionId ? (
+            <div
+              className="h-[min(32rem,70dvh)] min-h-80 overflow-hidden"
+              data-testid="rich-output-plugin-viewport"
+            >
+              <PluginFilePreview path={file.path} repo={file.repo} sessionId={sessionId} />
+            </div>
+          ) : (
+            <FilePreviewContent file={file} state={state} />
+          )}
         </div>
       )}
     </article>

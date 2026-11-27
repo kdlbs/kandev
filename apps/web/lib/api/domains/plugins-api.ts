@@ -1,14 +1,45 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, PluginSettings, SyncResult } from "@/lib/types/plugins";
+import type {
+  PluginCapabilityApproval,
+  PluginCapabilityApprovalContext,
+  PluginIdentityLink,
+  PluginIdentityLinkCode,
+  PluginRecord,
+  PluginSettings,
+  RevokePluginCapabilityApprovalInput,
+  SyncResult,
+  UpdatePluginCapabilityApprovalInput,
+} from "@/lib/types/plugins";
+import type { ManagedConversationDestinationOption } from "@/lib/types/automation";
+import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
+import { readSidebarGroupingProviders } from "@/lib/plugins/sidebar-grouping-metadata";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 const BASE = "/api/plugins";
+
+export async function listManagedConversationDestinations(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<ManagedConversationDestinationOption[]> {
+  const response = await fetchJson<{ destinations?: ManagedConversationDestinationOption[] }>(
+    `${BASE}/workspaces/${encodeURIComponent(workspaceId)}/managed-conversation-destinations`,
+    options,
+  );
+  return response.destinations ?? [];
+}
 
 // listPlugins fetches every registered plugin (GET /api/plugins).
 export async function listPlugins(options?: ApiRequestOptions) {
   const res = await fetchJson<{ plugins?: PluginRecord[] }>(BASE, options);
   return res.plugins ?? [];
+}
+
+export async function listSidebarGroupingProviders(): Promise<readonly SidebarGroupingProvider[]> {
+  const response = await fetchJson<{ groupings?: unknown }>(`${BASE}/sidebar-groupings`, {
+    cache: "no-store",
+  });
+  return readSidebarGroupingProviders(response.groupings) ?? [];
 }
 
 // getPlugin fetches a single plugin record by id. Rejects with a 404
@@ -132,10 +163,13 @@ export async function enablePlugin(id: string, options?: ApiRequestOptions) {
 
 // disablePlugin transitions a plugin to disabled (POST /api/plugins/:id/disable).
 export async function disablePlugin(id: string, options?: ApiRequestOptions) {
-  return fetchJson<{ disabled: boolean }>(`${BASE}/${encodeURIComponent(id)}/disable`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
-  });
+  return fetchJson<{ disabled: boolean; remote_resources_may_remain: boolean }>(
+    `${BASE}/${encodeURIComponent(id)}/disable`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST" },
+    },
+  );
 }
 
 // uninstallPlugin removes a plugin's registration (DELETE /api/plugins/:id).
@@ -188,6 +222,92 @@ export async function setPluginAutoUpdate(
       body: JSON.stringify({ auto_update: autoUpdate }),
     },
   });
+}
+
+export async function getPluginCapabilityApprovalContext(
+  pluginId: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApprovalContext> {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<PluginCapabilityApprovalContext>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals?${query.toString()}`,
+    options,
+  );
+}
+
+export async function updatePluginCapabilityApproval(
+  pluginId: string,
+  input: UpdatePluginCapabilityApprovalInput,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApproval> {
+  return fetchJson<PluginCapabilityApproval>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
+    },
+  );
+}
+
+export async function revokePluginCapabilityApproval(
+  pluginId: string,
+  input: RevokePluginCapabilityApprovalInput,
+  options?: ApiRequestOptions,
+): Promise<PluginCapabilityApproval> {
+  return fetchJson<PluginCapabilityApproval>(
+    `${BASE}/${encodeURIComponent(pluginId)}/capability-approvals`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "DELETE",
+        body: JSON.stringify(input),
+      },
+    },
+  );
+}
+
+// listPluginIdentityLinks returns the caller's external accounts linked
+// through this plugin; scope "all" returns every link and requires an admin.
+export async function listPluginIdentityLinks(
+  pluginId: string,
+  scope: "own" | "all",
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLink[]> {
+  const query = scope === "all" ? "?scope=all" : "";
+  const response = await fetchJson<{ links?: PluginIdentityLink[] }>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links${query}`,
+    options,
+  );
+  return response.links ?? [];
+}
+
+// createPluginIdentityLinkCode issues a single-use code that links the
+// external account presenting it, through this plugin, to the caller.
+export async function createPluginIdentityLinkCode(
+  pluginId: string,
+  options?: ApiRequestOptions,
+): Promise<PluginIdentityLinkCode> {
+  return fetchJson<PluginIdentityLinkCode>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/codes`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+}
+
+export async function revokePluginIdentityLink(
+  pluginId: string,
+  linkId: string,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<void>(
+    `${BASE}/${encodeURIComponent(pluginId)}/identity-links/${encodeURIComponent(linkId)}`,
+    { ...options, init: { ...(options?.init ?? {}), method: "DELETE" } },
+  );
 }
 
 // syncPlugins reconciles the plugin registry with the plugins directory on

@@ -8,6 +8,12 @@ owners:
 
 # Unified mobile navigation requirements
 
+## Navigation hierarchy revision
+
+[Navigation hierarchy](navigation-hierarchy.md) refines ordering and creation placement.
+The criteria below incorporate its tools-before-Tasks composition. Task-title switching,
+shared menu ownership, and dialog lifetime remain unchanged.
+
 ## Overview
 
 The phone hamburger consistently opens app navigation. Task switching remains
@@ -28,8 +34,9 @@ existing domain owners.
   the same app-navigation surface with the same accessible name and relative
   section order. It shall not directly open the task picker or display settings.
 - **AC-UI-MOBILE-MENU-001.2:** The menu shall show the active workspace first,
-  followed by global destinations, a collapsible Tasks sidebar, workspace actions,
-  integrations/plugin destinations, and utilities. Available destinations and
+  fixed above a content scroller containing the primary New Task action, Home/quick
+  actions, eligible workspace tools and integration/plugin destinations, contextual
+  Tasks, and utilities. Available destinations and
   their relative order shall depend on workspace mode and permissions, not the
   originating page. The current destination shall be visibly and semantically
   identified. Home shall represent all three listing modes; task selection is identified
@@ -151,8 +158,9 @@ the full task list.
 - **AC-UI-MOBILE-MENU-006.2:** The embedded Tasks disclosure shall use the same
   heading typography, left alignment, divider treatment, and section spacing as
   Utilities. A subordinate chevron shall communicate expansion; the adjacent
-  create-task plus shall remain visible in both states, independently usable,
-  and accessible. Both controls retain separate 44px hit areas. Collapsing shall
+  create-task plus shall remain visible in both states when the built-in primary
+  New Task entry is hidden. A visible primary New Task replaces that plus.
+  Each visible control retains a separate 44px hit area. Collapsing shall
   preserve existing data, selection, and dialog behavior.
 - **AC-UI-MOBILE-MENU-006.3:** The phone menu shall expose an Automations section
   in regular workspaces, including the existing automation list/detail and setup
@@ -174,8 +182,8 @@ the full task list.
   page-local navigation or expandable task content. Expanding Tasks shall not
   move those actions below the task list. Existing workspace context, activity
   indicators, launch behavior, and focus handoff shall be retained.
-- **AC-UI-MOBILE-MENU-007.2:** Regular workspace sections shall follow Tasks,
-  Automations, Integrations, Utilities order. Existing eligible plugin actions
+- **AC-UI-MOBILE-MENU-007.2:** Regular workspace sections shall place Automations,
+  eligible Canvases, and Integrations before Tasks, then Utilities. Existing eligible plugin actions
   shall share one Plugins section. Toolbar selection and context presentation
   shall follow AC-UI-MOBILE-MENU-008.1 and AC-UI-MOBILE-MENU-008.2.
   Optional system metrics shall follow navigation instead

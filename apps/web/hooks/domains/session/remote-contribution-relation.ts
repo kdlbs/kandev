@@ -181,7 +181,13 @@ export function classifyRemoteContribution(
     return result("unknown", providerHead, fallback);
   }
 
-  if (input.upstreamHead === providerHead && input.remoteAhead > 0 && input.remoteBehind === 0) {
+  // Upstream-relative counts describe the provider graph only when both
+  // snapshots name the same head.
+  if (input.upstreamHead !== providerHead || input.remoteAhead <= 0) {
+    return result("unknown", providerHead, fallback);
+  }
+
+  if (input.remoteBehind === 0) {
     return result("local_ahead", providerHead, {
       ...fallback,
       pushAhead: input.remoteAhead,

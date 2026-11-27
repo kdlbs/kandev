@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef } from "react";
 import { createTask } from "@/lib/api/domains/kanban-api";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTask } from "@/lib/links";
+import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import {
   buildWorkspaceSourcesPayload,
@@ -36,6 +37,7 @@ type UseSubtaskSubmitOpts = {
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
   workspaceMode: SubtaskWorkspaceMode;
+  relatedTaskIds?: string[];
   /** Whether the selected executor profile runs directly on the local clone. */
   isLocalExecutor?: boolean;
   /** True when local repositories must be resolved from their remote origin. */
@@ -57,11 +59,12 @@ type CreateSubtaskArgs = {
   autoTitle: boolean;
   autopilot: boolean;
   workspaceMode: SubtaskWorkspaceMode;
+  relatedTaskIds: string[];
   isLocalExecutor: boolean;
   remoteOriginMode: boolean;
   freshBranchEnabled: boolean;
   onClose: () => void;
-  setActiveTask: (taskId: string) => void;
+  navigate: NavigateToChild;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
 
@@ -82,6 +85,8 @@ export function shouldSubmitFreshBranch({
   return selection.kind === "local" && Boolean(selection.repositoryId || selection.localPath);
 }
 
+type NavigateToChild = (href: string, options: { scroll: false; onNavigated: () => void }) => void;
+
 async function createSubtask({
   fs,
   parentTaskId,
@@ -95,11 +100,12 @@ async function createSubtask({
   autoTitle,
   autopilot,
   workspaceMode,
+  relatedTaskIds,
   isLocalExecutor,
   remoteOriginMode,
   freshBranchEnabled,
   onClose,
-  setActiveTask,
+  navigate,
   setActiveSession,
 }: CreateSubtaskArgs) {
   const workspaceSources =
@@ -130,6 +136,7 @@ async function createSubtask({
     executor_profile_id:
       workspaceMode === "inherit_parent" ? undefined : fs.executorProfileId || undefined,
     parent_id: parentTaskId,
+    related_task_ids: relatedTaskIds.length ? relatedTaskIds : undefined,
     attachments: toMessageAttachments(attachments),
     workspace_mode: workspaceMode,
     autopilot: autopilot || undefined,
@@ -138,11 +145,14 @@ async function createSubtask({
   // Close the dialog before navigation. Navigation can remount the sidebar
   // that owns the dialog state, which makes a later close update a stale owner.
   onClose();
-  if (newSessionId) {
-    setActiveTask(response.id);
-    setActiveSession(response.id, newSessionId);
-    replaceTaskUrl(response.id);
-  }
+  if (!newSessionId) return;
+  navigate(linkToTask(response.id, { sessionId: newSessionId }), {
+    scroll: false,
+    // Publish the selection only once the history commit and router
+    // notification have landed, so a deferred navigation keeps the previous
+    // task and conversation selected until the user proceeds.
+    onNavigated: () => setActiveSession(response.id, newSessionId),
+  });
 }
 
 function canStartSubtaskSubmission({
@@ -198,12 +208,13 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     setIsCreating,
     onClose,
     workspaceMode,
+    relatedTaskIds = [],
     isLocalExecutor = false,
     remoteOriginMode = false,
     sourcePolicyInvalid = false,
   } = opts;
   const { toast } = useToast();
-  const setActiveTask = useAppStore((s) => s.setActiveTask);
+  const router = useRouter();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const isSubmittingRef = useRef(false);
   const handleSubmit = useCallback(
@@ -243,6 +254,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           autoTitle,
           autopilot,
           workspaceMode,
+          relatedTaskIds,
           isLocalExecutor,
           remoteOriginMode,
           freshBranchEnabled: shouldSubmitFreshBranch({
@@ -252,7 +264,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
             isLocalExecutor,
           }),
           onClose,
-          setActiveTask,
+          navigate: router.replace,
           setActiveSession,
         });
       } catch (error) {
@@ -278,9 +290,10 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       defaultProfileId,
       availableRepositories,
       attachments,
-      setActiveTask,
+      router,
       setActiveSession,
       workspaceMode,
+      relatedTaskIds,
       isLocalExecutor,
       remoteOriginMode,
       sourcePolicyInvalid,

@@ -11,6 +11,7 @@ export const defaultNeedsYouInboxState: NeedsYouInboxSliceState = {
     byWorkspaceId: {},
     generationByWorkspaceId: {},
     refreshTick: 0,
+    manualRetryTick: 0,
   },
 };
 
@@ -102,5 +103,10 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
   bumpNeedsYouInboxRefreshTick: () =>
     set((draft) => {
       draft.needsYouInbox.refreshTick += 1;
+    }),
+
+  requestNeedsYouInboxRetry: () =>
+    set((draft) => {
+      draft.needsYouInbox.manualRetryTick += 1;
     }),
 });

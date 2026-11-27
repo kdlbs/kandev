@@ -25,17 +25,11 @@ var ErrTaskRowNotFound = errors.New("task row not found")
 // task row's own fields) against every other such writer and against the
 // task row's own concurrent readers of that state.
 //
-// On PostgreSQL this is a real `SELECT ... FOR UPDATE`, held for the
-// lifetime of tx. On SQLite it is a deliberate no-op: the writer pool
-// (OpenSQLite) is capped at one connection, so a single open write
-// transaction already excludes every other write against the same
-// database for its whole lifetime — there is no second writer connection
-// that could interleave. This mirrors the two-primitive split already used
-// by the task-cleanup barrier (task/repository/sqlite/task_cleanup_barrier.go):
-// a caller across a package boundary (this function is shared by both the
-// task and office repositories, which write to the same tasks table using
-// the same underlying writer handle) gets the identical guarantee without
-// duplicating the dialect branch at every call site.
+// On PostgreSQL this is a real SELECT FOR UPDATE held until tx ends. On
+// SQLite this helper does not reserve a writer. The caller must reserve it
+// before gated reads when independent database handles can compete; task
+// hierarchy admission does so through LockTaskHierarchy. A single-connection
+// writer pool serializes only callers using that particular pool.
 func LockTaskRowInTx(ctx context.Context, tx *sqlx.Tx, driverName, taskID string) error {
 	if driverName != pgxDriverName {
 		return nil

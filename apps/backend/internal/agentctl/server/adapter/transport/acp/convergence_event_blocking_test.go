@@ -42,7 +42,7 @@ func TestConvergenceEventEmittersParkOnFullChannelThenDeliver(t *testing.T) {
 		{
 			name: "emitAuthoritativeConfigOptions",
 			emit: func(a *Adapter) {
-				a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", nil, cachedModels)
+				a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", nil, cachedModels, false)
 			},
 		},
 	}

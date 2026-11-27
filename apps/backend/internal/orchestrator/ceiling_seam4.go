@@ -2,9 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+)
+
+const (
+	resumePayloadAllowCompletedKey = "allow_completed_session_resume"
+	resumePayloadIdleProvenanceKey = "require_idle_suspension_provenance"
 )
 
 // seam4ResumePayload builds the AC-42 "resume" replay row from
@@ -19,8 +25,10 @@ func seam4ResumePayloadWithBinding(
 	binding *models.CeilingWorkflowEntryBinding,
 ) map[string]interface{} {
 	payload := map[string]interface{}{
-		metaKeySessionID:           sessionID,
-		"allow_branch_replacement": options.AllowBranchReplacement,
+		metaKeySessionID:               sessionID,
+		"allow_branch_replacement":     options.AllowBranchReplacement,
+		resumePayloadAllowCompletedKey: options.AllowCompletedSessionResume,
+		resumePayloadIdleProvenanceKey: options.RequireIdleSuspensionProvenance,
 	}
 	if binding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = map[string]interface{}{
@@ -31,7 +39,21 @@ func seam4ResumePayloadWithBinding(
 			"destination_session_id": binding.DestinationSessionID,
 		}
 	}
+	if !options.TransientRetryUpdatedAt.IsZero() {
+		payload["transient_retry_attempt_id"] = options.TransientRetryAttemptID
+		payload["transient_retry_error_stamp"] = options.TransientRetryErrorStamp
+		payload["transient_retry_updated_at"] = options.TransientRetryUpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return payload
+}
+
+// deferredIdleFocusResumeOfCompleted reports whether deferral resumes a
+// completed session parked by the idle policy. Such a record still targets
+// its completed destination; the replay re-checks the idle provenance.
+func deferredIdleFocusResumeOfCompleted(deferral models.CeilingDeferral, state models.TaskSessionState) bool {
+	return deferral.Kind == models.CeilingLaunchResume && state == models.TaskSessionStateCompleted &&
+		boolField(deferral.Payload, resumePayloadAllowCompletedKey) &&
+		boolField(deferral.Payload, resumePayloadIdleProvenanceKey)
 }
 
 // admitOrDeferSeam4 is Service.ResumeTaskSessionWithOptions's gate: consulted

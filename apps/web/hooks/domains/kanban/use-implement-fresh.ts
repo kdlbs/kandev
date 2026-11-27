@@ -3,7 +3,6 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { setChatDraftContent } from "@/lib/local-storage";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
@@ -59,10 +58,9 @@ export function useImplementFresh(
       return false;
     }
 
-    const { userText, attachments } = collectImplementPlanInput(
-      chatInputRef?.current,
-      resolvedSessionId,
-    );
+    const chatInput = chatInputRef?.current;
+    const clearAcceptedPayload = chatInput?.clearAcceptedPayload;
+    const { userText, attachments } = collectImplementPlanInput(chatInput, resolvedSessionId);
     const prompt = buildImplementPlanContent(userText);
 
     try {
@@ -83,9 +81,7 @@ export function useImplementFresh(
       await markPlanImplementationStartedBestEffort(taskId, newSessionId, setTaskPlan);
       setActiveSession(taskId, newSessionId);
 
-      // Clear composer + draft only when a fresh session was actually created.
-      chatInputRef?.current?.clear();
-      setChatDraftContent(resolvedSessionId, null);
+      clearAcceptedPayload?.({ message: userText, attachments });
       return true;
     } catch (err) {
       console.error("Failed to launch fresh implementation session:", err);

@@ -5,9 +5,16 @@ description: Kandev release and version-channel conventions — unified Stable S
 
 # Release & Versioning
 
-Kandev Stable releases use a **single SemVer** `X.Y.Z` shared across all distribution channels.
+Kandev Stable releases use a **single SemVer** `X.Y.Z` shared across all runtime distribution channels.
 npm also has an explicit prerelease-only `nightly` channel; it is not part of the unified Stable
 artifact set.
+
+Plugin SDKs are a separate version family: Go
+`github.com/kdlbs/kandev/pluginsdk` and npm `@kdlbs/plugin-sdk` share a version
+starting at 0.1.0. Stable verifies or publishes them; Nightly does not. Read the
+[SDK publication and recovery procedure](../../../docs/public/release-process.md#plugin-sdk-publication)
+before changing SDK release behavior. Public availability requires release
+evidence, not the presence of package metadata in source.
 
 ## Version targets
 
@@ -17,7 +24,12 @@ artifact set.
 - Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
 - Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
 - Scoop bucket: `kdlbs/scoop-kandev` `bucket/kandev.json` version, URL, and hash
-- GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
+- GitHub release: `vX.Y.Z` with standard platform archives `kandev-{platform}.tar.gz`, full offline archives `kandev-{platform}-full.tar.gz`, checksums, Windows ZIP equivalents, remote helper assets, and `runtime-size-report.md`
+
+Stable default archive names contain the standard runtime: host `kandev`, host `agentctl`, and
+`remote-helpers.json`. The `-full` archives also contain all four remote helper executables. Stable
+npm packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use standard archives. Containers
+and npm Nightlies stay full. Desktop keeps one standard installer and updater track.
 
 **npm, Homebrew, and Scoop are sibling channels**, not chained. All three consume the same GitHub release artifacts; none depends on another package-manager channel.
 
@@ -32,11 +44,25 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 
 1. Maintainer clicks "Run workflow" → keeps `channel=stable` → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
-3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
-4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
+3. `build-web`, `build-bundles`, `build-remote-helpers`, `build-desktop`, and both Docker builds create the channel inputs.
+4. `publish-release` promotes staged standard archives, publishes full archives and helpers, then attaches checksums, size reports, desktop artifacts, and notes. An immutable published host is reused only after signed-source and artifact verification; its assets, notes, and updater feed stay unchanged.
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
+8. `prepare-plugin-sdk` retains the exact tested archive, receipt, and signature on a `pluginsdk/vS` draft, then creates/verifies the signed SDK tag and finalizes the release with `make_latest=false`. Complete legacy host evidence is reused read-only. `publish-plugin-sdk` requires finalized evidence, uses OIDC without signing secrets, retains version-scoped upload intent and result artifacts for 90 days, then verifies both public consumers. Both jobs run on backfill.
+9. `stable-complete` and automatic contributor notices require successful SDK verification. `bootstrap_required` is incomplete; maintainers publish only the retained bytes and retry after configuring trusted publishing. Never add a token fallback or overwrite conflicting immutable evidence.
+
+Before retrying an SDK upload, follow the [partial SDK publication recovery guide](../../../docs/public/release-process.md#recover-partial-sdk-publication).
+
+## Contributor notices
+
+The `Release` workflow has a `notify_contributors` checkbox. It defaults to false. When selected, the workflow calls the reusable notification workflow after GitHub Release, npm, Homebrew, and Scoop publication all succeed. Dry runs, desktop validation, Nightly, cancellation before the notification job starts, and publication errors skip the call. Cancellation after posting starts can leave partial notices; rerun with the exact tag to complete safely.
+
+For manual notices or recovery, run **Notify release contributors** from the `main` ref. Leave `release_tag` empty to select the latest published Stable release. Enter an exact tag to select another release. The `dry_run` checkbox previews the same PR selection and comment text without posting.
+
+The helper reads PR links from the release notes. It posts only to merged PRs from this repository that belong to the selected release tag. It excludes bots and maintainers from `cliff.toml`. The job token posts as `github-actions[bot]`. Only notices from that bot or a listed maintainer count as already sent.
+
+Each comment includes a hidden release ID marker. Repeat runs skip comments with that marker and the exact unmarked notice used for `v0.97.0`. After a partial run, use the separate workflow with the exact tag. It skips confirmed notices and retries only missing notices. Wait for GitHub rate limits to clear before retrying.
 
 ## Release PR ruleset bypass
 
@@ -97,6 +123,18 @@ python3 .github/scripts/release-workflow-contract_test.py
 bash -n scripts/release/nightly-release.sh scripts/release/publish-npm.sh
 ```
 
+## Discord release announcements
+
+Normal Stable first attempts automatically call `announce-discord-release.yml` after GitHub Release, npm, Homebrew, Scoop, public SDK verification, and Stable completion succeed. Configure `DISCORD_GENERAL_WEBHOOK_URL` in the `release` environment. It sends one compact message with whole-release counts, attributed highlights, emojis, and the exact GitHub release link.
+
+Reruns and backfills skip automatic Discord delivery and require manual recovery. Nightly, dry-run, desktop-validation, cancellation before delivery, and failed publication skip it too. Missing secrets and Discord failures fail only the announcement job; check package publication separately.
+
+Use **Announce Discord release** on `main` with an exact Stable `release_tag`. The default `preview` mode requires no Discord secret. Inspect its summary and public preview artifact. Before `create`, verify publication and inspect the channel, then set `acknowledge_create=true` only if no announcement exists. To correct an existing post, use `update` and its `message_id`.
+
+Confirmed sends retain a message ID/link in the summary and a 30-day receipt artifact. The helper validates the message's webhook and release before update. Uncertain POST/PATCH outcomes and cancellation during delivery require channel inspection; do not resend automatically. Only explicit rate limits receive bounded retries. Never print or commit the webhook URL.
+
+See [release operating instructions](../../../docs/public/release-process.md#announce-a-release-on-discord) for setup and recovery.
+
 ## Release-tag signing configuration
 
 The release workflow reads signing configuration from the GitHub `release`
@@ -130,6 +168,8 @@ When adding, renaming, or removing bundled helper binaries such as `agentctl-<go
 - `.github/workflows/release.yml` bundle, macOS signing, and notarization loops
 - `scripts/release/prepare-desktop-runtime.sh`
 - `scripts/release/verify-desktop-runtime.sh`
+- `scripts/release/remote-helper-assets.mjs`
+- `apps/backend/internal/agent/runtime/lifecycle/remote_helper_manifest.go` and the cache resolver
 - `scripts/release-desktop.test.sh`
 - `apps/desktop/AGENTS.md` runtime resource list
 

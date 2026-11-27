@@ -12,15 +12,17 @@ const state = {
   workspaces: { activeId: "ws-1" as string | null },
   kanban: { workflowId: "wf-1" as string | null },
   sidebarViews: {
-    views: [{ id: "all", name: "All tasks" }],
+    views: [{ id: "all", name: "All tasks", filters: [] }],
     activeViewId: "all",
     draft: null,
+    transitionPending: false,
   },
   sidebarViewsByWorkspace: {
     "ws-1": {
-      views: [{ id: "all", name: "All tasks" }],
+      views: [{ id: "all", name: "All tasks", filters: [] }],
       activeViewId: "all",
       draft: null,
+      transitionPending: false,
     },
   },
   toggleAppSidebarSection: vi.fn(),
@@ -56,7 +58,7 @@ describe("TasksSection", () => {
     state.appSidebar.sectionExpanded.tasks = true;
     state.workspaces.activeId = "ws-1";
     state.kanban.workflowId = "wf-1";
-    state.sidebarViews.views = [{ id: "all", name: "All tasks" }];
+    state.sidebarViews.views = [{ id: "all", name: "All tasks", filters: [] }];
     state.sidebarViews.activeViewId = "all";
     state.sidebarViews.draft = null;
     state.sidebarViewsByWorkspace["ws-1"] = state.sidebarViews;
@@ -74,5 +76,14 @@ describe("TasksSection", () => {
     const header = screen.getByRole("button", { name: "Tasks" }).parentElement;
 
     expect(header?.contains(picker)).toBe(true);
+  });
+
+  it("keeps the picker name stable and announces a pending selection", () => {
+    state.sidebarViewsByWorkspace["ws-1"].transitionPending = true;
+    renderSection();
+
+    const picker = screen.getByTestId("tasks-view-picker");
+    expect(picker.getAttribute("aria-label")).toBe("View: All tasks");
+    expect(screen.getByRole("status").textContent).toBe("Loading All tasks...");
   });
 });

@@ -10,6 +10,7 @@ import {
   getMcpToolSchemaState,
   isKandevMcpServer,
   mcpStatusLabelKey,
+  mcpStatusPresentation,
   selectMcpServerName,
   selectMcpToolName,
 } from "./mcp-explorer-view-model";
@@ -26,7 +27,24 @@ function history(servers: MCPAttachmentServer[]): MCPAttachmentHistory {
 }
 
 describe("MCP explorer view model", () => {
-  it("uses observed servers and falls back to configured names", () => {
+  it("recognizes optional native packages only with canonical host provenance", () => {
+    const native = server({
+      name: "kandev-walkthroughs",
+      source: "kandev",
+      builtin_package: "walkthroughs",
+      tools_listed_at: "2026-10-25T12:00:00Z",
+      tools: [],
+    });
+    expect(isKandevMcpServer(native)).toBe(true);
+    expect(getMcpCatalogState(native)).toBe("loaded");
+    expect(isKandevMcpServer({ ...native, source: "profile" })).toBe(false);
+    expect(isKandevMcpServer({ ...native, name: "kandev-walkthroughs-sse" })).toBe(false);
+  });
+  it("keeps an unobserved tool count unknown", () => {
+    expect(getMcpToolCounts(server({ status: "unknown" })).total).toBeUndefined();
+    expect(getMcpToolCounts(server({ tools: [] })).total).toBe(0);
+  });
+  it("keeps configured servers visible when observations are partial", () => {
     const configured = buildMcpExplorerServers(["kandev", "filesystem"]);
     expect(configured.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
 
@@ -34,8 +52,19 @@ describe("MCP explorer view model", () => {
       ["kandev", "filesystem"],
       history([server({ name: "filesystem", source: "profile", status: "delivered" })]),
     );
-    expect(observed.map((item) => item.name)).toEqual(["filesystem"]);
+    expect(observed.map((item) => item.name)).toEqual(["filesystem", "kandev"]);
     expect(observed[0].source).toBe("profile");
+    expect(observed[1].status).toBe("unknown");
+
+    const partial = buildMcpExplorerServers(
+      ["kandev", "filesystem"],
+      history([server({ name: "kandev", source: "kandev", status: "active" })]),
+    );
+    expect(partial.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
+    expect(partial[1]).toMatchObject({
+      source: "profile",
+      status: "unknown",
+    });
   });
 
   it("selects kandev first and falls back when the selection disappears", () => {
@@ -64,7 +93,9 @@ describe("MCP explorer view model", () => {
       getMcpCatalogState(server({ name: "filesystem", source: "profile", status: "delivered" })),
     ).toBe("unavailable");
   });
+});
 
+describe("MCP server identity and tools", () => {
   it("identifies only the backend-owned Kandev server", () => {
     expect(isKandevMcpServer(server({ name: "kandev", source: "kandev" }))).toBe(true);
     expect(isKandevMcpServer(server({ name: "kandev", source: "profile" }))).toBe(false);
@@ -109,4 +140,53 @@ describe("MCP explorer view model", () => {
       kind: "too_large",
     });
   });
+});
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13
+it.each([
+  ["http_unsupported", "HttpUnsupported"],
+  ["sse_unsupported", "SseUnsupported"],
+  ["duplicate_name", "DuplicateName"],
+  ["transport_policy", "TransportPolicy"],
+  ["server_policy", "ServerPolicy"],
+  ["invalid_transport", "InvalidTransport"],
+  ["definition_disabled", "DefinitionDisabled"],
+  ["definition_missing", "DefinitionMissing"],
+  ["secret_resolution_failed", "SecretResolution"],
+  ["session_excluded", "SessionExcluded"],
+])("explains the recorded %s exclusion safely", (reason_code, suffix) => {
+  expect(mcpStatusPresentation(server({ status: "filtered", reason_code })).explanationKey).toBe(
+    `task:mcpReason${suffix}`,
+  );
+});
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.16
+it("does not reuse a stale filtered reason for stronger evidence or expose arbitrary reasons", () => {
+  expect(
+    mcpStatusPresentation(server({ status: "active", reason_code: "http_unsupported" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationActive");
+  expect(
+    mcpStatusPresentation(server({ status: "delivered", reason_code: "http_unsupported" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationDelivered");
+  expect(
+    mcpStatusPresentation(server({ status: "filtered", reason_code: "sensitive unknown" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationFiltered");
+});
+
+// @covers AC-AGENTS-MCP-MANAGEMENT-003.1
+it("uses only current server evidence and never promotes previous attempts", () => {
+  const prior = history([server({ status: "active", tool_count: 12 })]).current;
+  const current = history([]);
+  current.previous = [prior];
+  expect(buildMcpExplorerServers(["kandev"], current)).toEqual([
+    { name: "kandev", status: "unknown" },
+  ]);
+  const failed = server({ status: "failed", summary: "Connection failed" });
+  current.current.servers = [failed];
+  expect(buildMcpExplorerServers(["kandev", "filesystem"], current)).toEqual([
+    failed,
+    { name: "filesystem", source: "profile", status: "unknown" },
+  ]);
 });

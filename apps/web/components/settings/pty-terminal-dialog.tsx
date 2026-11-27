@@ -138,10 +138,17 @@ export function PtyTerminalDialog({
         {cmdLine && (
           <div
             data-testid={`${testIdPrefix ?? "pty"}-command`}
-            className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs"
+            className="flex min-w-0 items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs"
           >
             <span className="text-muted-foreground">$</span>
-            <code className="flex-1 truncate" title={cmdLine}>
+            <code
+              className={
+                presentation === "quick"
+                  ? "min-w-0 flex-1 whitespace-pre-wrap break-all"
+                  : "min-w-0 flex-1 truncate"
+              }
+              title={cmdLine}
+            >
               {cmdLine}
             </code>
           </div>

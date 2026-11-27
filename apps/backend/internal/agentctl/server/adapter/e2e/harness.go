@@ -254,7 +254,6 @@ func buildInstanceConfig(command string, protocol agent.Protocol, workDir string
 		WorkDir:                workDir,
 		AgentEnv:               env,
 		AutoApprovePermissions: autoApprove,
-		ApprovalPolicy:         "never",
 		ShellEnabled:           false,
 		LogLevel:               "debug",
 		LogFormat:              "console",
@@ -290,7 +289,7 @@ func buildMockAgent(t *testing.T) string {
 	backendRoot := findBackendRoot(t)
 
 	binary := t.TempDir() + "/mock-agent"
-	cmd := exec.Command("go", "build", "-o", binary, "./cmd/mock-agent")
+	cmd := exec.Command("go", "build", "-trimpath", "-o", binary, "./cmd/mock-agent")
 	cmd.Dir = backendRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build mock-agent: %v\n%s", err, out)

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -32,7 +35,47 @@ func newMultiRepoStatusServerWithAgentEnv(t *testing.T, agentEnv []string) (*Ser
 		WorkDir:  taskRoot,
 		AgentEnv: append([]string(nil), agentEnv...),
 	}
-	return NewServer(cfg, process.NewManager(cfg, log), nil, nil, log), repoNames
+	manager := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := manager.StopForTeardown(ctx); err != nil {
+			t.Errorf("stop multi-repo status fixture: %v", err)
+		}
+	})
+	return NewServer(cfg, manager, nil, nil, log), repoNames
+}
+
+func TestMultiRepoStatusFixtureStopsRepositoryTrackers(t *testing.T) {
+	var manager *process.Manager
+	var trackers []*process.WorkspaceTracker
+	t.Run("fixture", func(t *testing.T) {
+		server, repos := newMultiRepoStatusServer(t)
+		manager = server.procMgr
+		for _, repo := range repos {
+			tracker, err := manager.GetWorkspaceTrackerFor(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			trackers = append(trackers, tracker)
+		}
+	})
+	if manager == nil {
+		t.Fatal("fixture did not create a manager")
+	}
+	t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
+	_, release, err := manager.BeginOwnedOperation(context.Background())
+	if release != nil {
+		release()
+	}
+	if !errors.Is(err, process.ErrManagerStopping) {
+		t.Errorf("fixture left process admission open: %v", err)
+	}
+	for _, tracker := range trackers {
+		if _, err := tracker.GetGitStatus(context.Background(), true); !errors.Is(err, context.Canceled) {
+			t.Errorf("fixture left a repository tracker live: %v", err)
+		}
+	}
 }
 
 func newStatusTestRepo(t *testing.T, taskRoot, name string) string {

@@ -71,11 +71,16 @@ test.describe("Subagent card", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    const sessionId = task.session_id ?? task.primary_session_id;
+    expect(sessionId).toBeTruthy();
+    if (!sessionId) throw new Error("agent task did not return a session id");
+    await waitForPersistedSubagentMetrics(apiClient, sessionId);
+
     // The dedicated subagent card renders, not the generic tool_call row.
     // Assert exactly one so an accidental duplicate render fails the test
     // rather than being masked by .first().
     const cards = session.chat.locator('[data-testid="subagent-card"]');
-    await expect(cards).toHaveCount(1);
+    await expect(cards).toHaveCount(1, { timeout: 30_000 });
     const card = cards.first();
     await expect(card).toBeVisible();
 
@@ -86,15 +91,6 @@ test.describe("Subagent card", () => {
     await expect(card.locator('[data-testid="subagent-description"]')).toContainText(
       "Explore the codebase",
     );
-
-    // Chat idle means the outer turn is no longer streaming. The nested
-    // subagent completion event can still be hydrating into the card. Wait for
-    // the persisted message that causes the metadata row before checking the
-    // rendered consequence.
-    const sessionId = task.session_id ?? task.primary_session_id;
-    expect(sessionId).toBeTruthy();
-    if (!sessionId) throw new Error("agent task did not return a session id");
-    await waitForPersistedSubagentMetrics(apiClient, sessionId);
 
     const metadata = card.locator('[data-testid="subagent-meta"]');
     // A live update may have been missed while the page was hydrating. Once
@@ -120,5 +116,91 @@ test.describe("Subagent card", () => {
     // Expand the card and confirm the child (sleep 30) renders inside it.
     await card.getByRole("button").first().click();
     await expect(card).toContainText("sleep 30");
+  });
+
+  test("renders a localized control label and keeps a generic wait title", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Subagent controls",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:subagent-controls",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await session.chat.getByRole("button", { name: /2 tool calls/ }).click();
+    await expect(session.chat.getByText("Messaged subagent", { exact: true })).toBeVisible();
+    await expect(session.chat.getByText("wait", { exact: true })).toBeVisible();
+    await expect(session.chat.getByText("SendMessage", { exact: true })).toHaveCount(0);
+  });
+
+  test("marks a background subagent resumed after SendMessage", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Resume a background subagent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:subagent-resume-setup",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const sessionId = task.session_id ?? task.primary_session_id;
+    expect(sessionId).toBeTruthy();
+    if (!sessionId) throw new Error("agent task did not return a session id");
+
+    const cards = session.chat.locator('[data-testid="subagent-card"]');
+    await expect(cards).toHaveCount(1);
+    const card = cards.first();
+    await expect(card.locator('[data-testid="subagent-meta-background"]')).toBeVisible();
+
+    await session.sendMessage("/e2e:subagent-resume");
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some((message) => {
+          const normalized = message.metadata?.normalized;
+          if (!normalized || typeof normalized !== "object") return false;
+          const subagentTask = (normalized as { subagent_task?: unknown }).subagent_task;
+          return (
+            !!subagentTask &&
+            typeof subagentTask === "object" &&
+            (subagentTask as { resume_count?: unknown }).resume_count === 1
+          );
+        });
+      })
+      .toBe(true);
+
+    await expect(card.locator('[data-testid="subagent-meta-resume"]')).toContainText("Resumed x1", {
+      timeout: 15_000,
+    });
+    await expect(card.getByLabel("Completed")).toHaveCount(1);
   });
 });

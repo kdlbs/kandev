@@ -12,6 +12,10 @@ describe("Task behavior tab ownership", () => {
     expect(taskBehaviorTab("general-todo-list-panel")).toBe("conversation");
     expect(taskBehaviorTab("system-message-queue")).toBe("runtime");
     expect(taskBehaviorTab("general-task-sleep-inhibition")).toBe("runtime");
+    expect(taskBehaviorTab("general-agent-tab-close-behavior")).toBe("conversation");
+    expect(taskBehaviorTab("general-message-time-display")).toBe("conversation");
+    expect(taskBehaviorTab("general-prompt-suggestions")).toBe("conversation");
+    expect(taskBehaviorTab("general-prompt-suggestion-profile")).toBe("conversation");
     expect(taskBehaviorTab("unrelated")).toBeUndefined();
   });
   it("reveals new attention once in tab order without trapping navigation", () => {
@@ -20,9 +24,14 @@ describe("Task behavior tab ownership", () => {
     expect(firstNewAttentionTab(["runtime", "conversation"], ["runtime"])).toBe("conversation");
     expect(firstNewAttentionTab([], ["tasks"])).toBeUndefined();
   });
+
+  it("routes unread dot save attention to the conversation tab", () => {
+    expect(taskBehaviorTab("general-unread-task-dot")).toBe("conversation");
+    expect(taskBehaviorTab("general-unread-task-dot-hide-delay")).toBe("conversation");
+  });
 });
 
-it("preserves all nine existing discovery fragments", () => {
+it("preserves all discovery fragments", () => {
   expect(TASK_BEHAVIOR_TARGET_TABS).toEqual({
     "setting-creation-auto-focus": "tasks",
     "setting-agent-generated-task-titles": "tasks",
@@ -30,8 +39,13 @@ it("preserves all nine existing discovery fragments", () => {
     "setting-prevent-auto-start-on-open": "tasks",
     "setting-archive-confirmation": "tasks",
     "setting-unread-messages": "conversation",
+    "setting-unread-task-dot": "conversation",
+    "setting-unread-task-dot-hide-delay": "conversation",
+    "setting-agent-tab-close-behavior": "conversation",
     "setting-transcript-navigation": "conversation",
     "setting-session-capacity": "runtime",
+    "setting-message-time-display": "conversation",
     "setting-message-queue": "runtime",
+    "setting-prompt-suggestions": "conversation",
   });
 });

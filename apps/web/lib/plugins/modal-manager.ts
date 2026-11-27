@@ -13,8 +13,27 @@ export interface OpenPluginModal {
   instanceId: string;
   pluginId: string;
   options: PluginModalOptions;
+  /** Host-only trigger reference used to restore focus after the surface closes. */
+  openerElement?: HTMLElement;
   /** Host-only geometry. Plugins cannot select native workflow layouts through openModal. */
   layout?: "task-link";
+}
+
+function captureOpenerElement(): HTMLElement | undefined {
+  if (typeof document === "undefined") return undefined;
+
+  const activeElement = document.activeElement;
+  const HTMLElementConstructor = document.defaultView?.HTMLElement;
+  if (
+    !HTMLElementConstructor ||
+    !(activeElement instanceof HTMLElementConstructor) ||
+    activeElement === document.body ||
+    activeElement === document.documentElement
+  ) {
+    return undefined;
+  }
+
+  return activeElement;
 }
 
 let nextInstanceId = 0;
@@ -49,7 +68,9 @@ class PluginModalManager {
     layout?: OpenPluginModal["layout"],
   ): PluginModalHandle {
     const instanceId = `plugin-modal-${(nextInstanceId += 1)}`;
-    this.modals = [...this.modals, { instanceId, pluginId, options, layout }];
+    // Snapshot focus before subscribers render the newly opened modal.
+    const openerElement = captureOpenerElement();
+    this.modals = [...this.modals, { instanceId, pluginId, options, openerElement, layout }];
     this.notify();
     return { close: () => this.close(instanceId) };
   }

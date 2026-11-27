@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -17,10 +19,13 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -41,33 +46,52 @@ type restartMockAgentctlServer struct {
 
 	mu                 sync.Mutex
 	httpActions        []string
+	configuredCommand  string
+	configuredArgs     []string
+	configuredEnv      map[string]string
 	repairPackageSpecs []string
+	updateStreamCount  int
+	updateStreams      []*websocket.Conn
 	wsActions          []string
 	setModelIDs        []string
 	setModeIDs         []string
 	setOptions         []restartConfigOption
 
-	failStop                     bool
-	failSessionNew               bool
-	failSessionReset             bool
-	failCacheRepair              bool
-	failMode                     bool
-	failModel                    bool
-	failConfigOptionID           string
-	stderrLines                  []string
-	modelState                   *streams.SessionModelState
-	newModelState                *streams.SessionModelState
-	suppressSessionResetResponse bool
-	resetResponseDelay           time.Duration
-	resetLateEvent               *agentctl.AgentEvent
-	resetLateEventSent           chan struct{}
-	newLateEvent                 *agentctl.AgentEvent
-	newLateEventDelay            time.Duration
-	newLateEventSent             chan struct{}
-	newLateEventOnce             sync.Once
-	onReset                      func()
-	onSessionNew                 func()
-	onCacheRepair                func()
+	failStop                          bool
+	onStop                            func(context.Context)
+	failSessionNew                    bool
+	initializeError                   string
+	sessionNewError                   string
+	configureError                    string
+	startError                        string
+	failSessionReset                  bool
+	failCacheRepair                   bool
+	failMode                          bool
+	modeResult                        *agentctl.ModeResult
+	failModel                         bool
+	failConfigOptionID                string
+	stderrLines                       []string
+	stderrConfigured                  bool
+	modelState                        *streams.SessionModelState
+	newModelState                     *streams.SessionModelState
+	suppressSessionResetResponse      bool
+	resetResponseDelay                time.Duration
+	updateStreamClosed                chan struct{}
+	resetLateEvent                    *agentctl.AgentEvent
+	resetLateEventSent                chan struct{}
+	newLateEvent                      *agentctl.AgentEvent
+	newLateEventDelay                 time.Duration
+	newLateEventSent                  chan struct{}
+	newLateEventOnce                  sync.Once
+	processGeneration                 uint64
+	supportsManagedRuntimePreparation bool
+	supportsSessionLoad               bool
+	preparationDirectives             []agentctltypes.ManagedRuntimePreparationDirective
+	loadedSessionIDs                  []string
+	promptCalls                       int
+	onReset                           func()
+	onSessionNew                      func()
+	onCacheRepair                     func()
 }
 
 type restartConfigOption struct {
@@ -172,8 +196,9 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 	t.Helper()
 
 	m := &restartMockAgentctlServer{
-		failStop:       failStop,
-		failSessionNew: failSessionNew,
+		failStop:           failStop,
+		failSessionNew:     failSessionNew,
+		updateStreamClosed: make(chan struct{}, 32),
 	}
 
 	upgrader := websocket.Upgrader{
@@ -185,8 +210,21 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
-	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/identity", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		supportsPreparation := m.supportsManagedRuntimePreparation
+		m.mu.Unlock()
+		capabilities := []string{}
+		if supportsPreparation {
+			capabilities = append(capabilities, agentctltypes.ManagedRuntimePrivatePreparationCapability)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": capabilities})
+	})
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("stop")
+		if m.onStop != nil {
+			m.onStop(r.Context())
+		}
 		if m.failStop {
 			_, _ = w.Write([]byte(`{"success":false,"error":"stop failed"}`))
 			return
@@ -211,20 +249,67 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, r *http.Request) {
 		m.recordHTTP("configure")
+		var request struct {
+			Command   string            `json:"command"`
+			AgentArgs []string          `json:"agent_args"`
+			Env       map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, "invalid configure request", http.StatusBadRequest)
+			return
+		}
+		m.mu.Lock()
+		configureError := m.configureError
+		m.configuredCommand = request.Command
+		m.configuredArgs = append([]string(nil), request.AgentArgs...)
+		m.configuredEnv = cloneStringMap(request.Env)
+		m.mu.Unlock()
+		if configureError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": configureError})
+			return
+		}
 		_, _ = w.Write([]byte(`{"success":true}`))
 	})
-	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
-		m.recordHTTP("start")
-		_, _ = w.Write([]byte(`{"success":true,"command":"auggie --model test"}`))
+	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Preparation *agentctltypes.ManagedRuntimePreparationDirective `json:"preparation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err == nil && request.Preparation != nil {
+			m.mu.Lock()
+			m.preparationDirectives = append(m.preparationDirectives, *request.Preparation)
+			m.mu.Unlock()
+		}
+		m.mu.Lock()
+		m.httpActions = append(m.httpActions, "start")
+		m.processGeneration++
+		generation := m.processGeneration
+		startError := m.startError
+		m.mu.Unlock()
+		if startError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": startError})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"success":            true,
+			"command":            "auggie --model test",
+			"process_generation": generation,
+		})
 	})
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer func() { _ = conn.Close() }()
+		m.mu.Lock()
+		m.updateStreamCount++
+		m.updateStreams = append(m.updateStreams, conn)
+		m.mu.Unlock()
+		defer func() {
+			_ = conn.Close()
+			m.updateStreamClosed <- struct{}{}
+		}()
 
 		for {
 			_, message, err := conn.ReadMessage()
@@ -245,21 +330,44 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			var resp *ws.Message
 			switch msg.Action {
 			case "agent.initialize":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				m.mu.Lock()
+				initializeError := m.initializeError
+				supportsSessionLoad := m.supportsSessionLoad
+				m.mu.Unlock()
+				if initializeError != "" {
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+						"success": false,
+						"error":   initializeError,
+					})
+					break
+				}
+				payload := map[string]interface{}{
 					"success": true,
 					"agent_info": map[string]string{
 						"name":    "test-agent",
 						"version": "1.0.0",
 					},
-				})
+				}
+				if supportsSessionLoad {
+					payload["supports_session_load"] = true
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 			case "agent.session.new":
 				if m.onSessionNew != nil {
 					m.onSessionNew()
 				}
-				if m.failSessionNew {
+				m.mu.Lock()
+				failSessionNew := m.failSessionNew
+				sessionNewError := m.sessionNewError
+				m.mu.Unlock()
+				if failSessionNew || sessionNewError != "" {
+					message := sessionNewError
+					if message == "" {
+						message = "session new failed"
+					}
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 						"success": false,
-						"error":   "session new failed",
+						"error":   message,
 					})
 				} else {
 					payload := map[string]interface{}{
@@ -271,6 +379,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					}
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 				}
+			case "agent.session.load":
+				var request struct {
+					SessionID string `json:"session_id"`
+				}
+				_ = json.Unmarshal(msg.Payload, &request)
+				m.mu.Lock()
+				m.loadedSessionIDs = append(m.loadedSessionIDs, request.SessionID)
+				m.mu.Unlock()
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success":    true,
+					"session_id": request.SessionID,
+				})
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
@@ -309,9 +429,15 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				if m.failMode {
 					resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "mode rejected", nil)
 				} else {
-					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-						"success": true,
-					})
+					var request struct {
+						ModeID string `json:"mode_id"`
+					}
+					_ = json.Unmarshal(msg.Payload, &request)
+					result := agentctl.ModeResult{Requested: request.ModeID, Effective: request.ModeID, Confirmed: request.ModeID != ""}
+					if m.modeResult != nil {
+						result = *m.modeResult
+					}
+					resp, _ = ws.NewResponse(msg.ID, msg.Action, result)
 				}
 			case "agent.session.set_model":
 				if m.failModel {
@@ -335,12 +461,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.prompt":
+				m.mu.Lock()
+				m.promptCalls++
+				m.mu.Unlock()
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
 			case "agent.stderr":
-				stderrLines := m.stderrLines
-				if len(stderrLines) == 0 {
+				m.mu.Lock()
+				stderrLines := append([]string(nil), m.stderrLines...)
+				stderrConfigured := m.stderrConfigured
+				m.mu.Unlock()
+				if !stderrConfigured && len(stderrLines) == 0 {
 					stderrLines = []string{
 						"npm error code ETARGET",
 						"npm error notarget No matching version found for opencode-ai@1.2.3",
@@ -435,6 +567,27 @@ func (m *restartMockAgentctlServer) getHTTPActions() []string {
 	return out
 }
 
+func (m *restartMockAgentctlServer) getConfiguredProcess() (string, []string, map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.configuredCommand, append([]string(nil), m.configuredArgs...), cloneStringMap(m.configuredEnv)
+}
+
+func (m *restartMockAgentctlServer) getUpdateStreamCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.updateStreamCount
+}
+
+func (m *restartMockAgentctlServer) closeUpdateStreams() {
+	m.mu.Lock()
+	connections := append([]*websocket.Conn(nil), m.updateStreams...)
+	m.mu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+}
+
 func (m *restartMockAgentctlServer) getManagedRuntimeRepairSpecs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -449,6 +602,12 @@ func (m *restartMockAgentctlServer) getWSActions() []string {
 	out := make([]string, len(m.wsActions))
 	copy(out, m.wsActions)
 	return out
+}
+
+func (m *restartMockAgentctlServer) getPromptCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.promptCalls
 }
 
 func (m *restartMockAgentctlServer) getSetModelIDs() []string {
@@ -484,20 +643,22 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	t.Cleanup(client.Close)
 
 	exec := &AgentExecution{
-		ID:             "exec-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
-		ACPSessionID:   "old-session",
-		AgentCommand:   "auggie --model test",
-		Status:         v1.AgentStatusRunning,
-		WorkspacePath:  "/workspace",
+		ID:              "exec-1",
+		TaskID:          "task-1",
+		SessionID:       "session-1",
+		AgentProfileID:  "profile-1",
+		ResumeAttemptID: "resume-restart",
+		ACPSessionID:    "old-session",
+		AgentCommand:    "auggie --model test",
+		Status:          v1.AgentStatusRunning,
+		WorkspacePath:   "/workspace",
 		metadata: map[string]interface{}{
 			"task_description": "review the changes",
 		},
 		agentctl:     client,
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
+	initialStartupGeneration := exec.beginStartupAttemptWithID("resume-restart")
 	exec.messageBuffer.WriteString("old-response")
 	exec.thinkingBuffer.WriteString("old-thinking")
 	exec.currentMessageID = "msg-1"
@@ -521,6 +682,12 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 
 	if exec.ACPSessionID != "new-session-123" {
 		t.Fatalf("expected new ACP session ID, got %q", exec.ACPSessionID)
+	}
+	if exec.currentStartupAttemptID() != "resume-restart" {
+		t.Fatalf("restart changed recovery attempt ID to %q", exec.currentStartupAttemptID())
+	}
+	if got := exec.startupAttemptSnapshot(); got <= initialStartupGeneration {
+		t.Fatalf("restart startup source generation = %d, want > %d", got, initialStartupGeneration)
 	}
 	if exec.Status != v1.AgentStatusReady {
 		t.Fatalf("expected status %q, got %q", v1.AgentStatusReady, exec.Status)
@@ -578,6 +745,117 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 	if !slices.Contains(eventTypes, events.AgentContextReset) {
 		t.Fatalf("expected %q event, got %v", events.AgentContextReset, eventTypes)
+	}
+}
+
+func TestManager_RestartAgentProcessAppliesCursorAuthPreference(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "source-project", "mcp-auth.json"), []byte(`{"figma":{"token":"opaque"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpconfig.LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("create existing bridge link: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:            "cursor-profile",
+		AgentName:            "cursor-acp",
+		CursorMCPAuthEnabled: false,
+	}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = restartDefaultModelState()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	execution := &AgentExecution{
+		ID:             "exec-cursor-restart",
+		TaskID:         "task-1",
+		SessionID:      "session-cursor-restart",
+		AgentProfileID: "cursor-profile",
+		ExecutorType:   "local",
+		ACPSessionID:   "old-session",
+		AgentCommand:   "cursor-acp",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  workspace,
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, mgr.RestartAgentProcess(ctx, execution.ID))
+
+	destination := cursorMCPAuthDestinationForTest(t, projects, workspace)
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatalf("disabled preference was not applied before process restart, lstat err=%v", err)
+	}
+}
+
+func TestManager_PromptOnRunningCursorSessionKeepsLoadedAuthLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	cursorHome := filepath.Join(home, ".cursor")
+	projects := filepath.Join(cursorHome, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "source-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "source-project", "mcp-auth.json"), []byte(`{"figma":{"token":"opaque"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpconfig.LinkCursorMCPAuth(workspace, cursorHome); err != nil {
+		t.Fatalf("create existing bridge link: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:            "cursor-profile",
+		AgentName:            "cursor-acp",
+		CursorMCPAuthEnabled: false,
+	}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	execution := &AgentExecution{
+		ID:                 "exec-cursor-existing",
+		TaskID:             "task-1",
+		SessionID:          "session-cursor-existing",
+		AgentProfileID:     "cursor-profile",
+		ExecutorType:       "local",
+		RuntimeName:        agentruntime.RuntimeStandalone,
+		ACPSessionID:       "existing-session",
+		AgentCommand:       "cursor-acp",
+		AgentID:            "cursor-acp",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      workspace,
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	if _, err := mgr.PromptAgent(ctx, execution.ID, "continue current session", nil, true); err != nil {
+		t.Fatalf("PromptAgent: %v", err)
+	}
+	destination := cursorMCPAuthDestinationForTest(t, projects, workspace)
+	if _, err := os.Readlink(destination); err != nil {
+		t.Fatalf("running session auth link was changed by a prompt: %v", err)
+	}
+	if !slices.Contains(mock.getWSActions(), "agent.prompt") {
+		t.Fatalf("follow-up prompt did not reach running Cursor session: %v", mock.getWSActions())
 	}
 }
 

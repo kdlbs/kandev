@@ -23,22 +23,22 @@ function task(overrides: Partial<SidebarTask> = {}): SidebarTask {
   } as SidebarTask;
 }
 
-describe("buildSidebarItem pending archive projection", () => {
+describe("buildSidebarItem pending removal projection", () => {
   it("marks active rows covered by a pending archive", () => {
     const item = buildSidebarItem(task(), {
       ...emptyContext(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(true);
+    expect(item.isPendingRemoval).toBe(true);
   });
 
-  it("does not mark confirmed archived rows as pending", () => {
+  it("marks archived rows when deletion includes them", () => {
     const item = buildSidebarItem(task({ isArchived: true }), {
       ...emptyContext(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(false);
+    expect(item.isPendingRemoval).toBe(true);
   });
 });

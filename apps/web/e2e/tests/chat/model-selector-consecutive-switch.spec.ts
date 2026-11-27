@@ -78,8 +78,8 @@ test.describe("Chat model selector — consecutive switches", () => {
     // already be gone.
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const metadata = sessions.find((item) => item.id === sessionId)?.metadata;
+        const { session } = await apiClient.getTaskSession(sessionId);
+        const metadata = session.metadata;
         return (metadata?.runtime_config as { model?: string } | undefined)?.model;
       })
       .toBe("mock-fast");
@@ -98,8 +98,8 @@ test.describe("Chat model selector — consecutive switches", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const metadata = sessions.find((item) => item.id === sessionId)?.metadata;
+        const { session } = await apiClient.getTaskSession(sessionId);
+        const metadata = session.metadata;
         const overrides = metadata?.runtime_config_overrides as { model?: string } | undefined;
         return overrides?.model;
       })
@@ -133,8 +133,8 @@ test.describe("Chat model selector — consecutive switches", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const metadata = sessions.find((item) => item.id === sessionId)?.metadata;
+        const { session } = await apiClient.getTaskSession(sessionId);
+        const metadata = session.metadata;
         return (metadata?.runtime_config as { model?: string } | undefined)?.model;
       })
       .toBe("mock-fast");

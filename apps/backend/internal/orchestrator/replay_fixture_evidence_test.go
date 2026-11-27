@@ -39,7 +39,7 @@ func replayEvidenceLayer(service *Service, fx replayfixtures.Fixture) (watcher.A
 			token := fx.Expect.Events[tokenIndex]
 			tokenIndex++
 			if strings.HasSuffix(token, ":diagnostic") {
-				service.observeProviderDiagnostic(fx.Identity.SessionID, fx.Identity.ExecutionID, fx.Identity.PromptGeneration, frame.Text)
+				service.observeProviderDiagnostic(fx.Identity.SessionID, fx.Identity.ExecutionID, fx.Identity.PromptGeneration, fx.AgentID, frame.Text)
 			} else {
 				service.observePromptAttempt(fx.Identity.SessionID, fx.Identity.ExecutionID, fx.Identity.PromptGeneration, true, false)
 			}
@@ -147,7 +147,7 @@ func TestReplayFixtureEvidenceLayerIsReplayIdempotent(t *testing.T) {
 	var service Service
 	contaminate := func(executionID string, generation uint64) {
 		service.beginPromptAttempt(fx.Identity.SessionID, executionID, generation, false)
-		service.observeProviderDiagnostic(fx.Identity.SessionID, executionID, generation, gatewayServerFailureSample)
+		service.observeProviderDiagnostic(fx.Identity.SessionID, executionID, generation, fx.AgentID, gatewayServerFailureSample)
 	}
 
 	contaminate("stale-execution-1", 111)

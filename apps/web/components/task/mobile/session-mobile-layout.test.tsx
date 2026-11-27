@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, renderHook, act, fireEvent, screen } from "@testing-library/react";
+import { render, renderHook, act, screen } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
+import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { ROOT_ACTIVATE_EVENT, ROOT_FOCUS_EVENT } from "../root-context-menu";
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -41,7 +43,8 @@ vi.mock("../review-item-selector", () => ({
   ),
 }));
 
-vi.mock("@/components/state-provider", () => ({
+vi.mock("@/components/state-provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/state-provider")>()),
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({ tasks: { activeTaskId: "task-1", activeSessionId: "session-1" } }),
 }));
@@ -56,26 +59,12 @@ vi.mock("../review-detail-panel", async () => {
   };
 });
 
-vi.mock("../prompt-history-panel-content", () => ({
-  PromptHistoryPanelContent: ({
-    onNavigateToPrompt,
-  }: {
-    onNavigateToPrompt?: (messageId: string) => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="mobile-prompt-history-content"
-      onClick={() => onNavigateToPrompt?.("prompt-1")}
-    >
-      Prompt history
-    </button>
-  ),
-}));
-
 import {
   MobilePanelArea,
+  mobilePanelTopPadding,
   mobilePanelTopNavHeight,
   resolveMobilePluginPanel,
+  resolveMobileCorePanel,
   resolveMobileReviewSource,
   terminalPaddingBottom,
   useMobilePanelHandlers,
@@ -102,10 +91,38 @@ const OTHER_FILE: OpenFileTab = {
 const CHAT_LINK_PATH = "src/chat-link.ts";
 const REPO = "frontend";
 
+describe("mobilePanelTopNavHeight", () => {
+  it("reserves the fixed header only when no earlier page feedback owns the offset", () => {
+    expect(mobilePanelTopNavHeight(false)).toBe("3.5rem");
+    expect(mobilePanelTopNavHeight(true)).toBe("0px");
+    expect(mobilePanelTopNavHeight(false, true)).toBe("0px");
+    expect(mobilePanelTopNavHeight(true, true)).toBe("0px");
+  });
+});
+
+describe("mobilePanelTopPadding", () => {
+  it("omits both fixed-header and safe-area padding when page feedback owns clearance", () => {
+    expect(mobilePanelTopPadding(false, true)).toBe("0px");
+    expect(mobilePanelTopPadding(true, true)).toBe("0px");
+  });
+
+  it("keeps panel-owned safe-area padding for ordinary and shared-error layouts", () => {
+    expect(mobilePanelTopPadding(false, false)).toBe(
+      "calc(3.5rem + env(safe-area-inset-top, 0px))",
+    );
+    expect(mobilePanelTopPadding(true, false)).toBe("calc(0px + env(safe-area-inset-top, 0px))");
+  });
+});
+
 function renderHandlers(initialSid: string | null = "s1") {
   const handlePanelChange = vi.fn();
   const view = renderHook(
-    ({ sid }) => useMobilePanelHandlers({ effectiveSessionId: sid, handlePanelChange }),
+    ({ sid }) =>
+      useMobilePanelHandlers({
+        effectiveSessionId: sid,
+        handlePanelChange,
+        activePanel: "chat",
+      }),
     { initialProps: { sid: initialSid } },
   );
   return { handlePanelChange, ...view };
@@ -184,6 +201,44 @@ describe("useMobilePanelHandlers", () => {
 
     expect(fetchAndOpenFileMock).not.toHaveBeenCalled();
     expect(result.current.selectedFile).toBeNull();
+  });
+
+  it("activates the destination panel before revealing the root", () => {
+    const handlePanelChange = vi.fn();
+    const view = renderHook(
+      ({ panel }: { panel: MobileSessionPanel }) =>
+        useMobilePanelHandlers({
+          effectiveSessionId: "s1",
+          handlePanelChange,
+          activePanel: panel,
+        }),
+      { initialProps: { panel: "chat" as MobileSessionPanel } },
+    );
+    const focus = vi.fn();
+    window.addEventListener(ROOT_FOCUS_EVENT, focus);
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(ROOT_ACTIVATE_EVENT, {
+            detail: {
+              surface: "files",
+              trackerName: ".claude/worktrees/fix-b",
+              repositoryName: "kandev",
+              path: ".claude/worktrees/fix-b",
+            },
+          }),
+        );
+      });
+      expect(handlePanelChange).toHaveBeenCalledWith("files");
+      expect(focus).not.toHaveBeenCalled();
+
+      act(() => view.rerender({ panel: "files" }));
+      expect(focus).toHaveBeenCalledTimes(1);
+      const focusEvent = focus.mock.calls[0]?.[0] as CustomEvent | undefined;
+      expect(focusEvent?.detail.surface).toBe("files");
+    } finally {
+      window.removeEventListener(ROOT_FOCUS_EVENT, focus);
+    }
   });
 });
 
@@ -327,12 +382,22 @@ describe("resolveMobilePluginPanel", () => {
   });
 });
 
-describe("MobilePanelArea PR identity", () => {
-  it("removes nested top-bar padding when the outer task error reserves it", () => {
-    expect(mobilePanelTopNavHeight(false)).toBe("3.5rem");
-    expect(mobilePanelTopNavHeight(true)).toBe("0px");
+describe("resolveMobileCorePanel", () => {
+  it("keeps a managed Background Work selection", () => {
+    expect(resolveMobileCorePanel("background-work", null, true)).toBe("background-work");
   });
 
+  it("returns to Chat for passthrough or feature-disabled Background Work state", () => {
+    expect(resolveMobileCorePanel("background-work", null, false)).toBe("chat");
+  });
+
+  it("still falls back from an unavailable review surface", () => {
+    expect(resolveMobileCorePanel("review", null, true)).toBe("chat");
+    expect(resolveMobileCorePanel("review", "reviews", true)).toBe("review");
+  });
+});
+
+describe("MobilePanelArea PR identity", () => {
   it("remounts detail feedback when the user chooses another mixed-provider review", () => {
     function MobileReviewHarness() {
       const reviews: ReviewItemSummary[] = [
@@ -373,7 +438,7 @@ describe("MobilePanelArea PR identity", () => {
           handlePanelChangeAndClearSheet={vi.fn()}
           onNavigateToPrompt={vi.fn()}
           mobileScrollTarget={null}
-          topNavHeight="3.5rem"
+          topPadding="3.5rem"
           bottomNavHeight="3.25rem"
           reviews={reviews}
           selectedReview={selectedReview}
@@ -389,39 +454,6 @@ describe("MobilePanelArea PR identity", () => {
 
     expect(screen.queryByRole("button", { name: "feedback for pr-a" })).toBeNull();
     expect(screen.getByRole("button", { name: "feedback for pr-b" })).not.toBeNull();
-  });
-});
-
-describe("MobilePanelArea Prompt history", () => {
-  it("renders the history surface and forwards prompt navigation", () => {
-    const handleNavigateToPrompt = vi.fn();
-
-    render(
-      <MobilePanelArea
-        currentMobilePanel="prompt-history"
-        activeTaskId="task-1"
-        isPassthroughMode={false}
-        effectiveSessionId="session-1"
-        selectedFile={null}
-        selectedFilePreview={false}
-        selectedDiff={null}
-        handleOpenFileFromChat={vi.fn()}
-        handleClearSelectedDiff={vi.fn()}
-        handleOpenFile={vi.fn()}
-        handlePanelChangeAndClearSheet={vi.fn()}
-        onNavigateToPrompt={handleNavigateToPrompt}
-        mobileScrollTarget={null}
-        topNavHeight="3.5rem"
-        bottomNavHeight="3.25rem"
-        reviews={[]}
-        selectedReview={null}
-        onSelectReview={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId("mobile-prompt-history-content")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("mobile-prompt-history-content"));
-    expect(handleNavigateToPrompt).toHaveBeenCalledWith("prompt-1");
   });
 });
 
@@ -442,7 +474,7 @@ describe("MobilePanelArea Plan formatting offset", () => {
         handlePanelChangeAndClearSheet={vi.fn()}
         onNavigateToPrompt={vi.fn()}
         mobileScrollTarget={null}
-        topNavHeight="3.5rem"
+        topPadding="3.5rem"
         bottomNavHeight="3.25rem"
         reviews={[]}
         selectedReview={null}
@@ -473,7 +505,7 @@ function renderMobilePanel(currentMobilePanel: string) {
       handlePanelChangeAndClearSheet={vi.fn()}
       onNavigateToPrompt={vi.fn()}
       mobileScrollTarget={null}
-      topNavHeight="3.5rem"
+      topPadding="3.5rem"
       bottomNavHeight="3.25rem"
       reviews={[]}
       selectedReview={null}
@@ -514,14 +546,14 @@ describe("MobilePanelArea — plugin task panel (AC7)", () => {
 
 describe("terminalPaddingBottom", () => {
   it("pads by the keybar height alone when the keyboard is closed", () => {
-    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("58px");
     // bottomOffset is irrelevant while the keyboard is closed.
-    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("58px");
   });
 
   it("subtracts the bottom nav and adds the live keyboard offset when the keyboard is open", () => {
     expect(terminalPaddingBottom(true, 300, "3.25rem")).toBe(
-      "calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px))",
+      "calc(358px - 3.25rem - env(safe-area-inset-bottom, 0px))",
     );
   });
 });

@@ -1,4 +1,7 @@
+import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
+import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -8,13 +11,10 @@ import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { hasPayloadField, mergeTaskUpdate } from "@/lib/ws/handlers/task-merge";
-import {
-  clearPinnedSessionIfOverridden,
-  shouldPreservePinnedSessionForTask,
-} from "@/lib/ws/handlers/agent-session";
 import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 import {
   archivedTaskWorkspaceId,
+  bumpSidebarTaskQueryRevision,
   findArchivedTaskInCache,
   removeTaskFromActiveKanbans,
   removeTaskFromBothKanbans,
@@ -32,6 +32,10 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
+import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
+import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
+import { followUpdatedTaskPrimary } from "./task-primary-focus";
+import { findTaskInState } from "./task-lookup";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(
@@ -40,7 +44,8 @@ function upsertTask(
   payload: TaskEventPayload,
 ): KanbanTask[] {
   const existing = tasks.find((task) => task.id === nextTask.id);
-  const merged = mergeTaskUpdate(existing, nextTask, payload);
+  const incoming = existing ? { ...existing, ...taskOverviewPatch(payload) } : nextTask;
+  const merged = mergeTaskUpdate(existing, incoming, payload);
   return existing
     ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
     : [...tasks, merged];
@@ -95,12 +100,17 @@ function upsertTaskInBothKanbans(
   payload: TaskEventPayload,
 ): AppState {
   // Skip ephemeral tasks - they should never be added to kanban
-  if (payload.is_ephemeral) {
+  if (
+    payload.is_ephemeral ||
+    (payload.workspace_id &&
+      state.workspaces?.activeId &&
+      payload.workspace_id !== state.workspaces.activeId)
+  ) {
     return state;
   }
 
   const nextTask = toKanbanTask(payload);
-  let next = state;
+  let next = applyTaskOverviewEvent(state, payload);
 
   if (state.kanban.workflowId === wfId) {
     next = {
@@ -112,17 +122,6 @@ function upsertTaskInBothKanbans(
   next = upsertMultiTask(next, wfId, nextTask, payload);
 
   return next;
-}
-
-/** Look up a task across both single-kanban and multi-kanban snapshots. */
-function findTaskInState(state: AppState, taskId: string): KanbanTask | undefined {
-  const fromKanban = state.kanban.tasks.find((t) => t.id === taskId);
-  if (fromKanban) return fromKanban;
-  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
-    const found = snapshot.tasks.find((t) => t.id === taskId);
-    if (found) return found;
-  }
-  return undefined;
 }
 
 function taskEventIdForLog(payload: TaskEventPayload): string {
@@ -197,24 +196,23 @@ function upsertArchivedTaskInCache(
   };
   const items = sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
   const existing = items.find((item) => item.id === task.id);
-  const merged = mergeTaskUpdate(existing, task, payload);
-  const revisions = sidebarArchivedTasks.revisionByWorkspaceId ?? {};
-  return {
-    ...state,
-    sidebarArchivedTasks: {
-      ...sidebarArchivedTasks,
-      itemsByWorkspaceId: {
-        ...sidebarArchivedTasks.itemsByWorkspaceId,
-        [workspaceId]: existing
-          ? items.map((item) => (item.id === task.id ? merged : item))
-          : [...items, merged],
-      },
-      revisionByWorkspaceId: {
-        ...revisions,
-        [workspaceId]: (revisions[workspaceId] ?? 0) + 1,
-      },
-    },
-  };
+  const next = existing
+    ? {
+        ...state,
+        sidebarArchivedTasks: {
+          ...sidebarArchivedTasks,
+          itemsByWorkspaceId: {
+            ...sidebarArchivedTasks.itemsByWorkspaceId,
+            [workspaceId]: items.map((item) =>
+              item.id === task.id
+                ? mergeTaskUpdate(item, { ...item, ...taskOverviewPatch(payload) }, payload)
+                : item,
+            ),
+          },
+        },
+      }
+    : state;
+  return next;
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
@@ -246,7 +244,7 @@ function applyTaskUpdatedCache({
   archivedAt,
   archivedWorkspaceId,
 }: TaskUpdatedCacheContext): AppState {
-  let next = state;
+  let next = isArchivedUpdate ? applyTaskOverviewEvent(state, payload) : state;
 
   if (isArchivedUpdate) {
     next =
@@ -296,39 +294,6 @@ function removeArchivedTaskSideEffects(store: StoreApi<AppState>, taskId: string
   state.setOfficeRefetchTrigger("tasks");
 }
 
-function maybeFollowUpdatedTaskPrimary(
-  store: StoreApi<AppState>,
-  beforeState: AppState,
-  taskId: string,
-  previousPrimary: string | null,
-  payload: TaskEventPayload,
-): void {
-  // Follow focus to the new primary when:
-  //  - the user is currently viewing this task,
-  //  - the user was sitting on the previous primary,
-  //  - they do NOT have a non-terminal pinned session for this task, and
-  //  - a real previous primary actually changed.
-  // This makes workflow profile switches transparent for unpinned users
-  // without yanking users off a live session they deliberately selected. A
-  // pinned user whose session is being retired is followed via the session
-  // state-transition handoff (maybeAdoptSessionOnTransition) once that session
-  // actually reaches a terminal state — not from here, where we cannot yet tell
-  // a retirement from a manual "Set as Primary" that leaves the old session live.
-  const afterState = store.getState();
-  logTaskMerge("task.updated", beforeState, afterState, payload);
-  const newPrimary = findTaskInState(afterState, taskId)?.primarySessionId ?? null;
-  const shouldFollow =
-    Boolean(newPrimary) &&
-    Boolean(previousPrimary) &&
-    newPrimary !== previousPrimary &&
-    afterState.tasks.activeTaskId === taskId &&
-    afterState.tasks.activeSessionId === previousPrimary &&
-    !shouldPreservePinnedSessionForTask(afterState, taskId);
-  if (!shouldFollow || !newPrimary) return;
-  clearPinnedSessionIfOverridden(store, newPrimary);
-  afterState.setActiveSessionAuto(taskId, newPrimary);
-}
-
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
   // Ephemeral tasks never reach the Kanban board, but quick chats are shared
   // across devices — mirror them into the tab strip before bailing out.
@@ -355,17 +320,23 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   }
 
   store.setState((state) =>
-    applyTaskUpdatedCache({
-      state,
-      taskId,
-      workflowId: message.payload.workflow_id,
-      oldWorkflowId: message.payload.old_workflow_id,
-      payload: message.payload,
-      isArchivedUpdate,
-      partialArchivedTask,
-      archivedAt,
-      archivedWorkspaceId,
-    }),
+    bumpSidebarTaskQueryRevision(
+      applyTaskUpdatedCache({
+        state,
+        taskId,
+        workflowId: message.payload.workflow_id,
+        oldWorkflowId: message.payload.old_workflow_id,
+        payload: message.payload,
+        isArchivedUpdate,
+        partialArchivedTask,
+        archivedAt,
+        archivedWorkspaceId,
+      }),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
 
   store.getState().reconcileWorkflowSessionFocus?.(taskId);
@@ -375,7 +346,8 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     return;
   }
 
-  maybeFollowUpdatedTaskPrimary(store, beforeState, taskId, previousPrimary, message.payload);
+  logTaskMerge("task.updated", beforeState, store.getState(), message.payload);
+  followUpdatedTaskPrimary(store, taskId, previousPrimary);
 }
 
 function handleTaskUpsert(
@@ -390,10 +362,27 @@ function handleTaskUpsert(
   }
 
   const beforeState = store.getState();
+  const previousPrimary =
+    action === "task.state_changed"
+      ? (findTaskInState(beforeState, message.payload.task_id)?.primarySessionId ?? null)
+      : null;
   store.setState((state) =>
-    upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+    bumpSidebarTaskQueryRevision(
+      upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
   logTaskMerge(action, beforeState, store.getState(), message.payload);
+  store.getState().reconcileWorkflowSessionFocus?.(message.payload.task_id);
+  followUpdatedTaskPrimary(
+    store,
+    message.payload.task_id,
+    previousPrimary,
+    action === "task.created",
+  );
 }
 
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -438,19 +427,36 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       cleanupTaskStorage(deletedId, sessionIds, envIds);
       // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
+      invalidateTaskSessionMembership(store, deletedId);
       for (const sid of sessionIds) {
+        retireSessionReads(store, sid);
         useContextFilesStore.getState().clearSession(sid);
         currentState.clearQueueStatus?.(sid);
+        currentState.removeTaskSession?.(deletedId, sid, { confirmed: true });
       }
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
       store.setState((state) =>
-        clearDeletedTaskWalkthrough(
-          clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
-          deletedId,
+        bumpSidebarTaskQueryRevision(
+          clearDeletedTaskWalkthrough(
+            clearRemovedTaskSelection(
+              removeTaskFromBothKanbans(
+                applyTaskOverviewPatch(state, deletedId, null, message.payload.workspace_id),
+                deletedId,
+              ),
+              deletedId,
+            ),
+            deletedId,
+          ),
+          message.payload.workspace_id ??
+            archivedTaskWorkspaceId(state, message.payload) ??
+            state.workspaces?.activeId ??
+            undefined,
         ),
       );
+
+      sidebarTaskPageCache(store).removeTasks(new Set([deletedId]));
 
       // Capture the route match before any redirect mutates the pathname. This
       // covers a fresh load where the browser is parked on the task's route
@@ -479,7 +485,20 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       handleTaskUpsert("task.state_changed", store, message);
     },
     "task.status_summary.updated": (message) => {
-      store.setState((state) => updateTaskStatusSummaryInBothKanbans(state, message));
+      store.setState((state) =>
+        updateTaskStatusSummaryInBothKanbans(
+          applyTaskOverviewPatch(
+            state,
+            message.payload.task_id,
+            {
+              id: message.payload.task_id,
+              statusSummary: message.payload.status_summary,
+            },
+            message.payload.workspace_id,
+          ),
+          message,
+        ),
+      );
     },
   };
 }

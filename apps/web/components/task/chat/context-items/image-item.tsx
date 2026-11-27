@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useState, useCallback, type ReactNode } from "react";
+import { memo, useState, useCallback, useRef, type ReactNode } from "react";
 import { IconFile, IconLoader2, IconPhoto, IconRefresh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent } from "@kandev/ui/dialog";
 import type { ImageContextItem } from "@/lib/types/context";
@@ -10,15 +11,28 @@ import {
   IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME,
   ImagePreviewContent,
 } from "@/components/task/chat/image-preview-dialog";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { ContextChip } from "./context-chip";
 
 // The image chip intentionally owns the preview, delivery toggle, and retry
 // affordance so they stay synchronized on narrow/mobile composers.
 // eslint-disable-next-line max-lines-per-function, complexity
-export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextItem }) {
+export const ImageItem = memo(function ImageItem({
+  item,
+  showDeliveryMode = true,
+}: {
+  item: ImageContextItem;
+  showDeliveryMode?: boolean;
+}) {
   const { t } = useTranslation("chat");
+  const { isFinePointer } = useResponsiveBreakpoint();
   const [dialogOpen, setDialogOpen] = useState(false);
-  const previewSrc = item.attachment.preview;
+  const chipRef = useRef<HTMLButtonElement>(null);
+  // A restored or oversized ready image has no inline preview; the authorized
+  // content URL keeps the thumbnail and larger viewer available.
+  const previewSrc =
+    item.attachment.preview ??
+    (item.attachment.attachmentId ? attachmentContentUrl(item.attachment.attachmentId) : undefined);
   const deliveryMode = item.attachment.deliveryMode;
   const uploadStatus = item.attachment.uploadStatus;
   const deliveryDescription =
@@ -48,8 +62,9 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
             type="button"
             size="icon"
             variant="ghost"
-            className="h-5 w-5"
+            className={isFinePointer ? "h-5 w-5" : "min-h-11 min-w-11"}
             aria-label={t("chat:retryAttachmentUpload")}
+            data-testid="attachment-upload-retry"
             onClick={(event) => {
               event.stopPropagation();
               item.onRetry?.();
@@ -115,7 +130,7 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
         )}
       </div>
     ) : undefined;
-  if (deliveryMode === "path") {
+  if (showDeliveryMode && deliveryMode === "path") {
     leadingIcon = (
       <span className="relative h-3 w-3 shrink-0" aria-hidden="true">
         <IconFile className="h-3 w-3 text-muted-foreground" />
@@ -137,16 +152,25 @@ export const ImageItem = memo(function ImageItem({ item }: { item: ImageContextI
       <ContextChip
         kind="image"
         label={item.label}
-        thumbnail={deliveryMode === "prompt" ? previewSrc : undefined}
+        thumbnail={leadingIcon ? undefined : previewSrc}
         leadingIcon={leadingIcon}
         preview={preview}
         onClick={previewSrc ? handleClick : undefined}
         onRemove={item.onRemove}
+        triggerRef={chipRef}
       />
       {previewSrc && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent
             aria-describedby={undefined}
+            showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              const opener = chipRef.current;
+              if (opener) {
+                event.preventDefault();
+                opener.focus();
+              }
+            }}
             className={IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME}
           >
             <ImagePreviewContent src={previewSrc} alt={t("chat:attachmentPreviewFullAlt")} />

@@ -39,27 +39,53 @@ function deriveChangeValues(
   return { hasUnstaged, hasStaged, hasCommits, hasChanges: hasUnstaged || hasStaged };
 }
 
-export function deriveSessionGitValues(
-  gitStatus: GitStatusEntry | undefined,
-  hasRepositoryStatuses: boolean,
-  unstagedFiles: FileInfo[],
-  stagedFiles: FileInfo[],
-  commits: SessionCommit[],
-) {
+type DeriveSessionGitValuesArgs = {
+  gitStatus: GitStatusEntry | undefined;
+  hasRepositoryStatuses: boolean;
+  unstagedFiles: FileInfo[];
+  stagedFiles: FileInfo[];
+  commits: SessionCommit[];
+  repositoryDetailsReady?: boolean;
+};
+
+export function deriveSessionGitValues({
+  gitStatus,
+  hasRepositoryStatuses,
+  unstagedFiles,
+  stagedFiles,
+  commits,
+  repositoryDetailsReady = true,
+}: DeriveSessionGitValuesArgs) {
   const branch = deriveBranchValues(gitStatus);
   const upstream = deriveUpstreamValues(gitStatus, branch.ahead);
-  const status = { ...branch, ...upstream };
+  const statusDetailsReady =
+    Boolean(gitStatus || hasRepositoryStatuses) &&
+    gitStatus?.detail_state !== "pending" &&
+    gitStatus?.detail_state !== "unavailable" &&
+    repositoryDetailsReady;
+  const status = statusDetailsReady
+    ? { ...branch, ...upstream }
+    : {
+        ...branch,
+        ahead: 0,
+        behind: 0,
+        remoteAhead: 0,
+        remoteBehind: 0,
+        pushAhead: 0,
+        pullBehind: 0,
+      };
   const changes = deriveChangeValues(unstagedFiles, stagedFiles, commits);
   const hasAnything = changes.hasChanges || changes.hasCommits;
   return {
     ...status,
     statusLoaded: Boolean(gitStatus || hasRepositoryStatuses),
+    statusDetailsReady,
     ...changes,
     hasAnything,
     canStageAll: changes.hasUnstaged,
     canCommit: changes.hasStaged,
-    canPush: status.pushAhead > 0,
-    canPull: status.pullBehind > 0,
+    canPush: statusDetailsReady && status.pushAhead > 0,
+    canPull: statusDetailsReady && status.pullBehind > 0,
     canCreatePR: changes.hasCommits,
   };
 }

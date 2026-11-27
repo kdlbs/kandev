@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,9 +95,13 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 		locks:             make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
-		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
+		runtime.resolveBinary = func(ctx context.Context, req *ExecutorCreateRequest, platform kubeexecutor.Platform) ([]byte, error) {
 			arch := strings.TrimPrefix(string(platform), "linux/")
-			path, err := agentctlResolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "linux", GOARCH: arch})
+			var onProgress PrepareProgressCallback
+			if req != nil {
+				onProgress = req.OnProgress
+			}
+			path, err := agentctlResolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: arch}, onProgress)
 			if err != nil {
 				return nil, err
 			}
@@ -195,7 +200,7 @@ func (r *KubernetesExecutor) createFresh(
 		if stageErr != nil {
 			return stageErr
 		}
-		binary, stageErr = r.resolveBinary(profile.Platform)
+		binary, stageErr = r.resolveBinary(ctx, req, profile.Platform)
 		if stageErr != nil {
 			return fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, stageErr)
 		}
@@ -408,6 +413,7 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: nonce handshake: %w", err)
 	}
 	createRequest := buildReconnectCreateInstanceRequest(req, req.InstanceID)
+	applyKubernetesDurableJournalPath(createRequest, req)
 	createResponse, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, createRequest)
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: create agentctl instance: %w", err)
@@ -420,13 +426,39 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, err
 	}
 	client := agentctl.NewClient(kubernetesControlHost, int(forward.LocalPort()), r.logger,
-		agentctl.WithExecutionID(req.InstanceID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token))
+		agentctl.WithExecutionID(createResponse.ID), agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(token),
+		agentctl.WithBuiltinMCPScopedRoutes(createResponse.ScopedMCPRoutes))
 	if err := client.Health(ctx); err != nil {
 		client.Close()
 		_ = forward.Close()
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: instance health: %w", err)
 	}
 	return client, forward, token, createResponse.Port, nil
+}
+
+// applyKubernetesDurableJournalPath places delivery state on the workspace
+// volume only when that volume survives Pod replacement. EmptyDir is an
+// intentional legacy-delivery runtime because it cannot satisfy that
+// continuity contract.
+func applyKubernetesDurableJournalPath(createRequest *agentctl.CreateInstanceRequest, req *ExecutorCreateRequest) {
+	if createRequest == nil || req == nil {
+		return
+	}
+	mode := getMetadataString(req.Metadata, MetadataKeyKubernetesRuntimeWorkspaceMode)
+	if mode == "" {
+		mode = getMetadataString(req.Metadata, MetadataKeyKubernetesWorkspaceMode)
+	}
+	if mode != string(kubeexecutor.WorkspaceModeManagedPVC) && mode != string(kubeexecutor.WorkspaceModeExistingClaim) {
+		createRequest.DurableJournalPath = ""
+		return
+	}
+	if req.DurableJournalOwnerID == "" {
+		createRequest.DurableJournalPath = ""
+		return
+	}
+	createRequest.DurableJournalPath = filepath.Join(
+		kubernetesWorkspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
+	)
 }
 
 type kubernetesAgentctlInstanceControl interface {
@@ -455,7 +487,7 @@ func createOrReconcileKubernetesAgentctlInstance(
 	if reconcileErr != nil {
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
 	}
-	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
+	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port, ScopedMCPRoutes: info.ScopedMCPRoutes}
 	if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
 	}
@@ -625,8 +657,12 @@ func kubernetesProfileConfigFromMetadata(metadata map[string]interface{}) (kubee
 	return kubeexecutor.ParseProfileConfig(values)
 }
 
-func (r *KubernetesExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func (r *KubernetesExecutor) RecoverInstances(
+	ctx context.Context,
+	records []*models.ExecutorRunning,
+) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 func (r *KubernetesExecutor) GetInteractiveRunner() *process.InteractiveRunner { return nil }

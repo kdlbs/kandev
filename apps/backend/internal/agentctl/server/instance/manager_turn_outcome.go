@@ -12,6 +12,10 @@ func (m *Manager) RetainTurnOutcome(instanceID string, event streams.AgentEvent)
 	if !found {
 		return 0, false
 	}
+	if event.CapacityContinuation != nil {
+		snapshot := *event.CapacityContinuation
+		event.CapacityContinuation = &snapshot
+	}
 	turnID = m.turnIDSeq.Add(1)
 	inst.turnOutcome.Retain(turnID, event)
 	return turnID, true

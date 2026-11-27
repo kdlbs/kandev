@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCircleCheckFilled,
@@ -12,15 +12,15 @@ import {
   IconAlertTriangleFilled,
   IconShield,
 } from "@tabler/icons-react";
-import { Drawer } from "@kandev/ui/drawer";
+import { Drawer, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
-import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
+import { PR_CI_DESKTOP_POPOVER_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import {
   hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
@@ -30,8 +30,11 @@ import {
   isPRQueued,
   isPRWaitingOnBranchProtection,
   pickDefaultPR,
+  hasAnyPRMergeConflict,
 } from "@/components/github/pr-task-icon";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
+import { aggregatePRCIState } from "@/components/github/pr-ci-state";
 import {
   ChangeRequestStatusChip,
   ChangeRequestStatusChipHoverArea,
@@ -81,10 +84,6 @@ type MultiChipProps = {
   onRemovePR?: (pr: TaskPR) => Promise<void>;
   triggerRef?: TriggerRef;
 };
-
-function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
-}
 
 function chipStatus(pr: TaskPR): ChipStatus {
   // Terminal PRs are filtered before this helper. For active PRs, queue
@@ -179,10 +178,11 @@ function useChipPopoverInteractions() {
  * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskId);
   const { prs, refresh, unlink } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [restoreFocusAfterCollapse, setRestoreFocusAfterCollapse] = useState(false);
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
   // Only open PRs are worth a CI chip — terminal PRs (merged/closed) are
@@ -190,6 +190,14 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // stays visible as long as at least one is still open.
   const allPRs = Array.isArray(prs) ? prs : [];
   const openPRs = allPRs.filter((p) => p.state !== "merged" && p.state !== "closed");
+  useEffect(() => {
+    if (!restoreFocusAfterCollapse || allPRs.length !== 1) return;
+    const frame = requestAnimationFrame(() => {
+      triggerRef.current?.focus();
+      setRestoreFocusAfterCollapse(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [allPRs.length, restoreFocusAfterCollapse]);
   // Subscribe at the chip level so the cache warms even when the top-bar PR
   // button isn't mounted (e.g. small viewport that hides it). Warm the PR the
   // popover will actually open first (worst-status via pickDefaultPR — for a
@@ -197,6 +205,16 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // task warm when the popover opens.
   usePRFeedbackBackgroundSync(workspaceId, pickDefaultPR(openPRs));
   if (allPRs.length === 0 || (allPRs.length === 1 && openPRs.length === 0)) return null;
+  const removePR = async (pr: TaskPR) => {
+    const collapsesToSinglePR = allPRs.length === 2;
+    if (collapsesToSinglePR) setRestoreFocusAfterCollapse(true);
+    try {
+      await unlink(pr.id);
+    } catch (error) {
+      if (collapsesToSinglePR) setRestoreFocusAfterCollapse(false);
+      throw error;
+    }
+  };
   if (allPRs.length === 1)
     return (
       <PRStatusChipInner
@@ -212,7 +230,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
       statusPrs={openPRs}
       automation={automationForPRs(automationOptions, openPRs)}
       refreshTaskPR={refresh}
-      onRemovePR={(pr) => unlink(pr.id)}
+      onRemovePR={removePR}
       triggerRef={triggerRef}
     />
   );
@@ -264,7 +282,7 @@ function PRStatusChipHoverCard({ pr, automation, refreshTaskPR, triggerRef }: Si
         <PopoverAnchor asChild>
           <ChangeRequestStatusChip ref={ref} {...chipButtonAttrs(pr, status, automation, t)}>
             <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            <ChipStatusGlyph status={status} />
+            <ChipStatusGlyph status={status} prs={[pr]} />
             <AutomationFlagBadges automation={automation} />
           </ChangeRequestStatusChip>
         </PopoverAnchor>
@@ -273,10 +291,12 @@ function PRStatusChipHoverCard({ pr, automation, refreshTaskPR, triggerRef }: Si
         side="top"
         align="start"
         sideOffset={8}
-        className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        className={`w-80 p-2.5 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
         onMouseEnter={onContentEnter}
         onMouseMove={onContentEnter}
         onMouseLeave={onContentLeave}
+        onFocus={onContentEnter}
+        onBlur={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
@@ -328,7 +348,7 @@ function MultiChipGlyph({
   return (
     <>
       <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-      <ChipStatusGlyph status={status} />
+      <ChipStatusGlyph status={status} prs={prs} />
       <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
       <AutomationFlagBadges automation={automation} />
     </>
@@ -361,10 +381,12 @@ function PRStatusChipMultiHoverCard({
         side="top"
         align="start"
         sideOffset={8}
-        className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_SCROLL_CLASS}`}
+        className={`w-96 p-2.5 ${PR_CI_DESKTOP_POPOVER_CLASS}`}
         onMouseEnter={onContentEnter}
         onMouseMove={onContentEnter}
         onMouseLeave={onContentLeave}
+        onFocus={onContentEnter}
+        onBlur={onContentLeave}
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
@@ -373,7 +395,6 @@ function PRStatusChipMultiHoverCard({
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onRemovePR={onRemovePR}
-          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
         />
       </PopoverContent>
     </Popover>
@@ -393,16 +414,18 @@ function PRStatusChipMultiDrawer({
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <ChangeRequestStatusChip
-        ref={triggerRef}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        {...multiChipButtonAttrs(prs, status, automation, t)}
-      >
-        <MultiChipGlyph prs={prs} status={status} automation={automation} />
-      </ChangeRequestStatusChip>
+      <DrawerTrigger asChild>
+        <ChangeRequestStatusChip
+          ref={triggerRef}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          {...multiChipButtonAttrs(prs, status, automation, t)}
+        >
+          <MultiChipGlyph prs={prs} status={status} automation={automation} />
+        </ChangeRequestStatusChip>
+      </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
+        fixedContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"
         title={t("github:pullRequestCount", { count: prs.length })}
@@ -414,7 +437,6 @@ function PRStatusChipMultiDrawer({
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onRemovePR={onRemovePR}
-          onCollapseFocus={() => focusAfterCollapse(triggerRef)}
         />
       </ChangeRequestStatusDrawerContent>
     </Drawer>
@@ -427,18 +449,20 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <ChangeRequestStatusChip
-        ref={triggerRef}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        {...chipButtonAttrs(pr, status, automation, t)}
-      >
-        <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-        <ChipStatusGlyph status={status} />
-        <AutomationFlagBadges automation={automation} />
-      </ChangeRequestStatusChip>
+      <DrawerTrigger asChild>
+        <ChangeRequestStatusChip
+          ref={triggerRef}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          {...chipButtonAttrs(pr, status, automation, t)}
+        >
+          <IconChecklist className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <ChipStatusGlyph status={status} prs={[pr]} />
+          <AutomationFlagBadges automation={automation} />
+        </ChangeRequestStatusChip>
+      </DrawerTrigger>
       <ChangeRequestStatusDrawerContent
+        fixedContent
         testId="pr-status-chip-drawer"
         closeTestId="pr-status-chip-drawer-close"
         title={`${t("github:pr")}${pr.pr_number}`}
@@ -451,7 +475,16 @@ function PRStatusChipDrawer({ pr, automation, refreshTaskPR, triggerRef }: Singl
   );
 }
 
-function ChipStatusGlyph({ status }: { status: ChipStatus }) {
+function ChipStatusGlyph({ status, prs }: { status: ChipStatus; prs: TaskPR[] }) {
+  if (status === "draft") {
+    return (
+      <PRStatusGlyph
+        colorClassName="text-muted-foreground"
+        ciState={aggregatePRCIState(prs).state}
+        hasMergeConflicts={hasAnyPRMergeConflict(prs)}
+      />
+    );
+  }
   switch (status) {
     case "passed":
       return <IconCircleCheckFilled className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />;
@@ -469,8 +502,6 @@ function ChipStatusGlyph({ status }: { status: ChipStatus }) {
           aria-hidden="true"
         />
       );
-    case "draft":
-      return <IconPointFilled className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />;
     case "blocked":
       return (
         <IconShield

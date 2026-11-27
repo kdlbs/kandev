@@ -119,6 +119,79 @@ test.describe("@search plan panel search", () => {
       .toBe(`${total} / ${total}`);
   });
 
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.1
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.3
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.4
+  test("finds phrases across formatting and wraps navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const content = [
+      "The quick brown fox is a readiness marker.",
+      "",
+      "release **build**",
+      "",
+      "release `build`",
+      "",
+      "release bu*il*d",
+    ].join("\n");
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-formatted", {
+      description: planScript(content),
+    });
+    await openPlanPanel(testPage, session);
+    const editor = testPage.getByTestId("plan-panel").locator(".ProseMirror");
+    await expect(editor.locator("strong")).toHaveText("build");
+    await expect(editor.locator("code")).toHaveText("build");
+    await expect(editor.locator("em")).toHaveText("il");
+    const paragraphs = editor.locator("p").filter({ hasText: "release build" });
+    await expect(paragraphs).toHaveCount(3);
+
+    await openPanelSearch(testPage, "plan");
+    await panelSearchInput(testPage).fill("release build");
+    await expect(panelSearchMatchCounter(testPage)).toHaveText("1 / 3");
+    expect(
+      await paragraphs.evaluateAll((elements) =>
+        elements.map((element) =>
+          Array.from(element.querySelectorAll(".search-highlight"))
+            .map((fragment) => fragment.textContent)
+            .join(""),
+        ),
+      ),
+    ).toEqual(["release build", "release build", "release build"]);
+    const currentParagraph = paragraphs.filter({
+      has: testPage.locator(".search-highlight-current"),
+    });
+    await expect(currentParagraph).toHaveCount(1);
+    await expect(paragraphs.nth(0).locator(".search-highlight-current").first()).toBeVisible();
+    await prCapture.screenshot("plan-formatted-phrase", {
+      caption:
+        "Plan find highlights full phrases across bold, code, and mid-word italic formatting",
+    });
+
+    for (const [key, current] of [
+      ["Enter", 2],
+      ["Enter", 3],
+      ["Enter", 1],
+      ["Shift+Enter", 3],
+    ] as const) {
+      await panelSearchInput(testPage).press(key);
+      await expect(panelSearchMatchCounter(testPage)).toHaveText(`${current} / 3`);
+      await expect(currentParagraph).toHaveCount(1);
+      await expect(
+        paragraphs
+          .nth(current - 1)
+          .locator(".search-highlight-current")
+          .first(),
+      ).toBeVisible();
+    }
+    await panelSearchInput(testPage).fill("absent");
+    await expect(panelSearchMatchCounter(testPage)).toHaveText("0 / 0");
+    await expect(editor.locator(".search-highlight")).toHaveCount(0);
+  });
+
   test("P9 Close removes all highlights", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-close", {

@@ -68,3 +68,66 @@ func TestAgentFamilyResolverIsWired(t *testing.T) {
 		t.Errorf("SetAgentFamilyResolver is wired with %q, want the agent registry (agentRegistry)", resolverArg)
 	}
 }
+
+// TestTaskPromptCheckerIsWired guards the line that gives session.launch the
+// same coordinator attended-only scope upgrade as message.add
+// (copilot.md#attended-only).
+//
+// Every orchestrator test installs a checker straight into the Service
+// struct, so deleting SetTaskPromptChecker from provideOrchestrator leaves
+// that whole suite green while the shipped backend silently enforces no
+// task-prompt scope at all, letting session.launch start a turn on a
+// coordinator conversation task without the workspace.manage upgrade
+// AuthorizeTaskPromptScope requires — the defect this wiring exists to fix,
+// reintroduced with no failing test.
+func TestTaskPromptCheckerIsWired(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "orchestrator.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse orchestrator.go: %v", err)
+	}
+
+	var provideFn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "provideOrchestrator" {
+			provideFn = fn
+			break
+		}
+	}
+	if provideFn == nil {
+		t.Fatal("provideOrchestrator not found in orchestrator.go; re-point this guard at the DI function")
+	}
+
+	var checkerArg string
+	var calls int
+	ast.Inspect(provideFn, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "SetTaskPromptChecker" || len(call.Args) != 1 {
+			return true
+		}
+		calls++
+		if argSel, ok := call.Args[0].(*ast.SelectorExpr); ok {
+			if ident, ok := argSel.X.(*ast.Ident); ok {
+				checkerArg = ident.Name + "." + argSel.Sel.Name
+			}
+		}
+		return true
+	})
+
+	if calls == 0 {
+		t.Fatal("provideOrchestrator never calls SetTaskPromptChecker; session.launch would enforce " +
+			"no task-prompt scope at all, letting it start a turn on a coordinator conversation task " +
+			"without the workspace.manage upgrade AuthorizeTaskPromptScope requires")
+	}
+	if calls > 1 {
+		t.Errorf("SetTaskPromptChecker is called %d times in provideOrchestrator; expected exactly one wiring site", calls)
+	}
+	if checkerArg != "taskSvc.AuthorizeTaskPromptScope" {
+		t.Errorf("SetTaskPromptChecker is wired with %q, want taskSvc.AuthorizeTaskPromptScope", checkerArg)
+	}
+}

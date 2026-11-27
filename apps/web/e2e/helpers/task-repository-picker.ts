@@ -22,32 +22,21 @@ export async function openTaskRepositoryPicker(
   { mobile = false, provider }: TaskRepositoryPickerOptions = {},
 ): Promise<void> {
   if (mobile) {
-    const add = page.getByTestId("mobile-repository-add");
-    const management = page.getByTestId("mobile-repository-management");
     const sheet = page.getByTestId("mobile-repository-sheet-content");
-    const sheetOpen = (await sheet.count()) > 0 && (await sheet.isVisible().catch(() => false));
-    if (sheetOpen) {
-      await waitForFiniteAnimations(sheet);
-      if (!(await management.isVisible().catch(() => false))) {
-        await expect
-          .poll(() => sheet.isVisible().catch(() => false), {
-            timeout: 10_000,
-            message: "mobile repository sheet did not finish closing",
-          })
-          .toBe(false);
-      }
-    }
-    if (!(await management.isVisible().catch(() => false))) {
+    const openSheet = page.locator('[data-slot="drawer-content"][data-state="open"]').filter({
+      has: sheet,
+    });
+    if (!(await openSheet.isVisible())) {
+      await expect(sheet).toBeHidden();
       const manager = page.getByTestId("mobile-repository-manager");
       await expect(manager).toBeVisible({ timeout: 15_000 });
       await manager.tap();
-      await expect(sheet).toBeVisible();
-      await waitForFiniteAnimations(sheet);
     }
-    await expect(management).toBeVisible();
-    await expect(add).toBeVisible();
-    await waitForFiniteAnimations(sheet);
-    await add.dispatchEvent("click");
+    await waitForFiniteAnimations(openSheet);
+    const add = sheet.getByTestId("mobile-repository-add");
+    if (await add.isVisible()) {
+      await add.tap();
+    }
   } else {
     await page.getByTestId("add-repository").click();
   }

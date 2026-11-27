@@ -2,14 +2,89 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import type { StorageMaintenanceSettings } from "../../../lib/types/system";
 import {
   mockProgressiveStorageOverview,
+  mockStorageMaintenanceRuns,
   mockTemporaryArtifactOverview,
+  requestStorageMaintenanceSettings,
+  restoreStorageMaintenanceSettings,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test.describe("Mobile storage maintenance", () => {
+  let baselineSettings: StorageMaintenanceSettings | null = null;
+  const fixturePaths: string[] = [];
+
+  test.beforeEach(async ({ apiClient }) => {
+    baselineSettings = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    if (baselineSettings) {
+      await restoreStorageMaintenanceSettings(apiClient, baselineSettings);
+      baselineSettings = null;
+    }
+    for (const fixturePath of fixturePaths.splice(0)) {
+      fs.rmSync(fixturePath, { recursive: true, force: true });
+    }
+  });
+
+  test("saves the Go busy-cleanup policy with a touch-sized switch", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const baseline = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
+    const offSettings = {
+      ...baseline,
+      go_cache: { ...baseline.go_cache, allow_cleanup_while_busy: false },
+    };
+    try {
+      await requestStorageMaintenanceSettings(apiClient, "PATCH", offSettings);
+      await testPage.goto("/settings/system/storage");
+      const toggle = testPage.getByTestId("storage-go-cache-allow-busy");
+      await expect(toggle).toHaveAttribute("data-state", "unchecked");
+      await expect(testPage.getByTestId("storage-go-cache-busy-warning")).toContainText(
+        "Active builds may fail and need a retry.",
+      );
+      const box = await toggle.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+
+      await toggle.tap();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+      ).toBeVisible();
+      await testPage.reload();
+      await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
+        "data-state",
+        "checked",
+      );
+      expect(
+        (await requestStorageMaintenanceSettings(apiClient, "GET")).settings.go_cache
+          .allow_cleanup_while_busy,
+      ).toBe(true);
+
+      await testPage.getByTestId("storage-go-cache-allow-busy").tap();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+      ).toBeVisible();
+      await testPage.reload();
+      await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
+        "data-state",
+        "unchecked",
+      );
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    } finally {
+      await restoreStorageMaintenanceSettings(apiClient, baseline);
+    }
+  });
+
   test("keeps temporary artifact cleanup reachable with a touch-sized action", async ({
     testPage,
     prCapture,
@@ -113,6 +188,7 @@ test.describe("Mobile storage maintenance", () => {
     backend,
   }) => {
     const cache = seedManagedGoCache(backend.tmpDir);
+    fixturePaths.push(cache.artifact);
     const externalGoCache = `${backend.tmpDir}/external-go-cache`;
     fs.mkdirSync(externalGoCache, { recursive: true });
     const mobile = new MobileKanbanPage(testPage);
@@ -124,12 +200,14 @@ test.describe("Mobile storage maintenance", () => {
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-    await expect(testPage.getByRole("progressbar")).toBeVisible();
+    await expect(
+      testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+    ).toBeVisible();
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();
     await expect(testPage.getByRole("dialog")).toContainText(
-      "Turning it off does not disable Analyze or Run now",
+      "Turning scheduling off does not disable Analyze or Run now",
     );
     await testPage.keyboard.press("Escape");
     await testPage.getByTestId("storage-scheduling-enabled").click();
@@ -141,7 +219,9 @@ test.describe("Mobile storage maintenance", () => {
     );
     await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     await testPage.getByTestId("storage-analyze").click();
@@ -332,4 +412,80 @@ test.describe("Mobile storage maintenance", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
+
+  test("keeps maintenance history vertical with touch-sized details", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await mockStorageMaintenanceRuns(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    const partialRow = testPage.getByTestId("storage-run-history-partial");
+    await expect(partialRow.getByTestId("storage-run-status")).toHaveText("Partial");
+    await partialRow.locator("[data-slot='accordion-trigger']").tap();
+    const result = partialRow.getByTestId("storage-go-cache-result");
+    await expect(result).toContainText("Removed: 10.75 GB");
+    await expect(result).toContainText("Remaining: 53.69 GB");
+
+    const removedBox = await result.getByTestId("storage-go-cache-removed").boundingBox();
+    const remainingBox = await result.getByTestId("storage-go-cache-remaining").boundingBox();
+    expect(removedBox).not.toBeNull();
+    expect(remainingBox).not.toBeNull();
+    expect(remainingBox!.y).toBeGreaterThanOrEqual(removedBox!.y + removedBox!.height);
+
+    const technicalTrigger = partialRow.getByTestId("storage-run-technical-trigger");
+    const technicalBox = await technicalTrigger.boundingBox();
+    expect(technicalBox).not.toBeNull();
+    expect(technicalBox!.height).toBeGreaterThanOrEqual(44);
+
+    await technicalTrigger.tap();
+    const json = partialRow.getByTestId("storage-run-technical-json");
+    await expect(json).toBeVisible();
+    await expect(partialRow.getByTestId("storage-run-technical-message")).toContainText(
+      "go-cache parent changed after scan",
+    );
+    const technicalContent = partialRow.getByTestId("storage-run-technical-content");
+    const contentBox = await technicalContent.boundingBox();
+    expect(contentBox).not.toBeNull();
+    expect(contentBox!.height).toBeLessThanOrEqual(260);
+    expect(
+      await technicalContent.evaluate((element) => element.scrollHeight > element.clientHeight),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+
+    await prCapture.screenshot("mobile-storage-maintenance-history", {
+      caption:
+        "Phone maintenance history stacks facts, explains the result once, and contains diagnostics",
+      fullPage: true,
+    });
+
+    await technicalTrigger.tap();
+    await expect(partialRow.getByTestId("storage-run-technical-message")).toBeHidden();
+  });
+
+  for (const width of [767, 768]) {
+    test(`keeps maintenance history geometry at ${width}px`, async ({ testPage }) => {
+      await testPage.setViewportSize({ width, height: 900 });
+      await mockStorageMaintenanceRuns(testPage);
+      await testPage.goto("/settings/system/storage");
+
+      const partialRow = testPage.getByTestId("storage-run-history-partial");
+      await partialRow.locator("[data-slot='accordion-trigger']").click();
+      const technicalTrigger = partialRow.getByTestId("storage-run-technical-trigger");
+      const technicalBox = await technicalTrigger.boundingBox();
+      expect(technicalBox).not.toBeNull();
+      if (width < 768) {
+        expect(technicalBox!.height).toBeGreaterThanOrEqual(44);
+      } else {
+        expect(technicalBox!.height).toBeLessThanOrEqual(30);
+      }
+      await technicalTrigger.click();
+      await expect(partialRow.getByTestId("storage-run-technical-json")).toBeVisible();
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    });
+  }
 });

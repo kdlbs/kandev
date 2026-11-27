@@ -15,6 +15,11 @@ legacy_specs: []
 
 Keep a task-host language server working after its browser tab closes, then reconnect a later editor to the retained process and restore valid LSP information. Replace the browser-to-agentctl pass-through with a bounded runtime lease that remains the protocol peer while no browser is attached. Add browser reattachment and status recovery, then prove the user flow with desktop and tablet E2E tests. The design follows [ADR-2026-09-23](../../decisions/2026-09-23-task-owned-lsp-leases.md).
 
+This plan records the initial default-off rollout. The later
+[selected feature graduation](../selected-feature-graduation/task-02-lsp-default-on.md)
+promoted continuity to default-on in shipped profiles while retaining the
+restart-required kill switch.
+
 ## Scope
 
 ### In scope

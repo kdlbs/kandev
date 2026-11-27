@@ -231,6 +231,10 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 	if err != nil {
 		return nil, err
 	}
+	executorType, err := s.workspaceSourceExecutorType(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve executor type for task base branches: %w", err)
+	}
 	// Plans are computed over *every* row, including rows without a base
 	// branch: BuildBranchIdentityPlans groups by repository and picks which
 	// member of a group keeps the flat legacy path. Filtering first would
@@ -257,13 +261,21 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		if tr.BaseBranch == "" {
 			continue
 		}
-		out[baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)] = tr.BaseBranch
+		key, err := taskRepositoryWorkspaceTrackerKey(executorType, i, repos[i], tr, plans[i].PathSlug)
+		if err != nil {
+			repositoryName := ""
+			if repos[i] != nil {
+				repositoryName = repos[i].Name
+			}
+			return nil, fmt.Errorf("resolve base-branch workspace for repository %q: %w", repositoryName, err)
+		}
+		out[key] = tr.BaseBranch
 	}
 	// Single-repo legacy fallback: when only one row, duplicate under the
 	// empty key so the root WorkspaceTracker (repositoryName == "") picks it
 	// up too — matches the synthesis lifecycle.collectBaseBranches performs
 	// from req.RepoSpecs().
-	if len(taskRepos) == 1 && taskRepos[0].BaseBranch != "" {
+	if len(taskRepos) == 1 && taskRepos[0].BaseBranch != "" && executorType != string(models.ExecutorTypePluginRemote) {
 		if _, ok := out[""]; !ok {
 			out[""] = taskRepos[0].BaseBranch
 		}
@@ -272,6 +284,25 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		return nil, nil
 	}
 	return out, nil
+}
+
+func taskRepositoryWorkspaceTrackerKey(
+	executorType string,
+	index int,
+	repository *models.Repository,
+	taskRepository *models.TaskRepository,
+	pathSlug string,
+) (string, error) {
+	if models.IsRemoteExecutorType(models.ExecutorType(executorType)) {
+		if executorType != string(models.ExecutorTypePluginRemote) && index == 0 {
+			return "", nil
+		}
+		return WorkspaceSourceRuntimeEntryName(executorType, repository, taskRepository)
+	}
+	if repository == nil {
+		return "", fmt.Errorf("repository is missing")
+	}
+	return baseBranchTrackerKey(repository.Name, pathSlug), nil
 }
 
 // resolveBaseBranchRepositories resolves the Repository entity for each row,

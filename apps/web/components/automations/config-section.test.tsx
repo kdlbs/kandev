@@ -72,6 +72,8 @@ const mockState = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useOptionalAppStoreApi: () => null,
+  useOptionalAppStore: (_selector: unknown, fallback: unknown) => fallback,
 }));
 
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
@@ -133,17 +135,15 @@ vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
   ),
 }));
 
-import { ConfigSection, getExecutorItemDisabledReason } from "./config-section";
+import { ConfigSection, WorkflowField, getExecutorItemDisabledReason } from "./config-section";
 
 function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
   return render(
     <ConfigSection
       workspaceId={WORKSPACE_ID}
-      workflowId=""
       agentProfileId=""
       executorProfileId=""
       repositorySelections={[]}
-      onWorkflowChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}
@@ -159,7 +159,14 @@ afterEach(() => {
 
 describe("ConfigSection shared task selectors", () => {
   it("shows the shared workflow preview and removes the workflow-step picker", () => {
-    renderConfig();
+    render(
+      <WorkflowField
+        workspaceId={WORKSPACE_ID}
+        workflowId=""
+        taskMode="automation_run"
+        onWorkflowChange={() => {}}
+      />,
+    );
 
     fireEvent.click(screen.getByTestId("workflow-selector-trigger"));
 
@@ -203,6 +210,36 @@ describe("ConfigSection shared task selectors", () => {
     expect(onRepositoriesChange).toHaveBeenCalledWith([
       expect.objectContaining({ kind: "none", branch: "" }),
     ]);
+  });
+});
+
+describe("WorkflowField", () => {
+  it("requires a workflow for a normal task and explains why", () => {
+    render(
+      <WorkflowField
+        workspaceId={WORKSPACE_ID}
+        workflowId=""
+        taskMode="normal_task"
+        onWorkflowChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText("Choose a workflow so this task appears in Kanban and the sidebar."),
+    ).toBeTruthy();
+  });
+
+  it("keeps the workflow optional for automation history", () => {
+    render(
+      <WorkflowField
+        workspaceId={WORKSPACE_ID}
+        workflowId=""
+        taskMode="automation_run"
+        onWorkflowChange={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByText("Choose a workflow so this task appears in Kanban and the sidebar."),
+    ).toBeNull();
   });
 });
 

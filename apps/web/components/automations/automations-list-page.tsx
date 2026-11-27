@@ -14,6 +14,7 @@ import { AutomationsExportButton } from "./automations-export-button";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
+import { ManagedAutomationImportDialog } from "./managed-automation-import-dialog";
 import type { Automation } from "@/lib/types/automation";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
@@ -24,7 +25,7 @@ type AutomationsListPageProps = {
 export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const { items, loading, enable, disable, trigger, remove } = useAutomations(workspaceId);
+  const { items, loading, enable, disable, trigger, remove, create } = useAutomations(workspaceId);
   const enabledDrafts = useAutomationEnabledDrafts({ automations: items, enable, disable });
   const [automationToDelete, setAutomationToDelete] = useState<Automation | null>(null);
   const [deletingAutomationId, setDeletingAutomationId] = useState<string | null>(null);
@@ -76,8 +77,9 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         tab="automations"
         description={t("automations:listDescription")}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <AutomationsExportButton workspaceId={workspaceId} />
+            <ManagedAutomationImportDialog workspaceId={workspaceId} create={create} />
             <Button
               type="button"
               data-testid="new-automation-button"

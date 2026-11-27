@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -49,7 +50,7 @@ func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t 
 	var service Service
 	const message = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
 	service.beginPromptAttempt("session-1", "execution-1", 1, true)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, message)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", message)
 
 	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -66,7 +67,7 @@ func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t 
 
 	// A different failure must not erase the output fence.
 	service.beginPromptAttempt("session-2", "execution-2", 1, true)
-	service.observeProviderDiagnostic("session-2", "execution-2", 1, message)
+	service.observeProviderDiagnostic("session-2", "execution-2", 1, "", message)
 	other := service.withDynamicAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-2",
 		AgentExecutionID: "execution-2",
@@ -130,5 +131,55 @@ func TestDynamicAttemptEvidenceRejectsStaleExecution(t *testing.T) {
 	}
 	if dynamicPreResultSafe(got) {
 		t.Fatal("stale execution was treated as pre-result safe")
+	}
+}
+
+func TestDynamicAttemptAdmissionDoesNotClearReplacementRetirementFence(t *testing.T) {
+	const sessionID = "session-retirement-replacement"
+	var service Service
+	service.transientRetryNoticeFenceTTL = time.Minute
+
+	predecessor, releasePredecessor := service.acquireTransientRetryNoticeState(sessionID)
+	predecessor.mu.Lock()
+	service.retireTransientRetryNoticeLocked(sessionID, predecessor)
+	predecessor.mu.Unlock()
+	releasePredecessor()
+	if predecessor.retirementGeneration != 1 {
+		t.Fatalf("predecessor retirement generation = %d, want 1", predecessor.retirementGeneration)
+	}
+
+	evidence := service.beginDynamicAttempt(sessionID)
+	service.bindDynamicAttemptExecution(sessionID, "execution-1", evidence)
+	if got := transientRetryNoticeStateCount(&service); got != 0 {
+		t.Fatalf("notice state entries after admission clears predecessor fence = %d, want reclaimed", got)
+	}
+
+	replacement, releaseReplacement := service.acquireTransientRetryNoticeState(sessionID)
+	if replacement == predecessor {
+		t.Fatal("notice state replacement reused the reclaimed predecessor object")
+	}
+	replacement.mu.Lock()
+	service.retireTransientRetryNoticeLocked(sessionID, replacement)
+	replacement.mu.Unlock()
+	releaseReplacement()
+	t.Cleanup(func() {
+		replacement.mu.Lock()
+		service.clearTransientRetryNoticeFenceLocked(sessionID, replacement)
+		replacement.mu.Unlock()
+		service.transientRetryNoticeStatesMu.Lock()
+		service.reclaimTransientRetryNoticeStateLocked(sessionID, replacement)
+		service.transientRetryNoticeStatesMu.Unlock()
+	})
+	if replacement.retirementGeneration != evidence.retirementGeneration {
+		t.Fatalf("replacement generation = %d, want reused predecessor generation %d", replacement.retirementGeneration, evidence.retirementGeneration)
+	}
+
+	service.bindDynamicAttemptExecution(sessionID, "execution-1", evidence)
+
+	if !replacement.retired.Load() {
+		t.Fatal("post-launch admission cleared the replacement retirement fence")
+	}
+	if replacement.retirementGeneration != 1 {
+		t.Fatalf("replacement retirement generation = %d, want 1", replacement.retirementGeneration)
 	}
 }

@@ -73,7 +73,9 @@ test("phone profile navigation reaches the complete Docker editor", async ({
     );
     await saveButton.tap();
     await saveResponse;
-    await expect(testPage.getByText("Profile saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+    ).toBeVisible();
     await expect
       .poll(
         async () => (await apiClient.getExecutorProfile(executor.id, profile.id)).config?.image_tag,

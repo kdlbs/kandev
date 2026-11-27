@@ -16,7 +16,7 @@ The whole model is one idea: **workspaces live in a tree, and so do people.**
 - Being a member of a unit reaches **every workspace beneath it**, including ones created later.
 - Work that is nobody else's business lives in your **personal unit**, which takes no members.
 
-There is no per-workspace visibility switch. Where a workspace sits *is* who reaches it.
+Workspace access comes from organization units and roles assigned directly on the workspace.
 
 > Team access requires authentication. On a single-user install with authentication off, none of this appears and nothing changes.
 
@@ -51,15 +51,15 @@ Everyone in a unit reaches every workspace under it, at the role you give them. 
 
 ## Moving a workspace
 
-A workspace sits in exactly one unit, and `Settings > Workspaces > (workspace)` is where you change it. Moving it is how you hand a board to another team, or take it back.
+A workspace belongs to one organization unit. To move it, open **Settings > Workspaces > your workspace > Overview**. Under **Authentication & users**, choose the destination in **Organization unit**.
 
-![The workspace settings page showing a Placement card set to Runtime, above the Team access card.](../screenshots/team-access-workspace-placement.png)
+For example, if **Runtime** is under **Platform**, members of both units can open a workspace in Runtime. Moving a workspace can change which unit members have access. People with roles assigned under **Team access** keep those roles.
 
 ## Narrowing access
 
-There is no way to subtract a role, and that is deliberate. Roles combine by taking the strongest: what you inherit from a unit plus anything granted directly on one workspace. A grant can raise your access; nothing lowers it.
+The highest role applies when a person has roles through unit memberships or directly on the workspace.
 
-To give fewer people access to something, **move it to a unit with fewer members**. That keeps "why can this person write here" answerable by reading the tree, instead of by working out which of two mechanisms won.
+To change who inherits access to one workspace, move it to a unit with the membership you want. To change a person's direct role on that workspace, use **Team access**. A higher role from a unit still applies.
 
 ## What a colleague sees
 
@@ -177,6 +177,16 @@ Every guarded action names a scope. These strings appear in the API and are what
 | `org.config.manage` | Executors, agent profiles, environments, editors, prompts, notification providers |
 
 `GET /api/v1/authz/scopes` returns this list with descriptions.
+
+## Private compute on a shared board
+
+Workspace membership and executor access are separate. A collaborator can read
+a task's history without gaining permission to prompt its agent or open a shell
+on another user's private executor. Executor/profile owners and configuration
+administrators can use private compute, subject to the workspace permissions
+required by the action. A workspace owner alone has no private-compute bypass.
+See [Private executors and profiles](executors.md#private-executors-and-profiles)
+for ownership controls and inherited restrictions.
 
 ## Current limits
 

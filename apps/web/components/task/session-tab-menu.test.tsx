@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef, useState } from "react";
 
@@ -9,6 +9,7 @@ import {
   DeleteSessionPopover,
   SessionContextMenuItems,
 } from "./session-tab-menu";
+import { TabRenameInput } from "./tab-rename-input";
 
 describe("DeleteSessionDialog", () => {
   it("states conversation deletion and workspace retention", () => {
@@ -58,9 +59,85 @@ describe("DeleteSessionDialog", () => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
+/** Exercises rename focus through the real context-menu close sequence. */
+function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
+  const [renaming, setRenaming] = useState(false);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger tabIndex={0} data-testid="session-rename-trigger">
+        {renaming ? (
+          <TabRenameInput
+            initial="Implementation"
+            seqBadge={null}
+            onCommit={() => {
+              onCommit();
+              setRenaming(false);
+            }}
+            onCancel={() => setRenaming(false)}
+          />
+        ) : (
+          "Session"
+        )}
+      </ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="COMPLETED"
+        isPrimary
+        canShare={false}
+        taskId={null}
+        sessionId={undefined}
+        actions={{
+          handleSetPrimary: vi.fn(),
+          handleStop: vi.fn(),
+          handleResume: vi.fn(),
+          handleRestart: vi.fn(),
+        }}
+        onDelete={vi.fn()}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={() => setRenaming(true)}
+      />
+    </ContextMenu>
+  );
+}
+
 describe("SessionContextMenuItems", () => {
+  // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1
+  it("keeps the inline rename focused after menu focus restoration settles", async () => {
+    vi.useFakeTimers();
+    const onCommit = vi.fn();
+    render(<SessionRenameMenuHarness onCommit={onCommit} />);
+    const trigger = screen.getByTestId("session-rename-trigger");
+    act(() => trigger.focus());
+    fireEvent.contextMenu(trigger, { clientX: 100, clientY: 100 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(onCommit).not.toHaveBeenCalled();
+    const input = screen.getByTestId("tab-rename-input");
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("tab-rename-input")).toBeNull();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("restores focus on ordinary menu dismissal without starting rename", async () => {
+    vi.useFakeTimers();
+    render(<SessionRenameMenuHarness onCommit={vi.fn()} />);
+    const trigger = screen.getByTestId("session-rename-trigger");
+    act(() => trigger.focus());
+    fireEvent.contextMenu(trigger, { clientX: 100, clientY: 100 });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByTestId("tab-rename-input")).toBeNull();
+  });
+
   it("keeps the delete menu action open for its local confirmation", () => {
     const onDelete = vi.fn<(event: Event) => void>();
     render(
@@ -78,6 +155,7 @@ describe("SessionContextMenuItems", () => {
             handleSetPrimary: vi.fn(),
             handleStop: vi.fn(),
             handleResume: vi.fn(),
+            handleRestart: vi.fn(),
             handleCloseOthers: vi.fn(),
           }}
           onDelete={onDelete}
@@ -114,6 +192,7 @@ describe("SessionContextMenuItems", () => {
             handleSetPrimary: vi.fn(),
             handleStop: vi.fn(),
             handleResume: vi.fn(),
+            handleRestart: vi.fn(),
           }}
           onDelete={vi.fn()}
           onShare={vi.fn()}
@@ -183,4 +262,73 @@ describe("DeleteSessionPopover", () => {
     expect(shellClosed).toBe(true);
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
+});
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.5
+describe("Session restart menu", () => {
+  it.each(["RUNNING", "STARTING", "WAITING_FOR_INPUT"] as const)(
+    "restarts %s through its menu action",
+    (sessionState) => {
+      const handleRestart = vi.fn();
+      render(
+        <ContextMenu>
+          <ContextMenuTrigger data-testid="restart-tab">Agent</ContextMenuTrigger>
+          <SessionContextMenuItems
+            sessionState={sessionState}
+            isPrimary
+            canShare={false}
+            taskId={null}
+            sessionId="s1"
+            actions={{
+              handleSetPrimary: vi.fn(),
+              handleStop: vi.fn(),
+              handleResume: vi.fn(),
+              handleRestart,
+            }}
+            onDelete={vi.fn()}
+            onShare={vi.fn()}
+            onHandoffProfile={vi.fn()}
+            onStartRename={vi.fn()}
+          />
+        </ContextMenu>,
+      );
+      fireEvent.contextMenu(screen.getByTestId("restart-tab"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Restart session" }));
+      expect(handleRestart).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.4
+it("keeps restart visible and disables competing actions during cancellation", () => {
+  const onDelete = vi.fn();
+  render(
+    <ContextMenu>
+      <ContextMenuTrigger data-testid="pending-restart-tab">Agent</ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="CANCELLED"
+        isPrimary
+        canShare={false}
+        taskId={null}
+        sessionId="s1"
+        actions={{
+          handleSetPrimary: vi.fn(),
+          handleStop: vi.fn(),
+          handleResume: vi.fn(),
+          handleRestart: vi.fn(),
+          isRestarting: true,
+        }}
+        onDelete={onDelete}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={vi.fn()}
+      />
+    </ContextMenu>,
+  );
+  fireEvent.contextMenu(screen.getByTestId("pending-restart-tab"));
+  for (const name of ["Restart session", "Resume", "Delete"]) {
+    expect(screen.getByRole("menuitem", { name }).getAttribute("data-disabled")).not.toBeNull();
+  }
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+  expect(onDelete).not.toHaveBeenCalled();
 });

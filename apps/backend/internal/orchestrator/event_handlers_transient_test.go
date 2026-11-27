@@ -274,6 +274,9 @@ func TestCancelTransientRetry_StopsLoopAndShowsRecovery(t *testing.T) {
 	if mc.sessionMessages[0].metadata["recovery_actions"] != true {
 		t.Errorf("expected recovery_actions=true after cancel, got %v", mc.sessionMessages[0].metadata["recovery_actions"])
 	}
+	if mc.sessionMessages[0].metadata["recovery_disposition"] != "cancelled" {
+		t.Errorf("legacy cancellation must retain its disposition: %v", mc.sessionMessages[0].metadata)
+	}
 }
 
 func TestCancelTransientRetry_NoActiveLoop(t *testing.T) {

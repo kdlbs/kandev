@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
 import type {
@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   toast: vi.fn(),
 }));
+
+afterEach(cleanup);
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),

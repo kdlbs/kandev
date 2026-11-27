@@ -3,21 +3,63 @@ package executor
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// Regression coverage for the "failed prepare leaves a permanently bricked
-// workspace" defect: when a task_environments row was published ready with
-// zero task_environment_repos rows (the write-side bug, fixed separately),
-// validateReuseEnvironmentInventory used to treat that as a mismatch and
-// refuse every subsequent launch forever. Zero rows recorded means the
-// canonical inventory was never captured at all, which is recoverable by
-// letting the launch rebuild it — distinct from a non-empty but wrong
-// inventory, which must still be refused.
-func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
+// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.8
+func TestInheritedCheckoutSelectorsStayOutOfMaterialization(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-inherited"] = &models.Repository{
+		ID: "repo-inherited", Name: "repo", LocalPath: "/tmp/repo", DefaultBranch: "main",
+	}
+	repo.tasks["task-inherited"] = &models.Task{ID: "task-inherited"}
+	repo.taskRepositories["task-repo-inherited"] = &models.TaskRepository{
+		ID: "task-repo-inherited", TaskID: "task-inherited", RepositoryID: "repo-inherited",
+		BaseBranch: "main", CheckoutBranch: "feature/adopted",
+		Metadata: map[string]interface{}{"inherited_checkout_reuse_only": true},
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+	}
+	_, err := exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, req, nil,
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+	if req.CheckoutBranch != "" {
+		t.Fatalf("fresh materialization requested inherited checkout %q", req.CheckoutBranch)
+	}
+	if req.BranchIdentitySlug != "feature-adopted" {
+		t.Fatalf("fresh materialization identity = %q, want inherited slot feature-adopted", req.BranchIdentitySlug)
+	}
+
+	reuseReq := &LaunchAgentRequest{
+		TaskID: "task-inherited", SessionID: "session-inherited", ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspaceReuseRequired: true,
+	}
+	_, err = exec.applyResumeRepoConfig(
+		context.Background(), &v1.Task{ID: "task-inherited"},
+		&models.TaskSession{ID: "session-inherited", TaskID: "task-inherited"}, reuseReq,
+		&models.TaskEnvironment{ID: "parent-environment"},
+	)
+	if err != nil {
+		t.Fatalf("applyResumeRepoConfig for inherited reuse: %v", err)
+	}
+	if reuseReq.CheckoutBranch != "feature/adopted" {
+		t.Fatalf("inherited reuse checkout selector = %q, want feature/adopted", reuseReq.CheckoutBranch)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.1
+func TestValidateReuseEnvironmentInventory_ZeroRowsFailsClosed(t *testing.T) {
 	repo := newMockRepository()
 	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1"}
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -28,11 +70,41 @@ func TestValidateReuseEnvironmentInventory_ZeroRowsIsRecoverable(t *testing.T) {
 	}
 	env := &models.TaskEnvironment{ID: "env-1"}
 
-	if err := e.validateReuseEnvironmentInventory(context.Background(), req, env); err != nil {
-		t.Fatalf("validateReuseEnvironmentInventory() with zero recorded rows = %v, want nil (recoverable)", err)
+	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() with zero recorded rows = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
-	if req.WorkspaceReuseRequired {
-		t.Fatal("zero inventory kept WorkspaceReuseRequired=true, want fresh materialization")
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("zero inventory disabled WorkspaceReuseRequired and authorized materialization")
+	}
+}
+
+func TestWorkspaceReuseAllowed_EmptyWorktreeInventoryStillReachesFailClosedGuard(t *testing.T) {
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	env := &models.TaskEnvironment{
+		ID:           "env-1",
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		RepositoryID: "repo-1",
+	}
+
+	req.WorkspaceReuseRequired = workspaceReuseAllowed(
+		env, req.ExecutorType, true, true,
+	)
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("empty preserved Worktree inventory authorized fresh materialization before guarded recovery")
+	}
+	if err := e.validateReuseEnvironmentInventory(context.Background(), req, env); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() = %v, want ErrWorkspaceReuseUnsafe", err)
 	}
 }
 
@@ -56,6 +128,159 @@ func TestValidateReuseEnvironmentInventory_MismatchedRowsStillRefused(t *testing
 	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("validateReuseEnvironmentInventory() with mismatched rows = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotIgnoresDeletedHistoricalHolder(t *testing.T) {
+	active := &models.TaskEnvironmentRepo{
+		ID: "active-slot", RepositoryID: "repo-1", BranchSlug: "assigned-slot",
+		WorktreeID: "active-worktree", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	deleted := *active
+	deleted.ID = "deleted-slot"
+	deleted.BranchSlug = "historical-slot"
+	deleted.WorktreeID = "deleted-worktree"
+	deleted.Status = taskEnvironmentRepoStatusDeleted
+
+	slug, ok := checkoutBranchCanonicalSlot(
+		RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}, nil,
+		[]*models.TaskEnvironmentRepo{active, &deleted},
+	)
+	if !ok || slug != active.BranchSlug {
+		t.Fatalf("checkoutBranchCanonicalSlot() = %q, %t; want active slot %q", slug, ok, active.BranchSlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForTopLevelLaunch(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{{
+		ID: "assigned-slot", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "worktree-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}}
+	req := &LaunchAgentRequest{UseWorktree: true, RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want top-level slot adoption")
+	}
+	if req.BranchIdentitySlug != "retained-slot" {
+		t.Fatalf("top-level branch identity = %q, want retained-slot", req.BranchIdentitySlug)
+	}
+}
+
+func TestAdoptCheckoutBranchCanonicalSlotsForMultipleRepositories(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/one", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-2", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/two", Status: taskEnvironmentRepoStatusActive},
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/one"},
+		{RepositoryID: "repo-2", CheckoutBranch: "feature/two"},
+	}}
+
+	if !adoptCheckoutBranchCanonicalSlots(req, rows) {
+		t.Fatal("adoptCheckoutBranchCanonicalSlots() = false, want multi-repository slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "slot-one" || req.Repositories[1].BranchIdentitySlug != "slot-two" {
+		t.Fatalf("multi-repository branch identities = %q, %q; want slot-one, slot-two", req.Repositories[0].BranchIdentitySlug, req.Repositories[1].BranchIdentitySlug)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsAmbiguousActiveHolders(t *testing.T) {
+	rows := []*models.TaskEnvironmentRepo{
+		{ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "slot-one", WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+		{ID: "slot-2", RepositoryID: "repo-1", BranchSlug: "slot-two", WorktreeID: "wt-2", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive},
+	}
+	spec := RepoSpec{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"}
+
+	if slug, ok := checkoutBranchCanonicalSlot(spec, nil, rows); ok || slug != "" {
+		t.Fatalf("ambiguous checkout slot = %q, %t; want no adoption", slug, ok)
+	}
+}
+
+func TestCheckoutBranchCanonicalSlotRejectsSiblingCollision(t *testing.T) {
+	row := &models.TaskEnvironmentRepo{
+		ID: "slot-1", RepositoryID: "repo-1", BranchSlug: "retained-slot",
+		WorktreeID: "wt-1", WorktreeBranch: "feature/retained", Status: taskEnvironmentRepoStatusActive,
+	}
+	req := &LaunchAgentRequest{UseWorktree: true, Repositories: []RepoSpec{
+		{RepositoryID: "repo-1", CheckoutBranch: "feature/retained"},
+		{RepositoryID: "repo-1", BranchIdentitySlug: "retained-slot"},
+	}}
+
+	if adoptCheckoutBranchCanonicalSlots(req, []*models.TaskEnvironmentRepo{row}) {
+		t.Fatal("sibling selection of the same canonical row must prevent slot adoption")
+	}
+	if req.Repositories[0].BranchIdentitySlug != "" {
+		t.Fatalf("ambiguous sibling launch changed branch identity to %q", req.Repositories[0].BranchIdentitySlug)
+	}
+}
+
+// TestValidateReuseEnvironmentInventory_StagingPy3MismatchReproducesFailClosedError
+// reproduces the exact fail-closed error observed in the field for task
+// 96cfb14c-62f4-4048-bc03-813f1f123875 / session be3a413d-0891-4982-a563-b631028c36c6
+// / branch "staging-py3": the canonical inventory has zero rows for the
+// environment, so a Human-QA auto-start (or a fresh provider-only session
+// retry) on that task must still be refused rather than silently falling
+// through to a fresh checkout.
+func TestValidateReuseEnvironmentInventory_StagingPy3MismatchReproducesFailClosedError(t *testing.T) {
+	const (
+		taskID    = "96cfb14c-62f4-4048-bc03-813f1f123875"
+		sessionID = "be3a413d-0891-4982-a563-b631028c36c6"
+		branch    = "staging-py3"
+	)
+	repo := newMockRepository()
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: taskID, RepositoryID: "repo-1"}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 taskID,
+		SessionID:              sessionID,
+		WorkspaceReuseRequired: true,
+		RepositoryID:           "repo-1",
+		Branch:                 branch,
+	}
+	env := &models.TaskEnvironment{ID: "env-staging-py3", TaskID: taskID}
+
+	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() for staging-py3 reproduction = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if !strings.Contains(err.Error(), "canonical workspace repository inventory has no matching entry") {
+		t.Fatalf("validateReuseEnvironmentInventory() error = %q, want the exact logged fail-closed message", err.Error())
+	}
+	if !req.WorkspaceReuseRequired {
+		t.Fatal("staging-py3 mismatch disabled WorkspaceReuseRequired and authorized materialization")
+	}
+}
+
+// TestValidateReuseEnvironmentInventory_DevMismatchReproducesFailClosedError
+// reproduces the second logged occurrence of the same platform defect on an
+// unrelated task, 24cab57c-8e2c-44cc-8214-c0600d559391 / branch "dev": a
+// present-but-mismatched canonical row (wrong repository) must be refused
+// exactly like the zero-row case, confirming the defect is a reusable
+// inventory-identity gap rather than source-task-specific behavior.
+func TestValidateReuseEnvironmentInventory_DevMismatchReproducesFailClosedError(t *testing.T) {
+	const (
+		taskID = "24cab57c-8e2c-44cc-8214-c0600d559391"
+		branch = "dev"
+	)
+	repo := newMockRepository()
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{
+		TaskID:                 taskID,
+		WorkspaceReuseRequired: true,
+		RepositoryID:           "repo-1",
+		Branch:                 branch,
+	}
+	env := &models.TaskEnvironment{ID: "env-dev", TaskID: taskID}
+	repo.taskEnvironmentRepos[env.ID] = []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-other", WorktreeID: "worktree-other", BranchSlug: branch},
+	}
+
+	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("validateReuseEnvironmentInventory() for dev reproduction = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if !strings.Contains(err.Error(), "canonical workspace repository inventory has no matching entry") {
+		t.Fatalf("validateReuseEnvironmentInventory() error = %q, want the exact logged fail-closed message", err.Error())
 	}
 }
 
@@ -122,11 +347,48 @@ func TestPrepareResumeRepositorySettings_GuestSessionReuseValidatesAgainstResolv
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
 	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-guest", ExecutorType: "local_docker"}
 
-	if _, _, _, err := e.prepareResumeRepositorySettings(context.Background(), task, session, req); err != nil {
+	if _, _, _, err := e.prepareResumeRepositorySettings(context.Background(), task, session, req, ResumeOptions{}); err != nil {
 		t.Fatalf("prepareResumeRepositorySettings() = %v, want nil: a guest session reusing a shared environment whose canonical inventory actually matches must not be refused", err)
 	}
 	if !req.WorkspaceReuseRequired {
 		t.Fatalf("req.WorkspaceReuseRequired = false, want true for a live guest-session reuse")
+	}
+}
+
+func TestPrepareResumeRepositorySettings_DirtyCloneRelocationUsesSelectedWorktreeIdentity(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{ID: "repo-1", LocalPath: "/tmp/repo"}
+	repo.taskRepositories["tr-1"] = &models.TaskRepository{
+		ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0, BaseBranch: "feature/always",
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	canonicalRow := &models.TaskEnvironmentRepo{
+		ID: "env-repo-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
+		BranchSlug: "main", WorktreeID: "worktree-selected", Status: taskEnvironmentRepoStatusActive,
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree),
+		MaterializationSessionID: "sess-owner", Repos: []*models.TaskEnvironmentRepo{canonicalRow},
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.taskEnvironmentRepos[env.ID] = []*models.TaskEnvironmentRepo{canonicalRow}
+
+	session := &models.TaskSession{
+		ID: "sess-guest", TaskID: "task-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1",
+		Worktrees: []*models.TaskEnvironmentRepo{canonicalRow},
+	}
+	e := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: session.ID, ExecutorType: string(models.ExecutorTypeWorktree)}
+	ctx := worktree.WithDirtyCloneRelocation(context.Background())
+
+	if _, _, _, err := e.prepareResumeRepositorySettings(ctx, &v1.Task{ID: "task-1"}, session, req, ResumeOptions{}); err != nil {
+		t.Fatalf("prepareResumeRepositorySettings() = %v, want nil for the exact selected relocated worktree", err)
+	}
+	if req.BranchIdentitySlug != canonicalRow.BranchSlug {
+		t.Fatalf("req.BranchIdentitySlug = %q, want selected environment identity %q", req.BranchIdentitySlug, canonicalRow.BranchSlug)
+	}
+	if req.WorktreeID != canonicalRow.WorktreeID {
+		t.Fatalf("req.WorktreeID = %q, want exact selected worktree %q", req.WorktreeID, canonicalRow.WorktreeID)
 	}
 }
 
@@ -167,7 +429,7 @@ func TestPrepareResumeRepositorySettings_LocalExecutorResumeWithUntrackedBranchM
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
 	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "local", WorkspaceReuseRequired: true}
 
-	if _, _, _, err := e.prepareResumeRepositorySettings(context.Background(), task, session, req); err != nil {
+	if _, _, _, err := e.prepareResumeRepositorySettings(context.Background(), task, session, req, ResumeOptions{}); err != nil {
 		t.Fatalf("prepareResumeRepositorySettings() = %v, want nil: an ordinary local-executor resume whose canonical inventory actually matches on repository identity must not be refused for lacking a tracked branch", err)
 	}
 }
@@ -207,5 +469,21 @@ func TestValidateReuseEnvironmentInventory_NonWorktreeLegacyToleranceRequiresRea
 	err := e.validateReuseEnvironmentInventory(context.Background(), req, env)
 	if err != nil {
 		t.Fatalf("validateReuseEnvironmentInventory() = %v, want nil: a spec requiring branch %q must match only the branch-scoped row, not also the stray empty-branch row", err, "main")
+	}
+}
+
+func TestCanonicalInventoryMatchesRequiresWorkspacePlacementIdentity(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main", WorkspaceRelativePath: "repo/kandev/api"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorkspaceRelativePath: "repo/api", WorktreeID: "wt-wrong"},
+		{RepositoryID: "repo-1", BranchSlug: "main", WorkspaceRelativePath: "repo/kandev/api", WorktreeID: "wt-right"},
+	}
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want only the matching placement", got)
+	}
+
+	rows[1].WorkspaceRelativePath = "repo/other"
+	if got := canonicalInventoryMatches(spec, rows, true); got != 0 {
+		t.Fatalf("canonicalInventoryMatches() = %d after placement change, want no match", got)
 	}
 }

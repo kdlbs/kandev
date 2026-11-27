@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 )
 
 const acpCommandTestFixtureEnv = "KANDEV_ACP_COMMAND_TEST_FIXTURE"
@@ -24,6 +26,18 @@ func TestMain(m *testing.M) {
 		return
 	}
 	os.Exit(m.Run())
+}
+
+func TestWindowsACPCommandProcAttrHidesConsoleWindow(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+	setACPCommandProcAttr(cmd)
+
+	require.NotNil(t, cmd.SysProcAttr)
+	flags := cmd.SysProcAttr.CreationFlags
+	require.NotZero(t, flags&syscall.CREATE_NEW_PROCESS_GROUP, "CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
+	require.NotZero(t, flags&windows.CREATE_SUSPENDED, "CreationFlags = %#x, want CREATE_SUSPENDED", flags)
+	require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
+	require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
 }
 
 func TestWindowsACPCommandLifecycleJobKillsDescendants(t *testing.T) {

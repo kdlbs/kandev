@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { upsertOpenFileTab } from "./task-center-panel-file-tabs";
+import { upsertOpenFileTab, mergeRestoredFileTabs } from "./task-center-panel-file-tabs";
 
 const file: OpenFileTab = {
   path: "README.md",
@@ -22,7 +22,7 @@ describe("upsertOpenFileTab", () => {
     const frontend = { ...file, repo: "frontend" };
     const backend = { ...file, repo: "backend", renderedPreview: true };
 
-    expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
+    expect(upsertOpenFileTab([frontend], backend)).toMatchObject([frontend, backend]);
   });
 
   it("preserves an existing tab when no preview state is requested", () => {
@@ -54,8 +54,14 @@ describe("upsertOpenFileTab", () => {
     ]);
   });
 
+  it("retains a dirty repo-scoped tab when Files opens its workspace path", () => {
+    const existing = { ...file, repo: "frontend", content: "unsaved", isDirty: true };
+    const result = upsertOpenFileTab([existing], { ...file, path: "frontend/README.md" });
+    expect(result).toEqual([existing]);
+  });
+
   it("adds a new tab", () => {
-    expect(upsertOpenFileTab([], file)).toEqual([file]);
+    expect(upsertOpenFileTab([], file)).toMatchObject([file]);
   });
 
   it("evicts the oldest tab at capacity", () => {
@@ -70,6 +76,16 @@ describe("upsertOpenFileTab", () => {
 
     expect(result).toHaveLength(4);
     expect(result[0]?.path).toBe("file1.md");
-    expect(result[3]).toEqual(newFile);
+    expect(result[3]).toMatchObject(newFile);
   });
+});
+
+it("keeps live editors at capacity when older restoration finishes", () => {
+  const live = Array.from({ length: 4 }, (_, index) => ({
+    ...file,
+    path: `live-${index}`,
+    isDirty: true,
+    instanceId: Symbol(),
+  }));
+  expect(mergeRestoredFileTabs(live, [file])).toBe(live);
 });

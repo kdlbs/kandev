@@ -76,7 +76,7 @@ func validateDistributionApplication(m *Manifest) []error {
 }
 
 func validateDistributionContributions(m *Manifest) []error {
-	if len(m.Webhooks) == 0 && len(m.Actions) == 0 && len(m.RepositoryProviders) == 0 &&
+	if len(m.Webhooks) == 0 && len(m.Actions) == 0 && len(m.RepositoryProviders) == 0 && len(m.ExecutorProviders) == 0 &&
 		len(m.ReferenceSources) == 0 && len(m.AuthProviders) == 0 && len(m.AgentTools) == 0 &&
 		len(m.ConfigSchema) == 0 && m.Runtime.Type == "" && len(m.Runtime.Executables) == 0 {
 		return nil

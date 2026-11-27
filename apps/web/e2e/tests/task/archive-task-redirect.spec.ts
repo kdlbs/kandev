@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Archive task redirect", () => {
@@ -17,7 +16,7 @@ test.describe("Archive task redirect", () => {
     test.setTimeout(90_000);
 
     // Use distinct descriptions so we can verify the chat panel switches content.
-    await apiClient.createTaskWithAgent(
+    const taskA = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Archive Task A",
       seedData.agentProfileId,
@@ -29,7 +28,7 @@ test.describe("Archive task redirect", () => {
       },
     );
 
-    await apiClient.createTaskWithAgent(
+    const taskB = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Archive Task B",
       seedData.agentProfileId,
@@ -41,18 +40,9 @@ test.describe("Archive task redirect", () => {
       },
     );
 
-    // --- Navigate to kanban and wait for both task cards ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const cardA = kanban.taskCardByTitle("Archive Task A");
-    const cardB = kanban.taskCardByTitle("Archive Task B");
-    await expect(cardA).toBeVisible({ timeout: 30_000 });
-    await expect(cardB).toBeVisible({ timeout: 30_000 });
-
-    // Click task A to open its session detail page
-    await cardA.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // Open the seeded route directly; Kanban cards can be replaced while the
+    // feed refreshes, but opening the task is not the behavior under test.
+    await testPage.goto(`/t/${taskA.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -85,8 +75,8 @@ test.describe("Archive task redirect", () => {
       timeout: 15_000,
     });
 
-    // The URL should have changed to Task B's session (still a /t/ route, but different ID)
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 10_000 });
+    // Wait for the route to converge on B before issuing the second archive.
+    await expect.poll(() => new URL(testPage.url()).pathname).toBe(`/t/${taskB.id}`);
     expect(testPage.url()).not.toBe(urlBeforeArchive);
 
     // --- Archive the last remaining task (B) — should redirect home ---

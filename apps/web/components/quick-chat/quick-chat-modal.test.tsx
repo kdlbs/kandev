@@ -1,9 +1,13 @@
 import { useCallback, useState } from "react";
 import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import {
+  useClarificationEscapeGuard,
+  wasEscapeClaimedByDialog,
+} from "@/hooks/use-clarification-escape-guard";
 import { ResetContextButton } from "@/components/task/chat/reset-context-button";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
 
 const setQuickChatInitialPrompt = vi.fn();
 const quickChatSessionItems: Record<string, { state: string; task_id: string }> = {};
@@ -15,6 +19,7 @@ const persistTabOrder = vi.fn();
 const handleOpenChange = vi.fn();
 const handleNewChat = vi.fn();
 const escapePreventDefault = vi.fn();
+const escapeEvents: KeyboardEvent[] = [];
 const CHAT_NAME = "Chat one";
 const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
@@ -57,7 +62,7 @@ vi.mock("@kandev/ui/dialog", () => ({
     onEscapeKeyDown,
   }: {
     children: React.ReactNode;
-    onEscapeKeyDown?: (event: { preventDefault: () => void }) => void;
+    onEscapeKeyDown?: (event: KeyboardEvent) => void;
   }) => (
     <div>
       {children}
@@ -66,7 +71,14 @@ vi.mock("@kandev/ui/dialog", () => ({
       <button
         type="button"
         data-testid={FIRE_ESCAPE_TESTID}
-        onClick={() => onEscapeKeyDown?.({ preventDefault: escapePreventDefault })}
+        onClick={() => {
+          const event = {
+            key: "Escape",
+            preventDefault: escapePreventDefault,
+          } as unknown as KeyboardEvent;
+          escapeEvents.push(event);
+          onEscapeKeyDown?.(event);
+        }}
       />
     </div>
   ),
@@ -211,6 +223,8 @@ const defaultQuickChatModalState = {
   handleNewTerminal,
   handleActivateTerminal,
   handleTerminalStateChange: vi.fn(),
+  handleRecoverTerminal: vi.fn(),
+  terminalRecoveryByTab: {},
   handleSetupKindChange: vi.fn(),
   handleSelectAgent: vi.fn(),
   handleCloseTab: vi.fn(),
@@ -227,9 +241,11 @@ import { QuickChatModal } from "./quick-chat-modal";
 afterEach(() => {
   responsiveMock.isMobile = false;
   cleanup();
+  sessionStorage.clear();
   for (const key of Object.keys(quickChatSessionItems)) delete quickChatSessionItems[key];
   for (const key of Object.keys(quickChatPrepareProgress)) delete quickChatPrepareProgress[key];
   vi.clearAllMocks();
+  escapeEvents.length = 0;
   useQuickChatModalMock.mockReset();
   useQuickChatModalMock.mockReturnValue(defaultQuickChatModalState);
   responsiveMock.isFinePointer = true;
@@ -313,6 +329,61 @@ describe("QuickChatModal mixed tabs", () => {
   });
 });
 
+describe("QuickChatModal setup draft ownership", () => {
+  const setupSessionId = "quick-chat-setup:ws-1:chat";
+  const draftId = "quick-chat-setup-draft:local:ws-1";
+
+  function closeSetupTab() {
+    const setupTab = screen
+      .getAllByTestId("quick-chat-tab")
+      .find((tab) => tab.textContent?.includes("New Chat"));
+    if (!setupTab) throw new Error("Quick Chat setup tab was not rendered");
+    fireEvent.click(within(setupTab).getByRole("button", { name: "Close New Chat" }));
+  }
+
+  it("preserves the setup draft when closing a setup tab that is not active", () => {
+    setChatDraftText(draftId, "Keep the background setup draft");
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      activeKind: "conversation",
+      activeSessionId: "chat-1",
+      activeSession: { sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+      activeSessionNeedsAgent: false,
+      sessions: [
+        ...defaultQuickChatModalState.sessions,
+        { sessionId: setupSessionId, workspaceId: WORKSPACE_ID, kind: "chat" },
+      ],
+    });
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    closeSetupTab();
+
+    expect(getChatDraftText(draftId)).toBe("Keep the background setup draft");
+    expect(defaultQuickChatModalState.handleCloseTab).toHaveBeenCalledWith(setupSessionId);
+  });
+
+  it("discards the setup draft when closing its active setup tab", () => {
+    setChatDraftText(draftId, "Discard this setup draft");
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      activeKind: "conversation",
+      activeSessionId: setupSessionId,
+      activeSession: { sessionId: setupSessionId, workspaceId: WORKSPACE_ID, kind: "chat" },
+      activeSessionNeedsAgent: true,
+      sessions: [
+        ...defaultQuickChatModalState.sessions,
+        { sessionId: setupSessionId, workspaceId: WORKSPACE_ID, kind: "chat" },
+      ],
+    });
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    closeSetupTab();
+
+    expect(getChatDraftText(draftId)).toBe("");
+    expect(defaultQuickChatModalState.handleCloseTab).toHaveBeenCalledWith(setupSessionId);
+  });
+});
+
 describe("QuickChatModal — Escape with a pending clarification", () => {
   function renderWithConversationTab() {
     // mockReturnValue (not -Once): QuickChatModal's own escape-guard state
@@ -342,6 +413,7 @@ describe("QuickChatModal — Escape with a pending clarification", () => {
     fireEvent.click(screen.getByTestId(FIRE_ESCAPE_TESTID));
 
     expect(escapePreventDefault).toHaveBeenCalledTimes(1);
+    expect(wasEscapeClaimedByDialog(escapeEvents[0]!)).toBe(true);
     expect(screen.getByTestId("quick-chat-dialog")).toBeTruthy();
   });
 

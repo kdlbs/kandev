@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import { createAppStore } from "@/lib/state/store";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/components/kanban-card";
 
 const reorderBand = vi.fn();
@@ -13,11 +15,8 @@ vi.mock("@/hooks/use-task-actions", () => ({
   useTaskActions: () => ({ moveTaskById: mockMoveTaskById }),
 }));
 
-const storeState = {
-  kanbanMulti: { snapshots: {} as Record<string, { tasks: unknown[] }> },
-  setWorkflowSnapshot: vi.fn(),
-};
-const store = { getState: () => storeState };
+let store = createAppStore();
+let snapshotWrite = vi.spyOn(store.getState(), "setWorkflowSnapshot");
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => store,
 }));
@@ -26,14 +25,15 @@ import { useCrossStepMove, useSwimlaneKanbanDnd } from "./use-swimlane-kanban-dn
 
 const WORKFLOW_ID = "wf1";
 
-function makeTask(id: string, stepId: string): Task {
-  return { id, workflowStepId: stepId, title: id } as Task;
+function makeTask(id: string, stepId: string): KanbanState["tasks"][number] {
+  return { id, workflowId: WORKFLOW_ID, workflowStepId: stepId, title: id, position: 0 };
 }
 
 beforeEach(() => {
   reorderBand.mockReset();
   mockMoveTaskById.mockReset();
-  storeState.setWorkflowSnapshot.mockReset();
+  store = createAppStore();
+  snapshotWrite = vi.spyOn(store.getState(), "setWorkflowSnapshot");
 });
 
 describe("useSwimlaneKanbanDnd — Escape/drop-outside cancellation (AC.9)", () => {
@@ -86,7 +86,7 @@ describe("useSwimlaneKanbanDnd — Escape/drop-outside cancellation (AC.9)", () 
     expect(result.current.activeTask).toBeNull();
     expect(reorderBand).not.toHaveBeenCalled();
     expect(mockMoveTaskById).not.toHaveBeenCalled();
-    expect(storeState.setWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(snapshotWrite).not.toHaveBeenCalled();
   });
 });
 
@@ -94,7 +94,12 @@ describe("useCrossStepMove — rollback on failure", () => {
   it("reverts only the moved task's step, preserving a concurrent update to another task", async () => {
     const taskA = makeTask("a", "step-1");
     const taskB = makeTask("b", "step-1");
-    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = { tasks: [taskA, taskB] };
+    store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+      workflowId: WORKFLOW_ID,
+      workflowName: "Workflow",
+      steps: [],
+      tasks: [taskA, taskB],
+    });
 
     let rejectMove!: (error: unknown) => void;
     mockMoveTaskById.mockReturnValue(
@@ -112,19 +117,22 @@ describe("useCrossStepMove — rollback on failure", () => {
 
     // A concurrent, unrelated update lands on task b while the move is
     // still in flight — the rollback must not discard it.
-    storeState.kanbanMulti.snapshots[WORKFLOW_ID] = {
+    store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+      workflowId: WORKFLOW_ID,
+      workflowName: "Workflow",
+      steps: [],
       tasks: [
-        storeState.setWorkflowSnapshot.mock.calls.at(-1)?.[1].tasks.find((t: Task) => t.id === "a"),
+        store.getState().kanbanMulti.snapshots[WORKFLOW_ID].tasks.find((task) => task.id === "a")!,
         { ...taskB, title: "b (concurrently renamed)" },
       ],
-    };
+    });
 
     await act(async () => {
       rejectMove(new Error("network error"));
       await pending;
     });
 
-    const lastCall = storeState.setWorkflowSnapshot.mock.calls.at(-1);
+    const lastCall = snapshotWrite.mock.calls.at(-1);
     const finalTasks = lastCall?.[1].tasks as Task[];
     expect(finalTasks.find((t) => t.id === "a")?.workflowStepId).toBe("step-1");
     expect(finalTasks.find((t) => t.id === "b")?.title).toBe("b (concurrently renamed)");

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Branch } from "@/lib/types/http";
+import type { RepositoryId } from "@/lib/types/ids";
 import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
 import type { TaskRepositorySelection } from "./task-create-dialog-types";
 import {
   effectiveRemoteOriginBranch,
+  isHostRepositorySelection,
   remoteOriginSelectionNeedsRecovery,
   remoteOriginSelectionIsCompatible,
 } from "./task-create-dialog-remote-origin-inspection";
@@ -35,6 +37,19 @@ function selection(overrides: Partial<Extract<TaskRepositorySelection, { kind: "
 }
 
 describe("remote-origin selection compatibility", () => {
+  it("keeps a registered remote selectable without a host-origin inspection", () => {
+    const row = selection({ checkoutSource: undefined, expectedOrigin: undefined });
+    const saved = {
+      id: row.repositoryId as RepositoryId,
+      local_path: "",
+      provider: "github",
+      remote_url: origin,
+    };
+
+    expect(isHostRepositorySelection(row, [saved])).toBe(false);
+    expect(isHostRepositorySelection(row, [{ ...saved, local_path: "/work/api" }])).toBe(true);
+  });
+
   it("accepts a restored source after fresh origin inspection", () => {
     const row = selection();
 

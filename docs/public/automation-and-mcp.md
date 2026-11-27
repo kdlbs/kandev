@@ -13,7 +13,7 @@ Kandev has several mechanisms that can act without repeated manual setup. Their 
 | Workspace automations       | Create task-backed work from a schedule, GitHub pull request, webhook, or manual trigger.                      |
 | Task MCP                    | Give an active Kandev session task, plan, conversation, and coordination tools.                                |
 | Office MCP and runtime CLI  | Give an Office run a restricted coordination surface and permission-checked commands for Office state changes. |
-| Profile MCP                 | Add third-party MCP servers to one agent profile, subject to executor policy.                                  |
+| Workspace MCP              | Configure reusable MCP definitions and select them for repositories, profiles, tasks, and sessions.           |
 | External MCP                | Let a client outside a task configure Kandev and create or manage work through the backend.                    |
 
 Use workflow events for predictable transitions on existing work. Use a workspace automation when an external signal must create new work. MCP is a tool interface, not a scheduler.
@@ -37,7 +37,9 @@ New automations are enabled. Each trigger has its own `enabled` value, which
 is false when omitted. Creation does not manually start a run, but an enabled
 trigger can fire as soon as its conditions are met. The default target is a
 hidden automation run with no repository, a new task for each firing, and one
-concurrent run. The `normal_task` target requires a workflow.
+concurrent run. The `normal_task` target requires a workflow. A
+`managed_conversation` target delivers the prompt to an existing retained plugin
+conversation selected in the workspace; it does not create an automation task.
 
 The result includes the saved automation ID and triggers, plus the webhook
 secret revealed on creation. Later reads redact that secret. You can inspect
@@ -57,16 +59,22 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
-The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's exact materialized checkouts and files and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `new_workspace`, including when the parent has a saved child-workspace preference. Omission on a top-level task keeps its existing behavior.
 
-Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
+If a new launch for an inherited child selects a different non-Kubernetes executor from the parent's materialized environment, Kandev creates a separate workspace owned by the child. Uncommitted parent changes are not copied into that workspace. A session that is still bound to the inherited environment must resume with its original executor. Kubernetes environments remain task-owned and cannot be shared across tasks.
+
+For a Kubernetes parent, use `workspace_mode: "new_workspace"` when creating a child that will run. Kubernetes Pods belong to one task, so a child cannot attach to the parent's environment.
+
+Queued creation with `start_agent: false` omits the materialized workspace until launch. If you explicitly select `inherit_parent`, creation still succeeds, but opening or launching that child returns `workspace_reuse_unsupported` before a session is created. Select `new_workspace` to proceed; retrying or restoring the healthy parent does not enable cross-task attachment. Additional sessions on the same Kubernetes task remain supported.
+
+Omit `workspace_mode` to create an isolated subtask by default; send `inherit_parent` to share the parent's existing files and checkout. Use omission instead of an empty string to request defaulting. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
 
 ## Quick path
 
 - Use a **workflow event** for predictable transitions on existing tasks.
 - Use a **workspace automation** when a schedule or external signal should create work.
 - Use **task MCP** for tools inside an active agent session.
-- Use **profile MCP** to add servers to an agent profile.
+- Use **workspace MCP** to configure reusable servers and select their scope.
 - Use **external MCP** to expose Kandev tools to third-party clients.
 - Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
 
@@ -90,21 +98,28 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 
 ![Settings > Workspaces > Default > Automations showing enabled scheduled and webhook automations, export, new automation, and run actions.](../screenshots/automation-list.png)
 
-1. Enter a required name and optional description.
-2. Select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
-3. Choose the run destination:
-   - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
-   - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
-4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
-5. Enter a prompt and optional task-title template.
-6. Choose **Context between runs**:
-   - **Start a new task for every run** creates a separate task, conversation, and task environment for each firing. In the hidden destination, those tasks do not appear in Kanban or the sidebar; in the normal-task destination, they do.
-   - **Continue the previous session** reuses one task, primary session, conversation, and worktree across firings. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
-7. Keep the default maximum concurrency of 1 unless parallel work is safe. Reused sessions always use one active run.
-8. Choose a schedule and optional GitHub condition, or switch to webhook mode.
-9. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
+The editor reads top to bottom, and each choice sits above the fields it changes.
 
-![Automation editor showing repository access, run destination, context between runs, concurrency, and Save changes.](../screenshots/automation-editor.png)
+1. Enter a required name. The **Enabled** switch sits beside it.
+2. Under **When**, choose a schedule and optional GitHub condition, or switch to webhook mode. **No schedule** stays available after you pick a schedule, so you can remove it again.
+3. Under **Where runs go**, choose the **Run destination**. One line describes the selected option. With a mouse or keyboard, hover or focus another option to read what it does.
+   - **Automation history** keeps each generated task out of Kanban and the sidebar. The **Workflow** below it is optional.
+   - **Normal task** creates ordinary workflow work that appears in Kanban and the sidebar. The **Workflow** below it is required; an empty starting step uses that workflow's configured starting step.
+   - **Managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, so the workflow, task-for-each-run, task title, **Agent**, and **If a run fails** settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
+4. Under **Repeat runs**, choose the **Task for each run**:
+   - **New task each run** creates a separate task, conversation, and task environment for each firing. Runs can overlap.
+   - **One shared task** reuses one task, primary session, conversation, and worktree across every firing, whatever triggered it. With a GitHub PR condition, different pull requests share that task. The destination and exact repository/base-branch pairs remain part of continuation compatibility.
+   - **One task per pull request** appears when the automation has a GitHub PR condition. Each pull request keeps its own task, so different pull requests never share one and can run in parallel. See [Following up on a pull request](#following-up-on-a-pull-request).
+
+   **Max concurrent runs** follows in the same card. Keep the default of 1 unless parallel work is safe. **One shared task** locks it to 1.
+5. Under **Instructions**, enter an optional task-title template and the instructions. **Show placeholders** lists the trigger's placeholders; typing `{{` in a prompt also offers them.
+6. Under **Agent**, select an agent profile and executor profile. Passthrough profiles are not offered. Worktree and Local-compatible profiles can run without a repository in a task-owned scratch workspace.
+7. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
+8. The **Tools** row names the enabled tools. Select it to choose [MCP access](#choose-mcp-access) and, for automation-history runs, [plugin tools](#opt-in-plugin-tools). It opens by itself when MCP choices cannot load, saved MCP choices conflict, or approved plugin tools need review.
+9. Under **If a run fails**, choose [automatic retries](#automatic-retries).
+10. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
+
+![Automation editor showing Where runs go with a Normal task destination and its workflow, Repeat runs with the task for each run and max concurrent runs, Instructions, and Save changes.](../screenshots/automation-editor.png)
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
@@ -112,7 +127,7 @@ The form can save an empty agent or executor selection, but launch still needs a
 
 Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow at its configured start step, and follows the ordinary task lifecycle. The workflow selector shows the same ordered step preview as New Task; automations do not have a separate step selector. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
 
-With **Start a new task for every run**, each firing gets its own task, primary session, worktree or scratch workspace, and conversation. With **Continue the previous session**, the first firing creates one task and later firings send a new turn to its primary session. Kandev does not reset or rebase a reused checkout. If the saved task, session, runtime, or task environment is missing or incompatible, the firing creates a replacement thread and records that action on the run. A reused task keeps its creation title; each run keeps its own rendered `display_title` snapshot.
+With **New task each run**, each firing gets its own task, primary session, worktree or scratch workspace, and conversation. With **One shared task**, the first firing creates one task and later firings send a new turn to its primary session. Kandev does not reset or rebase a reused checkout. If the saved task, session, runtime, or task environment is missing or incompatible, the firing creates a replacement thread and records that action on the run. A reused task keeps its creation title; each run keeps its own rendered `display_title` snapshot.
 
 A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can reply to it and the agent continues in the same session and worktree. A run is a thread, not a receipt. Worktrees are retained for the ten most recent finished task IDs of each automation and reclaimed beyond that, so an older run stays readable but can no longer be answered.
 
@@ -120,7 +135,33 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
+CLI passthrough output does not appear in the run transcript. You cannot recover this output from the run transcript. To record output in future sessions, disable CLI passthrough in the automation's agent profile.
+
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
+
+For a managed-conversation destination, each firing is admitted as durable ordered
+input to the selected conversation. Automation delivery status records whether
+the input was accepted, separately from the agent's result. Pausing or deleting
+the schedule does not delete the shared conversation. Portable automation export
+stores the plugin ID and instance key, not a private conversation ID; import
+requires an explicit binding to an available conversation in the destination
+workspace.
+
+### Private executor access
+
+Automations and provider watches retain the Kandev user who created them.
+Background dispatch, retries, and deferred launches check that user's current
+executor access. Editing or manually triggering a source also checks the
+caller's access, so another workspace member cannot borrow its creator's
+private compute. A disabled or missing creator cannot authorize private
+compute. Legacy sources without a recorded creator continue to use shared
+executors; recreate the source as the intended user before choosing a private
+executor.
+
+The same executor checks cover workflow execution and existing task sessions.
+A task's MCP principal uses its recorded execution actor for executor access;
+workspace ownership does not supply another user's private authority. See
+[Private executors and profiles](executors.md#private-executors-and-profiles).
 
 ## Trigger behavior
 
@@ -129,11 +170,59 @@ The editor has two exclusive layouts:
 - **Scheduled**: one schedule plus at most one GitHub condition;
 - **Webhook**: one authenticated webhook trigger. Switching to webhook deletes the schedule and condition, and switching back deletes the webhook trigger.
 
-In the current backend, the schedule and GitHub PR condition are independent triggers. A non-empty schedule creates generic scheduled runs, while the PR trigger separately polls GitHub. Adding a PR condition does not constrain the scheduled run. Clear the schedule expression if the automation should run only for matching PRs.
+In the current backend, the schedule and GitHub PR condition are independent triggers. A non-empty schedule creates generic scheduled runs, while the PR trigger separately polls GitHub. Adding a PR condition does not constrain the scheduled run. Choose **No schedule** if the automation should run only for matching PRs.
+
+### Webhook delivery contract
+
+Send `POST /api/v1/automations/webhook/<automation-id>` with the
+`X-Webhook-Secret` and `X-Kandev-Delivery-ID` headers. Delivery IDs are required
+and deduplicate a delivery per automation, so a provider can safely retry the
+same request. The endpoint accepts bodies up to 1 MiB and never stores request
+headers. With no `safe_json_pointers` configured, the validated bounded JSON
+body is retained for legacy webhook interpolation, dedup-key, and repository
+selector paths. When pointers are configured, only selected values are retained
+in retry history; path-based features can resolve only those retained values.
+Invalid pointers, pointers deeper than eight segments, and projected values
+over the configured bounds are rejected.
+
+Automation retry history groups all attempts under the original trigger
+identity. The history view returns a bounded page, an opaque continuation
+cursor, and a high-water mark so clients can continue paging without losing
+newly-created retry groups.
+
+### Initial task start
+
+An automation owns the first start of the task it creates. If a workflow feeder
+immediately moves that task into an automatic step, the workflow waits for the
+automation's start. A ceiling-queued start keeps that ownership until its replay
+or definitive drop resolves. Reusing a conversation keeps its original identity.
+
+A backend restart does not release an unresolved start. If an older task remains
+blocked without enough ownership evidence, inspect its automation run and use
+explicit task/session recovery. Pending retry ownership still requires a
+confirmed completion or Stop before another execution can start.
+
+### Automatic retries
+
+Task automations can choose **Don't retry**, **Fixed number of times**, or **Until it succeeds**. Attempt, delay, backoff, and history settings appear once retries are on. Fixed delay keeps the same interval; exponential delay increases the interval between attempts. **Every attempt** lists each retry as its own run; **Retry timeline** groups them into one entry. Both retain the original firing and its related history.
+
+A retry keeps one task, session, turn and submission identity through queued starts and backend recovery. If provider acceptance cannot be established, the run remains pending with an error and is not automatically sent again. It continues to occupy capacity until its exact turn completes or the observed execution is confirmed stopped. Stop, disable and delete can therefore report pending ownership instead of silently releasing a possibly live run. Retrying a failed Stop targets that same execution. Older retries without sufficient acceptance evidence also remain pending.
 
 ### Schedule
 
 The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
+
+Editing a saved schedule starts the new definition at its first occurrence after the successful save. Earlier occurrences of the replacement expression do not run, so changing a weekday or time does not replay history.
+
+- **Replacement:** a changed cron expression or effective timezone starts a new schedule boundary.
+- **Not a replacement:** JSON formatting, expression whitespace, an empty timezone versus `UTC`, or a timezone field that an `@every` or `TZ=`/`CRON_TZ=` expression ignores. These saves keep the pending occurrence.
+
+Clearing the expression stops automatic runs. Entering a non-empty expression later starts from that later save.
+
+An automation can be enabled while its schedule trigger is disabled. In Run
+detail, select **Turn on schedule** to enable only the trigger without changing
+its schedule. If the current schedule has a missed occurrence, it can run once
+on the next scheduler check.
 
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
@@ -147,18 +236,35 @@ Use the supplied presets: every 5, 15, or 30 minutes; hourly; every 6 hours; dai
 
 The editor accepts arbitrary five-field cron text, including fixed calendar forms such as `30 8 * * *`, weekday ranges such as `15 9 * * 1-5`, and day-of-month schedules, all of which now fire at the correct time. A saved timezone (for example `America/New_York`) is honored, including that zone's daylight-saving transitions; an empty timezone means UTC, so schedules are deterministic regardless of the host clock. Scheduled runs are deduplicated per trigger per minute.
 
+A non-empty schedule must have a next occurrence within the supported five-year search horizon. Schedules such as February 31 are rejected on save. Already-saved impossible schedules do not create automatic runs; edit them to a valid schedule. Empty schedules remain unscheduled. Valid leap-day schedules within that horizon remain supported, and day-of-month/day-of-week OR expressions such as `0 0 31 2 MON` still run on Mondays in February.
+
 ### GitHub pull requests
 
-The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It searches open PRs and supports:
+The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It lists each selected repository's open PRs and supports:
 
 - an explicit list of repositories;
 - base-branch glob filters, including `*` and a trailing wildcard such as `release/*`;
 - exact author-login filters;
+- label filters (saved through the API, MCP, or YAML; the form does not offer them), which match a PR that has at least one listed label;
 - draft exclusion.
 
-Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, but the evaluator currently ignores the saved event list: clearing that checkbox does not stop polling or firing. Disable the automation/trigger instead. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
+Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. A missing, null, or empty event selection stays inactive. The condition offers three events:
 
-The current evaluator does not apply label filters, and the current form does not offer them.
+- **Opened** (`opened`) fires once per matching PR opened after the trigger was created. PRs that were already open, including ones open before you added **Opened** to an existing trigger, are skipped. Check **Also run on pull requests already open** (`include_existing_prs`) to also run once for each matching PR that is open now. Each PR is deduplicated once per automation by repository and PR number.
+- **New commits** (`new_commits`) fires once for each new head commit of an open PR. The first time a trigger sees a PR, Kandev only records its head, so enabling the event does not review every open PR. Pushes made while a PR does not match the filters do not fire later. **Wait until pushes stop for** (`quiet_period_minutes`, 0 to 1440) fires only after the head stays unchanged that long; a newer push restarts the wait.
+- **Review requested** (`review_requested`) fires when a matching reviewer is newly requested, including **Re-request review** after an earlier review. **Reviewers** (`reviewers`) accepts user logins and `org/team-slug` values; empty matches any reviewer.
+
+Kandev fires at most one of these per PR per poll, in the order above. Every filter applies to every event.
+
+#### Following up on a pull request
+
+With **One task per pull request** (`reuse_per_pr`), the first firing for a PR creates its task, and later firings for the same PR send a new turn to that task's session. A firing without a PR, such as **Run now** or a schedule, starts a new task. If the PR's task is deleted, archived, incompatible, or its session ended, Kandev creates a replacement task and records that on the run.
+
+- **Follow-up instructions** (`follow_up_prompt`) appear directly under the instructions and replace them when a firing continues the PR's task. Leave them empty to send the main instructions.
+- **Move to step when continuing** (`pr_continuation_step_id`, normal tasks only) moves the task to a workflow step, such as a review column, before the follow-up. The step's own auto-start prompt does not run; its other entry actions, such as resetting the agent context, still apply.
+- **When merged** and **When closed without merging** (`pr_merged_action`, `pr_closed_action`) keep, archive, or delete the PR's task. Kandev applies them directly, without an agent run, within about a minute of the PR ending. Deleting removes the task's conversation and files.
+
+When the PR's task is busy, because a run is open or someone is using its session, Kandev holds new firings and checks again each minute. The next check after the task is free fires once, for the PR's latest state. Maximum concurrent runs still applies to the whole automation.
 
 ### GitHub pull requests merged
 
@@ -200,16 +306,20 @@ Send:
 ```http
 POST /api/v1/automations/webhook/{automationId}
 X-Webhook-Secret: <secret>
+X-Kandev-Delivery-ID: <delivery-id>
 Content-Type: application/json
 ```
 
-Kandev silently reads only the first 1 MiB of the request body; it does not reject an oversized body. If that retained prefix is valid JSON, it becomes trigger data. Empty or invalid JSON is wrapped as `{"body":"<raw text>"}`. The endpoint always returns `200 {"status":"triggered"}` for a well-formed, authenticated request, whether the delivery went on to fire, was filtered out, or was deduplicated; it returns 401 for a wrong secret, 404 for an unknown automation, and 409 when the automation or its webhook trigger is disabled.
+Webhook requests must include `X-Kandev-Delivery-ID`, limited to 256 characters. If a configured deduplication path resolves to a supported, non-empty value, that value deduplicates deliveries. If the path is not configured or does not resolve to a supported value, Kandev uses the delivery ID instead. Kandev accepts an empty body, rejects invalid JSON or invalid JSON-pointer projections with `400`, and rejects bodies larger than 1 MiB with `413`.
 
-A webhook trigger's configuration can optionally set a deduplication key, a list of filters, and a repository selector:
+Webhook trigger configuration can retain selected payload values with up to 32 bounded RFC 6901 pointers. When pointers are configured, only selected values are stored in retry history. Without pointers, the validated payload is retained up to the 1 MiB request limit to preserve legacy `{{webhook.<path>}}` interpolation. A delivery whose configured deduplication key resolves to a value seen on an earlier firing is recorded as a duplicate and creates no new task.
 
-- **Deduplication key**: a dot path into the payload, for example `issue.id`. A delivery whose resolved value repeats an earlier firing's is recorded as a duplicate and creates no new task. Leave it blank to fire on every delivery.
+A webhook trigger's configuration can optionally set a deduplication key, a list of filters, a repository selector, and safe JSON pointers:
+
+- **Deduplication key**: a dot path into the payload, for example `issue.id`. A delivery whose resolved value repeats an earlier firing's is recorded as a duplicate and creates no new task. If the path is blank or does not resolve to a supported value, Kandev deduplicates by delivery ID.
 - **Filters**: an ordered list of `{path, op, values}` predicates, evaluated before deduplication and before the run's concurrency slot is claimed. Every filter must pass for the delivery to fire; a rejected delivery still returns the uniform 200 response, creates no task, and is recorded as skipped. Supported operators are `eq`, `ne`, `in`, `not_in`, `exists`, `not_exists`, and `contains`; the five comparison operators other than `exists`/`not_exists` trim and lowercase both sides before comparing, so filter values are case-insensitive. A path that does not resolve fails every operator except `not_exists`.
 - **Repository selector**: a dot path whose resolved value is matched, exactly and case-sensitively, against one of the automation's already-configured repositories by name. Exactly one match binds that repository to the run; no match, or more than one, binds none. This is deliberately not the same resolution GitHub pull request triggers use, because the webhook route is exempt from session authentication and authorized by its shared secret alone, so a payload must never be able to name an arbitrary repository.
+- **Safe JSON pointers**: up to 32 RFC 6901 pointers select payload fields retained in retry history. Selected values have per-value, total-size, and pointer-depth limits. When configured, unselected fields are not persisted in retry snapshots; when omitted, the bounded validated payload is retained for legacy interpolation.
 
 Make downstream actions idempotent regardless: a sender can still retry a delivery that Kandev has already deduplicated or filtered. The secret is stored with the automation rather than in Kandev's encrypted provider-secret store, and anyone with Kandev settings access can reveal it. Treat it as a credential, use TLS, keep it out of URLs/logs, and replace the automation if rotation is required.
 
@@ -225,7 +335,7 @@ A trigger can succeed and still run nothing. A disabled automation, an already-f
 
 Every trigger supports `{{trigger.type}}`, `{{trigger.timestamp}}`, and `{{data.<path>}}`.
 
-GitHub PR runs additionally support `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.repo}}`, `{{pr.branch}}`, `{{pr.base_branch}}`, and `{{pr.body}}`.
+GitHub PR runs additionally support `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.repo}}`, `{{pr.branch}}`, `{{pr.base_branch}}`, `{{pr.body}}`, `{{pr.head_sha}}`, `{{pr.previous_head_sha}}` (the head the previous firing saw; empty for `opened`), `{{pr.event}}` (`opened`, `new_commits`, or `review_requested`), and `{{pr.requested_reviewers}}` (newly requested reviewers for `review_requested`).
 
 Webhook runs support `{{webhook.body}}` and `{{webhook.<path>}}`. Dot segments traverse nested objects, and a numeric segment indexes an array, for example `{{webhook.commits.0.message}}`. Scalar values are converted to text; objects and arrays become JSON. Missing or unresolved placeholders are removed rather than sent literally.
 
@@ -235,15 +345,19 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 
 **Automations** in the sidebar lists the workspace's automations with a health dot. Picking one opens it. **`/automations`** is the agenda across all of them, what fires next, and the recent runs of every automation in one feed. **`/automations/<id>`** is one automation's conversation: it opens on the newest run's transcript, carries the run's title snapshot and a reply box, and groups runs as Running / Completed in a rail or mobile drawer. A selected open run exposes **Stop current run**, which cancels its exact task, session, and turn without touching another run in a shared session. Configuration is behind **Details**, because an automation is configured once and read continuously.
 
+The Automations section, agenda, and phone navigation prioritize running work (blue), then a paused automation or disabled schedule (gray); otherwise the indicator follows the newest run: red for failure or a retry that could not be scheduled, green for success, amber for cancellation or a scheduled retry, and gray for skipped or archived runs. Non-success outcomes remain visible even when paused: the desktop sidebar shows the outcome before its age, such as **Failed, 4m ago**, while the agenda keeps its next-firing information and phone rows show status without adding an age. A newer success clears an earlier failure after refresh; an automation that has never run retains its idle or paused indication without an outcome label or last-run age.
+
 ![Kandev sidebar showing the Automations section with workspace automation shortcuts.](../screenshots/automation-sidebar.png)
 
 `/runs` still resolves to the same places, so older links keep working.
 
 ## Concurrency, history, and cleanup
 
-Maximum concurrent runs defaults to 1 and cannot be less than 1. An admitted `triggered` run and a bound `task_created` run are both open until their exact turn is settled. A run counts as active while its task is neither deleted, archived, nor explicitly cancelled, the same definition the UI uses when it says an automation will not fire because a run is still open, so the reason shown and the cap causing it cannot disagree. `reuse_thread` requires `max_concurrent_runs = 1`. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
+Maximum concurrent runs defaults to 1 and cannot be less than 1. An admitted `triggered` run and a bound `task_created` run are both open until their exact turn is settled. An unresolved retry launch continues to count as active even if its task is archived or cancellation was requested. Other runs count as active while their task is neither deleted, archived, nor explicitly cancelled, the same definition the UI uses when it says an automation will not fire because a run is still open, so the reason shown and the cap causing it cannot disagree. `reuse_thread` requires `max_concurrent_runs = 1`. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
 
-Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
+The Automations page and an automation's history page show a newly recorded run within a couple of seconds, without a reload, whether a schedule, a webhook, or the GitHub poller recorded it.
+
+Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. When the instance session limit delays a run's start, Kandev keeps the run `triggered` and retries the start automatically; the run holds its concurrency slot for as long as the limit stays full. Stopping the run cancels the waiting start. For legacy runs, a backend restart or deletion of the waiting task marks the unbound run `failed` and drops its start. Retry-enabled runs can remain held after restart while Kandev reconciles their start. If start acceptance or stopping is unresolved, restarting, waiting for a lease to expire or deleting the task does not authorize a replacement start; use the existing run/session recovery controls. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
 
 A run that produced a task opens its conversation. A run that never produced one (a skipped firing) is listed but inert; there is nothing to read.
 
@@ -255,9 +369,37 @@ Native session continuation and provider-managed compaction remain authoritative
 
 ### Automation coordinator MCP
 
-Automation sessions receive one fixed, workspace-scoped coordinator MCP surface. The server resolves the trusted automation principal before dispatch and uses that principal for workspace, caller task, caller session, surface, and audit identity; a prompt or tool argument cannot forge those values. The catalog includes coordination and pending-question or permission actions needed by an automation, but excludes task deletion, configuration mutation, task-local authoring, provider PR/MR actions, diagnostics, plugins, and arbitrary capability settings.
+Private automation sessions receive required, workspace-scoped Core tools for coordination and pending blockers. The backend binds the automation, workspace, task, and session identities. Tool arguments cannot replace them.
 
-The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for every mutation except archiving. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
+### Choose MCP access
+
+1. Open **Settings > Workspaces > your workspace > Automations** and select an automation.
+2. Under **Agent**, select the **Tools** row. Under **MCP access**, use the **On** or **Off** switch in each package row. Select a package name to read its details, including what Configuration can change. Configuration, Rich Output, Walkthroughs, and Diagnostics are optional. Core stays required.
+3. Select additional **Workspace MCP servers** from that workspace's saved catalog. Repository and agent-profile inheritance remains additive.
+4. Use **Save changes**. Use **Reset** to remove unsaved edits.
+
+**Configuration grants mutation access** to authorized workflows, profiles, prompts, executors, and automations. The private run keeps its automation identity and workspace restrictions. Native Configuration tools cannot change package grants, automation MCP selections, plugin approvals, or profile MCP server access. Selected third-party servers use their own tools and credentials. The native dispatcher does not sandbox those servers.
+
+Private-run choices apply from the **next agent start**. Saving does not restart a run. A continued task keeps its accepted selection until its agent restarts. A fresh process, including a retry or replacement, reads current choices. Use the MCP plug icon to inspect MCP information when the viewer is available. The run conversation has no separate MCP access summary.
+
+Built-in package switches use explicit **On** or **Off** selections directly in the package list. Select a package name to inspect its details. Automations do not offer a package inheritance action. Core remains required.
+
+For **normal task** automations, MCP choices form a template for newly created tasks. Workspace task-package limits still apply. Reusing an existing task preserves that task's later customization. Managed conversations use their destination's tool policy.
+
+Existing automations keep their current tools until an explicit selection is saved. Portable exports omit access selections, so imports require a native configuration save. An older helper that cannot enforce explicit automation selection reports an upgrade error before starting.
+
+An unavailable definition remains visible for removal. Selecting a server does not create credentials or prove a connection. Confirmed catalog deletion leaves its automation reference unavailable until you remove it in the editor. See [Built-in MCP packages](builtin-mcp-packages.md) for package identities and application timing.
+
+### Opt-in plugin tools
+
+A private automation can also use exact plugin tools that its owner selected in the editor. The `Plugin tools (optional)` section under **Agent > Tools** lists active, configured plugins whose manifests declare `automation` tools. Only those plugins appear; third-party plugins remain unsupported until their authors add and accept the surface. Select individual tools and use the editor's existing **Save** action; that save is the approval. Saving an unrelated field leaves the stored selection unchanged.
+
+Access is bounded to the automation, workspace, plugin installation, and plugin policy version shown at save time. Reinstalling a plugin or saving its configuration, including a secret-only change, requires review and reselection. Previously selected tools stay visible for reference but grant nothing until the owner selects current tools again. Clearing a plugin's selection removes its access.
+
+Discovery and every call re-read the current approval. Removed tools, disabled plugins, stale policy versions, and unreadable approval data fail closed. Plugin tools add no core or administrative MCP capability, and results stay in automation history: a hidden run never adds a task to Kanban or the sidebar without an explicit task-creation action.
+
+
+The automation's own hidden task and every session on it are invalid targets for messaging, stopping, spawning, and blocker discovery or resolution, and for coordination mutations except archiving. Selected authoring packages can write output and walkthroughs for the current hidden task. An automation can archive its own hidden task; that is its normal end-of-run completion signal, not a self-mutation. Foreign-workspace targets return the same not-found result as unknown targets. The archive exemption covers only the automation's own hidden task; sessions on it remain invalid targets. A task spawned on another allowed task receives that target task's normal MCP profile and never inherits the automation surface. Reused worktrees are not reset or rebased by coordinator actions.
 
 ## Export automations
 
@@ -265,9 +407,86 @@ The automations settings page (**Settings > Workspaces > _Workspace_ > Automatio
 
 The same data is available directly over REST for scripting: `GET /api/v1/workspaces/:workspaceId/automations/export` returns one YAML document (`application/yaml`) listing every automation, and `GET /api/v1/workspaces/:workspaceId/automations/export/zip` returns the same per-file zip the UI control downloads (`application/zip`). Both are read-only and deterministic: exporting an unchanged workspace twice produces byte-identical output. A workspace you cannot access and a workspace that does not exist both return `404` with no distinguishing detail; any other failure returns `500`.
 
+## Workspace MCP
+
+Workspace MCP definitions are reusable, workspace-owned server configurations. Open **Settings > Workspaces > _workspace_ > MCP servers** to use the **Configured** and **Marketplace** views. This page manages MCP servers that Kandev delivers to agents. **External MCP** is separate and exposes Kandev's own MCP endpoint to outside clients.
+
+Add a custom definition as a remote endpoint, an exact-version managed npm package, or an existing executable. Bind secrets by workspace-secret reference. Saving a definition does not download, connect to, or start a server. Managed npm packages are materialized lazily in a Kandev-owned task-executor cache and do not change repository files or lockfiles.
+
+After adding a custom or marketplace server, **Saved to _workspace_** confirms
+its name in **Configured**. Choose **Done** to leave it saved, or **Use in** to
+choose a repository, an enabled agent profile in this workspace, or an existing
+task session. **Use in** is also available on saved catalog cards.
+
+Review the scope, then choose **Open MCP settings**. This only opens the existing
+editor and highlights the server once. Select its checkbox to add it. Repository
+and profile edits use **Save changes** and affect future sessions in that scope.
+A session link opens the named conversation; open its plug menu and **Customize**
+to select the server. That selection saves automatically for this session and
+uses the provider's existing application timing.
+
+If owner discovery fails or the owner becomes unavailable, the definition stays
+saved. Retry reads the current choices; it does not register another server or
+start an agent. Enable disabled definitions before using **Use in**.
+
+If Kandev cannot confirm the save, choose **Review saved servers**. This refreshes
+the catalog before you can add another server. Check for the server you intended
+to save; Kandev does not repeat an uncertain registration automatically.
+
+For an executable, each **Arguments** row is one argument, including spaces or an empty value. Configure non-secret environment values or HTTP headers in the editor. Use **Secret bindings** to choose a workspace or global secret reference for a credential. Only the reference is saved in the definition; the task executor receives the bound value when the server is prepared.
+
+Marketplace review shows the inputs requested by the selected setup. Complete required values and secret references before adding it. Choices that require unsupported variable substitution are unavailable.
+
+Marketplace entries come from Kandev-curated templates or cached public Registry metadata. Registry metadata is publisher supplied, not a Kandev security review. Review the publisher, selected remote or exact package version, transport, requested configuration, and secret bindings before adding an entry. A Registry outage shows the last successful cache with a stale or degraded status. Deprecated and deleted entries are not offered for new installation.
+
+Each saved catalog definition has **Used in**, which lists its directly selecting
+owners that you can access. Open a named owner to manage its existing selection.
+The list is paged and excludes inaccessible owners. It does not infer inherited
+use or connection health. Opening an owner never selects a server or starts an
+agent.
+
+Saved global profiles require an explicit workspace choice or a valid workspace
+link. Switching that context uses the shared unsaved-settings guard. Profile
+and repository edits retain **Save changes**; session edits keep their existing
+autosave behavior. See [Agents and profiles](agents-and-profiles.md#find-where-a-server-is-selected)
+for navigation and legacy configuration recovery.
+
+Select configured definitions at the profile, repository, task, or task-session scope. Repository selection is collapsed by default. Task creation keeps its selector inside collapsed **Advanced** settings. The effective set is additive across every task repository, the workspace-contextual profile, task, and session. Duplicate definitions are delivered once with all contributing origins; inherited definitions cannot be removed at a narrower scope.
+
+Selection lists show each server's runtime name, supplied description, setup
+mode, transport and known catalog source. Repository settings reveals these
+choices directly when you expand **MCP servers**.
+
+In a session's **Customize** view, populated sections show servers selected for
+the task, inherited from repositories, or inherited from the agent profile.
+Each server appears once: task selections group first, then repositories, then
+the profile. This display order does not override another source. Rows list any
+other contributing sources under **Also selected by**. **Additional servers**
+contains choices from the workspace catalog for this session, with descriptions
+and setup mode, transport and catalog-source labels. A label such as **Custom**
+describes how the definition entered the catalog, not which scope selected it.
+
+
+An active turn keeps its current MCP list. Existing task sessions save a desired revision and apply it after the turn becomes idle. Providers that advertise safe ACP reconnection reuse the same session. Unsupported reconnection defers the change until the next start, and a failed reconnect keeps the previous applied revision active until retry.
+
 ## Task MCP
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
+
+### Discover executors and profiles
+
+Call `list_executors_kandev` without arguments to list the executors and
+profiles available to the task caller. The catalogue includes custom executor
+IDs. It filters foreign-owned executors and profiles, including foreign
+profiles on a shared executor. A visible executor can have no visible profiles.
+
+Use a returned profile ID as `executor_profile_id` in `create_task_kandev`.
+`list_executor_profiles_kandev(executor_id)` remains available when you need
+to look up profiles for one known executor. Discovery does not authorize a
+future launch: task creation and executor admission check current ownership.
+With authentication disabled, the existing single-user identity can see all
+resources. See [Private executors and profiles](executors.md#private-executors-and-profiles)
+for the ownership rules.
 
 ### Manage linked pull and merge requests
 
@@ -279,7 +498,21 @@ Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`
 or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
 the canonical `repository_id`, and a positive request number. A number by itself
 is rejected, so a fork and its canonical repository can safely have the same
-number. For example:
+number.
+
+For a new `link`, use the Kandev ID in `repositories[].repository_id` from
+`list_tasks_kandev`. The repository must be attached to the target task. An
+unmatched ID returns a validation error for `repository_id`.
+
+For `unlink`, use the repository ID from the stored association. Unlink can
+remove that association after its repository is detached. The management tool
+is available only in task-mode sessions whose calling task has at least one
+attached GitHub or GitLab repository. If the calling task has none, attach a
+supported repository and start or resume its task session to restore the tool.
+Then unlink the target task's association with its stored provider, repository
+ID, and request number.
+
+For example:
 
 ```json
 {
@@ -314,6 +547,13 @@ GitHub auto-fix turn; it does not report manual work or GitLab auto-fix turns.
 GitLab MR associations in the provider-neutral `change_requests` field; the
 legacy `prs` field remains GitHub-only for compatibility.
 
+`list_related_tasks_kandev` defaults to the current task. Another target is
+readable only when it is an ancestor, a descendant, a sibling with a shared
+non-empty parent, or a blocker of the caller in the same workspace. An
+unrelated task is denied, including in the same workspace. The compact output
+option is not a separate permission: `verbose` adds descriptions and never
+widens access.
+
 Unlinking changes only the active association and its matching automation
 state. It does not delete conversation history, terminal receipts, or the
 upstream pull request or merge request.
@@ -323,6 +563,51 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
+In task mode, a session-bound Kanban child can pass `parent_id: "self"` to create a sibling under its direct parent when the one-level Kanban depth limit is reached. The result reports the requested and effective parent and explains that the common parent owns coordination while the calling session remains the creation source. An explicit child ID retains the depth error. External MCP callers cannot use the `self` shorthand, and Office task creation keeps its existing runtime and skill boundary.
+
+The additive `parent_resolution` result contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. A deduplicated result describes existing work without creation or reparenting; its top-level `parent_id` remains the returned task's actual parent. The `deduplicated` and `creation_complete` indicators retain their existing meaning. See [Coordination](coordination.md#create-a-subtask-from-an-agent) for inheritance and parent controls.
+
+### Read only the relevant part of a plan
+
+For focused changes to a large plan, call `get_task_plan_kandev` with a range:
+
+```json
+{"offset": 0, "limit": 2000}
+```
+
+`offset` is a zero-based Unicode code-point position, not a byte or UTF-16
+position. `limit` is the maximum number of characters to return, from 1 through
+8,192. Supplying either argument enables partial reading: an omitted offset
+defaults to zero, and an omitted limit defaults to 4,096. Omit both for the
+existing full-plan read. Null, fractional, negative, and otherwise invalid
+range arguments are rejected instead of falling back to a full read.
+
+The result separates metadata from exact content. Partial metadata includes
+`partial`, `version`, `offset`, `limit`, `total_characters`,
+`total_content_bytes`, `returned_characters`, `content_bytes`, `has_more`, and
+`next_offset`. `content_bytes` describes the returned fragment; the total fields
+describe the whole plan. Whitespace and line endings are preserved.
+
+To continue, use the returned `next_offset` and pass the first page's `version`
+as `expected_version`. A changed or deleted plan returns `plan_version_conflict`
+without content; reconcile the current plan before continuing. Offset exactly
+at the end returns an empty final page, with `has_more=false` and
+`next_offset=null`. An offset beyond the end is rejected. A missing plan without
+an expected version keeps the existing no-plan result.
+
+Use a fragment from the read with `edit_task_plan_kandev`:
+
+```json
+{"expected_version": "<version from read>", "old_text": "- [ ] Run tests", "new_text": "- [x] Run tests"}
+```
+
+The match must be unique across the entire plan, even when it appears only once
+in the returned page. Never submit a partial read as a whole-document
+replacement. Successful writes return a compact acknowledgement and a new
+version; reuse it for another known fragment edit. Restart pagination after a
+write because previous offsets belong to the earlier version. For adding a
+section, use the append mode described below.
 
 ### Protect task plan writes
 
@@ -376,100 +661,143 @@ or task tree.
 
 ### Native rich output
 
-Task and Office agents can call `show_rich_output_kandev` when a workspace file,
+Task and Office agents with the Rich Output package can call `show_rich_output_kandev` when a workspace file,
 trend, comparison, or small metric group is materially clearer as a native
-presentation than as prose. The injected agent context requires this tool when
-the user explicitly asks for a chart, graph, plot, or file preview and suitable
-data is available. Prefer plain text or Markdown for ordinary answers. Small
-row-and-column comparisons should remain Markdown tables; native tables would
-duplicate that capability while adding another layout and accessibility
-contract.
+presentation than as prose. When that package is selected, the injected agent context requires this tool for
+structured comparisons, recorded checks, charts, graphs, plots, file previews
+and KPI or metric requests when suitable data is available. Prefer plain text or Markdown for ordinary answers. Small textual comparisons can remain Markdown tables. For structured multi-row
+comparisons, verification findings or a prominent observation, agents can use
+Table, StatusList and Callout from the discovered catalog. Users can ask about
+their data without naming a tool or component.
 
-Version 1 accepts a title, an optional description, and one to four ordered
-blocks:
+New calls use `version: 2` and `catalog_version: 1`. A presentation has a title,
+an optional description, and a `spec` containing a `root` element ID and an
+`elements` map. Each element has a catalog `type`, literal `props`, and ordered
+`children` IDs. Discover the tool schema for exact properties and examples.
 
-- `file` references a task-workspace-relative path. It can include an optional
-  repository discriminator, title, caption, and MIME type. Kandev never accepts
-  absolute paths, traversal, URLs, data URIs, or inline file bytes.
-- `chart` renders a line or bar chart and includes a plain-text summary for
-  nonvisual interpretation. Data can be supplied in either of two ways:
-  - Inline `labels` plus 1 to 4 `series`, with one finite numeric or `null`
-    value per label.
-  - A `csv` descriptor with a workspace-relative `.csv` `path`, optional
-    `repo`, exact `x_column`, and 1 to 4 numeric `series` column mappings.
-    Kandev reads 1 to 100 rows in file order. Empty numeric cells become gaps.
-- `metrics` renders 1 to 6 plain-text label/value pairs with optional details.
+Malformed calls fail before workspace reads. Validation feedback identifies the
+field and expected shape for the selected component and source form. Ambiguous
+forms report separate alternatives. Agents can correct a rejected call using
+that feedback and discovered examples; rejected values and file contents are
+not included in the diagnostic.
+If a rich-output call fails, select its error icon to read the diagnostic
+before you correct the call.
 
-Kandev renders visible x/y values and automatically shortens ISO date/time
-labels, large numbers, and long categories on the axes. Tooltips retain the
-original x label and full values. Give every series a clear label and include
-its unit when useful, for example `p95 (ms)`. A one-series chart displays that
-label as an informational legend; a multi-series chart renders local keyboard-
-and touch-operable legend filters. Those filters change only the current view,
-not the persisted result or agent context.
+| Component | Purpose |
+| --- | --- |
+| `Stack` | Ordered vertical or horizontal children. Horizontal groups stack below 768px. |
+| `Group` | Children with an optional plain-text title. |
+| `Text` | A plain-text explanation, up to 500 characters. |
+| `Chart` | A line or bar chart with a required nonvisual summary and inline or CSV data. |
+| `Table` | One to eight labelled columns and up to 100 literal-text rows, inline or selected from a workspace CSV. Phone rows retain every field. |
+| `StatusList` | Up to 20 ordered, static verification findings with visible status labels and icons. |
+| `Callout` | A static info, success, warning or error note with optional title and plain text. |
+| `Metrics` | One to six label/value pairs with optional details. |
+| `FilePreview` | A workspace-relative file path with optional `repo`, title, and caption. Use a path such as `reports/snapshots.diff` for a unified patch. Native previews for `.diff` and `.patch` expand automatically in side-by-side view and support switching to Unified. |
 
-The complete tool input is limited to 64 KiB. Titles are limited to 120
-characters and the optional presentation description to 500 characters.
-Unknown fields and unsupported versions are rejected. Agents cannot choose
-HTML, Markdown, JavaScript, CSS, colors, animation, component names, or layout;
-Kandev owns those details so results remain consistent, accessible, and
-responsive.
+Agents choose hierarchy and ordering from this catalog. Kandev owns styling,
+axes, legends, tooltips, and responsive behavior. HTML, Markdown, JavaScript,
+CSS, arbitrary components, state bindings, event handlers, and actions are not
+accepted. Use Markdown for small textual comparisons.
+
+The input is limited to 64 KiB, 64 elements, eight levels, and four total
+`Chart`, `Metrics`, `FilePreview`, `Table` or `StatusList` elements. Callout is
+explanatory text under the same byte, node and depth limits. Element IDs start with an ASCII
+letter and contain at most 64 letters, digits, underscores, or hyphens;
+`constructor`, `prototype` and `__proto__` are reserved. Every element must be reachable
+exactly once from the root. Containers require children, leaves have none, and
+cycles, shared children, unknown fields, and unsupported versions are rejected.
+Titles are limited to 120 characters and the presentation description to 500.
+
+This composition groups verification metrics beside an explanation:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "catalog_version": 1,
   "title": "Build health",
-  "description": "Latest local verification",
-  "blocks": [
-    {
-      "type": "metrics",
-      "items": [
-        { "label": "Passed", "value": "38" },
-        { "label": "Duration", "value": "12.4s", "detail": "Warm cache" }
-      ]
-    },
-    {
-      "type": "chart",
-      "chart_type": "line",
-      "title": "Runtime by run",
-      "summary": "Runtime fell across the last five runs.",
-      "labels": ["1", "2", "3", "4", "5"],
-      "series": [
-        { "label": "Runtime (s)", "values": [18.2, 16.4, 15.1, 13.8, 12.4] }
-      ]
-    },
-    {
-      "type": "file",
-      "path": "reports/build.json",
-      "title": "Raw report",
-      "mime_type": "application/json"
+  "spec": {
+    "root": "report",
+    "elements": {
+      "report": { "type": "Stack", "props": { "direction": "horizontal" }, "children": ["checks", "context"] },
+      "checks": { "type": "Group", "props": { "title": "Checks" }, "children": ["counts"] },
+      "counts": { "type": "Metrics", "props": { "items": [{ "label": "Passed", "value": "38" }] }, "children": [] },
+      "context": { "type": "Text", "props": { "text": "All focused checks passed." }, "children": [] }
     }
-  ]
+  }
 }
 ```
 
-Use a CSV-backed line chart for a time series already present in the workspace:
+Tables use unique `columns` containing a `key` and visible `label`, each 1 to
+120 Unicode code points. Supply either `rows` of strings or `csv` with a
+workspace-relative path and optional `repo`. A CSV column key selects its exact
+normalized header. Each row has one cell per column, with at most 500 code
+points per cell. Numeric formatting, blanks and markup characters remain
+literal text; empty cells and header-only tables receive localized empty copy.
+Desktop uses column headers, while phone rows show every field with its label.
+
+StatusList items contain a `label` (1 to 120 code points), `status` and optional
+`detail` (up to 500). Status is `passed`, `failed`, `running`, `pending` or
+`skipped`. These are recorded findings supplied by the agent, including running
+and pending; they do not poll executions or change workflow state. An empty
+list shows localized empty copy.
+
+Callout uses `kind` (`info`, `success`, `warning` or `error`), optional `title`
+(up to 120 code points) and `text` (1 to 500). Every kind has a localized label
+and icon. Notes stay static on replay and are not live alert announcements.
+Table and StatusList also accept an optional title of up to 120 code points.
+
+This report selects service fields from CSV, records a check and highlights a
+finding:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "catalog_version": 1,
+  "title": "Service verification",
+  "spec": {
+    "root": "report",
+    "elements": {
+      "report": { "type": "Stack", "props": { "direction": "vertical" }, "children": ["services", "checks", "finding"] },
+      "services": { "type": "Table", "props": { "columns": [{ "key": "service", "label": "Service" }, { "key": "monthly_cost_usd", "label": "Monthly cost (USD)" }], "csv": { "path": "services.csv" } }, "children": [] },
+      "checks": { "type": "StatusList", "props": { "items": [{ "label": "Load budget", "status": "failed", "detail": "Payments p95 exceeds the target." }] }, "children": [] },
+      "finding": { "type": "Callout", "props": { "kind": "warning", "title": "Investigate Payments", "text": "Highest cost and latency in this sample." }, "children": [] }
+    }
+  }
+}
+```
+
+For inline tables, replace `csv` with `rows`, for example
+`[["API", "00420"], ["Payments", "680"]]` for the two columns above.
+
+Charts accept inline `labels` and one to four `series`, each with a label and
+one finite numeric or `null` value per x label. Up to 100 labels are accepted.
+Alternatively, reference a workspace CSV and map its exact headers:
+
+```json
+{
+  "version": 2,
+  "catalog_version": 1,
   "title": "API latency",
-  "blocks": [
-    {
-      "type": "chart",
-      "chart_type": "line",
-      "title": "p50 and p95 latency",
-      "summary": "Tail latency fell across the recorded samples.",
-      "csv": {
-        "path": "reports/latency.csv",
-        "x_column": "recorded_at",
-        "series": [
-          { "column": "p50_ms", "label": "p50 (ms)" },
-          { "column": "p95_ms", "label": "p95 (ms)" }
-        ]
+  "spec": {
+    "root": "latency",
+    "elements": {
+      "latency": {
+        "type": "Chart",
+        "props": {
+          "chart_type": "line",
+          "title": "p95 latency",
+          "summary": "Latency across recorded samples.",
+          "csv": {
+            "path": "reports/latency.csv",
+            "x_column": "recorded_at",
+            "series": [{ "column": "p95_ms", "label": "p95 (ms)" }]
+          }
+        },
+        "children": []
       }
     }
-  ]
+  }
 }
 ```
 
@@ -481,44 +809,61 @@ recorded_at,p50_ms,p95_ms
 2026-08-14T10:00:00Z,16.4,25.1
 ```
 
-Use the same CSV form for a categorical bar comparison:
+For a categorical comparison, use `chart_type: "bar"`, an x column such as
+`route`, and numeric series such as `requests`. CSV descriptors can include a
+`repo` discriminator and one to four numeric column mappings. Sources must
+be workspace-relative `.csv` paths. File references reject absolute paths,
+traversal, URLs, data URIs, and inline bytes.
 
-```json
-{
-  "version": 1,
-  "title": "Traffic mix",
-  "blocks": [
-    {
-      "type": "chart",
-      "chart_type": "bar",
-      "title": "Requests by route",
-      "summary": "The API route carries most request volume.",
-      "csv": {
-        "path": "reports/routes.csv",
-        "x_column": "route",
-        "series": [{ "column": "requests", "label": "Requests" }]
-      }
-    }
-  ]
-}
-```
+CSV files must be UTF-8 text with unique headers, no more than 256 KiB,
+and at most 100 data rows. Chart sources require at least one data row;
+Table sources allow header-only files. Blank/duplicate headers and malformed
+row widths are rejected. Named columns must exist exactly. Chart x values must be
+nonempty and at most 120 characters. Selected chart numeric cells must be finite
+numbers or empty; empty cells become gaps. Malformed rows and invalid values
+reject the tool call with the source row and column when available.
 
-CSV files must be UTF-8 text with one unique header row, no more than 256 KiB,
-and 1 to 100 data rows. Named columns must exist exactly. X values must be
-non-empty and at most 120 characters. Selected numeric cells must be finite
-numbers or empty; malformed rows and invalid values reject the tool call with
-the source row and column when available.
+Kandev displays visible x/y values and shortens ISO dates, large numbers, and
+long categories on the axes. Tooltips retain original labels and full values.
+Label series with units, for example `p95 (ms)`. A single series has an
+informational legend; multiple series have keyboard- and touch-operable local
+filters. Those filters change the current view, not the accepted result.
 
 A completed presentation persists with the conversation and replays after a
-reload. For a CSV chart, Kandev resolves selected columns during the tool call
-and persists only bounded labels plus numeric or `null` values. It never stores
-the raw CSV and never re-reads it during replay, so later edits or workspace
-cleanup do not change the accepted chart.
+reload. CSV results store bounded labels and numeric or `null` chart values in
+`resolved_charts`, and selected column definitions/literal cells in
+`resolved_tables`, addressed by exact `element_id`. The envelope uses
+`version: 2` and `catalog_version: 1` and stays within 64 KiB. Mixed sources
+resolve atomically; a source failure produces no partial report. They never store raw
+CSV or reread the source on replay. Later edits or workspace cleanup do not
+change the accepted chart or table.
 
-File-preview bytes do not persist: Kandev fetches a referenced file only after
-the user selects **Preview**, and **Open file** uses the existing desktop or
-mobile file viewer. If the task workspace later disappears, the presentation
-remains while that file block reports that its preview is unavailable.
+File bytes do not persist. Image file cards expand and load automatically when
+they appear in the conversation. Select **Hide preview** to collapse an image
+and **Preview** to reopen it. Click or tap the image to inspect it in a larger
+dialog, as with image attachments. Select **Actual size** to inspect image
+details and scroll within the dialog; select **Fit** to see the whole image
+again. Close the dialog to return to the preview. Each opening starts in Fit.
+To start image cards collapsed, turn off **Show image previews by default** in
+**Settings > Preferences > Appearance** and select **Save changes**. This
+preference is saved on this device and applies when a card has no retained
+Show/Hide choice. You can always select **Preview**, then click or tap the
+visible image to open the larger dialog.
+Other files load only after you select
+**Preview**. For a text preview, select **Hide preview**, then **Preview** to
+read the current workspace contents. **Open file** uses the native desktop or
+mobile viewer. If the workspace disappears, the report remains and the file
+preview reports that it is unavailable.
+
+Historical version 1 reports still render, including their stored CSV snapshots.
+New version 1 calls are rejected with guidance to refresh tool discovery and
+send the version 2 composition. Retained history does not enable the old
+`blocks` authoring format or its unused MIME hint in new calls.
+
+Catalog version 1 can gain optional capabilities without changing existing
+meaning. Breaking component or property changes require a new catalog version
+and an explicit historical-reader migration. Agents must follow the schema
+returned by the running Kandev instance.
 
 This is a Kandev-native MCP tool, not a portable MCP rich-content standard or an
 MCP App. Portable MCP content uses protocol-level content and resource types that
@@ -641,11 +986,53 @@ Every create response from both the MCP tool result and the REST response body a
 
 Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation; update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
+### Select repositories when you create a task
+
+`POST /api/v1/tasks` accepts an ordered `repositories` array. Each entry can use
+`repository_id`, `base_branch`, `checkout_branch`, `branch_policy_id`,
+`pr_number`, and `checkout_options`. Local execution also accepts the fresh
+branch fields `fresh_branch`, `new_branch_name`, `confirm_discard`, and
+`consented_dirty_files`. Use this form when a repository needs its own settings.
+
+For ID-only selections, send `repository_ids` instead. The server attaches the
+listed repositories in the given order, with the same defaults as entries that
+contain only `repository_id`.
+
+An empty array skips automatic project sources for a root task. A subtask with
+an empty repository list can still inherit its parent's repositories.
+
+Treat an omitted or `null` field as no selection. If neither field contains an
+array, a root task can use its project's repository sources and a subtask can
+inherit its parent's repositories. If one field contains an array, that array
+supplies the selection, subject to subtask inheritance when it is empty.
+
+Send only one of `repositories` or `repository_ids`. If both fields contain
+arrays, the server returns HTTP `400` with `creation_rejected: true`, even when
+one or both arrays are empty. A malformed ID list or a repository outside the
+workspace also rejects task creation.
+
+For normal deletion when workspace inspection fails, `delete_task_kandev`
+requires both `discard_worktree_changes: true` and
+`allow_unverified_workspace_changes: true`. These flags acknowledge possible
+loss of local changes. They do not bypass ownership checks for file removal.
+The response reports `cleanup_operation_ids`, `workspace_cleanup_pending`, and
+`runtime_stop_pending`. A successful task deletion can have pending cleanup.
+
+For an authorized task deletion, `delete_task_kandev` accepts the optional
+`workspace_cleanup` value `delete` (default) or `retain`. Use `retain` to delete
+the task and conversation while keeping workspace files and branches, including
+when workspace inspection fails. Existing task scope and authorization rules
+still apply. The response includes `workspace_cleanup`,
+`retention_operation_ids`, and `runtime_stop_pending`. A pending runtime stop
+does not mean the task deletion failed. Retained resources remain excluded from
+automatic cleanup and can continue to consume disk space or provider capacity.
+See [task deletion recovery](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
+| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, executors, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
 | Coordination                        | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
 | User interaction                    | Ask a structured question when the current agent/session supports it.                                                                                                                                                                                              |
 | Plans                               | Create, get, update, and delete the current task plan; apply exact edits; list, read, and restore revisions.                                                                                                                                                        |
@@ -673,6 +1060,10 @@ If one managed repository cannot be renamed or its snapshot cannot be persisted,
 accepted and the response reports the successful, preserved, and failed branch outcomes separately.
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
+
+GitHub rate coordination is internal to Kandev. The MCP surface does not expose
+a standalone rate snapshot tool. Workflow Sync documents the operation-local
+details returned when a sync fails because of a GitHub rate limit.
 
 ### Provider-scoped review automation tools
 
@@ -714,29 +1105,80 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The task must be repository-backed and have no active turn or tool call.
 - Exact normalized retries are idempotent. Contradictory duplicates, unsupported sources, or failed sources roll back the batch.
 
-`add_branch_to_task_kandev` is a Worktree-only compatibility path for adding one repository and branch during an active turn:
+`add_branch_to_task_kandev` adds one repository and branch during an active turn on host Worktree and Local executors:
 
 - It creates a sibling worktree, makes its parent the Files root, and rescans without restarting the agent or workspace processes.
+- Pass `worktree_path` to attach a linked Git worktree the agent already created inside the task workspace. Kandev validates the path, repository, and branch, attaches it in place, and never moves, recreates, or rewrites it. The response adds `adopted: true` and `already_attached: true` when an existing root is reused.
+- A `worktree_path` report on a Docker, SSH, Kubernetes, or Sprites executor is rejected with an actionable error. Detection never adopts paths outside the task workspace root, foreign repositories, submodules, detached `HEAD`, or a path the user removed from the task.
 - The response includes `worktree_path`, `task_workspace_path`, and `agent_cwd_changed: false`. Deferred pre-launch materialization omits both paths.
+- The running agent keeps its original working directory. Repository-relative chat links emitted before or after attachment therefore continue to open the original checkout under the new Files root. Explicit source prefixes such as `master/docs/guide.md` are preserved, and Kandev never searches sibling repositories for a duplicate filename.
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
 - Use `add_workspace_sources_kandev` for mixed source batches on an idle task. `update_repository_base_branch_kandev` changes Kandev's diff base, not a pull request's target.
+
+For eligible Local and Worktree tasks, source attachment can recreate a missing
+provider clone at its exact current workspace-managed destination. Live branch
+attachment supports this recovery on Worktree tasks. A valid managed clone is
+reused. Explicit local repositories retain their own paths, including when they
+carry provider metadata; a missing local folder is not replaced by a clone.
+
+A missing older managed clone requires explicit re-import. For a built-in
+provider, an authorized caller can create a separate registration with
+`POST /api/v1/workspaces/:id/repositories`: give it a new display name,
+`source_type: "provider"`, the same provider/host/owner/name, and no `local_path`.
+Select the returned repository ID for the new attachment. Keep the old
+registration for its existing tasks; this operation does not migrate their
+worktrees or recreate the old clone path. Invalid origins, foreign paths,
+unverifiable Git metadata and failed verified-path persistence reject the
+attachment. A verified shared clone may remain after a later task attachment
+failure so a retry can reuse it.
+
+A backend hosted in Docker uses its server filesystem for Local/Worktree tasks.
+That is different from a task using a Docker executor, which retains executor-side
+repository materialization. This recovery does not change remote executor routes.
+
 
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-When the response says that the workflow step changed, the calling turn is stale. The error identifies the launch and current steps, and a retry in that turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+The tool result separates acceptance from movement. `accepted: true` with a `pending` outcome means the signal is durably recorded. It does not prove that a transition committed, that the task entered the workflow step named Review, or that a reviewer received the handoff. A committed result includes the exact `transition` ledger and destination. A duplicate returns `already_signaled` with the retained `signal_id`, `source`, `outcome`, `transition` when one exists, and a `current` snapshot of the task route.
+
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. A later turn in the same entry can replace an unconsumed earlier signal with its own summary and handoff. An older turn stays tied to its original entry, including when the task leaves and returns to the same step. A native verification turn without another completion call leaves the accepted handoff unchanged.
+
+When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+
+Older turns or pending completion signals created without workflow-entry evidence are not backfilled. If completion cannot resolve the calling turn, have the user start a fresh turn in the current step before signaling again.
 
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
+
+### Transfer a task between workspaces
+
+`transfer_task_kandev` moves one existing task identity across workspaces without stopping its running session or recreating its task data. It is available to configuration and external human clients, plus a server-attested Office CEO session. Regular Kanban agents and automation coordinators do not receive it.
+
+The request must bind the exact source workspace, workflow, lane, and current `updated_at` generation. It also supplies the destination workspace and workflow, either a stable destination lane ID or one unique exact lane name, a unique `idempotency_key`, and `preservation_policy: "preserve-task-identity-v1"`. Source and destination workspaces must have the same owner. The destination lane must have the same name, inherited workflow prompt, effective agent, events, participant slate, completion behavior, and capacity policy as the source lane.
+
+Kandev transfers the task UUID atomically and preserves its sessions and active turn, task environments and worktrees, repositories and branches, plans and messages, parent/dependency relations, pull-request associations, status summaries, pending move state, and history. Workspace-owned projections are rebound in the same transaction. For an authorized Office transfer, the CEO runner seat maps to the destination workspace's unique active CEO while any live session continues unchanged; a coordinator may map only its own runner seat. Other workspace-scoped participant profiles, incompatible labels, workspace groups, Office projects or tree holds without a destination mapping, active cleanup, ambiguous lane mapping, a full destination lane, stale placement, or stale generation fail closed without moving the task.
+
+Every attempt writes a redacted audit row. A successful receipt includes the operation ID, source and destination placement, committed task generation, step-transition ID, session census, preservation counts and digest, idempotency key, and policy. It never contains prompts, message bodies, secrets, or repository credentials. An exact retry by the bound actor and session returns the stored receipt after current task and destination-workspace access is confirmed; it does not depend on mutable workflow or lane configuration. Reusing the key for a changed request or actor returns a conflict. Destination-bound Office authorization is replay-only and cannot create a fresh transfer.
+
+Configuration access is derived from the calling session's stored purpose. Office CEO authority requires an enabled, active profile. Lane equivalence also checks session start/end policy, session target, completion on entry, and the unclassified fallback veto. An unmapped workspace-owned record blocks its task's transfer; empty tables and records for other tasks do not. After a denied or failed attempt, that caller must supply a fresh idempotency key.
+
+A busy PostgreSQL transfer reservation returns a conflict and leaves the task
+unchanged. This can happen while another task's related rows are being written.
+After that operation finishes, manually retry the same unchanged request and
+idempotency key. Kandev does not automatically retry this conflict. Denied or
+failed attempts still require a fresh key as described above.
+
+The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
 
 <details>
 <summary>Office MCP and runtime CLI</summary>
 
 ## Office MCP and runtime CLI
 
-Office runs use a smaller MCP surface than regular task-mode sessions. The built-in Office server registers exactly these tools:
+Office runs use a smaller MCP surface than regular task-mode sessions. Core registers the required Office tools below; `show_rich_output_kandev` belongs to the optional Rich Output package, which is on by default. See [Built-in MCP packages](builtin-mcp-packages.md).
 
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
@@ -744,9 +1186,10 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `list_related_tasks_kandev`;
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`;
 - `show_rich_output_kandev`;
+- `transfer_task_kandev` is available only to a server-attested Office CEO session. It applies the atomic, audited transfer contract above.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. GitHub rate coordination stays internal, with operation-local details documented by features such as [Workflow Sync](workflow-sync.md). Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 
@@ -802,6 +1245,13 @@ $KANDEV_CLI kandev task create \
   --assignee "$AGENT_ID"
 ```
 
+`task create` also accepts two relation flags:
+
+- `--blocked-by ID,ID` makes the new task wait for the listed tasks. Each one must be the run's own task, a task in the run's scope, or a task the run's task can read (the run task's ancestors, descendants, siblings, or blockers). Anything else is refused without revealing whether the task exists. Blockers can only be declared on the task being created.
+- `--workspace-mode new_workspace` gives the new task its own workspace and worktree. `inherit_parent` (valid only with `--parent`) shares the parent's. Omit the flag to keep the default: a subtask shares its parent's workspace.
+
+`--priority`, `--workspace-group-id`, `--default-child-workspace`, and `--default-child-ordering` are not available to Office runs.
+
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
 An Office run can read tasks in its signed workspace with:
@@ -824,7 +1274,7 @@ Taskless launch and session creation remain separate Office scheduler work.
 
 ## Profile and executor MCP
 
-An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. The built-in Kandev task server is injected separately and cannot be replaced by a profile entry named `kandev`.
+An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. Kandev injects its [built-in packages](builtin-mcp-packages.md) separately. Their native server names, including `kandev`, are reserved and cannot be replaced by profile entries.
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
@@ -839,7 +1289,7 @@ The explorer has server, tool-list, and tool-detail levels. On desktop, the
 server list stays visible beside the active level. On touch devices, select a
 server to open its tool list. Select **Back to servers** to return.
 
-Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+Select a native package server after it serves `tools/list`. The tool list is sorted and
 scrolls independently from the explorer header. Each row shows the tool name
 and an estimated token value. Select a tool to open its description and
 arguments. Select **Back to tools** to return to the same list position.
@@ -863,7 +1313,10 @@ result, descriptions, schemas, or token estimates. The explorer still shows
 safe status metadata. The built-in Kandev server becomes **Connected** after
 protocol acceptance, either legacy MCP initialize or an accepted modern
 request. It becomes **Active** after it serves `tools/list`. Missing
-observation is not a failure. Red appears only for an explicit sanitized error.
+observation is not a failure. Delivered and unobserved rows use neutral styling.
+A configured name alone stays **Unknown**; another server's active report
+does not establish delivery. Saved-change notices remain independent of these
+connection states. Red appears only for an explicit sanitized error.
 
 The report is per Kandev session and execution. It stores only bounded,
 sanitized attachment facts. It does not store MCP headers, environment values,
@@ -897,7 +1350,15 @@ The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
 
 Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
 
-Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
+For valid notifications with no `id` and no `params._meta`, Kandev can use a supported
+modern protocol header to supply the missing version metadata. Accepted
+notifications return HTTP 202 with no body. This accommodates roots-change
+notifications sent when a client restores a conversation.
+
+Tool requests still require their normal metadata. Explicitly supplied metadata,
+duplicate JSON members, and noncanonical field spellings retain SDK validation.
+
+New managed agentctl instances negotiate helper-scoped native MCP routes during creation. Core routes use `/i/<helper-id>/mcp`, `/i/<helper-id>/sse`, and `/i/<helper-id>/message`; optional built-in package routes add `/packages/<package-id>` after the transport path. Older helpers that omit this mode continue to use the bare agentctl routes. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 
 ### Configured third-party MCP servers
 
@@ -912,9 +1373,33 @@ External MCP exposes tools in these groups:
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
-- tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
+- tasks: list, create, move, delete, archive, update task fields and state, and change task priority; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
+
+### Set task priority through MCP
+
+`create_task_kandev` accepts the optional `priority` values `critical`, `high`,
+`medium`, and `low`. If you omit it, Kandev uses `medium`, including for a
+subtask whose parent has a different priority.
+
+External MCP, task MCP, and automation MCP expose `update_task_kandev`. Send
+`task_id` and `priority` to change priority without changing task state:
+
+```json
+{ "task_id": "task-uuid", "priority": "high" }
+```
+
+The update field accepts the same four exact values. Omit `priority` to leave
+the stored value unchanged. Empty, padded, uppercase, and unknown values are
+rejected. External updates use the authenticated caller's existing workspace
+permissions.
+
+If a `create_task_kandev` retry uses an `external_id` that already belongs to a
+task, Kandev returns that task with its current priority. A later priority in
+the retry does not change it. Call `update_task_kandev` to revise the task.
+Configuration MCP keeps its state-only task update, and Office task sessions do
+not receive the generic task update tool.
 
 ### Agent-accessible settings
 
@@ -947,6 +1432,39 @@ at runtime instead of assuming that a domain's full schema is present in the
 tool definition. Existing lifecycle tools and compatibility MCP tools remain
 available where documented.
 
+Repository clone URLs use the same tools. Read the saved value with
+`get_settings_kandev`, then preview one replacement without writing:
+
+```json
+{
+  "target": {
+    "resource_type": "repository",
+    "resource_id": "repository-id",
+    "workspace_id": "workspace-id"
+  },
+  "changes": { "remote_url": "git@github.com:acme/widget.git" },
+  "options": { "validate_only": true }
+}
+```
+
+The result carries a `validation` object with the saved and effective URLs,
+provider identity, and `validation_scope`. Repeat the same call without
+`options`, or with `"validate_only": false`, to commit the change. A committed
+update republishes `settings.remote_url` and a `repository.updated` event. With
+`validate_only` set to `true`, the option accepts only a repository target with
+exactly one `remote_url` change. With `validate_only` set to `false`, ordinary
+repository settings updates and combined URL/settings or binding writes remain
+available. Unknown options, non-boolean values, mixed preview changes, and null
+or blank URLs are rejected without a write.
+
+Built-in GitHub, GitLab, and Azure DevOps providers verify the credential-free
+locator against the saved provider, host, namespace or project, and repository
+name. An active plugin provider must instead return its exact HTTPS clone URL
+and matching immutable descriptor. The preview is advisory: every update repeats
+validation. The repair changes registration data only. It does not rewrite an
+existing checkout or restart a task. See
+[Repair a registered clone URL](git-operations.md#repair-a-registered-clone-url).
+
 `export_workflow_kandev` takes `workflow_id` and returns one version 2
 `kandev_workflow` JSON document with explicit step completion booleans. It omits
 instance IDs and timestamps. Pass its JSON text unchanged as `document` to
@@ -961,7 +1479,7 @@ contains summaries only, so it does not include prompt content:
 ```json
 {
   "shared_prompts": [
-    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+    { "name": "code-review", "builtin": true, "allow_agent_edits": false, "content_bytes": 1234 }
   ],
   "total": 1
 }
@@ -974,9 +1492,41 @@ Use `get_shared_prompt_kandev` with one saved prompt name to read its full conte
 ```
 
 Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
-`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+`name`, `content`, `builtin`, `allow_agent_edits`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
 internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
-only read saved prompts. They do not create, update, delete, or expand `@name` references.
+only read saved prompts and do not expand `@name` references.
+
+### Create or update a saved prompt
+
+Configuration and external MCP clients expose `create_shared_prompt_kandev` and
+`update_shared_prompt_kandev`. Both require `org.config.manage` and accept:
+
+```json
+{ "name": "review-policy", "content": "Check correctness and test coverage." }
+```
+
+Creation fails if the exact name already exists. Update replaces the full content
+of an existing, case-sensitive name and cannot rename it. Names allow up to 512
+UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
+returns the same saved-prompt fields as `get_shared_prompt_kandev`.
+
+**Built-in prompts cannot be changed by agents.** Every custom prompt can be
+updated through the existing authorized MCP write tools, including prompts
+created in Settings and prompts that were previously marked as protected. The
+`allow_agent_edits` response field remains for compatibility: it is `true` for
+custom prompts and `false` for built-ins. It does not control a stored permission.
+Generic `update_settings_kandev` writes can change custom prompt names and
+content, but cannot change agent-edit eligibility.
+
+Configuration assistants should create or update a shared prompt only when the
+operator explicitly requests or agrees to the change. The backend does not
+verify that request or agreement. Authorized prompt writes require
+`org.config.manage`. Read the saved prompt back after writing it. Apply requested
+shared prompt changes before changing workflow steps that inject them, then read
+back both the prompts and steps. Successful writes refresh open prompt settings
+pages and affect future `@name` expansions. They preserve unsaved editor drafts
+and do not rewrite instructions already captured by a running turn.
+There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
 
@@ -996,6 +1546,30 @@ through results oldest-first.
 Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`, `age_seconds`,
 `context`, and an ordered `questions` array; each question carries `question_id`, `title`,
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
+
+The bundle's `pending_id` is the durable identity of the visible question group. If the request
+carrying an `ask_user_question_kandev` call is interrupted or times out while the call is waiting,
+the question remains durably recorded. It stays visible and answerable while its bundle belongs to
+the session's current turn and the session is non-terminal. When the agent re-sends the same
+JSON-RPC request (same request id, normalized questions, and context) within the same MCP session,
+Kandev maps the retry to the bundle its interrupted call created: no second question is published,
+the bundle is marked attached again if the interruption had detached it, and a previously recorded
+answer, rejection, or cancellation is reconciled instead of opening another wait. Reusing a
+completed request id for different question content creates a new bundle. A superseded bundle or a
+bundle on a completed, failed, or cancelled session is reported as no longer active.
+
+Registration and answer delivery use one atomic handoff. If an answer commits during retry
+reconciliation, it either reaches the re-registered tool waiter or continues through detached
+delivery, never both. When detached delivery won first, the retry reports that delivery is already
+in progress instead of returning a duplicate tool response. A new MCP session (for example after a
+stdio agent restarts or a client drops its `Mcp-Session-Id`) starts fresh: a re-sent request id is a
+new question there. A call with a new request id creates a distinct bundle, even when its questions
+match an existing pending bundle. Calls without a transport retry identity retain the existing
+pending-question deduplication behavior.
+
+A provisional answer marked delivery-pending is not a confirmed outcome. An exact retry joins the
+live delivery confirmation and returns only after persistence and the local watchdog notifier
+complete. If confirmation fails, the retry reports an error and the bundle is restored when safe.
 
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:
@@ -1091,13 +1665,13 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 
 ## Troubleshooting
 
-- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.
+- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation or after its expression or effective timezone changes, not immediately.
 - **No GitHub push or CI runs:** connect a workspace GitHub App whose installation is subscribed to `push`/`check_run` events, reinstall a pre-existing App so it receives them, and select explicit repositories (an empty repository list is not evaluated).
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.
 - **Run fails before a task starts:** select valid non-passthrough agent and non-local executor profiles, and add/select a repository.
 - **Run fails on permission:** an automation run cannot answer prompts. Use a safely constrained profile that does not require one, or reply to the run afterward and let the agent continue.
-- **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are not rejected; the suffix is silently discarded, so inspect the retained trigger data.
+- **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are rejected with `413`; inspect the configured JSON pointers and retained trigger data for missing fields.
 - **Missing template data:** inspect run trigger data and the dot path; unresolved placeholders are intentionally removed.
 - **Task MCP tool missing:** confirm this is a Kandev task session, the agent supports the injection strategy, and the operation belongs to task rather than external mode.
 - **One agent did not load MCP tools:** inspect that session's toolbar report. A delivered/unverified row is evidence that ACP or passthrough configuration reached the agent, not proof that the agent contacted the server. For deeper developer investigation, run `acpdbg mcp-probe` against the agent and inspect its JSONL.

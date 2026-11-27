@@ -12,9 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
@@ -30,44 +33,63 @@ type ControlClient struct {
 	httpClient *http.Client
 	logger     *logger.Logger
 	authToken  string
+	// applyToken, when set, updates the credential on a leased endpoint transport,
+	// which must not be replaced.
+	applyToken   func(string)
+	runtimeGuard *runtimeBindingGuard
 }
+
+var ErrControlCredentialsRejected = errors.New("agentctl control credentials rejected")
+
+const createInstanceHTTPTimeout = 120 * time.Second
 
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url,omitempty"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name               string                          `json:"name"`
+	URL                string                          `json:"url,omitempty"`
+	Type               string                          `json:"type,omitempty"`
+	Command            string                          `json:"command,omitempty"`
+	Args               []string                        `json:"args,omitempty"`
+	Env                map[string]string               `json:"env,omitempty"`
+	Headers            map[string]string               `json:"headers,omitempty"`
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
-	ID                     string              `json:"id,omitempty"`
-	WorkspacePath          string              `json:"workspace_path"`
-	AgentCommand           string              `json:"agent_command,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"`       // Protocol adapter to use (currently "acp")
-	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
-	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
-	Env                    map[string]string   `json:"env,omitempty"`
-	AutoStart              bool                `json:"auto_start,omitempty"`
-	AutoApprovePermissions *bool               `json:"auto_approve_permissions,omitempty"`
-	McpServers             []McpServerConfig   `json:"mcp_servers,omitempty"`
-	SessionID              string              `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
-	TaskID                 string              `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion     bool                `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
-	AssumeMcpSse           bool                `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
-	AssumeMcpHttp          bool                `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
-	McpMode                string              `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders           []string            `json:"mcp_providers,omitempty"`        // Supported review-automation providers
-	McpProfile             *mcpprofile.Context `json:"mcp_profile,omitempty"`          // Backend-owned typed MCP tool profile
+	ID                         string              `json:"id,omitempty"`
+	ScopedMCPRoutes            bool                `json:"scoped_mcp_routes,omitempty"`
+	WorkspacePath              string              `json:"workspace_path"`
+	AgentCommand               string              `json:"agent_command,omitempty"`
+	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled      bool                `json:"codex_app_server_enabled,omitempty"`
+	AgentType                  string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
+	WorkspaceFlag              string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
+	Env                        map[string]string   `json:"env,omitempty"`
+	AutoStart                  bool                `json:"auto_start,omitempty"`
+	AutoApprovePermissions     *bool               `json:"auto_approve_permissions,omitempty"`
+	McpServers                 []McpServerConfig   `json:"mcp_servers,omitempty"`
+	SessionID                  string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
+	TaskID                     string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion         bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions          bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
+	CopilotNativeSessionEvents bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
+	AssumeMcpSse               bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
+	AssumeMcpHttp              bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
+	McpMode                    string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders               []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
+	McpProfile                 *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
 	// — notably opencode acp.
 	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+	// OfflineBudgetMinutes is the longest the instance runs without a stable
+	// backend connection. Launch always sets it; an agentctl without the
+	// capability ignores the field.
+	OfflineBudgetMinutes *int `json:"offline_budget_minutes,omitempty"`
 
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty). Propagated from
@@ -79,6 +101,10 @@ type CreateInstanceRequest struct {
 	// after initialize. Resolved by the backend from the launching agent
 	// profile's OpenAI-compatible provider fields.
 	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
+
+	// AuthPolicy selects a provider-specific authentication method after
+	// initialize. It is an internal child-process contract.
+	AuthPolicy *acpcompat.AuthPolicy `json:"acp_auth_policy,omitempty"`
 
 	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
 	// built-in tool names for an agent that appends the server name itself.
@@ -99,23 +125,47 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// WorkspaceExcludedRoots are detached checkouts that discovery must skip.
+	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
+	// TaskWorkspaceRoot is the containment boundary for linked-worktree
+	// discovery. Empty falls back to the agent workspace.
+	TaskWorkspaceRoot string `json:"task_workspace_root,omitempty"`
+	// DurableJournalPath is an owner-scoped path on retained executor storage.
+	// Empty means the instance uses legacy delivery semantics.
+	DurableJournalPath string `json:"durable_journal_path,omitempty"`
+	// DeliveryStreamID is the generation-scoped stream identity retained across
+	// replacement of the agentctl process.
+	DeliveryStreamID string `json:"delivery_stream_id,omitempty"`
+	// DeliveryIncarnationID fences events to the owning Kandev session lifetime.
+	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
+	// DeliveryHarnessGeneration fences events to one native harness conversation.
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+
+	// OpenCodePluginRuntime is the resolved OpenCode family/source/version for
+	// this launch. Nil keeps the integration off for non-OpenCode launches.
+	OpenCodePluginRuntime *agentctltypes.OpenCodePluginRuntime `json:"opencode_plugin_runtime,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
-	ID   string `json:"id"`
-	Port int    `json:"port"`
+	ID              string `json:"id"`
+	Port            int    `json:"port"`
+	ScopedMCPRoutes bool   `json:"scoped_mcp_routes"`
 }
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
-	ID            string            `json:"id"`
-	Port          int               `json:"port"`
-	Status        string            `json:"status"`
-	WorkspacePath string            `json:"workspace_path"`
-	AgentCommand  string            `json:"agent_command"`
-	Env           map[string]string `json:"env,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ACPProtocolVersion uint16            `json:"acp_protocol_version,omitempty"`
+	ID                 string            `json:"id"`
+	ScopedMCPRoutes    bool              `json:"scoped_mcp_routes"`
+	Port               int               `json:"port"`
+	LeaseGeneration    uint64            `json:"lease_generation"`
+	ListenerActive     bool              `json:"listener_active"`
+	Status             string            `json:"status"`
+	WorkspacePath      string            `json:"workspace_path"`
+	AgentCommand       string            `json:"agent_command"`
+	Env                map[string]string `json:"env"`
+	CreatedAt          time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task ID this instance was created for, if any.
@@ -123,11 +173,15 @@ type InstanceInfo struct {
 	// WorkspaceSourceRoots is the instance's live, current source-root
 	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
 	// "workspace source roots" reconstruction row).
-	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots"`
 	// ProviderSessionID is the live agent CLI's own session identity, read
 	// back from the adopted instance (AC-EXECUTORS-SURVIVAL-002.14's
 	// "provider session identity" reconstruction row).
 	ProviderSessionID string `json:"provider_session_id,omitempty"`
+	// CopilotNativeSessionEvents reports whether the adopted adapter actually
+	// subscribed to the vendor's native session-event stream. Older peers omit
+	// it, which remains a truthful "not subscribed".
+	CopilotNativeSessionEvents bool `json:"copilot_native_session_events,omitempty"`
 }
 
 // ControlClientOption configures optional ControlClient settings.
@@ -152,10 +206,24 @@ func NewControlClient(host string, port int, log *logger.Logger, opts ...Control
 	for _, opt := range opts {
 		opt(c)
 	}
-	if c.authToken != "" {
-		c.httpClient.Transport = &authTransport{token: c.authToken}
-	}
+	c.installTransportLocked()
 	return c
+}
+
+// Close releases the client's idle connections.
+func (c *ControlClient) Close() {
+	c.httpClient.CloseIdleConnections()
+}
+
+func (c *ControlClient) installTransportLocked() {
+	var transport http.RoundTripper
+	if c.authToken != "" {
+		transport = &authTransport{token: c.authToken}
+	}
+	if c.runtimeGuard != nil {
+		transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: transport}
+	}
+	c.httpClient.Transport = transport
 }
 
 // AuthToken returns the current auth token. Used to propagate the token
@@ -172,7 +240,11 @@ func (c *ControlClient) SetAuthToken(token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.authToken = token
-	c.httpClient.Transport = &authTransport{token: token}
+	if c.applyToken != nil {
+		c.applyToken(token)
+		return
+	}
+	c.installTransportLocked()
 }
 
 // Handshake performs the bootstrap handshake with agentctl.
@@ -272,6 +344,9 @@ func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapsh
 
 // CreateInstance creates a new agent instance.
 func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceRequest) (*CreateInstanceResponse, error) {
+	if err := c.requireBuiltinPackages(ctx, req); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -283,7 +358,14 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	// Instance creation starts its process manager and workspace trackers before
+	// responding, so it needs a longer bound than ordinary control requests.
+	// Copy under c.mu: credential rotation replaces the transport under it.
+	c.mu.Lock()
+	createClient := *c.httpClient
+	c.mu.Unlock()
+	createClient.Timeout = createInstanceHTTPTimeout
+	resp, err := createClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}
@@ -377,8 +459,9 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 // IdentityInfo is the response from GET /identity: installation identity and
 // the capability set this control server advertises.
 type IdentityInfo struct {
-	ServerIdentity string   `json:"server_identity"`
-	Capabilities   []string `json:"capabilities"`
+	BuiltinMCPCatalogVersion int      `json:"builtin_mcp_catalog_version"`
+	ServerIdentity           string   `json:"server_identity"`
+	Capabilities             []string `json:"capabilities"`
 	// UnownedPeriodMS is the reporting server's own resolved unowned period
 	// in milliseconds (AC-EXECUTORS-CONTROL-OWNERSHIP-003.2/.7) -- the value
 	// that server itself enforces, which an adopting backend's local config
@@ -390,8 +473,9 @@ type IdentityInfo struct {
 // ServerDetails carries the control-server values an adopting backend
 // records but that are withheld from the unauthenticated identity endpoint.
 type ServerDetails struct {
-	HomeDir           string `json:"home_dir"`
-	DiagnosticLogPath string `json:"diagnostic_log_path"`
+	HomeDir           string                    `json:"home_dir"`
+	DiagnosticLogPath string                    `json:"diagnostic_log_path"`
+	ProcessIdentity   *processidentity.Identity `json:"process_identity,omitempty"`
 }
 
 // GetIdentity fetches the control server's identity and capability set. It
@@ -518,6 +602,9 @@ func (c *ControlClient) GetServerDetails(ctx context.Context) (*ServerDetails, e
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, fmt.Errorf("%w: status %d", ErrControlCredentialsRejected, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("failed to get server details: status %d", resp.StatusCode)
 	}
 

@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/workspaces/requirements/improve-kandev.md
+requirements:
+  - REQ-WORKSPACES-IMPROVE-KANDEV-001
+system_design:
+  - ../../specs/workspaces/system-design/improve-kandev.md
 created: 2026-08-01
 status: implemented
 ---

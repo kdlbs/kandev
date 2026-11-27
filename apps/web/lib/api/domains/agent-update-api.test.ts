@@ -6,9 +6,12 @@ vi.mock("@/lib/config", () => ({
 
 import {
   listAgentUpdateStatuses,
+  setAgentAutomaticUpdates,
   previewAgentUpdate,
+  previewAgentUpdateToFamily,
   previewAgentUpdateUseDefault,
   updateAgent,
+  updateAgentToFamily,
   updateAgentUseDefault,
 } from "./agent-update-api";
 
@@ -50,11 +53,62 @@ describe("managed runtime update API", () => {
   });
 
   it("sends only the exact target version in the update body", async () => {
-    await updateAgent(AGENT_NAME, TARGET_VERSION);
+    await updateAgent(AGENT_NAME, { update_mode: "pinned", target_version: TARGET_VERSION });
 
     const [, init] = fetchSpy.mock.calls[0] ?? [];
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION }));
+  });
+
+  it("echoes reviewed runtime evidence with the exact target", async () => {
+    const reviewed_runtime = {
+      runtime_id: "npm:opencode-ai",
+      package: "opencode-ai",
+      current_version: "1.18.4",
+      effective_version: "1.18.4",
+      active_version: "1.18.4",
+      family: "v1",
+      source: "managed",
+      runtime_revision: 4,
+    };
+    await updateAgent(AGENT_NAME, {
+      update_mode: "pinned",
+      target_version: TARGET_VERSION,
+      reviewed_runtime,
+    });
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION, reviewed_runtime }));
+  });
+
+  it("previews an explicit OpenCode family target", async () => {
+    await previewAgentUpdateToFamily(AGENT_NAME, "v2", "2.0.18", { cache: "no-store" });
+
+    const [input] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(input)).toBe(
+      `${API_BASE_URL}/api/v1/agent-update/${AGENT_NAME}/preview?target_family=v2&target_version=2.0.18`,
+    );
+  });
+
+  it("sends the preview revision with an explicit family migration", async () => {
+    await updateAgentToFamily(AGENT_NAME, "2.0.18", "v2", 7);
+
+    const [, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(init?.body).toBe(
+      JSON.stringify({
+        target_version: "2.0.18",
+        target_family: "v2",
+        expected_runtime_revision: 7,
+      }),
+    );
+  });
+
+  it("submits a harness-owned update with an exact empty JSON body", async () => {
+    await updateAgent("omp-acp", { update_mode: "self_update" });
+    const [input, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/omp-acp`);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe("{}");
   });
 
   it("previews returning to the Kandev default with a structural query", async () => {
@@ -82,4 +136,12 @@ describe("managed runtime update API", () => {
     expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/status`);
     expect(init?.cache).toBe("no-store");
   });
+});
+
+it("persists explicit runtime consent through the protected mutation client", async () => {
+  await setAgentAutomaticUpdates("gemini", true);
+  const [input, init] = fetchSpy.mock.calls[0] ?? [];
+  expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/gemini/automatic`);
+  expect(init?.method).toBe("PATCH");
+  expect(init?.body).toBe(JSON.stringify({ enabled: true }));
 });

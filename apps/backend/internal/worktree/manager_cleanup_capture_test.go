@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -120,6 +121,136 @@ func TestCaptureCleanupHeadOIDs_MissingWorktree(t *testing.T) {
 		if _, err := os.Lstat(wt.Path); err == nil && wt.ID != "healthy" {
 			t.Errorf("capture unexpectedly created path for %q", wt.ID)
 		}
+	}
+}
+
+func TestCaptureCleanupHeadOIDs_WaitsForWorktreeRemoval(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "checkout")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+
+	mgr := newCaptureTestManager(t)
+	releasePath, err := acquireWorktreeTargetPath(context.Background(), worktreePath)
+	if err != nil {
+		t.Fatalf("acquire cleanup path lock: %v", err)
+	}
+	defer releasePath()
+	repoLock := mgr.getRepoLock(repoPath)
+	repoLock.Lock()
+	repoLockHeld := true
+	defer func() {
+		if repoLockHeld {
+			repoLock.Unlock()
+			mgr.releaseRepoLock(repoPath)
+		}
+	}()
+
+	type captureResult struct {
+		identities map[string]string
+		err        error
+	}
+	result := make(chan captureResult, 1)
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		identities, captureErr := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+			ID:             "worktree-being-removed",
+			RepositoryPath: repoPath,
+			Path:           worktreePath,
+			Branch:         "feature/pr-branch",
+		}})
+		result <- captureResult{identities: identities, err: captureErr}
+	}()
+
+	awaitTargetPathLockReference(t, worktreePath, 2, returned)
+	runGit(t, repoPath, "worktree", "remove", "--force", worktreePath)
+	repoLock.Unlock()
+	mgr.releaseRepoLock(repoPath)
+	repoLockHeld = false
+	releasePath()
+
+	captured := <-result
+	if captured.err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() error after cleanup: %v", captured.err)
+	}
+	if got := captured.identities["worktree-being-removed"]; got != wantOID {
+		t.Fatalf("captured identity = %q, want branch identity %q", got, wantOID)
+	}
+}
+
+func awaitTargetPathLockReference(
+	t *testing.T,
+	path string,
+	wantRefs int,
+	returned <-chan struct{},
+) {
+	t.Helper()
+
+	key, err := normalizedWorktreeTargetPath(path)
+	if err != nil {
+		t.Fatalf("normalize target path: %v", err)
+	}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		worktreeTargetPathLocks.mu.Lock()
+		entry := worktreeTargetPathLocks.entries[key]
+		refs := 0
+		if entry != nil {
+			refs = entry.refs
+		}
+		worktreeTargetPathLocks.mu.Unlock()
+		if refs >= wantRefs {
+			return
+		}
+		select {
+		case <-returned:
+			t.Fatal("CaptureCleanupHeadOIDs() returned before acquiring the cleanup path lock")
+		case <-timeout.C:
+			t.Fatalf("capture did not reference target path lock; refs = %d, want at least %d", refs, wantRefs)
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestCaptureCleanupHeadOIDs_PathRemovedDuringInspection(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	worktreePath := filepath.Join(t.TempDir(), "checkout")
+	runGit(t, repoPath, "worktree", "add", worktreePath, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, worktreePath, "rev-parse", "HEAD"))
+
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("locate git: %v", err)
+	}
+	scriptDir := writeFakeGitScript(t, `
+if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "--verify" ]; then
+  rm -rf "$PWD"
+  exit 128
+fi
+exec "${KD_REAL_GIT:?}" "$@"
+`)
+	t.Setenv("KD_REAL_GIT", gitPath)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	mgr := newCaptureTestManager(t)
+
+	got, err := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+		ID:             "disappearing-checkout",
+		RepositoryPath: repoPath,
+		Path:           worktreePath,
+		Branch:         "feature/pr-branch",
+	}})
+	if err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() unexpected error: %v", err)
+	}
+	if got["disappearing-checkout"] != wantOID {
+		t.Fatalf("captured identity = %q, want %q", got["disappearing-checkout"], wantOID)
+	}
+	if _, err := os.Lstat(worktreePath); err == nil {
+		t.Fatalf("worktree path %q still exists after simulated concurrent removal", worktreePath)
 	}
 }
 
@@ -298,4 +429,80 @@ func newCaptureTestManager(t *testing.T) *Manager {
 		t.Fatalf("NewManager failed: %v", err)
 	}
 	return mgr
+}
+
+// A checkout directory that survives without its .git file must not let Git
+// discover an ancestor repository: the archive identity comes from the
+// worktree's branch, not from whatever repository encloses the directory.
+func TestCaptureCleanupHeadOIDs_CheckoutWithoutGitMetadataUsesBranch(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	branch := "feature/orphaned-checkout"
+	runGit(t, repoPath, "branch", branch, "main")
+	mainOID := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+
+	enclosing := initGitRepoForWorktreeTest(t)
+	if err := os.WriteFile(filepath.Join(enclosing, "other.txt"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, enclosing, "add", "other.txt")
+	runGit(t, enclosing, "commit", "-m", "enclosing repository commit")
+	enclosingOID := strings.TrimSpace(runGit(t, enclosing, "rev-parse", "HEAD"))
+	if enclosingOID == mainOID {
+		t.Fatal("test repositories must have distinct HEADs")
+	}
+
+	checkout := filepath.Join(enclosing, "orphaned-checkout")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+		ID:             "orphaned",
+		RepositoryPath: repoPath,
+		Path:           checkout,
+		Branch:         branch,
+	}})
+	if err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() unexpected error: %v", err)
+	}
+	if got["orphaned"] != mainOID {
+		t.Fatalf("identity = %q, want the branch OID %q (enclosing repository HEAD is %q)", got["orphaned"], mainOID, enclosingOID)
+	}
+}
+
+// The presence check cannot stop an external actor from removing .git before
+// Git starts. The HEAD inspection itself must then fail rather than discover
+// the enclosing repository, so the caller falls back to the branch identity.
+func TestRunCheckoutLocalGitInspect_DoesNotDiscoverEnclosingRepository(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	mgr := newCaptureTestManager(t)
+
+	linked := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repoPath, "worktree", "add", linked, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, linked, "rev-parse", "HEAD"))
+	output, err := mgr.runCheckoutLocalGitInspect(context.Background(), linked, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("linked worktree inspection failed: %v (%s)", err, output)
+	}
+	if got := strings.TrimSpace(output); got != wantOID {
+		t.Fatalf("linked worktree HEAD = %q, want %q", got, wantOID)
+	}
+
+	enclosing := initGitRepoForWorktreeTest(t)
+	enclosingOID := strings.TrimSpace(runGit(t, enclosing, "rev-parse", "HEAD"))
+	checkout := filepath.Join(enclosing, "metadata-removed")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output, err = mgr.runCheckoutLocalGitInspect(context.Background(), checkout, "rev-parse", "--verify", "HEAD^{commit}")
+	if err == nil {
+		t.Fatalf("inspection without checkout .git succeeded with %q (enclosing HEAD %q), want an error", strings.TrimSpace(output), enclosingOID)
+	}
 }

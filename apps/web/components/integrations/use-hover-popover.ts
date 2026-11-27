@@ -212,6 +212,7 @@ export function useHoverPopover({
   const onOpenChange = useCallback(
     (next: boolean) => {
       if (next) {
+        clearOpen();
         setOpen(true);
         return;
       }

@@ -40,6 +40,12 @@ func newTestControlClient(t *testing.T, srv *httptest.Server, opts ...ControlCli
 	return NewControlClient(host, port, newTestLogger(), opts...)
 }
 
+type controlRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f controlRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestNewControlClient_BuildsBaseURLFromHostAndPort(t *testing.T) {
 	c := NewControlClient("agentctl.internal", 7777, newTestLogger())
 	if c.baseURL != "http://agentctl.internal:7777" {
@@ -464,6 +470,107 @@ func TestCreateInstance_FailureModes(t *testing.T) {
 	}
 }
 
+func TestCreateInstance_UsesLongerHTTPTimeout(t *testing.T) {
+	const want = 120 * time.Second
+	var remaining time.Duration
+	c := NewControlClient("agentctl.test", 80, newTestLogger())
+	c.httpClient.Transport = controlRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			t.Fatal("request has no deadline")
+		}
+		remaining = time.Until(deadline)
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"id":"inst-1","port":41234}`)),
+			Request:    req,
+		}, nil
+	})
+
+	if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "inst-1", WorkspacePath: "/workspace"}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if remaining < want-time.Second || remaining > want {
+		t.Errorf("CreateInstance deadline had %v remaining, want close to %v", remaining, want)
+	}
+	if c.httpClient.Timeout != 30*time.Second {
+		t.Errorf("shared timeout = %v after CreateInstance, want 30s", c.httpClient.Timeout)
+	}
+}
+
+func TestCreateInstance_CallerDeadlineStillApplies(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	resp, err := newTestControlClient(t, srv).CreateInstance(ctx, &CreateInstanceRequest{WorkspacePath: "/w"})
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "failed to create instance") {
+		t.Fatalf("error = %v, want wrapped context.DeadlineExceeded", err)
+	}
+	if resp != nil {
+		t.Errorf("response = %+v, want nil on failure", resp)
+	}
+}
+
+func TestCreateInstance_SendsControlAuthToken(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"inst-1","port":41234}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newTestControlClient(t, srv, WithControlAuthToken("control-token"))
+	if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if auth != "Bearer control-token" {
+		t.Errorf("Authorization = %q, want Bearer control-token", auth)
+	}
+}
+
+// TestCreateInstance_CopiesClientUnderRotation is meaningful under -race:
+// credential rotation replaces the transport while creation copies the client.
+func TestCreateInstance_CopiesClientUnderRotation(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	t.Cleanup(srv.Close)
+	c := newTestControlClient(t, srv, WithControlAuthToken("initial-token"))
+
+	done := make(chan struct{})
+	rotated := make(chan struct{})
+	go func() {
+		defer close(rotated)
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+				c.SetAuthToken(fmt.Sprintf("token-%d", i))
+			}
+		}
+	}()
+	for range 20 {
+		if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"}); err != nil {
+			close(done)
+			<-rotated
+			t.Fatalf("CreateInstance: %v", err)
+		}
+	}
+	close(done)
+	<-rotated
+}
+
 func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusNoContent} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -577,6 +684,33 @@ func TestGetInstance_DecodesEveryField(t *testing.T) {
 	wantCreated := time.Date(2026, 8, 10, 12, 34, 56, 0, time.UTC)
 	if !info.CreatedAt.Equal(wantCreated) {
 		t.Errorf("CreatedAt = %v, want %v", info.CreatedAt, wantCreated)
+	}
+	if info.LeaseGeneration != 0 || info.ListenerActive {
+		t.Errorf("missing lease diagnostics = generation %d, active %t; want zero values for an older server", info.LeaseGeneration, info.ListenerActive)
+	}
+}
+
+func TestControlClientInstanceLeaseDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{
+		"id":"inst-lease","port":41001,"status":"running",
+		"workspace_path":"/workspace/lease","task_id":"task-lease",
+		"session_id":"session-lease","workspace_source_roots":["/workspace/lease"],
+		"provider_session_id":"provider-session-lease",
+		"lease_generation":17,"listener_active":true
+	}`))
+	t.Cleanup(srv.Close)
+
+	info, err := newTestControlClient(t, srv).GetInstance(context.Background(), "inst-lease")
+	if err != nil {
+		t.Fatalf("GetInstance: %v", err)
+	}
+	if info.LeaseGeneration != 17 || !info.ListenerActive {
+		t.Fatalf("lease diagnostics = generation %d, active %t; want 17 and true", info.LeaseGeneration, info.ListenerActive)
+	}
+	if info.TaskID != "task-lease" || info.SessionID != "session-lease" ||
+		len(info.WorkspaceSourceRoots) != 1 || info.WorkspaceSourceRoots[0] != "/workspace/lease" ||
+		info.ProviderSessionID != "provider-session-lease" {
+		t.Fatalf("existing instance metadata was lost: %+v", info)
 	}
 }
 

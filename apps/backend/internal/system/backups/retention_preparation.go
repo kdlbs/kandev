@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
@@ -28,10 +28,14 @@ type RetentionReceipt struct {
 // CreateForRetention holds maintenance admission through snapshot verification
 // and publication. It does not authorize retention or prune existing backups.
 func (s *Service) CreateForRetention(ctx context.Context) (RetentionReceipt, error) {
-	return s.createSnapshot(ctx, true)
+	return s.createSnapshotWithSources(ctx, true, true)
 }
 
 func (s *Service) createSnapshot(ctx context.Context, verify bool) (RetentionReceipt, error) {
+	return s.createSnapshotWithSources(ctx, verify, true)
+}
+
+func (s *Service) createSnapshotWithSources(ctx context.Context, verify, publishSources bool) (RetentionReceipt, error) {
 	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
 	if err != nil {
 		return RetentionReceipt{}, err
@@ -43,10 +47,10 @@ func (s *Service) createSnapshot(ctx context.Context, verify bool) (RetentionRec
 	if err := s.ensureSQLiteRestore(); err != nil {
 		return RetentionReceipt{}, err
 	}
-	return s.writeSnapshot(ctx, verify)
+	return s.writeSnapshot(ctx, verify, publishSources)
 }
 
-func (s *Service) writeSnapshot(ctx context.Context, verify bool) (RetentionReceipt, error) {
+func (s *Service) writeSnapshot(ctx context.Context, verify, publishSources bool) (RetentionReceipt, error) {
 	if err := s.ensureBackupsDir(); err != nil {
 		return RetentionReceipt{}, err
 	}
@@ -57,7 +61,7 @@ func (s *Service) writeSnapshot(ctx context.Context, verify bool) (RetentionRece
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
 	path := filepath.Join(stage, "snapshot.db")
-	size, err := persistence.SnapshotSQLiteContext(ctx, s.pool.Writer(), path)
+	size, err := persistence.CopySQLiteSnapshotContext(ctx, s.pool.Reader(), path)
 	if err != nil {
 		return RetentionReceipt{}, err
 	}
@@ -71,12 +75,25 @@ func (s *Service) writeSnapshot(ctx context.Context, verify bool) (RetentionRece
 			return RetentionReceipt{}, err
 		}
 	}
+	if publishSources && digest == "" {
+		digest, err = verifySnapshot(ctx, path)
+		if err != nil {
+			return RetentionReceipt{}, err
+		}
+	}
 	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().UnixNano(), dbSuffix)
 	if err := ctx.Err(); err != nil {
 		return RetentionReceipt{}, err
 	}
-	if err := os.Rename(path, filepath.Join(s.backupsDir(), name)); err != nil {
+	finalPath := filepath.Join(s.backupsDir(), name)
+	if err := os.Rename(path, finalPath); err != nil {
 		return RetentionReceipt{}, err
+	}
+	if publishSources && s.RetentionSources != nil {
+		if err := s.RetentionSources.PublishRetentionBackup(ctx, finalPath, digest); err != nil {
+			_ = os.Remove(finalPath)
+			return RetentionReceipt{}, err
+		}
 	}
 	return RetentionReceipt{Name: name, SizeBytes: size, CompletedAt: time.Now().UTC(), SHA256: digest}, nil
 }
@@ -122,8 +139,7 @@ func (s *Service) VerifyRetentionBackupUnderLease(ctx context.Context, receipt R
 }
 
 func verifySnapshot(ctx context.Context, path string) (string, error) {
-	uri := &url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	reader, err := sqlx.Open("sqlite3", uri.String())
+	reader, err := openSnapshotReader(path)
 	if err != nil {
 		return "", err
 	}
@@ -150,6 +166,12 @@ func verifySnapshot(ctx context.Context, path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+// openSnapshotReader opens the snapshot file itself read-only and never
+// creates a file.
+func openSnapshotReader(path string) (*sqlx.DB, error) {
+	return sqlx.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(path)+"?mode=ro")
+}
+
 type contextReader struct {
 	ctx    context.Context
 	reader io.Reader
@@ -160,4 +182,20 @@ func (r *contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.reader.Read(p)
+}
+
+// VerifyRetentionBackupWithSources is the retention-preparation verifier. It
+// also proves the checkpoint sidecar covers every live preserved source.
+func (s *Service) VerifyRetentionBackupWithSources(ctx context.Context, receipt RetentionReceipt) error {
+	if err := s.VerifyRetentionBackupUnderLease(ctx, receipt); err != nil {
+		return err
+	}
+	if s.RetentionSources == nil {
+		return nil
+	}
+	path, err := s.resolveSnapshotPath(receipt.Name)
+	if err != nil {
+		return err
+	}
+	return s.RetentionSources.VerifyRetentionBackup(ctx, path, receipt.SHA256)
 }

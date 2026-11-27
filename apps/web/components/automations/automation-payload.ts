@@ -1,9 +1,16 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
+  Automation,
+  AutomationMCPSelection,
   AutomationRepository,
+  AutomationPluginToolSelection,
   ContinuationPolicy,
+  PRContinuationSettings,
+  PREndAction,
+  ManagedConversationDestination,
   RepositoryMode,
+  RetryPolicy,
   TaskMode,
   TriggerType,
   UpdateAutomationRequest,
@@ -14,11 +21,21 @@ import {
   type RepositorySelection,
 } from "./automation-repository-selection";
 
-// Shared form state + pending trigger types used by the editor and its
-// save handler. Lifted out of automation-editor.tsx so the editor stays
-// under the file-length lint cap.
+// Managed conversations do not expose retry policy controls. Keep their wire
+// value canonical even when an older saved record hydrates an enabled policy.
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  mode: "disabled",
+  max_retries: "0",
+  delay_seconds: "0",
+  backoff: "fixed",
+  history_mode: "attempts",
+};
+// Shared form state and pending trigger types keep the editor and save handler
+// aligned while keeping automation-editor.tsx under its file-length limit.
 
 export type FormState = {
+  mcpSelection?: AutomationMCPSelection | null;
+  mcpSelectionRevision?: number;
   name: string;
   description: string;
   workflowId: string;
@@ -26,17 +43,54 @@ export type FormState = {
   agentProfileId: string;
   executorProfileId: string;
   taskMode: TaskMode;
+  managedDestination?: ManagedConversationDestination;
   repositoryMode: RepositoryMode;
-  // repositorySelections captures an ordered list of registered workspace
-  // repos (id), discovered local repos (path — registered at save time to
-  // obtain an id), or an empty list for repo-less automations.
   repositorySelections: RepositorySelection[];
   prompt: string;
   taskTitleTemplate: string;
   enabled: boolean;
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
+  followUpPrompt: string;
+  prContinuationStepId: string;
+  prMergedAction: PREndAction;
+  prClosedAction: PREndAction;
+  retryPolicy: RetryPolicy;
+  pluginTools: AutomationPluginToolSelection[];
 };
+
+/** Canonical form for comparing two approvals without tool-order noise. */
+export function canonicalPluginTools(
+  selection: AutomationPluginToolSelection[],
+): AutomationPluginToolSelection[] {
+  return selection
+    .map((entry) => ({
+      ...entry,
+      tool_names: [...entry.tool_names].sort(),
+    }))
+    .sort((left, right) => left.plugin_id.localeCompare(right.plugin_id));
+}
+
+export function retryPolicyAfterModeChange(
+  policy: RetryPolicy,
+  mode: RetryPolicy["mode"],
+): RetryPolicy {
+  const maxRetries = Number(policy.max_retries);
+  return {
+    ...policy,
+    mode,
+    ...(mode === "finite" && (!Number.isSafeInteger(maxRetries) || maxRetries < 1)
+      ? { max_retries: "1" }
+      : {}),
+  };
+}
+
+export function normalizeRetryPolicyForTaskMode(
+  taskMode: TaskMode,
+  policy: RetryPolicy,
+): RetryPolicy {
+  return taskMode === "managed_conversation" ? DEFAULT_RETRY_POLICY : policy;
+}
 
 export type PendingTrigger = {
   tempId: string;
@@ -150,6 +204,10 @@ async function resolveOneRepositoryId(
   return created.id;
 }
 
+// The save boundary carries decimal strings without number coercion.
+/**
+ * Build a creation request with MCP choices only for automation modes that accept native selections.
+ */
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
@@ -159,39 +217,15 @@ export function buildCreatePayload(
   // i18n-exempt: persisted automation name. See the comment below.
   return {
     workspace_id: workspaceId,
-    // Persisted as the automation's name — user data, so it stays English
-    // rather than writing a locale-dependent value into the record. (Unreachable
-    // in practice: canSave requires a non-empty name.)
     name: form.name || "New Automation",
     description: form.description,
-    workflow_id: form.workflowId,
+    workflow_id: savedWorkflowId(form),
     workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
-    repository_mode: repositories.length > 0 ? "selected" : "none",
-    repository_ids: repositories.map((repository) => repository.repository_id),
-    repositories,
-    prompt: form.prompt,
-    task_title_template: form.taskTitleTemplate,
-    max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
-    triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
-  };
-}
-
-export function buildUpdatePayload(
-  form: FormState,
-  repositories: AutomationRepository[],
-): UpdateAutomationRequest {
-  return {
-    name: form.name,
-    description: form.description,
-    workflow_id: form.workflowId,
-    workflow_step_id: "",
-    agent_profile_id: form.agentProfileId,
-    executor_profile_id: form.executorProfileId,
-    task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
     repository_mode: repositories.length > 0 ? "selected" : "none",
     repository_ids: repositories.map((repository) => repository.repository_id),
     repositories,
@@ -199,7 +233,88 @@ export function buildUpdatePayload(
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
+    continuation_policy: savedContinuationPolicy(form),
+    ...prContinuationPayload(form),
+    triggers: pending.map((trigger) => ({
+      type: trigger.type,
+      config: trigger.config,
+      enabled: trigger.enabled,
+    })),
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    plugin_tools: form.taskMode === "automation_run" ? form.pluginTools : [],
+    ...(form.taskMode !== "managed_conversation" && form.mcpSelection
+      ? { mcp_selection: form.mcpSelection }
+      : {}),
+  };
+}
+
+/**
+ * Build a partial update that preserves omitted grants and supplies the revision for selection
+ * changes or mode changes.
+ */
+export function buildUpdatePayload(
+  form: FormState,
+  repositories: AutomationRepository[],
+  pluginTools?: AutomationPluginToolSelection[],
+  mcpSelection?: AutomationMCPSelection,
+  modeChanged = false,
+): UpdateAutomationRequest {
+  return {
+    ...(mcpSelection && form.taskMode !== "managed_conversation"
+      ? {
+          mcp_selection: mcpSelection,
+        }
+      : {}),
+    ...((mcpSelection && form.taskMode !== "managed_conversation") || modeChanged
+      ? { expected_mcp_selection_revision: form.mcpSelectionRevision ?? 0 }
+      : {}),
+    name: form.name,
+    description: form.description,
+    workflow_id: savedWorkflowId(form),
+    workflow_step_id: "",
+    agent_profile_id: form.agentProfileId,
+    executor_profile_id: form.executorProfileId,
+    task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
+    repository_mode: repositories.length > 0 ? "selected" : "none",
+    repository_ids: repositories.map((repository) => repository.repository_id),
+    repositories,
+    prompt: form.prompt,
+    task_title_template: form.taskTitleTemplate,
+    enabled: form.enabled,
+    max_concurrent_runs: form.maxConcurrentRuns,
+    continuation_policy: savedContinuationPolicy(form),
+    ...prContinuationPayload(form),
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
+    ...(pluginTools !== undefined
+      ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
+      : {}),
+  };
+}
+
+/** A managed conversation runs in the plugin's session: it has no workflow. */
+function savedWorkflowId(form: FormState): string {
+  return form.taskMode === "managed_conversation" ? "" : form.workflowId;
+}
+
+/** A managed conversation has no repeat-run choice, so a hidden one never saves. */
+function savedContinuationPolicy(form: FormState): ContinuationPolicy {
+  return form.taskMode === "managed_conversation" ? "new_task" : form.continuationPolicy;
+}
+
+/**
+ * Per-PR options for the save boundary. Options that do not apply to the
+ * selected policy or target are sent empty so a stale draft never saves them.
+ */
+export function prContinuationPayload(form: FormState): PRContinuationSettings {
+  const perPR = savedContinuationPolicy(form) === "reuse_per_pr";
+  return {
+    follow_up_prompt: perPR ? form.followUpPrompt : "",
+    pr_continuation_step_id:
+      perPR && form.taskMode === "normal_task" ? form.prContinuationStepId : "",
+    pr_merged_action: perPR ? form.prMergedAction : "keep",
+    pr_closed_action: perPR ? form.prClosedAction : "keep",
   };
 }
 
@@ -209,3 +324,63 @@ export function buildWebhookUrl(automationId: string): string {
 }
 
 export type CreatedWebhookDetails = { url: string; secret: string };
+
+/**
+ * Compare selections independently of package order and definition order without mutating the draft.
+ */
+export function canonicalMCPSelection(selection: AutomationMCPSelection | null | undefined) {
+  return selection
+    ? {
+        builtin_packages: [...selection.builtin_packages].sort(),
+        definition_ids: [...selection.definition_ids].sort(),
+      }
+    : null;
+}
+
+/**
+ * Submit a selection only when its values or task mode differ from the saved draft.
+ */
+export function mcpSelectionForUpdate(form: FormState, saved: FormState) {
+  if (form.taskMode !== saved.taskMode) return form.mcpSelection ?? undefined;
+  if (
+    JSON.stringify(canonicalMCPSelection(form.mcpSelection)) ===
+    JSON.stringify(canonicalMCPSelection(saved.mcpSelection))
+  )
+    return undefined;
+  return form.mcpSelection ?? undefined;
+}
+/**
+ * Use the server's accepted selection and revision while preserving the draft's other fields.
+ */
+export function withSavedMCPSelection(form: FormState, saved: Automation): FormState {
+  return {
+    ...form,
+    mcpSelection: saved.mcp_selection,
+    mcpSelectionRevision: saved.mcp_selection_revision ?? form.mcpSelectionRevision ?? 0,
+  };
+}
+
+export function automationDraftRevision(form: FormState): string {
+  const { mcpSelectionRevision: _serverRevision, ...draft } = form;
+  return JSON.stringify({ ...draft, mcpSelection: canonicalMCPSelection(draft.mcpSelection) });
+}
+
+/**
+ * Preserve newer local choices when an older save completes, but advance their revision for the next
+ * save.
+ */
+export function reconcileSavedMCPSelection(
+  current: FormState,
+  submitted: FormState,
+  saved: Automation,
+): FormState {
+  const unchanged =
+    current.taskMode === submitted.taskMode &&
+    JSON.stringify(canonicalMCPSelection(current.mcpSelection)) ===
+      JSON.stringify(canonicalMCPSelection(submitted.mcpSelection));
+  if (unchanged) return withSavedMCPSelection(current, saved);
+  return {
+    ...current,
+    mcpSelectionRevision: saved.mcp_selection_revision ?? current.mcpSelectionRevision,
+  };
+}

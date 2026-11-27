@@ -1,3 +1,4 @@
+import { attachCommentFile } from "../../helpers/comment-attachment";
 import { expect, type Page, type Locator } from "@playwright/test";
 import { DIFF_FILE } from "./review-fix-comments-popover-flow";
 
@@ -6,15 +7,39 @@ export async function openFileComment(page: Page, dialog: Locator, mobile: boole
     `[data-testid="review-file-header"][data-file-path="${DIFF_FILE}"]`,
   );
   if (mobile) {
-    await header.getByRole("button", { name: `More actions for ${DIFF_FILE}` }).tap();
-    await page
-      .getByTestId("review-file-actions-menu")
-      .getByRole("menuitem", { name: "Comment on file" })
-      .tap();
+    const trigger = header.getByRole("button", { name: `More actions for ${DIFF_FILE}` });
+    await trigger.tap();
+    const menu = page.getByTestId("review-file-actions-menu");
+    await expect(menu).toBeVisible();
+    const menuItem = menu.getByRole("menuitem", { name: "Comment on file" });
+    await expect(menuItem).toBeVisible();
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("the mobile review flow requires a fixed viewport");
+    await expect
+      .poll(
+        async () => {
+          const box = await menuItem.boundingBox();
+          return Boolean(
+            box &&
+            box.x >= 0 &&
+            box.y >= 0 &&
+            box.x + box.width <= viewport.width &&
+            box.y + box.height <= viewport.height &&
+            box.height >= 44,
+          );
+        },
+        {
+          timeout: 5_000,
+          message: "the mobile file action must fit the viewport and touch target",
+        },
+      )
+      .toBe(true);
+    await menuItem.tap();
   } else {
     await header.getByRole("button", { name: "Comment on file", exact: true }).click();
   }
   const region = dialog.getByTestId("review-file-comments");
+  await expect(region).toBeVisible();
   await expect(region.getByRole("textbox")).toBeFocused();
   return region;
 }
@@ -25,7 +50,7 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
   );
   await header.getByRole("button", { name: `Collapse ${DIFF_FILE}`, exact: true }).click();
   let region = await openFileComment(page, dialog, mobile);
-  await expect(region.getByRole("button", { name: /Add/ })).toBeDisabled();
+  await expect(region.getByRole("button", { name: "Add", exact: true })).toBeDisabled();
   await region.getByRole("textbox").fill("Cancel this draft");
   await region.getByRole("textbox").press("Escape");
   await expect(dialog).toBeVisible();
@@ -33,8 +58,13 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
   await expect(header.locator("[data-review-comment-opener]")).toBeFocused();
   region = await openFileComment(page, dialog, mobile);
   await region.getByRole("textbox").fill("Whole-file feedback for the agent");
-  const add = region.getByRole("button", { name: /Add/ });
-  if (mobile) expect((await add.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const attachmentId = await attachCommentFile(page, region, "review-note.txt");
+  const add = region.getByRole("button", { name: "Add", exact: true });
+  if (mobile) {
+    await expect
+      .poll(async () => Math.round((await add.boundingBox())?.height ?? 0))
+      .toBeGreaterThanOrEqual(44);
+  }
   await add.click();
   const card = region.getByTestId("review-file-comment-card");
   await expect(card).toContainText("Whole-file feedback for the agent");
@@ -47,4 +77,5 @@ export async function exerciseFileComment(page: Page, dialog: Locator, mobile: b
     "scrollWidth",
     await page.locator("html").evaluate((el) => el.clientWidth),
   );
+  return attachmentId;
 }

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/persistence"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -24,7 +25,7 @@ func TestRunOutcomeMigration_AddsNullableColumn(t *testing.T) {
 	seedAgentProfile(t, db, "agent-outcome-migration", "ws-outcome-migration")
 	ctx := context.Background()
 
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-outcome-migration",
 		Reason:         "task_assigned",
 		Payload:        `{}`,

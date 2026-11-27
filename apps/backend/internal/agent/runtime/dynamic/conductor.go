@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
@@ -16,6 +17,7 @@ import (
 // sent to a different candidate.
 type DownstreamLaunch struct {
 	ExecutionProfileID string
+	AttemptID          string
 	Decision           RouteDecision
 	Prompt             string
 	PriorACPSession    string
@@ -112,7 +114,7 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -145,7 +147,7 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.SessionID, request.LogicalProfileID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -199,12 +201,40 @@ func (c *Conductor) RouteAfterFailure(
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
 	if err != nil {
 		return RouteDecision{}, err
 	}
 	return c.engine.ApplyFailureContext(
 		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure,
+	)
+}
+
+// RouteAfterUnclassifiedFailure applies the narrow opt-in policy using
+// caller-supplied evidence from a trusted task/runtime boundary.
+func (c *Conductor) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	if resolver, ok := c.profiles.(interface {
+		RouteAfterUnclassifiedFailure(context.Context, string, string, string, int64, *routingerr.Error, UnclassifiedFailureEvidence) (RouteDecision, error)
+	}); ok {
+		return resolver.RouteAfterUnclassifiedFailure(
+			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
+		)
+	}
+	profile, err := c.loadProfile(ctx, sessionID, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
 	)
 }
 
@@ -237,8 +267,13 @@ func (c *Conductor) launchWithFallback(
 	current := decision
 	currentContinuation := continuation
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if c.engine.Circuits().IsHeld(accountBlockKey(current.ExecutionProfileID)) {
+			c.engine.ReleaseProbe(current, false)
+			return DownstreamExecution{}, current, ErrExecutionProfileHeld
+		}
 		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
+			AttemptID:          uuid.NewString(),
 			Decision:           current,
 			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
 			PriorACPSession:    priorACPSession(request.PriorACPSession, decision, current),
@@ -261,7 +296,11 @@ func (c *Conductor) launchWithFallback(
 			}
 			return DownstreamExecution{}, current, fallbackErr
 		}
-		if !shouldFallback || attempt+1 >= maxAttempts {
+		if !shouldFallback {
+			c.recordUnroutedLaunchFailure(ctx, request.SessionID, profile, current, err)
+			return DownstreamExecution{}, current, err
+		}
+		if attempt+1 >= maxAttempts {
 			return DownstreamExecution{}, current, err
 		}
 		classified := classifiedLaunchFailure(err)
@@ -305,7 +344,7 @@ func (c *Conductor) nextAfterLaunchFailure(
 	if !classified.FallbackAllowed {
 		return RouteDecision{}, false, nil
 	}
-	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
+	if c.engine.ActionForFailure(profile, decision.ExecutionProfileID, classified) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
 	next, err := c.engine.ApplyFailureContext(
@@ -323,6 +362,31 @@ func classifiedLaunchFailure(err error) *routingerr.Error {
 		return classified
 	}
 	return nil
+}
+
+// recordUnroutedLaunchFailure charges a classified failure the policy does not
+// route to the candidate's shared resource circuit. A quota failure configured
+// as stop still means the account is exhausted, so later selections must skip
+// it until the provider reset instead of retrying the same account on the next
+// run. RecordFailureCircuit keeps the generation fence: an attempt the route
+// already left opens nothing.
+func (c *Conductor) recordUnroutedLaunchFailure(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	decision RouteDecision,
+	launchErr error,
+) {
+	if c == nil || c.engine == nil {
+		return
+	}
+	classified := classifiedLaunchFailure(launchErr)
+	if classified == nil {
+		return
+	}
+	_, _ = c.engine.RecordFailureCircuit(
+		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified,
+	)
 }
 
 // continuationWithFailure records a classified launch failure on the
@@ -367,6 +431,9 @@ func (c *Conductor) Resume(ctx context.Context, sessionID, prompt string) error 
 		c.mu.Lock()
 		c.active[sessionID] = execution
 		c.mu.Unlock()
+	}
+	if c.engine != nil && c.engine.Circuits().IsHeld(accountBlockKey(execution.ExecutionProfileID)) {
+		return ErrExecutionProfileHeld
 	}
 	return c.downstream.Resume(ctx, execution.ID, prompt)
 }
@@ -738,4 +805,13 @@ func boundedTailN(value string, limit int) string {
 		value = value[cut:]
 	}
 	return strings.ToValidUTF8(value, "")
+}
+
+func (c *Conductor) loadProfile(ctx context.Context, sessionID, profileID string) (Profile, error) {
+	if loader, ok := c.profiles.(interface {
+		LoadDynamicProfileForSession(context.Context, string, string) (Profile, error)
+	}); ok {
+		return loader.LoadDynamicProfileForSession(ctx, sessionID, profileID)
+	}
+	return c.profiles.LoadDynamicProfile(ctx, profileID)
 }

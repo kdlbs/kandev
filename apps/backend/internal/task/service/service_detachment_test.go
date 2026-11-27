@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -27,8 +28,8 @@ func (r *reparentAfterDetachRepository) DetachTask(ctx context.Context, taskID s
 	if err != nil {
 		return false, err
 	}
-	task.ParentID = r.parentID
-	if err := r.UpdateTask(ctx, task); err != nil {
+	admission := r.TaskRepository.(repository.TaskHierarchyAdmission)
+	if _, err := admission.UpdateTaskWithParentAdmission(ctx, task, &r.parentID, false, hierarchy.ValidateParent); err != nil {
 		return false, err
 	}
 	return changed, nil
@@ -290,15 +291,15 @@ func TestDetachTaskRollsBackHierarchyWhenWorkspaceTransferFails(t *testing.T) {
 }
 
 func TestDetachTaskEventReflectsConcurrentReparent(t *testing.T) {
-	svc, eventBus, repo := createTestService(t)
+	svc, eventBus, repo := createTestServiceWithTaskAndSessionRepos(t, func(repo *sqliterepo.Repository) repository.TaskRepository {
+		return &reparentAfterDetachRepository{TaskRepository: repo, detacher: repo, parentID: "replacement-parent"}
+	}, func(repo *sqliterepo.Repository) repository.SessionRepository { return repo })
 	ctx := context.Background()
 	createDetachmentFixture(t, ctx, repo)
-	eventBus.ClearEvents()
-	svc.tasks = &reparentAfterDetachRepository{
-		TaskRepository: repo,
-		detacher:       repo,
-		parentID:       "replacement-parent",
+	if err := repo.CreateTask(ctx, &models.Task{ID: "replacement-parent", WorkspaceID: "workspace", WorkflowID: "workflow", WorkflowStepID: "step", Title: "Replacement"}); err != nil {
+		t.Fatal(err)
 	}
+	eventBus.ClearEvents()
 
 	task, err := svc.DetachTask(ctx, "child")
 	if err != nil {

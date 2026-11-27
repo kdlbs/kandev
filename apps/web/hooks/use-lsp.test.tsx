@@ -21,7 +21,6 @@ const mocks = vi.hoisted(() => {
     lspAutoStartLanguages: [],
     lspServerConfigs: {},
   };
-  let continuityEnabled = false;
   const stop = vi.fn((sessionId: string, language: string) => {
     state.status = disabledStatus;
     for (const listener of changeListeners) listener(`${sessionId}:${language}`);
@@ -60,12 +59,6 @@ const mocks = vi.hoisted(() => {
     changeListeners,
     stop,
     userSettings,
-    get continuityEnabled() {
-      return continuityEnabled;
-    },
-    set continuityEnabled(value: boolean) {
-      continuityEnabled = value;
-    },
   };
 });
 
@@ -89,14 +82,11 @@ vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   toLspLanguage: (language: string) => (language === "typescript" ? language : null),
 }));
 
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => mocks.continuityEnabled,
-}));
-
 import { useLsp, useLspStatus } from "./use-lsp";
 
 const SESSION_ID = "session";
 const LANGUAGE = "typescript";
+const SERVER_CRASHED_REASON = "server crashed";
 
 beforeEach(() => {
   mocks.connect.mockClear();
@@ -109,7 +99,6 @@ beforeEach(() => {
   mocks.stop.mockClear();
   mocks.enabledKeys.clear();
   mocks.leaseHints.clear();
-  mocks.continuityEnabled = false;
   mocks.state.status = mocks.disabledStatus;
   mocks.state.progress = mocks.emptyProgress;
   mocks.userSettings.lspAutoStartLanguages = [];
@@ -131,7 +120,7 @@ describe("useLsp manual policy leases", () => {
     act(() => {
       mocks.state.status = {
         state: "error",
-        reason: "server crashed",
+        reason: SERVER_CRASHED_REASON,
       } as typeof mocks.disabledStatus;
       for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
     });
@@ -197,7 +186,7 @@ describe("useLsp manual policy leases", () => {
     act(() => {
       mocks.state.status = {
         state: "error",
-        reason: "server crashed",
+        reason: SERVER_CRASHED_REASON,
       } as typeof mocks.disabledStatus;
       for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
     });
@@ -233,21 +222,67 @@ describe("useLsp auto-start policy", () => {
 
 describe("useLsp browser continuity policy", () => {
   it("reattaches a hinted lease when auto-start is disabled", async () => {
-    mocks.continuityEnabled = true;
     mocks.leaseHints.add(`kandev-lsp-lease:${SESSION_ID}:${LANGUAGE}`);
 
     const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
 
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
-    expect(mocks.connect).toHaveBeenCalledWith(SESSION_ID, LANGUAGE, {}, true);
+    expect(mocks.connect).toHaveBeenCalledWith(SESSION_ID, LANGUAGE, {});
     hook.unmount();
   });
 
-  it("does not use a stale lease hint when continuity is disabled", async () => {
-    mocks.leaseHints.add(`kandev-lsp-lease:${SESSION_ID}:${LANGUAGE}`);
-
+  it("does not restart a crashed lease until the user retries", async () => {
+    const leaseKey = `kandev-lsp-lease:${SESSION_ID}:${LANGUAGE}`;
     const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-    expect(mocks.connect).not.toHaveBeenCalled();
+
+    act(() => hook.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+
+    act(() => {
+      mocks.state.status = { state: "ready" } as typeof mocks.disabledStatus;
+      mocks.leaseHints.add(leaseKey);
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      mocks.state.status = {
+        state: "error",
+        reason: SERVER_CRASHED_REASON,
+      } as typeof mocks.disabledStatus;
+      mocks.leaseHints.delete(leaseKey);
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+
+    act(() => hook.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(3));
+    hook.unmount();
+  });
+
+  it("does not treat a previous session's start as a retry after switching sessions", async () => {
+    const firstSession = "generation-session-a";
+    const secondSession = "generation-session-b";
+    const hook = renderHook(({ sessionId }) => useLsp(sessionId, LANGUAGE), {
+      initialProps: { sessionId: firstSession },
+    });
+
+    act(() => hook.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+
+    mocks.saveEnabledState(secondSession, LANGUAGE);
+    act(() => {
+      mocks.state.status = {
+        state: "error",
+        reason: SERVER_CRASHED_REASON,
+      } as typeof mocks.disabledStatus;
+      for (const listener of mocks.changeListeners) listener(`${firstSession}:${LANGUAGE}`);
+    });
+
+    hook.rerender({ sessionId: secondSession });
+    await waitFor(() => expect(mocks.getStatus).toHaveBeenCalled());
+    expect(mocks.connect).toHaveBeenCalledOnce();
     hook.unmount();
   });
 });

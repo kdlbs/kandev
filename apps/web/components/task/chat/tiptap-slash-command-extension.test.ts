@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { SlashCommandNode } from "./tiptap-slash-command-extension";
-import { formatSlashCommandDisplayLabel } from "./tiptap-slash-command-utils";
+import {
+  formatSlashCommandDisplayLabel,
+  formatSlashCommandLabel,
+} from "./tiptap-slash-command-utils";
 
 const SLOW_COMMAND_NAME = "slow";
 const SLOW_COMMAND_LABEL = "/slow";
@@ -31,12 +34,12 @@ describe("SlashCommandNode", () => {
     });
   });
 
-  it("renders text from label when present", () => {
+  it("serializes the raw commandName when the visible label differs", () => {
     expect(
       config.renderText({
         node: { attrs: { label: SLOW_COMMAND_LABEL, commandName: "fast" } },
       }),
-    ).toBe(SLOW_COMMAND_LABEL);
+    ).toBe("/fast");
   });
 
   it("renders text from commandName when label is missing", () => {
@@ -76,6 +79,13 @@ describe("SlashCommandNode", () => {
       }),
     ).toBe(SLOW_COMMAND_NAME);
     expect(formatSlashCommandDisplayLabel({ commandName: "fast" })).toBe("fast");
+  });
+
+  it("keeps the clean skill label separate from serialized Codex invocation", () => {
+    const attrs = { label: "/retro", commandName: "$retro" };
+
+    expect(formatSlashCommandDisplayLabel(attrs)).toBe("retro");
+    expect(formatSlashCommandLabel(attrs)).toBe("/$retro");
   });
 
   it("parses slash command attrs from HTML data attrs", () => {

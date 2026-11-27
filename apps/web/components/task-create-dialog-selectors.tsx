@@ -1,24 +1,46 @@
 /* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMemo } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  memo,
+  useCallback,
+  useMemo,
+} from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
 import { Combobox } from "./combobox";
+import type { ComboboxOption } from "./combobox";
+import { Button } from "@kandev/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@kandev/ui/command";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { IconCheck, IconChevronDown, IconX } from "@tabler/icons-react";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import {
-  processFile,
-  MAX_FILES,
-  MAX_TOTAL_SIZE,
-  type FileAttachment,
-} from "@/components/task/chat/file-attachment";
-import {
-  useAttachmentCountFeedback,
-  useAttachmentFileFeedback,
-  useAttachmentTotalSizeFeedback,
-  useUnreadablePastedImageFeedback,
-} from "@/components/task/chat/use-attachment-file-feedback";
+  useTaskCreateAttachments,
+  type TaskCreateAttachmentController,
+} from "@/hooks/domains/task/use-task-create-attachments";
 import {
   readClipboardAttachments,
   type ImagePasteIssue,
@@ -43,45 +65,23 @@ import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
-import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
-import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { TaskCreateDialogTaskCreatedContext } from "./task-create-dialog-task-created";
 import {
   composerIdentity,
   composerInsertionText,
   useStablePluginComposerCapability,
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { ChatInputPluginActions } from "@/components/task/chat/chat-input-plugin-actions";
 
 export { BranchSelector } from "./branch-selector";
 export type { BranchOption, BranchSelectorProps } from "./branch-selector";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
-
-type AttachmentLimitRejection = "count" | "total-size" | null;
-
-function acceptAttachmentsWithinLimits(
-  existing: FileAttachment[],
-  processed: FileAttachment[],
-): { accepted: FileAttachment[]; rejection: AttachmentLimitRejection } {
-  let nextCount = existing.length;
-  let nextTotalSize = existing.reduce((sum, att) => sum + att.size, 0);
-  const accepted: FileAttachment[] = [];
-
-  for (const att of processed) {
-    if (nextCount >= MAX_FILES) return { accepted, rejection: "count" };
-    if (nextTotalSize + att.size > MAX_TOTAL_SIZE) {
-      return { accepted, rejection: "total-size" };
-    }
-    accepted.push(att);
-    nextCount += 1;
-    nextTotalSize += att.size;
-  }
-
-  return { accepted, rejection: null };
-}
 
 type RepositoryOption = {
   value: string;
@@ -128,13 +128,22 @@ export const RepositorySelector = memo(function RepositorySelector({
 });
 
 type AgentSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel: () => React.ReactNode }>;
+  options: Array<{
+    value: string;
+    label: string;
+    renderLabel: () => React.ReactNode;
+    renderTriggerLabel?: () => React.ReactNode;
+  }>;
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  touchTarget?: boolean;
+  testId?: string;
+  triggerId?: string;
+  ariaDescribedBy?: string;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -145,6 +154,10 @@ export const AgentSelector = memo(function AgentSelector({
   placeholder,
   triggerClassName,
   popoverPortal,
+  touchTarget,
+  testId,
+  triggerId,
+  ariaDescribedBy,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
   return (
@@ -160,7 +173,10 @@ export const AgentSelector = memo(function AgentSelector({
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
-      testId="agent-profile-selector"
+      touchTarget={touchTarget}
+      testId={testId ?? "agent-profile-selector"}
+      triggerId={triggerId}
+      ariaDescribedBy={ariaDescribedBy}
     />
   );
 });
@@ -202,8 +218,8 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   );
 });
 
-type ExecutorProfileSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel?: () => React.ReactNode }>;
+export type ExecutorProfileSelectorProps = {
+  options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
@@ -211,6 +227,94 @@ type ExecutorProfileSelectorProps = {
   triggerClassName?: string;
   popoverPortal?: boolean;
 };
+
+function TouchExecutorProfileSelector({
+  options,
+  value,
+  onValueChange,
+  disabled,
+  placeholder,
+  triggerClassName,
+}: ExecutorProfileSelectorProps) {
+  const { t } = useTranslation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+  return (
+    <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <DrawerTrigger asChild>
+        <Button
+          variant="ghost"
+          role="combobox"
+          aria-label={t("task:executorProfile2")}
+          aria-expanded={drawerOpen}
+          aria-haspopup="dialog"
+          disabled={disabled}
+          data-testid="executor-profile-selector"
+          className={cn("h-11 min-h-12 w-full justify-between", triggerClassName)}
+        >
+          <span className="min-w-0 truncate text-left">
+            {selected?.renderTriggerLabel?.() ??
+              selected?.renderLabel?.() ??
+              selected?.label ??
+              placeholder}
+          </span>
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent className="flex h-[min(82dvh,40rem)] max-h-[calc(100dvh-env(safe-area-inset-bottom,0px))] flex-col overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+        <DrawerHeader className="shrink-0 pr-12 text-left">
+          <DrawerTitle>{t("task:executorProfile2")}</DrawerTitle>
+          <DrawerDescription>{placeholder}</DrawerDescription>
+          <DrawerClose asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("common:close")}
+              className="absolute right-3 top-3 min-h-12 min-w-12"
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
+          </DrawerClose>
+        </DrawerHeader>
+        <Command
+          className="min-h-0 flex-1 border-t"
+          data-testid="executor-profile-selector-dropdown"
+        >
+          <CommandInput placeholder={t("task:searchProfiles")} className="h-11 min-h-12" />
+          <CommandList className="min-h-0 flex-1 overflow-y-auto" data-vaul-no-drag>
+            <CommandEmpty>{t("task:noProfileFound")}</CommandEmpty>
+            <CommandGroup>
+              {options.map((option) => (
+                <CommandItem
+                  key={option.value}
+                  value={option.value}
+                  keywords={[option.label, option.description ?? ""]}
+                  disabled={option.disabled}
+                  className="min-h-12 py-2"
+                  onSelect={() => {
+                    if (option.disabled) return;
+                    onValueChange(option.value);
+                    setDrawerOpen(false);
+                  }}
+                >
+                  <span className="flex min-w-0 flex-1 items-center">
+                    {option.renderLabel ? option.renderLabel() : option.label}
+                  </span>
+                  <IconCheck
+                    className={cn(
+                      "ml-2 h-4 w-4 shrink-0",
+                      option.value === value ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </DrawerContent>
+    </Drawer>
+  );
+}
 
 export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   options,
@@ -222,6 +326,19 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   popoverPortal,
 }: ExecutorProfileSelectorProps) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  if (usesTouchDrawer) {
+    return (
+      <TouchExecutorProfileSelector
+        options={options}
+        value={value}
+        onValueChange={onValueChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        triggerClassName={triggerClassName}
+      />
+    );
+  }
   return (
     <Combobox
       options={options}
@@ -285,6 +402,17 @@ type TaskFormInputsProps = {
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  initialAttachments?: FileAttachment[];
+  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void;
+  /** An external controller keeps uploads alive above a closing dialog. */
+  attachmentController?: TaskCreateAttachmentController;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
+  toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
+  contextLeadingContent?: React.ReactNode;
   onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -312,139 +440,6 @@ type TaskFormInputsProps = {
    */
   onComposerSubmit?: () => boolean | Promise<boolean>;
 };
-
-// eslint-disable-next-line max-lines-per-function
-function useFileAttachments(
-  workspaceId: string | null | undefined,
-  onPendingAttachmentUploadsChange?: (pending: boolean) => void,
-) {
-  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const attachmentsRef = useRef<FileAttachment[]>([]);
-
-  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
-    setAttachments((prev) => {
-      const next = prev.map((attachment) =>
-        attachment.id === id ? { ...attachment, ...update } : attachment,
-      );
-      attachmentsRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const uploadPendingAttachment = useCallback(
-    async (attachment: FileAttachment) => {
-      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
-      updateAttachment(attachment.id, { uploadStatus: "uploading" });
-      try {
-        const uploaded = await uploadAttachment(attachment.file, {
-          workspaceId,
-          kind: attachment.isImage ? "image" : "resource",
-          deliveryMode: attachment.deliveryMode,
-        });
-        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
-          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
-          return;
-        }
-        updateAttachment(attachment.id, {
-          attachmentId: uploaded.attachment_id,
-          uploadStatus: "ready",
-          size: uploaded.size_bytes,
-        });
-      } catch (error) {
-        updateAttachment(attachment.id, {
-          uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
-        });
-      }
-    },
-    [updateAttachment, workspaceId],
-  );
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    for (const attachment of attachmentsRef.current) {
-      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
-        void uploadPendingAttachment(attachment);
-      }
-    }
-  }, [uploadPendingAttachment, workspaceId]);
-
-  const [isDragging, setIsDragging] = useState(false);
-  const warnAttachmentCountLimit = useAttachmentCountFeedback();
-  const rejectOversizedFile = useAttachmentFileFeedback();
-  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
-  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
-
-  useEffect(() => {
-    onPendingAttachmentUploadsChange?.(
-      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
-    );
-  }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
-
-  const addFiles = useCallback(
-    async (files: File[], issue?: ImagePasteIssue) => {
-      if (issue === "unreadable-image") {
-        warnUnreadablePastedImage();
-        return;
-      }
-      const processed: FileAttachment[] = [];
-      for (const file of files) {
-        if (rejectOversizedFile(file)) continue;
-        const attachment = await processFile(file);
-        if (attachment) processed.push(attachment);
-      }
-      if (processed.length === 0) return;
-
-      const { accepted, rejection } = acceptAttachmentsWithinLimits(
-        attachmentsRef.current,
-        processed,
-      );
-      if (rejection === "count") {
-        warnAttachmentCountLimit();
-      } else if (rejection === "total-size") {
-        warnAttachmentTotalSizeLimit();
-      }
-      if (accepted.length === 0) return;
-
-      const next = [...attachmentsRef.current, ...accepted];
-      attachmentsRef.current = next;
-      setAttachments(next);
-      for (const attachment of accepted) void uploadPendingAttachment(attachment);
-    },
-    [
-      rejectOversizedFile,
-      warnAttachmentCountLimit,
-      warnAttachmentTotalSizeLimit,
-      warnUnreadablePastedImage,
-      uploadPendingAttachment,
-    ],
-  );
-
-  const handleRemoveAttachment = useCallback((id: string) => {
-    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
-    const next = attachmentsRef.current.filter((att) => att.id !== id);
-    attachmentsRef.current = next;
-    setAttachments(next);
-    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
-  }, []);
-
-  const handleRetryAttachment = useCallback(
-    (id: string) => {
-      const attachment = attachmentsRef.current.find((item) => item.id === id);
-      if (attachment) void uploadPendingAttachment(attachment);
-    },
-    [uploadPendingAttachment],
-  );
-
-  return {
-    attachments,
-    isDragging,
-    setIsDragging,
-    addFiles,
-    handleRemoveAttachment,
-    handleRetryAttachment,
-  };
-}
 
 function useAttachmentHandlers(
   disabled: boolean | undefined,
@@ -508,42 +503,54 @@ function useAttachmentHandlers(
   return { handlePaste, handleDragOver, handleDragLeave, handleDrop };
 }
 
+function areAttachmentsMutable(controller?: TaskCreateAttachmentController): boolean {
+  return controller ? controller.isAccepting : true;
+}
+
 function toContextItems(
   attachments: FileAttachment[],
+  mutable: boolean,
   onRemove: (id: string) => void,
   onRetry: (id: string) => void,
 ): ContextItem[] {
-  return attachments.map((att) =>
-    att.isImage
+  return attachments.map((att) => {
+    const controls = mutable
+      ? {
+          onRemove: () => onRemove(att.id),
+          ...(att.file ? { onRetry: () => onRetry(att.id) } : {}),
+        }
+      : {};
+    return att.isImage
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
           label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
+          ...controls,
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
           id: `file:${att.id}`,
           label: att.fileName,
           attachment: att,
-          onRemove: () => onRemove(att.id),
-          onRetry: () => onRetry(att.id),
-        } as FileAttachmentContextItem),
-  );
+          ...controls,
+        } as FileAttachmentContextItem);
+  });
 }
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const isMobile = useResponsiveBreakpoint().isMobile;
+  const usesTouchTarget = usesTouchDrawer || isMobile;
   return (
-    <div className="flex items-center px-1 pb-1">
+    <div className="flex items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             aria-label={t("task:attachFiles")}
-            className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            className={`inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${usesTouchTarget ? "h-11 w-11" : "h-7 w-7"} ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
           >
@@ -556,13 +563,25 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
   );
 }
 
-function useDescriptionInput(
-  initialDescription: string,
-  autoFocus: boolean | undefined,
-  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>,
-  onDescriptionChange: (hasContent: boolean) => void,
-  attachments: FileAttachment[],
-) {
+type DescriptionInputOptions = {
+  initialDescription: string;
+  autoFocus: boolean | undefined;
+  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
+  onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  attachments: FileAttachment[];
+  clearAttachments: () => void;
+};
+
+function useDescriptionInput({
+  initialDescription,
+  autoFocus,
+  descriptionValueRef,
+  onDescriptionChange,
+  onDescriptionValueChange,
+  attachments,
+  clearAttachments,
+}: DescriptionInputOptions) {
   const [description, setDescription] = useState(initialDescription);
   const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -577,9 +596,10 @@ function useDescriptionInput(
       const hasContent = newValue.trim().length > 0;
       descriptionRef.current = newValue;
       setDescription(newValue);
+      onDescriptionValueChange?.(newValue);
       if (hadContent !== hasContent) onDescriptionChange(hasContent);
     },
-    [onDescriptionChange],
+    [onDescriptionChange, onDescriptionValueChange],
   );
 
   useEffect(() => {
@@ -589,9 +609,10 @@ function useDescriptionInput(
         getValue: () => descriptionRef.current,
         setValue: setDescriptionValue,
         getAttachments: () => attachments,
+        clearAttachments,
       };
     }
-  }, [attachments, descriptionValueRef, setDescriptionValue]);
+  }, [attachments, clearAttachments, descriptionValueRef, setDescriptionValue]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -656,6 +677,9 @@ type FormInputsToolbarProps = {
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
   pluginActions?: React.ReactNode;
+  toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -670,10 +694,15 @@ function FormInputsToolbar({
   jiraImport,
   linearImport,
   pluginActions,
+  toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
 }: FormInputsToolbarProps) {
   return (
-    <div className="flex items-center px-1 pb-1">
+    <div className="flex items-center p-1">
+      {toolbarLeadingActions}
       <AttachButton onClick={onAttach} disabled={disabled} />
+      {toolbarAttachmentActions}
       {onEnhancePrompt && (
         <EnhancePromptButton
           onClick={onEnhancePrompt}
@@ -703,7 +732,10 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
-      <div className="ml-auto flex items-center">{pluginActions}</div>
+      <div className="ml-auto flex items-center gap-1">
+        {pluginActions}
+        {toolbarActions}
+      </div>
     </div>
   );
 }
@@ -730,6 +762,8 @@ function PromptMentionPopover({
 
 function useCreationComposerPluginActions(args: {
   isSessionMode: boolean;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
   taskId: string | null;
   disabled: boolean;
   description: string;
@@ -739,7 +773,8 @@ function useCreationComposerPluginActions(args: {
   submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
-  const surface = args.isSessionMode ? "new-session" : "task-create";
+  const registerTaskCreatedHandler = useContext(TaskCreateDialogTaskCreatedContext);
+  const surface = getCreationComposerSurface(args);
   const composer = useStablePluginComposerCapability(
     {
       insertText: (text) => {
@@ -751,12 +786,33 @@ function useCreationComposerPluginActions(args: {
       // reads its editor: insert-then-submit in one callback happens before
       // React re-renders with the new description.
       submit: async () => {
-        if (args.disabled || !args.descriptionRef.current.trim() || !args.submit) return false;
+        if (
+          args.disabled ||
+          args.composerSubmitDisabled ||
+          !args.descriptionRef.current.trim() ||
+          !args.submit
+        )
+          return false;
         return await args.submit();
       },
     },
     composerIdentity(surface, args.taskId, null),
   );
+  if (args.quickChatComposer) {
+    return (
+      <ChatInputPluginActions
+        sessionId={null}
+        taskId={null}
+        surface="quick-chat"
+        presentation={isMobile ? "mobile" : "desktop"}
+        disabled={args.disabled || args.composerSubmitDisabled}
+        submittable={
+          !args.disabled && !args.composerSubmitDisabled && args.description.trim().length > 0
+        }
+        composer={composer}
+      />
+    );
+  }
   return (
     <PluginSlot
       name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
@@ -769,9 +825,22 @@ function useCreationComposerPluginActions(args: {
         disabled: args.disabled,
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
+        ...(!args.isSessionMode && registerTaskCreatedHandler
+          ? { registerTaskCreatedHandler }
+          : {}),
       }}
+      actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
+}
+
+function getCreationComposerSurface(args: {
+  quickChatComposer?: boolean;
+  isSessionMode: boolean;
+}): "quick-chat" | "new-session" | "task-create" {
+  if (args.quickChatComposer) return "quick-chat";
+  if (args.isSessionMode) return "new-session";
+  return "task-create";
 }
 
 function useTextareaHandlers(
@@ -924,6 +993,16 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onDescriptionValueChange,
+  initialAttachments,
+  onAttachmentsChange,
+  attachmentController,
+  quickChatComposer,
+  contextLeadingContent,
+  composerSubmitDisabled,
+  toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
   onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
@@ -944,6 +1023,13 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   useEffect(() => {
     if (!hasLaunchPromptPreview) setIsLaunchPromptPreview(false);
   }, [hasLaunchPromptPreview]);
+  const internalAttachmentController = useTaskCreateAttachments({
+    workspaceId,
+    enabled: !attachmentController,
+    initialAttachments,
+    onPendingAttachmentUploadsChange,
+    onAttachmentsChange,
+  });
   const {
     attachments,
     isDragging,
@@ -951,24 +1037,37 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     addFiles,
     handleRemoveAttachment,
     handleRetryAttachment,
-  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
+    clearAttachments,
+  } = attachmentController ?? internalAttachmentController;
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
     setIsDragging,
   );
+  const attachmentsMutable = areAttachmentsMutable(attachmentController);
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
-    [attachments, handleRemoveAttachment, handleRetryAttachment],
+    () =>
+      toContextItems(
+        attachments,
+        attachmentsMutable,
+        handleRemoveAttachment,
+        handleRetryAttachment,
+      ),
+    [attachments, attachmentsMutable, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
-    useDescriptionInput(
+    useDescriptionInput({
       initialDescription,
       autoFocus,
       descriptionValueRef,
       onDescriptionChange,
+      onDescriptionValueChange,
       attachments,
-    );
+      clearAttachments,
+    });
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
   const referenceInputRef = useRef<RichTextInputHandle | null>(null);
   const mention = useTaskCreatePromptMention({
     textareaRef,
@@ -1023,6 +1122,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   }, [autoFocus, promptReferencesEnabled]);
   const pluginActions = useCreationComposerPluginActions({
     isSessionMode,
+    quickChatComposer,
+    composerSubmitDisabled,
     taskId,
     disabled: Boolean(disabled),
     description,
@@ -1046,7 +1147,12 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       <div
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
-        <ContextZone items={contextItems} />
+        <ContextZone
+          items={contextItems}
+          leadingContent={contextLeadingContent}
+          rowClassName={quickChatComposer ? "gap-2 px-3 py-2" : undefined}
+          scrollable={!quickChatComposer}
+        />
         <TaskDescriptionInput
           isLaunchPromptPreview={isLaunchPromptPreview}
           launchPromptPreview={launchPromptPreview}
@@ -1077,6 +1183,9 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           jiraImport={jiraImport}
           linearImport={linearImport}
           pluginActions={pluginActions}
+          toolbarActions={toolbarActions}
+          toolbarLeadingActions={toolbarLeadingActions}
+          toolbarAttachmentActions={toolbarAttachmentActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>

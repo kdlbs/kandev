@@ -1,0 +1,160 @@
+package process
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNativeResumeMissingUnknownRetirementUsesIdleCurrentOwner(t *testing.T) {
+	for _, condition := range []string{"idle", "busy", "foreign incarnation", "foreign session", "newer generation", "foreign stream", "existing live", "existing hash mismatch"} {
+		t.Run(condition, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "delivery.bbolt")
+			store, err := journal.Open(journal.Config{Path: path})
+			require.NoError(t, err)
+			currentStore := store
+			manager := &Manager{
+				cfg: &config.InstanceConfig{
+					DurableJournalPath: path, SessionID: "session", DeliveryIncarnationID: "incarnation",
+					DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream",
+				},
+				logger: newTestLogger(t), deliveryJournal: store,
+			}
+			t.Cleanup(func() { _ = currentStore.Close() })
+			submission := journal.Submission{
+				ID: "interrupted", SessionID: "session", IncarnationID: "incarnation",
+				HarnessGeneration: 1, StreamID: "stream", Hash: "prompt-hash",
+				State: journal.SubmissionInterruptedUnknown,
+			}
+			switch condition {
+			case "busy":
+				manager.deliverySubmissionMu.Lock()
+			case "foreign incarnation":
+				submission.IncarnationID = "other-incarnation"
+			case "foreign session":
+				submission.SessionID = "other-session"
+			case "newer generation":
+				submission.HarnessGeneration = 2
+			case "foreign stream":
+				submission.StreamID = "other-stream"
+			case "existing live":
+				existing := submission
+				existing.State = journal.SubmissionAccepted
+				_, err = store.PutSubmission(ctx, existing)
+				require.NoError(t, err)
+			case "existing hash mismatch":
+				existing := submission
+				existing.Hash = "other-hash"
+				_, err = store.PutSubmission(ctx, existing)
+				require.NoError(t, err)
+			}
+
+			err = manager.RetireMissingUnknownDeliverySubmission(ctx, submission)
+			if condition == "idle" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				if condition == "existing live" {
+					require.ErrorIs(t, err, journal.ErrSubmissionState)
+				}
+				if condition == "existing hash mismatch" {
+					require.ErrorIs(t, err, journal.ErrOwnerMismatch)
+				}
+			}
+			if condition == "busy" {
+				manager.deliverySubmissionMu.Unlock()
+			}
+
+			if condition != "idle" {
+				stored, getErr := store.GetSubmission(ctx, submission.ID)
+				if condition == "existing live" || condition == "existing hash mismatch" {
+					require.NoError(t, getErr)
+					require.False(t, stored.Retired)
+				} else {
+					require.ErrorIs(t, getErr, journal.ErrSubmissionNotFound)
+				}
+				return
+			}
+
+			require.NoError(t, store.Close())
+			currentStore, err = journal.Open(journal.Config{Path: path})
+			require.NoError(t, err)
+			manager.deliveryJournal = currentStore
+			stored, err := currentStore.GetSubmission(ctx, submission.ID)
+			require.NoError(t, err)
+			require.Equal(t, journal.SubmissionInterruptedUnknown, stored.State)
+			require.True(t, stored.Retired)
+			require.Empty(t, stored.Payload)
+			require.NoError(t, manager.RetireMissingUnknownDeliverySubmission(ctx, submission), "repeated recovery must keep the retired unknown record")
+			unresolved, err := currentStore.HasUnresolvedSubmissions(ctx)
+			require.NoError(t, err)
+			require.False(t, unresolved)
+			duplicate := submission
+			duplicate.State = journal.SubmissionPrepared
+			_, err = currentStore.PutSubmission(ctx, duplicate)
+			require.ErrorIs(t, err, journal.ErrSubmissionState)
+			calls := 0
+			_, err = manager.DispatchDeliverySubmission(ctx, submission.ID, func(context.Context) error {
+				calls++
+				return nil
+			})
+			require.Error(t, err)
+			require.Zero(t, calls)
+		})
+	}
+}
+
+func TestNativeResumeRetirementRequiresIdleCurrentOwner(t *testing.T) {
+	for _, condition := range []string{"idle", "busy", "foreign incarnation", "foreign session"} {
+		t.Run(condition, func(t *testing.T) {
+			ctx := context.Background()
+			journalPath := filepath.Join(t.TempDir(), "delivery.bbolt")
+			store, err := journal.Open(journal.Config{Path: journalPath})
+			require.NoError(t, err)
+			manager := &Manager{cfg: &config.InstanceConfig{DurableJournalPath: journalPath, SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream"}, logger: newTestLogger(t), deliveryJournal: store}
+			t.Cleanup(func() { _ = manager.closeDeliveryJournal() })
+			submission := journal.Submission{ID: "interrupted", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream", Hash: "hash", Payload: []byte("prompt"), State: journal.SubmissionInterruptedUnknown}
+			switch condition {
+			case "busy":
+				manager.deliverySubmissionMu.Lock()
+				defer manager.deliverySubmissionMu.Unlock()
+			case "foreign incarnation":
+				submission.IncarnationID = "other-incarnation"
+			case "foreign session":
+				submission.SessionID = "other-session"
+			}
+			_, err = store.PutSubmission(ctx, submission)
+			require.NoError(t, err)
+			err = manager.RetireDeliverySubmission(ctx, submission.ID, 1)
+			if condition == "idle" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			stored, err := store.GetSubmission(ctx, submission.ID)
+			require.NoError(t, err)
+			require.Equal(t, condition == "idle", stored.Retired)
+			require.Equal(t, journal.SubmissionInterruptedUnknown, stored.State)
+			if condition == "idle" {
+				capability := manager.DeliveryCapability()
+				require.False(t, capability.Unresolved)
+				calls := 0
+				_, err := manager.DispatchDeliverySubmission(ctx, submission.ID, func(context.Context) error { calls++; return nil })
+				require.Error(t, err)
+				require.Zero(t, calls, "acknowledgement must never replay the old instruction")
+				fresh := submission
+				fresh.ID, fresh.Hash, fresh.Payload, fresh.State = "new-instruction", "new-hash", []byte("distinct instruction"), journal.SubmissionPrepared
+				_, err = manager.AdmitDeliverySubmission(ctx, fresh)
+				require.NoError(t, err)
+				_, err = manager.DispatchDeliverySubmission(ctx, fresh.ID, func(context.Context) error { calls++; return nil })
+				require.NoError(t, err)
+				require.Equal(t, 1, calls)
+			}
+		})
+	}
+}

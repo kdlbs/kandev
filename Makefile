@@ -52,7 +52,7 @@ MAGENTA := \033[35m
 VERBOSE ?= 0
 NODE ?= $(shell command -v node $(NULL_REDIR) || echo node)
 RUNTIME_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
-RUNTIME_VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+RUNTIME_VERSION ?= $(shell git describe --tags --match "v[0-9]*" --exclude "*/*" --always --dirty $(NULL_REDIR) || echo dev)
 SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
 SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
 SERVICE_VERSION ?= $(RUNTIME_VERSION)
@@ -257,8 +257,14 @@ desktop-runtime:
 		--output-dir "$(DESKTOP_RUNTIME_DIR)"
 
 .PHONY: desktop-dev
+DESKTOP_DEV_ENV = KANDEV_HOME_DIR="$(CURDIR)/.kandev-dev" \
+	KANDEV_DATABASE_PATH="$(CURDIR)/.kandev-dev/data/kandev.db" \
+	KANDEV_DATABASE_DRIVER=sqlite \
+	KANDEV_E2E_MOCK=false \
+	KANDEV_DEBUG_DEV_MODE=true
 desktop-dev: desktop-runtime
-	@KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
+	@$(DESKTOP_DEV_ENV) \
+		KANDEV_DESKTOP_RUNTIME_DIR="$(CURDIR)/$(DESKTOP_RUNTIME_DIR)" \
 		$(PNPM) -C $(APPS_DIR) --filter @kandev/desktop dev
 
 .PHONY: desktop-build
@@ -324,7 +330,7 @@ start-windows:
 	@echo Installing web dependencies...
 	@cd $(APPS_DIR) && $(PNPM) install
 	@echo Building web app...
-	@cd $(APPS_DIR) && set "VITE_KANDEV_API_PORT=" && set "VITE_KANDEV_DEBUG=" && $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && set "VITE_KANDEV_API_PORT=" && set "VITE_KANDEV_DEBUG=" && set "NODE_ENV=production" && $(PNPM) --filter @kandev/web build
 	@$(MAKE) -s sync-embedded-web-windows
 	@echo Building backend...
 	@$(MAKE) -s -C $(BACKEND_DIR) build
@@ -443,15 +449,25 @@ build-backend-quiet:
 ## e2e/global-setup.ts checks the resulting tar.gz exists (like it does for
 ## the kandev/mock-agent binaries) but does not build it itself — this target
 ## is the "make it exist" step, wired into test-e2e* below.
+.PHONY: build-e2e-delivery-fixture
+build-e2e-delivery-fixture:
+	@$(MAKE) -C $(BACKEND_DIR) build-e2e-delivery-fixture
+
+.PHONY: build-e2e-send-now-fixture
+build-e2e-send-now-fixture:
+	@$(MAKE) -C $(BACKEND_DIR) build-e2e-send-now-fixture
+
 .PHONY: build-e2e-plugin-package
 build-e2e-plugin-package:
 	@printf "$(CYAN)Packaging e2e fixture plugin...$(RESET)\n"
 	@$(MAKE) -C $(BACKEND_DIR) e2e-plugin-package
 
 .PHONY: build-web
+# Vite bundles the development React runtime whenever NODE_ENV is inherited as
+# development, so source builds pin production at the command boundary.
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build
 
 ## Web build for the E2E harness. Identical to build-web except that it keeps the
 ## pseudo QA catalog, which a production build drops (see
@@ -461,12 +477,12 @@ build-web:
 .PHONY: build-web-e2e
 build-web-e2e:
 	@printf "$(CYAN)Building web app (with the pseudo QA locale)...$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build:e2e
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build:e2e
 
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
-	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= NODE_ENV=production $(PNPM) --filter @kandev/web build 2>&1 | grep -v "Warning:" | grep -v "parseLineType" | grep -v "^$$" || true
 
 .PHONY: sync-embedded-web
 sync-embedded-web:
@@ -559,11 +575,21 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
-	@node --test .github/scripts/pr-docs.test.cjs
+	@python3 .github/scripts/web-toolchain-evidence_test.py
+	@python3 .github/scripts/upgrade-regression-workflow-contract_test.py
+	@node --test scripts/web-native-toolchain.test.mjs
+	@python3 .github/scripts/notify-release-contributors_test.py
+	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
+	@python3 .github/scripts/discord-release-content_test.py
+	@python3 .github/scripts/announce-discord-release_test.py
+	@python3 .github/scripts/announce-discord-release-workflow-contract_test.py
+	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
+	@node --test scripts/update-agent-runtime-pins.test.mjs .github/scripts/record-agent-runtime-pin-refresh.test.mjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
 	@bash scripts/run-quiet.test.sh
 	@bash scripts/dev-prod-db-path.test.sh
+	@bash scripts/desktop-dev-env.test.sh
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
@@ -573,13 +599,14 @@ test-scripts:
 	@bash scripts/release-desktop.test.sh
 	@bash scripts/release/runtime-bundle.test.sh
 	@bash scripts/release/retry-ghcr-command.test.sh
+	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
-	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
+	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs scripts/release/existing-release.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs scripts/generic-plugin-host-boundary.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
+test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Running E2E tests (headless, resource-bounded, managed runner)...$(RESET)\n"
 	@cd $(WEB_DIR) && status=0; for project in routing auth chromium mobile-chrome containers; do \
 		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
@@ -587,12 +614,12 @@ test-e2e: build-backend build-backend-linux-helpers build-web-e2e build-e2e-plug
 	done; exit $$status
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package build-e2e-delivery-fixture build-e2e-send-now-fixture
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 

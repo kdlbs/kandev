@@ -92,6 +92,30 @@ func TestCreateTaskWithExternalIDAuthorizationPrecedesValidation(t *testing.T) {
 	}
 }
 
+func TestFindTaskByExternalIDForCreateUsesCreateAuthorization(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedOwnedWorkspaceForCreate(t, ctx, repo, "ws-owned-create-lookup", "user-a")
+	created, err := svc.CreateTask(ctxAs("user-a"), &CreateTaskRequest{
+		WorkspaceID: "ws-owned-create-lookup", WorkflowID: wfID, Title: "Existing", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, _, err := svc.FindTaskByExternalIDForCreate(ctxAs("user-b"), "ws-owned-create-lookup", "ext-1"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("unauthorized lookup err = %v, want ErrWorkspaceNotFound", err)
+	}
+
+	task, found, err := svc.FindTaskByExternalIDForCreate(ctxAs("user-a"), "ws-owned-create-lookup", " ext-1 ")
+	if err != nil || !found || task == nil || task.ID != created.Task.ID {
+		t.Fatalf("authorized lookup = task:%+v found:%t err:%v, want the existing task", task, found, err)
+	}
+	if task, found, err := svc.FindTaskByExternalIDForCreate(ctxAs("user-a"), "ws-owned-create-lookup", "ext-missing"); err != nil || found || task != nil {
+		t.Fatalf("missing lookup = task:%+v found:%t err:%v, want no task", task, found, err)
+	}
+}
+
 // TestLookupAndReleaseExternalIDDenyUnauthorizedWorkspace covers the
 // permissions scenario for the two new by-external-id routes directly: a
 // caller who does not own the workspace gets ErrWorkspaceNotFound from both

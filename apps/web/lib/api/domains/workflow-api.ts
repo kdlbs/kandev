@@ -27,6 +27,7 @@ type BackendTemplateStep = {
   session_target?: StepDefinition["session_target"];
   profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
   profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
+  disable_unclassified_fallback?: boolean;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -37,6 +38,10 @@ type BackendTemplateStep = {
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
   steps?: BackendTemplateStep[];
   default_steps?: BackendTemplateStep[];
+};
+
+type BackendListWorkflowStepsResponse = Omit<ListWorkflowStepsResponse, "steps"> & {
+  steps?: WorkflowStep[] | null;
 };
 
 export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
@@ -58,6 +63,7 @@ export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): Wo
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     complete_task_on_enter: step.complete_task_on_enter,
     auto_advance_requires_signal: step.auto_advance_requires_signal,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
@@ -94,14 +100,15 @@ export async function getWorkflowTemplate(templateId: string, options?: ApiReque
 
 // Workflow Step operations
 export async function listWorkflowSteps(workflowId: string, options?: ApiRequestOptions) {
-  const response = await fetchJson<ListWorkflowStepsResponse>(
+  const response = await fetchJson<BackendListWorkflowStepsResponse>(
     `/api/v1/workflows/${workflowId}/workflow/steps`,
     options,
   );
   return {
     ...response,
-    steps: response.steps.map((step) => ({
+    steps: (response.steps ?? []).map((step) => ({
       ...step,
+      disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
         step.profile_session_start_policy,
       ),
@@ -116,6 +123,7 @@ export async function getWorkflowStep(stepId: string, options?: ApiRequestOption
   const step = await fetchJson<WorkflowStep>(`/api/v1/workflow/steps/${stepId}`, options);
   return {
     ...step,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),
@@ -140,6 +148,7 @@ export async function createWorkflowStep(
     session_target?: StepDefinition["session_target"];
     profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
     profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
+    disable_unclassified_fallback?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   },
@@ -151,6 +160,7 @@ export async function createWorkflowStep(
   });
   return {
     ...step,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),

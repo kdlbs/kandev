@@ -58,7 +58,7 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     // The task remains selected in shared state, but GitHub has no task-only providers.
     await opener.tap();
     await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
-    await drawer.getByRole("button", { name: "New task", exact: true }).tap();
+    await drawer.getByTestId("mobile-new-task-button").tap();
     await expect(drawer).toBeHidden();
     await expect(testPage.getByRole("dialog")).toBeVisible();
     await expect(testPage.getByRole("dialog")).not.toHaveAccessibleName("Tasks");

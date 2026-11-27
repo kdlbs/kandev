@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,19 +13,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/completion"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // captureUpdateTaskRepo backs the update-task tests: it serves a task with an
-// attached repository and records whether the task's repository rows were
-// wiped (the replace path always deletes before recreating).
+// attached repository and records committed replacements.
 type captureUpdateTaskRepo struct {
 	mockRepository
 	deleteReposCalled bool
+	replacementRows   []*models.TaskRepository
+	metadata          map[string]interface{}
+	executorProfile   *models.ExecutorProfile
 }
 
 func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -34,7 +41,45 @@ func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.T
 		WorkflowID:  "wf-1",
 		Title:       "Old title",
 		State:       v1.TaskStateTODO,
+		Metadata:    m.metadata,
 	}, nil
+}
+
+func (*captureUpdateTaskRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
+	return &models.Workspace{ID: id, OwnerID: "alice"}, nil
+}
+
+func (m *captureUpdateTaskRepo) GetExecutorProfile(_ context.Context, id string) (*models.ExecutorProfile, error) {
+	if m.executorProfile == nil || m.executorProfile.ID != id {
+		return nil, repoerrors.ErrExecutorProfileNotFound
+	}
+	return m.executorProfile, nil
+}
+
+// These mapper tests exercise title-only updates or association-only replacement.
+func (m *captureUpdateTaskRepo) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, _ repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	if update.Description != nil || update.Priority != nil || update.State != nil || update.WorkflowStepID != nil || update.Position != nil || update.ParentID != nil || update.AssigneeUserID != nil || update.Metadata != nil {
+		return nil, errors.New("unsupported field in association mapper fixture")
+	}
+	task, err := m.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := &models.TaskFieldUpdateResult{Task: task, PriorState: task.State, PriorWorkflowStepID: task.WorkflowStepID}
+	if update.Title != nil {
+		task.Title = *update.Title
+	}
+	return result, nil
+}
+
+func (m *captureUpdateTaskRepo) UpdateTaskFieldsWithParentAdmissionAndCompletionAdmission(
+	ctx context.Context,
+	id string,
+	update models.TaskFieldUpdate,
+	validate repository.TaskParentValidator,
+	_ *completion.Admission,
+) (*models.TaskFieldUpdateResult, error) {
+	return m.UpdateTaskFieldsWithParentAdmission(ctx, id, update, validate)
 }
 
 func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, _ string) error {
@@ -42,9 +87,23 @@ func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, 
 	return nil
 }
 
+func (m *captureUpdateTaskRepo) ReplaceTaskRepositories(ctx context.Context, taskID string, build func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error) {
+	prior, err := m.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := build(models.TaskRepositoryReplacementSnapshot{Repositories: prior})
+	if err != nil {
+		return nil, err
+	}
+	m.replacementRows = rows
+	m.deleteReposCalled = true
+	return rows, nil
+}
+
 func (m *captureUpdateTaskRepo) ListTaskRepositories(_ context.Context, taskID string) ([]*models.TaskRepository, error) {
 	if m.deleteReposCalled {
-		return nil, nil
+		return m.replacementRows, nil
 	}
 	return []*models.TaskRepository{
 		{ID: "tr-1", TaskID: taskID, RepositoryID: "repo-1", BaseBranch: "main"},
@@ -133,6 +192,55 @@ func TestWSUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
 	assert.Equal(t, []string{"repo-1"}, decodeTaskRepositoryIDs(t, resp.Payload))
 }
 
+func TestHTTPUpdateTaskExecutorMutationDenialIsForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newUpdateTaskHandlers(t)
+	repo.metadata = map[string]interface{}{models.MetaKeyExecutorProfileID: "private-profile"}
+	repo.executorProfile = &models.ExecutorProfile{
+		ID: "private-profile", ExecutorID: "private-executor", OwnerUserID: "bob",
+	}
+	repo.executors = map[string]*models.Executor{
+		"private-executor": {ID: "private-executor", OwnerUserID: "bob"},
+	}
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/tasks/task-1", strings.NewReader(`{"title":"Renamed"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember}))
+	response := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(response)
+	ctx.Params = gin.Params{{Key: "id", Value: "task-1"}}
+	ctx.Request = request
+
+	h.httpUpdateTask(ctx)
+
+	require.Equal(t, http.StatusForbidden, response.Code)
+	require.JSONEq(t, `{"error":"executor mutation denied"}`, response.Body.String())
+	assert.False(t, repo.deleteReposCalled)
+}
+
+func TestWSUpdateTaskExecutorMutationDenialIsForbidden(t *testing.T) {
+	h, repo := newUpdateTaskHandlers(t)
+	repo.metadata = map[string]interface{}{models.MetaKeyExecutorProfileID: "private-profile"}
+	repo.executorProfile = &models.ExecutorProfile{
+		ID: "private-profile", ExecutorID: "private-executor", OwnerUserID: "bob",
+	}
+	repo.executors = map[string]*models.Executor{
+		"private-executor": {ID: "private-executor", OwnerUserID: "bob"},
+	}
+	ctx := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleMember})
+	request, err := ws.NewRequest("update", ws.ActionTaskUpdate, map[string]string{"id": "task-1", "title": "Renamed"})
+	require.NoError(t, err)
+
+	response, err := h.wsUpdateTask(ctx, request)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.Equal(t, ws.ErrorCodeForbidden, payload.Code)
+	require.Equal(t, models.ErrExecutorMutationDenied.Error(), payload.Message)
+	assert.False(t, repo.deleteReposCalled)
+}
+
 func TestHTTPUpdateTaskRejectsOverlongTitle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h, repo := newUpdateTaskHandlers(t)
@@ -163,14 +271,14 @@ func TestWSUpdateTaskReturnsValidationErrorForOverlongTitle(t *testing.T) {
 	assert.False(t, repo.deleteReposCalled, "rejected title must not touch task repositories")
 }
 
-func TestConvertUpdateRepositories(t *testing.T) {
-	assert.Nil(t, convertUpdateRepositories(false, nil), "absent field must stay nil")
+func TestConvertTaskRepositories(t *testing.T) {
+	assert.Nil(t, convertTaskRepositories(false, nil), "absent field must stay nil")
 
-	empty := convertUpdateRepositories(true, nil)
+	empty := convertTaskRepositories(true, nil)
 	require.NotNil(t, empty, "provided empty list must map to a non-nil slice so it clears")
 	assert.Len(t, empty, 0)
 
-	converted := convertUpdateRepositories(true, []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}})
+	converted := convertTaskRepositories(true, []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}})
 	require.Len(t, converted, 1)
 	assert.Equal(t, "repo-1", converted[0].RepositoryID)
 }

@@ -11,16 +11,16 @@ owners:
 
 ## Purpose
 
-The task and workflow system owns durable work items, task relationships,
-execution lifecycle, workflow steps, queued launches, and the contracts that
-move a task through its configured process.
+Owns durable tasks, their workflows, and their execution lifecycle.
 
 ## Ownership
 
-This system owns task identity and metadata, task documents and attachments,
-parent and dependency relationships, task creation and launch behavior, task
-runtime state publication, workflow definitions and transitions, completion
-signals, and task-scoped scheduling contracts.
+Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, relationships, creation, launch, and completion.
+
+Turn change sets bind immutable repository intervals to capture policy,
+history, and transcript anchors. Workspaces own checkout identity; runtime owns
+ordered executor access.
 
 ## Exclusions
 
@@ -36,6 +36,7 @@ signals, and task-scoped scheduling contracts.
 
 ### Requirements
 
+- [HTTP repository IDs](requirements/http-task-repository-selection.md)
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
@@ -46,6 +47,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
 - [Task removal navigation](requirements/removal-navigation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
+- [Mixed repository selection](requirements/mixed-repository-selection.md)
 - [Task Autopilot Mode](requirements/autopilot-mode.md)
 - [Blocked Task Escalation](requirements/blocked-task-escalation.md)
 - [Board priority sort and filter](requirements/board-priority-sort-filter.md)
@@ -68,6 +70,7 @@ signals, and task-scoped scheduling contracts.
 - [Link Existing Task to External References](requirements/link-existing-task-github-issue.md)
 - [MCP-Created Task Agent Profile Default](requirements/mcp-task-agent-profile-default.md)
 - [MCP Tool Name Stability](requirements/mcp-tool-name-stability.md)
+- [MCP task priority](requirements/mcp-task-priority.md)
 - [MCP workspace modes](requirements/mcp-workspace-mode.md)
 - [Missing task route recovery](requirements/missing-task-route-recovery.md)
 - [Task model unification](requirements/model-unification.md)
@@ -82,7 +85,7 @@ signals, and task-scoped scheduling contracts.
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Saved Prompt Delivery](requirements/saved-prompt-delivery.md)
-- [Quick Chat Sessions, Persistence, and Expiration](requirements/quick-chat-expiration.md)
+- [Quick Chat Sessions and Persistence](requirements/quick-chat-expiration.md)
 - [Quick Chat Agent Titles](requirements/quick-chat-agent-titles.md)
 - [Quick Chat Repository Context](requirements/quick-chat-repository-context.md)
 - [Remote Contribution Tasks](requirements/remote-contribution-tasks.md)
@@ -92,9 +95,11 @@ signals, and task-scoped scheduling contracts.
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Managed Branch Compaction](requirements/managed-branch-compaction.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
+- [Terminal target lifecycle](requirements/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Task Cleanup Source Manifest](requirements/archive-source-manifest.md)
+- [Guarded Exact-Task Retirement](requirements/guarded-exact-task-retirement.md)
 - [Restart-Orphaned Session Terminalization](requirements/restart-orphaned-session-terminalization.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
 - [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
@@ -103,6 +108,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Actions Menu Action Outcomes](requirements/task-actions-menu-outcomes.md)
 - [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
 - [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
+- [Workflow PR Lifecycle Events](requirements/workflow-pr-lifecycle-events.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
 - [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
 - [Task Subtree Controls](requirements/subtree-controls.md)
@@ -120,12 +126,14 @@ signals, and task-scoped scheduling contracts.
 - [Session stall visibility and orphan healing](requirements/session-stall-visibility.md)
 - [Task Launch Failure Recovery](requirements/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](requirements/worktree-metadata-recovery.md)
+- [Audited cross-workspace task transfers](requirements/cross-workspace-task-transfer.md)
 - [Task priority visibility](requirements/task-priority-visibility.md)
 - [Threads task actions](requirements/threads-task-actions.md)
 - [Task Title Length Limit](requirements/title-length-limit.md)
 - [User Question Turn Boundary](requirements/user-question-turn-boundary.md)
 - [WIP Limits and Visible Overflow Queues](requirements/wip-limit-pull-system.md)
 - [Tasks Without Repositories](requirements/without-repositories.md)
+- [Workspace root files](requirements/workspace-root-files.md)
 - [Workflow completion-signal payload delivery](requirements/workflow-completion-signal-payload-delivery.md)
 - [Cancelled Turn Completion](requirements/workflow-cancelled-turn-completion.md)
 - [Workflow Cycle Guardrails](requirements/workflow-cycle-guardrails.md)
@@ -151,6 +159,7 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [HTTP repository IDs](system-design/http-task-repository-selection.md)
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
@@ -158,7 +167,9 @@ signals, and task-scoped scheduling contracts.
 
 - [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
+- [Workspace root files](system-design/workspace-root-files.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
+- [Mixed repository selection](system-design/mixed-repository-selection.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
 - [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
@@ -168,9 +179,11 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
+- [Workflow PR Lifecycle Events](system-design/workflow-pr-lifecycle-events.md)
 - [MCP Tool Name Stability](system-design/mcp-tool-name-stability.md)
 - [MCP workspace modes](system-design/mcp-workspace-mode.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
+- [Rich task title previews](system-design/rich-task-title-previews.md)
 - [Branch history explanations](system-design/branch-history-explanations.md)
 - [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
@@ -191,11 +204,13 @@ signals, and task-scoped scheduling contracts.
 - [Managed Branch Compaction](system-design/managed-branch-compaction.md)
 - [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
+- [Terminal target lifecycle](system-design/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Resume prompt queue](system-design/resume-prompt-queue.md)
 - [Session Delete Preserves Task Workspaces](system-design/session-delete-resource-cleanup.md)
 - [Task Cleanup Source Manifest](system-design/archive-source-manifest.md)
+- [Guarded Exact-Task Retirement](system-design/guarded-exact-task-retirement.md)
 - [Task Dependencies and Auto-Start Chains](system-design/task-dependencies.md)
 - [Dependency Gate Skip Visibility](system-design/dependency-gate-skip-visibility.md)
 - [Edit task dependencies](system-design/task-dependency-detail-editing.md)
@@ -203,8 +218,10 @@ signals, and task-scoped scheduling contracts.
 - [Session stall visibility and orphan healing](system-design/session-stall-visibility.md)
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [Worktree metadata recovery](system-design/worktree-metadata-recovery.md)
+- [Audited cross-workspace task transfers](system-design/cross-workspace-task-transfer.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
+- [MCP task priority](system-design/mcp-task-priority.md)
 - [Board priority sort and filter](system-design/board-priority-sort-filter.md)
 - [Threads task actions](system-design/threads-task-actions.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
@@ -220,8 +237,7 @@ signals, and task-scoped scheduling contracts.
 
 ## Migration record
 
-Migration remains in progress. Files that retain migration wrappers still need
-extraction before this system can return to a complete migration state.
+Files with migration wrappers still need extraction.
 
 ## Related systems
 

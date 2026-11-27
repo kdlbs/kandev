@@ -63,7 +63,8 @@ async function probeTabStrip(strip: Locator): Promise<TabProbe[]> {
         );
       }
       return {
-        title: label.textContent?.trim() ?? "",
+        // Git status can update the count badge between geometry measurements.
+        title: (label.textContent?.trim() ?? "").replace(/\s+\(\d+\)$/, ""),
         tabWidth: tab.getBoundingClientRect().width,
         closeWidth: close.getBoundingClientRect().width,
         truncated: label.scrollWidth > label.clientWidth,

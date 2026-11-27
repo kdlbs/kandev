@@ -1,4 +1,12 @@
-import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/toast-provider";
@@ -12,8 +20,16 @@ import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import type { TaskSession } from "@/lib/types/http";
 import { useState } from "react";
 import { DrawerTitle } from "@kandev/ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { TaskSwitcherDrawer } from "./task-switcher-drawer";
+import { TaskPickerSurface } from "./task-picker-surface";
+import { WorkspaceSwitcher } from "../workspace-switcher";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
@@ -23,7 +39,8 @@ const mocks = vi.hoisted(() => ({
     taskPRs: { byTaskId: {} },
     taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
-    userSettings: { sidebarTaskColors: {} },
+    userSettings: { sidebarTaskColors: {}, unreadTaskDot: false, unreadTaskDotHideDelaySeconds: 0 },
+    tasks: { activeSessionId: null },
     kanban: { tasks: [] },
     kanbanMulti: { snapshots: {} },
     taskSessions: { items: {} },
@@ -31,6 +48,10 @@ const mocks = vi.hoisted(() => ({
     agentProfiles: { items: [] },
   },
 }));
+
+const TASK_FILTER_LABEL = "Task filter";
+const WORKSPACE_A = "Workspace A";
+const WORKSPACE_B = "Workspace B";
 
 type MockAppState = typeof mocks.appState & {
   toggleSidebarGroupCollapsed: typeof mocks.toggleSidebarGroupCollapsed;
@@ -86,42 +107,199 @@ function task(id: string): TaskSwitcherItem {
   };
 }
 
-it("keeps the Tasks drawer as the sole modal during confirmation and restores its list", () => {
-  const previousWidth = window.innerWidth;
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
-  function Tasks() {
-    const [confirm, setConfirm] = useState(false);
-    return (
+it.each(["click", "Escape"])(
+  "keeps the Tasks drawer open when %s cancels confirmation",
+  (action) => {
+    const previousWidth = window.innerWidth;
+    const onDrawerOpenChange = vi.fn();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    function Tasks() {
+      const [confirm, setConfirm] = useState(false);
+      return (
+        <TaskSwitcherDrawer open onOpenChange={onDrawerOpenChange}>
+          <DrawerTitle>Tasks</DrawerTitle>
+          <input aria-label={TASK_FILTER_LABEL} defaultValue="Work in progress" />
+          <button onClick={() => setConfirm(true)}>Archive target</button>
+          <MobileActionConfirmation
+            open={confirm}
+            onOpenChange={setConfirm}
+            targetKey="task"
+            title="Archive task?"
+            subject="Target"
+            cancelLabel="Cancel"
+            confirmLabel="Archive"
+            onConfirm={vi.fn()}
+          />
+        </TaskSwitcherDrawer>
+      );
+    }
+    const view = render(<Tasks />);
+    try {
+      const drawer = screen.getByRole("dialog", { name: "Tasks" });
+      const input = screen.getByRole("textbox", { name: TASK_FILTER_LABEL });
+      fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
+      expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
+      expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+      expect(screen.queryByRole("textbox", { name: TASK_FILTER_LABEL })).toBeNull();
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      if (action === "Escape") fireEvent.keyDown(cancel, { key: "Escape" });
+      else fireEvent.click(cancel);
+      expect(screen.getByRole("textbox", { name: TASK_FILTER_LABEL })).toBe(input);
+      expect(onDrawerOpenChange).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  },
+);
+
+it("restores the original pointer style when workspace selection unmounts the nested menu and drawer", async () => {
+  const originalPointerEvents = document.body.style.pointerEvents;
+  document.body.style.pointerEvents = "auto";
+  function Navigation() {
+    const [mounted, setMounted] = useState(true);
+    return mounted ? (
       <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
         <DrawerTitle>Tasks</DrawerTitle>
-        <input aria-label="Task filter" defaultValue="Work in progress" />
-        <button onClick={() => setConfirm(true)}>Archive target</button>
-        <MobileActionConfirmation
-          open={confirm}
-          onOpenChange={setConfirm}
-          targetKey="task"
-          title="Archive task?"
-          subject="Target"
-          cancelLabel="Cancel"
-          confirmLabel="Archive"
-          onConfirm={vi.fn()}
+        <WorkspaceSwitcher
+          workspaces={[
+            { id: "a", name: WORKSPACE_A },
+            { id: "b", name: WORKSPACE_B },
+          ]}
+          activeWorkspaceId="a"
+          onSelect={() => setMounted(false)}
         />
       </TaskSwitcherDrawer>
+    ) : (
+      <button>Destination</button>
     );
   }
-  const view = render(<Tasks />);
+  const view = render(<Navigation />);
   try {
-    const drawer = screen.getByRole("dialog", { name: "Tasks" });
-    const input = screen.getByRole("textbox", { name: "Task filter" });
-    fireEvent.click(screen.getByRole("button", { name: "Archive target" }));
-    expect(screen.getByRole("dialog", { name: "Archive task?" })).toBe(drawer);
-    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
-    expect(screen.queryByRole("textbox", { name: "Task filter" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("textbox", { name: "Task filter" })).toBe(input);
+    expect(document.body.style.pointerEvents).toBe("none");
+    fireEvent.keyDown(screen.getByRole("button", { name: WORKSPACE_A }), { key: "Enter" });
+    await screen.findByRole("menuitem", { name: WORKSPACE_B });
+    fireEvent.click(screen.getByRole("menuitem", { name: WORKSPACE_B }));
+    await screen.findByRole("button", { name: "Destination" });
+    await waitFor(() => expect(document.body.style.pointerEvents).toBe("auto"));
   } finally {
     view.unmount();
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    document.body.style.pointerEvents = originalPointerEvents;
+  }
+});
+
+it.each(["", "auto"])(
+  "restores pointer style '%s' if navigation disposes the drawer during the menu exit animation",
+  async (pointerStyle) => {
+    const originalPointerEvents = document.body.style.pointerEvents;
+    document.body.style.pointerEvents = pointerStyle;
+    const styles = document.createElement("style");
+    styles.textContent = `[data-slot="dropdown-menu-content"] { animation-name: menu-in; }
+    [data-slot="dropdown-menu-content"][data-state="closed"] { animation-name: menu-out; }`;
+    document.head.append(styles);
+    const view = render(
+      <TaskSwitcherDrawer open onOpenChange={vi.fn()}>
+        <DrawerTitle>Tasks</DrawerTitle>
+        <WorkspaceSwitcher
+          workspaces={[
+            { id: "a", name: WORKSPACE_A },
+            { id: "b", name: WORKSPACE_B },
+          ]}
+          activeWorkspaceId="a"
+          onSelect={vi.fn()}
+        />
+      </TaskSwitcherDrawer>,
+    );
+    try {
+      fireEvent.keyDown(screen.getByRole("button", { name: WORKSPACE_A }), { key: "Enter" });
+      const item = await screen.findByRole("menuitem", { name: WORKSPACE_B });
+      const menu = screen.getByRole("menu");
+      fireEvent.animationStart(menu, { animationName: "menu-in" });
+      fireEvent.click(item);
+      expect(menu.getAttribute("data-state")).toBe("closed");
+      expect(menu.isConnected).toBe(true);
+      expect(document.body.style.pointerEvents).toBe("none");
+      view.unmount();
+      await waitFor(() => expect(document.body.style.pointerEvents).toBe(pointerStyle));
+    } finally {
+      view.unmount();
+      styles.remove();
+      document.body.style.pointerEvents = originalPointerEvents;
+    }
+  },
+);
+
+it.each(["", "auto"])(
+  "keeps standalone dropdown menus modal and restores pointer style '%s'",
+  async (pointerStyle) => {
+    const originalPointerEvents = document.body.style.pointerEvents;
+    document.body.style.pointerEvents = pointerStyle;
+    const onSelect = vi.fn();
+    const view = render(
+      <DropdownMenu>
+        <DropdownMenuTrigger>{WORKSPACE_A}</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem onSelect={() => onSelect("b")}>{WORKSPACE_B}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    try {
+      fireEvent.keyDown(screen.getByRole("button", { name: WORKSPACE_A }), { key: "Enter" });
+      const item = await screen.findByRole("menuitem", { name: WORKSPACE_B });
+      await waitFor(() => expect(document.body.style.pointerEvents).toBe("none"));
+      fireEvent.click(item);
+      expect(onSelect).toHaveBeenCalledWith("b");
+      await waitFor(() => expect(document.body.style.pointerEvents).toBe(pointerStyle));
+    } finally {
+      view.unmount();
+      document.body.style.pointerEvents = originalPointerEvents;
+    }
+  },
+);
+
+it("keeps the Tasks modal through workspace changes and releases its pointer lock on close", async () => {
+  const originalPointerEvents = document.body.style.pointerEvents;
+  const workspaceA = "workspace-a";
+  const workspaceB = "workspace-b";
+  function picker(workspaceId: string, open: boolean) {
+    return (
+      <TaskPickerSurface
+        presentation="drawer"
+        workspaceId={workspaceId}
+        open={open}
+        onOpenChange={vi.fn()}
+      >
+        <DrawerTitle>Tasks</DrawerTitle>
+        <input aria-label={TASK_FILTER_LABEL} defaultValue="Current filter" />
+      </TaskPickerSurface>
+    );
+  }
+  const view = render(picker(workspaceA, true));
+  try {
+    const modal = screen.getByRole("dialog", { name: "Tasks" });
+    const input = screen.getByRole("textbox", { name: TASK_FILTER_LABEL });
+    fireEvent.change(input, { target: { value: "Retained input" } });
+    view.rerender(picker(workspaceA, true));
+    expect(screen.getByRole("textbox", { name: TASK_FILTER_LABEL })).toBe(input);
+    expect((input as HTMLInputElement).value).toBe("Retained input");
+    view.rerender(picker(workspaceB, true));
+    expect(screen.getByRole("dialog", { name: "Tasks" })).toBe(modal);
+    const nextInput = screen.getByRole("textbox", { name: TASK_FILTER_LABEL });
+    expect(nextInput).not.toBe(input);
+    expect((nextInput as HTMLInputElement).value).toBe("Current filter");
+    view.rerender(picker(workspaceB, false));
+    expect(screen.queryByRole("dialog", { name: "Tasks", hidden: true })).toBeNull();
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+    expect(document.body.hasAttribute("data-scroll-locked")).toBe(false);
+    view.rerender(picker(workspaceA, true));
+    expect(screen.getByRole("dialog", { name: "Tasks" })).toBeDefined();
+    view.rerender(picker(workspaceA, false));
+    expect(screen.queryByRole("dialog", { name: "Tasks", hidden: true })).toBeNull();
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+    expect(document.body.hasAttribute("data-scroll-locked")).toBe(false);
+  } finally {
+    view.unmount();
+    document.body.style.pointerEvents = originalPointerEvents;
   }
 });
 
@@ -342,7 +520,7 @@ describe("SessionTaskSwitcherSheet lifecycle", () => {
     expect(setActiveSession).toHaveBeenCalledTimes(1);
     expect(setActiveSession).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(tabletTaskId);
+    expect(navigate).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

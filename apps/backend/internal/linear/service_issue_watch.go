@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"math"
 	"strings"
 	"time"
@@ -62,6 +63,10 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	}
 	if req.Enabled != nil {
 		w.Enabled = *req.Enabled
+	}
+
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
 	}
 	if err := s.store.CreateIssueWatch(ctx, w); err != nil {
 		return nil, err
@@ -147,7 +152,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
-		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, projectIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
 	if err := validateFilterBounds(w.Filter); err != nil {
 		return nil, err
@@ -175,6 +180,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		}
 		w.RepositoryID = repositoryID
 		w.BaseBranch = baseBranch
+	}
+
+	if _, err := s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
@@ -230,35 +239,79 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // haven't been turned into tasks yet. last_polled_at is stamped regardless of
 // whether the search succeeded — a failing search still counts as "we tried".
 //
-// Concurrency note: callers must tolerate being handed an issue that gets
-// stolen by a concurrent reserver. We query the seen-set and return unseen
-// identifiers, but we do NOT insert the dedup row here — that happens in the
-// orchestrator's ReserveIssueWatchTask via INSERT OR IGNORE. If the manual
-// /trigger endpoint and the poller tick fire for the same watch in quick
-// succession, both calls can see the same identifier as unseen before either
-// has reserved it. The duplicate publish is harmless (the second reserver
-// loses the race and bails) but the goroutine work is wasted. Same pattern as
-// the JIRA watcher.
+// Dispatch claims each issue atomically. A blocker-aware poll also owns a
+// revision of the pending set, so a concurrent poll or reset can supersede it.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*LinearIssue, error) {
-	defer s.stampWatchLastPolled(w.ID)
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
+	var pollRevision int64
+	if w.Filter.RequireBlockersDone {
+		revision, err := s.store.issueWatchPollRevision(ctx, w.ID)
+		if err != nil {
+			return nil, err
+		}
+		pollRevision = revision
+	}
+	defer func() { s.stampWatchLastPolled(w.ID, pollRevision) }()
 	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	seen, err := s.store.ListSeenIssueIdentifiers(ctx, w.ID)
+	reservations, err := s.store.listIssueWatchReservations(ctx, w.ID)
 	if err != nil {
+		if w.Filter.RequireBlockersDone {
+			return nil, err
+		}
 		s.log.Warn("linear: dedup set fetch failed",
 			zap.String("watch_id", w.ID), zap.Error(err))
-		seen = nil
 	}
+	out, err := s.searchIssueWatchPages(ctx, client, w)
+	if err != nil {
+		return nil, err
+	}
+	if w.Filter.RequireBlockersDone {
+		eligible, pending, err := s.holdBlockedIssues(ctx, client, w, out, reservations)
+		if err != nil {
+			return nil, err
+		}
+		committed, err := s.store.replacePendingIssueIDs(ctx, w.ID, pollRevision, pending)
+		if err != nil || !committed {
+			return nil, err
+		}
+		out = eligible
+		pollRevision++
+	} else {
+		out = unreservedIssues(out, reservations)
+	}
+	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
+		if err := attachProjectDescriptions(ctx, client, out); err != nil {
+			return nil, err
+		}
+	}
+	// Order dispatch so the most important issues win the in-flight slots.
+	sortBy := w.SortBy
+	if w.Filter.RequireBlockersDone && sortBy == SortByDefault {
+		sortBy = SortByUpdatedDesc
+	}
+	sortIssues(out, sortBy)
+	return out, nil
+}
+
+// searchIssueWatchPages reads the bounded window of matches for a watch.
+func (s *Service) searchIssueWatchPages(ctx context.Context, client Client, w *IssueWatch) ([]*LinearIssue, error) {
 	// Page through matches (bounded by maxPages) so the sort below ranks the
 	// whole unseen backlog. Linear only orders by created/updated, so priority
 	// ordering must be done here over the full fetched set. Default order is a
 	// no-op for sortIssues, so paginating a default watch buys nothing but
 	// extra Linear calls and larger dispatch bursts — keep it on the legacy
-	// single-page fetch.
+	// single-page fetch. A watch that holds blocked issues back still pages,
+	// so issues it can start are not hidden behind a full page of blocked ones.
 	maxPages := issueWatchMaxPages
-	if w.SortBy == SortByDefault {
+	if w.SortBy == SortByDefault && !w.Filter.RequireBlockersDone {
 		maxPages = 1
 	}
 	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
@@ -284,9 +337,6 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		for i := range res.Issues {
 			issue := res.Issues[i]
-			if _, ok := seen[issue.Identifier]; ok {
-				continue
-			}
 			out = append(out, &issue)
 		}
 		if res.IsLast || res.NextPageToken == "" {
@@ -294,18 +344,48 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		pageToken = res.NextPageToken
 	}
-	// Order dispatch so the most important issues win the in-flight slots.
-	sortIssues(out, w.SortBy)
 	return out, nil
+}
+
+// attachProjectDescriptions fills ProjectDescription on every issue that
+// belongs to a project, with one content lookup per distinct project. A
+// failed lookup fails the poll so no task starts without the brief its
+// prompt asks for; the next poll retries.
+func attachProjectDescriptions(ctx context.Context, client Client, issues []*LinearIssue) error {
+	var ids []string
+	seen := map[string]struct{}{}
+	for _, issue := range issues {
+		if issue.ProjectID == "" {
+			continue
+		}
+		if _, ok := seen[issue.ProjectID]; ok {
+			continue
+		}
+		seen[issue.ProjectID] = struct{}{}
+		ids = append(ids, issue.ProjectID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	contents, err := client.GetProjectContents(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("linear: fetch project descriptions: %w", err)
+	}
+	for _, issue := range issues {
+		if issue.ProjectID != "" {
+			issue.ProjectDescription = contents[issue.ProjectID]
+		}
+	}
+	return nil
 }
 
 // stampWatchLastPolled writes the current timestamp using a fresh background
 // context with a short write deadline, so a cancelled caller ctx (e.g. shutdown)
 // doesn't drop the liveness record.
-func (s *Service) stampWatchLastPolled(watchID string) {
+func (s *Service) stampWatchLastPolled(watchID string, revision int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
 	defer cancel()
-	if err := s.store.UpdateIssueWatchLastPolled(ctx, watchID, time.Now().UTC()); err != nil {
+	if err := s.store.updateIssueWatchLastPolled(ctx, watchID, time.Now().UTC(), revision); err != nil {
 		s.log.Warn("linear: update last_polled_at failed",
 			zap.String("watch_id", watchID), zap.Error(err))
 	}
@@ -322,6 +402,7 @@ func (s *Service) publishNewLinearIssueEvent(ctx context.Context, w *IssueWatch,
 		return
 	}
 	evt := bus.NewEvent(events.LinearNewIssue, "linear", &NewLinearIssueEvent{
+		CreatedByUserID:   w.CreatedByUserID,
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
@@ -402,7 +483,7 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
 	if filterIsEmpty(normalizeFilter(req.Filter)) {
-		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, projectIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
 	if err := validateFilterBounds(req.Filter); err != nil {
 		return err
@@ -497,19 +578,12 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 		CreatorID:   strings.TrimSpace(f.CreatorID),
 		EstimateMin: f.EstimateMin,
 		EstimateMax: f.EstimateMax,
+
+		RequireBlockersDone: f.RequireBlockersDone,
 	}
-	for _, id := range f.StateIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			out.StateIDs = append(out.StateIDs, id)
-		}
-	}
-	for _, id := range f.LabelIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			out.LabelIDs = append(out.LabelIDs, id)
-		}
-	}
+	out.StateIDs = trimIDs(f.StateIDs)
+	out.LabelIDs = trimIDs(f.LabelIDs)
+	out.ProjectIDs = trimIDs(f.ProjectIDs)
 	seenPriority := map[int]bool{}
 	for _, p := range f.Priorities {
 		if seenPriority[p] {
@@ -521,6 +595,18 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 	return out
 }
 
+// trimIDs trims each ID and drops empty entries; nil when none remain.
+func trimIDs(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func filterIsEmpty(f SearchFilter) bool {
 	return f.Query == "" &&
 		f.TeamKey == "" &&
@@ -528,6 +614,7 @@ func filterIsEmpty(f SearchFilter) bool {
 		len(f.StateIDs) == 0 &&
 		len(f.Priorities) == 0 &&
 		len(f.LabelIDs) == 0 &&
+		len(f.ProjectIDs) == 0 &&
 		f.CreatorID == "" &&
 		f.EstimateMin == nil &&
 		f.EstimateMax == nil

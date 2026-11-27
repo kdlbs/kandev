@@ -103,3 +103,69 @@ for (const failLogo of [false, true]) {
     );
   });
 }
+
+test("Antigravity arch loads from the logo API in the desktop model picker", async ({
+  backend,
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(90_000);
+  const restoreBackend = await backend.useEnv({ KANDEV_E2E_MOCK_ANTIGRAVITY: "true" });
+  try {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((candidate) => candidate.name === "antigravity-acp");
+    if (!agent) throw new Error("Antigravity agent is not available in the E2E registry");
+    const profile = await apiClient.createAgentProfile(agent.id, "Antigravity logo desktop", {
+      model: "mock-fast",
+      cli_flags: [],
+    });
+    await testPage.addInitScript((theme) => localStorage.setItem("theme", theme), "dark");
+    const logoResponsePromise = testPage.waitForResponse((response) =>
+      response.url().includes("/api/v1/agents/antigravity-acp/logo?variant=dark"),
+    );
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Antigravity composer provider icon",
+      profile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an Antigravity mock session");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const logoResponse = await logoResponsePromise;
+    expect(logoResponse.status()).toBe(200);
+    expect(logoResponse.headers()["content-type"]).toContain("image/svg+xml");
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast");
+    const icon = trigger.getByTestId("model-provider-icon");
+    const image = icon.locator("img");
+    await expect(image).toBeVisible();
+    await expect
+      .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0);
+
+    await trigger.focus();
+    await testPage.keyboard.press("Enter");
+    const pickerIcon = testPage.locator("[cmdk-group-heading]").getByTestId("model-provider-icon");
+    await expect(pickerIcon.locator("img")).toBeVisible();
+    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible();
+    await prCapture.screenshot("antigravity-logo-desktop", {
+      caption: "Antigravity arch in the desktop composer model picker",
+    });
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    await restoreBackend();
+  }
+});

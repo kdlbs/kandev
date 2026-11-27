@@ -1,5 +1,7 @@
 "use client";
 
+import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
+
 import { memo } from "react";
 
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -17,8 +19,10 @@ export type ChatInputToolbarProps = {
   planModeAvailable?: boolean;
   mcpServers?: string[];
   mcpAttachmentHistory?: MCPAttachmentHistory;
+  mcpSelection?: TaskSessionMCPSelection | null;
   onPlanModeChange: (enabled: boolean) => void;
   sessionId: string | null;
+  detailActive?: boolean;
   taskId: string | null;
   taskTitle?: string;
   taskDescription: string;
@@ -26,6 +30,7 @@ export type ChatInputToolbarProps = {
   canCancelAgent?: boolean;
   /** Whether the input has content to send (text, comments, or context) */
   hasContent?: boolean;
+  planActionDisabledReason?: string;
   isDisabled: boolean;
   submitDisabledReason?: string;
   isSending: boolean;
@@ -113,6 +118,7 @@ function MinimalToolbar({
 }
 
 const toolbarDefaults = {
+  detailActive: true,
   planModeAvailable: true,
   mcpServers: [] as string[],
   submitKey: "cmd_enter" as const,
@@ -168,7 +174,9 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         }
         mcpServers={props.mcpServers}
         mcpAttachmentHistory={props.mcpAttachmentHistory}
+        mcpSelection={props.mcpSelection}
         sessionId={props.sessionId}
+        detailActive={props.detailActive}
         taskId={props.taskId}
         taskTitle={props.taskTitle}
         onAttachFiles={props.onAttachFiles}
@@ -182,6 +190,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
+        planActionDisabledReason={props.planActionDisabledReason}
         onEnhancePrompt={props.onEnhancePrompt}
         isEnhancingPrompt={props.isEnhancingPrompt}
         isUtilityConfigured={props.isUtilityConfigured}

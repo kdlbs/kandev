@@ -17,6 +17,7 @@ import {
   PullDropdown,
 } from "./changes-panel-header-actions";
 import type { RenameBranchResult } from "./changes-panel-header-actions";
+import type { ChangesPanelRefreshStatus } from "./changes-panel-refresh-status";
 
 export { PullDropdown } from "./changes-panel-header-actions";
 
@@ -32,6 +33,9 @@ function buildHeaderBranchRows(props: ChangesPanelHeaderProps) {
 }
 
 type ChangesPanelHeaderProps = {
+  refreshStatus: ChangesPanelRefreshStatus;
+  hasPriorData: boolean;
+  failedRepositories: string[];
   hasChanges: boolean;
   hasCommits: boolean;
   hasPRFiles?: boolean;
@@ -156,17 +160,12 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
   const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
     <PanelHeaderBarSplit
+      leftClassName="shrink-0"
       left={
         <ChangesPanelHeaderLeft
-          showDiffReview={showDiffReview}
-          onOpenDiffAll={onOpenDiffAll}
-          onOpenReview={onOpenReview}
-          onRequestWalkthrough={onRequestWalkthrough}
-          requestWalkthroughDisabled={requestWalkthroughDisabled}
-        />
-      }
-      leftWhenOverflow={
-        <ChangesPanelHeaderLeft
+          refreshStatus={props.refreshStatus}
+          hasPriorData={props.hasPriorData}
+          failedRepositories={props.failedRepositories}
           showDiffReview={showDiffReview}
           primaryOnly
           onOpenDiffAll={onOpenDiffAll}
@@ -177,16 +176,15 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
       }
       right={<ChangesPanelHeaderRight props={props} branchRows={branchRows} />}
       overflow={
-        <ChangesPanelHeaderOverflowActions
-          showDiffReview={showDiffReview}
-          onOpenDiffAll={onOpenDiffAll}
-          onOpenReview={onOpenReview}
-          onRequestWalkthrough={onRequestWalkthrough}
-          requestWalkthroughDisabled={requestWalkthroughDisabled}
-        />
+        showDiffReview ? (
+          <ChangesPanelHeaderOverflowActions
+            onOpenDiffAll={onOpenDiffAll}
+            onRequestWalkthrough={onRequestWalkthrough}
+            requestWalkthroughDisabled={requestWalkthroughDisabled}
+          />
+        ) : null
       }
-      overflowAt={520}
-      hideLeftWhenOverflow
+      overflowAt={350}
       hideRightWhenOverflow={false}
     />
   );
