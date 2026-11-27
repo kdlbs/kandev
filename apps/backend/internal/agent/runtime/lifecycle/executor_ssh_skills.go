@@ -124,5 +124,12 @@ func sshSafeRelativePath(value string) (string, bool) {
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return "", false
 	}
+	// Windows path joins trim whitespace from each segment, so " .." would
+	// become a parent reference there. Reject it on every host.
+	for _, segment := range strings.Split(cleaned, "/") {
+		if strings.TrimSpace(segment) == ".." {
+			return "", false
+		}
+	}
 	return cleaned, true
 }
