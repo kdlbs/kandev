@@ -375,13 +375,16 @@ func TestTaskEventBroadcasterRedactsProtectedSessionStateFromPersistedAuthority(
 	t.Cleanup(func() { _ = database.Close() })
 	store, err := automation.NewStore(database, database)
 	require.NoError(t, err)
-	a := &automation.Automation{WorkspaceID: "workspace-credential-event", Name: "protected event"}
-	require.NoError(t, store.CreateAutomation(context.Background(), a))
+	creatorContext := authn.WithIdentity(context.Background(), authn.Identity{UserID: "creator-1", Role: authn.RoleMember})
+	a := &automation.Automation{WorkspaceID: "workspace-credential-event", Name: "protected event", AgentProfileID: "profile-1"}
+	require.NoError(t, store.CreateAutomationWithCredentialChoices(creatorContext, a, []automation.AutomationCredentialChoice{{
+		ProfileID: "profile-1", Key: "SERVICE_KEY", SecretID: "personal-secret", SourceSecretID: "profile-secret",
+	}}))
 	run := &automation.AutomationRun{
 		AutomationID: a.ID, TaskID: "protected-event-task", Status: automation.RunStatusTaskCreated,
-		TriggerType: automation.TriggerTypeManual, ProtectedCreatorUserID: "creator-1",
+		TriggerType: automation.TriggerTypeManual,
 	}
-	require.NoError(t, store.CreateRun(context.Background(), run))
+	require.NoError(t, store.CreateRun(creatorContext, run))
 
 	hub := NewHub(nil, testLogger())
 	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}

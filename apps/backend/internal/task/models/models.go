@@ -2039,10 +2039,11 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	OwnerID     string `json:"owner_id"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	OwnerID           string `json:"owner_id"`
+	OwnershipRevision int64  `json:"ownership_revision"`
 	// OrgID is the owning tenant. Empty means organizations are off or the
 	// tenancy migration has not run.
 	OrgID string `json:"org_id,omitempty"`

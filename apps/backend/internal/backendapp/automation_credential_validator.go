@@ -10,8 +10,17 @@ import (
 
 type lifecycleAutomationCredentialValidator struct {
 	manager        automationCredentialLifecycle
-	service        *automation.Service
+	service        automationCredentialChoiceResolver
 	prepareCreator func(context.Context, string, string, string) (context.Context, error)
+}
+
+type automationCredentialChoiceResolver interface {
+	ResolveAutomationCredentialChoice(
+		context.Context,
+		*automation.Automation,
+		string,
+		string,
+	) (automation.AutomationCredentialChoice, string, error)
 }
 
 type automationCredentialLifecycle interface {

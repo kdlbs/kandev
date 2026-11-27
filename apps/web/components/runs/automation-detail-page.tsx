@@ -48,6 +48,14 @@ function useWorkspaceGuard(automation: Automation | null, onLeave: () => void): 
   return foreign;
 }
 
+function isSessionlessCredentialFailure(run: AutomationRun): boolean {
+  return (
+    !run.session_id &&
+    !isOpenRun(run.status) &&
+    parseAutomationCredentialRunError(run.error_message) !== null
+  );
+}
+
 /**
  * The run the pane is showing. An explicit `?run=` wins; otherwise the newest,
  * because "what did it say last night" is the question this page exists for.
@@ -59,7 +67,10 @@ function selectRun(runs: AutomationRun[], requestedId: string | undefined): Auto
   // identifier remains redacted. Keep that run selectable for its safe status
   // and Stop control without opening its transcript.
   const selectable = runs.filter(
-    (run) => Boolean(run.session_id) || (run.can_stop && isOpenRun(run.status)),
+    (run) =>
+      Boolean(run.session_id) ||
+      (run.can_stop && isOpenRun(run.status)) ||
+      isSessionlessCredentialFailure(run),
   );
   if (selectable.length === 0) return null;
   const requested = requestedId ? selectable.find((run) => run.id === requestedId) : undefined;

@@ -75,6 +75,8 @@ Check phone hit targets, keyboard selection, and focus return. The form keeps th
 
 ## Verification
 
+In a fresh worktree, run `cd apps && pnpm install --frozen-lockfile` before the first frontend command.
+
 Use `internal/automation` `TestAutomationPersonalCredentialBinding` for authority, atomic save, source changes, supported settings, and reload.
 Use `internal/automation` `TestAutomationCredentialExport` for a disabled export without references.
 Extend the desktop and phone flows from task 01. Use temporary stores and a disposable PostgreSQL database for the conformance run.

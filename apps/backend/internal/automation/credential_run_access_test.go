@@ -10,12 +10,13 @@ import (
 )
 
 func TestAutomationCredentialRunAccessProjection(t *testing.T) {
-	ctx := context.Background()
 	svc := newTestService(t)
 	a := &Automation{WorkspaceID: "credential-run-workspace", Name: "credential run"}
+	ctx := credentialIdentity("credential-creator")
 	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	storePersonalCredentialChoice(t, svc.store, a)
 	run := &AutomationRun{
-		AutomationID: a.ID, TaskID: "credential-run-task", ProtectedCreatorUserID: "credential-creator",
+		AutomationID: a.ID, TaskID: "credential-run-task",
 		Status: RunStatusFailed, ErrorMessage: "provider returned secret-id=private", DisplayTitle: "private run title",
 		TriggerData: json.RawMessage(`{"payload":"private"}`),
 	}

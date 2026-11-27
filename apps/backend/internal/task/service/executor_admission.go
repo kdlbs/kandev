@@ -27,6 +27,9 @@ func (s *Service) SetExecutorIdentityResolver(resolve func(context.Context, stri
 // ExecutorActorContext restores only explicit durable attribution. Unknown
 // creators cannot inherit the workspace owner's or scheduler's authority.
 func (s *Service) ExecutorActorContext(ctx context.Context, userID string) (context.Context, error) {
+	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic && identity.UserID == userID {
+		return ctx, nil
+	}
 	if s.executorIdentityResolver == nil {
 		return ctx, fmt.Errorf("executor actor resolver is unavailable")
 	}
@@ -139,15 +142,15 @@ func (s *Service) PrepareAutomationCredentialActorContext(
 	ctx context.Context,
 	workspaceID, creatorID, profileID string,
 ) (context.Context, error) {
-	if creatorID == "" {
-		return ctx, models.ErrExecutorOwnershipInvalid
-	}
 	actorCtx := models.WithExecutorWorkspace(ctx, workspaceID)
-	actorCtx = models.WithExecutorActor(actorCtx, creatorID)
 	caller, hasCaller := authn.IdentityFromContext(ctx)
 	if hasCaller && caller.Synthetic {
 		return actorCtx, s.authorizeCredentialExecutor(actorCtx, profileID)
 	}
+	if creatorID == "" {
+		return actorCtx, models.ErrExecutorOwnershipInvalid
+	}
+	actorCtx = models.WithExecutorActor(actorCtx, creatorID)
 	actorCtx, err := s.ExecutorActorContext(actorCtx, creatorID)
 	if err != nil {
 		return actorCtx, err

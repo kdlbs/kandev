@@ -109,15 +109,26 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 	if err != nil {
 		return err
 	}
-	hasCredentialChoices, err := s.HasCredentialChoicesTx(ctx, tx, run.AutomationID)
+	choices, err := s.credentialChoicesTx(ctx, tx, run.AutomationID)
 	if err != nil {
 		return err
 	}
-	if hasCredentialChoices {
+	selectedRepositories, err := s.selectedRepositoryIDsTx(ctx, tx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	choices = credentialChoicesForSelectedRepositories(choices, selectedRepositories)
+	if len(choices) > 0 {
 		if err := credentialMutationActor(ctx, state.CreatorUserID); err != nil {
 			return err
 		}
 		run.ProtectedCreatorUserID = state.CreatorUserID
+	} else {
+		run.ProtectedCreatorUserID = ""
+	}
+	run.CredentialChoicesSnapshot, err = encodeRunCredentialChoiceSnapshot(run.AutomationID, choices)
+	if err != nil {
+		return err
 	}
 	if err := checkRetryAdmissionCapacity(ctx, tx, run.AutomationID); err != nil {
 		return err
@@ -158,10 +169,10 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 			retry_task_intent_id, retry_policy_snapshot, retry_trigger_snapshot,
 			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
 			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
-			automation_revision, trigger_revision, created_at)
+			credential_choices_snapshot, automation_revision, trigger_revision, created_at)
 		VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		run.ID, run.AutomationID, run.ProtectedCreatorUserID, run.TriggerID, run.TriggerType, run.TaskID, run.Status, run.DedupKey,
@@ -172,7 +183,7 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 		run.RetryFailureClass, run.RetryTaskIntentID, run.RetryPolicySnapshot, run.RetryTriggerSnapshot,
 		run.RetryLaunchConfigSnapshot, run.RetryLaunchConfigVersion, run.RetryResolvedPrompt,
 		run.RetryResolvedTitle, run.RetryResolvedTriggerAt, run.RetryContinuationSnapshot,
-		run.AutomationRevision, run.TriggerRevision, run.CreatedAt); err != nil {
+		run.CredentialChoicesSnapshot, run.AutomationRevision, run.TriggerRevision, run.CreatedAt); err != nil {
 		return err
 	}
 	group.CreatedAt, group.UpdatedAt = now, now

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -24,9 +25,15 @@ func (r automationCredentialProfileResolver) ResolveProfile(context.Context, str
 type automationCredentialRepositoryReader struct {
 	*fakeExecutorProfileReader
 	repositories map[string]*models.Repository
+	executor     *models.Executor
+	executorErr  error
+	executorIDs  []string
 }
 
-type automationCredentialSecretStore struct{ *inMemorySecretStore }
+type automationCredentialSecretStore struct {
+	*inMemorySecretStore
+	revealedGlobalIDs []string
+}
 
 func (*automationCredentialSecretStore) CopyScoped(context.Context, string, string, secrets.SecretScope, string, *string, func(context.Context) error) (*secrets.Secret, error) {
 	return nil, nil
@@ -36,12 +43,18 @@ func (*automationCredentialSecretStore) MoveScoped(context.Context, string, stri
 	return nil, nil
 }
 
+func (s *automationCredentialSecretStore) RevealGlobal(ctx context.Context, id string) (string, error) {
+	s.revealedGlobalIDs = append(s.revealedGlobalIDs, id)
+	return s.inMemorySecretStore.RevealGlobal(ctx, id)
+}
+
 func (r *automationCredentialRepositoryReader) GetRepository(_ context.Context, id string) (*models.Repository, error) {
 	return r.repositories[id], nil
 }
 
-func (*automationCredentialRepositoryReader) GetExecutor(_ context.Context, id string) (*models.Executor, error) {
-	return &models.Executor{ID: id, Type: models.ExecutorTypeRemoteDocker}, nil
+func (r *automationCredentialRepositoryReader) GetExecutor(_ context.Context, id string) (*models.Executor, error) {
+	r.executorIDs = append(r.executorIDs, id)
+	return r.executor, r.executorErr
 }
 
 func TestAutomationCredentialEnvironment(t *testing.T) {
@@ -105,7 +118,7 @@ func TestAutomationCredentialEnvironment(t *testing.T) {
 
 func TestAutomationCredentialEnvironmentRemoteAdmissionUsesPersonalBinding(t *testing.T) {
 	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "creator", Role: authn.RoleMember})
-	store := newInMemorySecretStore()
+	store := &automationCredentialSecretStore{inMemorySecretStore: newInMemorySecretStore()}
 	require.NoError(t, store.Create(ctx, &secrets.SecretWithValue{
 		Secret: secrets.Secret{ID: "personal-secret", Scope: secrets.ScopeGlobal}, Value: "personal-api-key",
 	}))
@@ -115,6 +128,7 @@ func TestAutomationCredentialEnvironmentRemoteAdmissionUsesPersonalBinding(t *te
 				ID: "executor-profile", ExecutorID: "remote-executor", EnvVars: []models.ProfileEnvVar{{Key: "ANTHROPIC_API_KEY", SecretID: "shared-default-secret"}},
 			},
 		}},
+		executor: &models.Executor{ID: "remote-executor", Type: models.ExecutorTypeRemoteDocker},
 	}
 	mgr := newTestManager(t)
 	mgr.profileResolver = automationCredentialProfileResolver{info: &AgentProfileInfo{
@@ -132,4 +146,87 @@ func TestAutomationCredentialEnvironmentRemoteAdmissionUsesPersonalBinding(t *te
 	})
 
 	require.NoError(t, err)
+	require.Equal(t, []string{"remote-executor"}, reader.executorIDs)
+	require.NotEmpty(t, store.revealedGlobalIDs)
+	require.Contains(t, store.revealedGlobalIDs, "personal-secret")
+	require.NotContains(t, store.revealedGlobalIDs, "shared-default-secret")
+}
+
+func TestAutomationCredentialEnvironmentExecutorLookupFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		executor  *models.Executor
+		lookupErr error
+		wantErr   error
+	}{
+		{name: "storage failure", lookupErr: errors.New("database unavailable"), wantErr: ErrAutomationCredentialStorage},
+		{name: "canceled lookup", lookupErr: context.Canceled, wantErr: context.Canceled},
+		{name: "missing executor", wantErr: ErrAutomationCredentialStorage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &automationCredentialRepositoryReader{
+				fakeExecutorProfileReader: &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+					"executor-profile": {ID: "executor-profile", ExecutorID: "remote-executor"},
+				}},
+				executor:    tc.executor,
+				executorErr: tc.lookupErr,
+			}
+			mgr := newTestManager(t)
+			mgr.profileResolver = automationCredentialProfileResolver{info: &AgentProfileInfo{
+				ProfileID: "agent-profile", AgentName: agents.NewClaudeACP().ID(),
+			}}
+			mgr.SetExecutorProfileReader(reader)
+			mgr.SetSecretStore(newInMemorySecretStore())
+
+			err := mgr.ValidateAutomationCredentialEnvironment(context.Background(), AutomationCredentialRequest{
+				AgentProfileID: "agent-profile", ExecutorProfileID: "executor-profile",
+			})
+
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Equal(t, []string{"remote-executor"}, reader.executorIDs)
+		})
+	}
+}
+
+func TestAutomationCredentialEnvironmentSkipsRemoteAdmissionAfterLocalExecutorLookup(t *testing.T) {
+	reader := &automationCredentialRepositoryReader{
+		fakeExecutorProfileReader: &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+			"executor-profile": {
+				ID: "executor-profile", ExecutorID: "local-executor",
+				Config: map[string]string{"remote_credentials": "invalid local-only config"},
+			},
+		}},
+		executor: &models.Executor{ID: "local-executor", Type: models.ExecutorTypeLocal},
+	}
+	mgr := newTestManager(t)
+	mgr.profileResolver = automationCredentialProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "agent-profile", AgentName: agents.NewClaudeACP().ID(),
+	}}
+	mgr.SetExecutorProfileReader(reader)
+	mgr.SetSecretStore(newInMemorySecretStore())
+
+	err := mgr.ValidateAutomationCredentialEnvironment(context.Background(), AutomationCredentialRequest{
+		AgentProfileID: "agent-profile", ExecutorProfileID: "executor-profile",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"local-executor"}, reader.executorIDs)
+}
+
+func TestAutomationCredentialEnvironmentRequiresExecutorLookupCapability(t *testing.T) {
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+		"executor-profile": {ID: "executor-profile", ExecutorID: "remote-executor"},
+	}}
+	mgr := newTestManager(t)
+	mgr.profileResolver = automationCredentialProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "agent-profile", AgentName: agents.NewClaudeACP().ID(),
+	}}
+	mgr.SetExecutorProfileReader(reader)
+	mgr.SetSecretStore(newInMemorySecretStore())
+
+	err := mgr.ValidateAutomationCredentialEnvironment(context.Background(), AutomationCredentialRequest{
+		AgentProfileID: "agent-profile", ExecutorProfileID: "executor-profile",
+	})
+
+	require.ErrorIs(t, err, ErrAutomationCredentialStorage)
 }

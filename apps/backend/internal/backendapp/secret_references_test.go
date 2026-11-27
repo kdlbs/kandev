@@ -7,18 +7,21 @@ import (
 	"testing"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type secretReferenceFixture struct {
-	agents       []*settingsmodels.Agent
-	profiles     []*settingsmodels.AgentProfile
-	executors    []*models.ExecutorProfile
-	workspaces   []*models.Workspace
-	repositories map[string][]*models.Repository
-	fail         string
+	agents         []*settingsmodels.Agent
+	profiles       []*settingsmodels.AgentProfile
+	executors      []*models.ExecutorProfile
+	workspaces     []*models.Workspace
+	repositories   map[string][]*models.Repository
+	automations    map[string][]*automation.Automation
+	automationByID map[string]*automation.Automation
+	fail           string
 }
 
 var errReferenceRead = errors.New("reference storage unavailable")
@@ -53,6 +56,18 @@ func (f *secretReferenceFixture) ListRepositories(_ context.Context, workspaceID
 	}
 	return f.repositories[workspaceID], nil
 }
+func (f *secretReferenceFixture) ListAutomations(_ context.Context, workspaceID string) ([]*automation.Automation, error) {
+	if f.fail == "automations" {
+		return nil, errReferenceRead
+	}
+	return f.automations[workspaceID], nil
+}
+func (f *secretReferenceFixture) GetAutomation(_ context.Context, id string) (*automation.Automation, error) {
+	if f.fail == "automation_details" {
+		return nil, errReferenceRead
+	}
+	return f.automationByID[id], nil
+}
 
 func newSecretReferenceFixture() *secretReferenceFixture {
 	return &secretReferenceFixture{
@@ -70,6 +85,24 @@ func newSecretReferenceFixture() *secretReferenceFixture {
 		},
 		executors:  []*models.ExecutorProfile{{ID: "executor", Name: "Local", EnvVars: []models.ProfileEnvVar{{Key: "EXEC_TOKEN", SecretID: "secret"}}}},
 		workspaces: []*models.Workspace{{ID: "visible"}, {ID: "private"}},
+		automations: map[string][]*automation.Automation{
+			"visible": {{ID: "automation-visible", WorkspaceID: "visible", Name: "Daily review"}},
+			"private": {{ID: "automation-private", WorkspaceID: "private", Name: "Private review"}},
+		},
+		automationByID: map[string]*automation.Automation{
+			"automation-visible": {
+				ID: "automation-visible", WorkspaceID: "visible", Name: "Daily review",
+				CredentialChoices: []automation.CredentialChoiceProjection{{
+					Kind: automation.CredentialChoicePersonal, Key: "AUTO_TOKEN", SecretID: "secret",
+				}},
+			},
+			"automation-private": {
+				ID: "automation-private", WorkspaceID: "private", Name: "Private review",
+				CredentialChoices: []automation.CredentialChoiceProjection{{
+					Kind: automation.CredentialChoicePersonal, Key: "PRIVATE_AUTO_TOKEN", SecretID: "secret",
+				}},
+			},
+		},
 		repositories: map[string][]*models.Repository{
 			"visible": {{ID: "repo", Name: "App", WorkspaceID: "visible", SecretBindings: []models.RepositorySecretBinding{{Key: "REPO_TOKEN", SecretID: "secret"}}}},
 			"private": {{ID: "private-id", Name: "Private app", WorkspaceID: "private", SecretBindings: []models.RepositorySecretBinding{{Key: "PRIVATE_KEY", SecretID: "secret"}}}},
@@ -80,7 +113,7 @@ func newSecretReferenceFixture() *secretReferenceFixture {
 // @covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9
 func TestSecretReferenceDiscoveryAndRedaction(t *testing.T) {
 	f := newSecretReferenceFixture()
-	checker := secretReferenceChecker{agents: f, tasks: f, authorizeWorkspace: func(_ context.Context, id string) error {
+	checker := secretReferenceChecker{agents: f, tasks: f, automations: f, authorizeWorkspace: func(_ context.Context, id string) error {
 		if id == "private" {
 			return repoerrors.ErrWorkspaceNotFound
 		}
@@ -97,6 +130,8 @@ func TestSecretReferenceDiscoveryAndRedaction(t *testing.T) {
 		{Kind: "executor_profile", ID: "executor", Name: "Local", Key: "EXEC_TOKEN"},
 		{Kind: "repository", ID: "repo", Name: "App", Key: "REPO_TOKEN"},
 		{Kind: "repository"},
+		{Kind: "automation", ID: "automation-visible", Name: "Daily review", Key: "AUTO_TOKEN"},
+		{Kind: "automation"},
 	}
 	if !reflect.DeepEqual(refs, want) {
 		t.Fatalf("references = %#v, want %#v", refs, want)
@@ -109,11 +144,11 @@ func TestSecretReferenceDiscoveryAndRedaction(t *testing.T) {
 
 // @covers AC-WORKSPACES-REPOSITORY-SECRETS-001.11
 func TestSecretReferenceReadFailure(t *testing.T) {
-	for _, stage := range []string{"agents", "profiles", "executors", "workspaces", "repositories", "authorization"} {
+	for _, stage := range []string{"agents", "profiles", "executors", "workspaces", "repositories", "automations", "automation_details", "authorization"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newSecretReferenceFixture()
 			f.fail = stage
-			checker := secretReferenceChecker{agents: f, tasks: f, authorizeWorkspace: func(context.Context, string) error {
+			checker := secretReferenceChecker{agents: f, tasks: f, automations: f, authorizeWorkspace: func(context.Context, string) error {
 				if stage == "authorization" {
 					return errReferenceRead
 				}
@@ -124,5 +159,18 @@ func TestSecretReferenceReadFailure(t *testing.T) {
 				t.Fatalf("references = %v, error = %v", refs, err)
 			}
 		})
+	}
+}
+
+func TestSecretReferenceDiscoveryRequiresAutomationReader(t *testing.T) {
+	f := newSecretReferenceFixture()
+	checker := secretReferenceChecker{agents: f, tasks: f, authorizeWorkspace: func(context.Context, string) error {
+		return nil
+	}}
+
+	refs, err := checker.list(context.Background(), "secret")
+
+	if refs != nil || err == nil {
+		t.Fatalf("references = %v, error = %v; want fail-closed automation reference lookup", refs, err)
 	}
 }

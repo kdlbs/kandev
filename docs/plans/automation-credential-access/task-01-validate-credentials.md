@@ -75,6 +75,8 @@ Keep the standard form for an automation without credential references. Show saf
 
 ## Verification
 
+In a fresh worktree, run `cd apps && pnpm install --frozen-lockfile` before the first frontend command.
+
 Start with the two-account v0.103.0 scenario in the plan.
 Use `TestAutomationCredentialSave` for enabled writes, deferred sources, and disabled drafts.
 Use `TestAutomationCredentialEnvironment` for source and precedence equivalence.

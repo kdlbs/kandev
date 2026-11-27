@@ -313,10 +313,19 @@ func (m *Manager) validateAutomationRemoteCredentials(
 	}
 	reader, ok := m.executorProfileReader.(automationCredentialExecutorReader)
 	if !ok {
-		return nil
+		return ErrAutomationCredentialStorage
 	}
 	executor, err := reader.GetExecutor(ctx, executorProfile.ExecutorID)
-	if err != nil || executor == nil || !models.IsRemoteExecutorType(executor.Type) {
+	if err != nil {
+		if isCredentialCancellation(err) {
+			return err
+		}
+		return ErrAutomationCredentialStorage
+	}
+	if executor == nil {
+		return ErrAutomationCredentialStorage
+	}
+	if !models.IsRemoteExecutorType(executor.Type) {
 		return nil
 	}
 	if err := remoteauth.ValidateCredentialAdmission(ctx, remoteauth.AdmissionInput{

@@ -87,4 +87,28 @@ describe("AutomationCredentialConfig", () => {
     expect(updateField).toHaveBeenCalledWith("agentProfileId", "agent-2");
     expect(updateField).not.toHaveBeenCalledWith("personalCredentialBindings", expect.anything());
   });
+
+  it("hides personal selection and rejects edits for an unsupported trigger draft", () => {
+    const updateField = vi.fn();
+    render(
+      <AutomationCredentialConfig
+        form={{ ...form, continuationPolicy: "new_task" }}
+        triggers={[{ id: "trigger-1", type: "webhook" } as never]}
+        workspaceId="workspace-1"
+        automation={null}
+        onAutomationChange={() => {}}
+        updateField={updateField}
+        credentialError={null}
+        dirtyFields={{
+          agentProfileId: false,
+          executorProfileId: false,
+          repositorySelections: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("credential-eligibility").textContent).toBe("false");
+    fireEvent.click(screen.getByTestId("change-personal-binding"));
+    expect(updateField).not.toHaveBeenCalledWith("personalCredentialBindings", expect.anything());
+  });
 });

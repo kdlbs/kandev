@@ -813,15 +813,15 @@ func startAgentInfrastructure(
 				return services.Task.PrepareAutomationCredentialActor(ctx, workspaceID, creatorID, profileID)
 			},
 		)
-		services.Automation.Service.SetWorkspaceCredentialOwnerRevisionLookup(func(ctx context.Context, workspaceID string) (time.Time, error) {
+		services.Automation.Service.SetWorkspaceCredentialOwnerRevisionLookup(func(ctx context.Context, workspaceID string) (int64, error) {
 			workspace, err := repos.Task.GetWorkspace(ctx, workspaceID)
 			if err != nil {
-				return time.Time{}, err
+				return 0, err
 			}
 			if workspace == nil {
-				return time.Time{}, automation.ErrCredentialChoiceUnavailable
+				return 0, automation.ErrCredentialChoiceUnavailable
 			}
-			return workspace.UpdatedAt, nil
+			return workspace.OwnershipRevision, nil
 		})
 		services.Automation.Service.SetCredentialCreatorNameLookup(func(ctx context.Context, userID string) (string, error) {
 			if services.Auth == nil {
@@ -3243,8 +3243,12 @@ func buildHTTPServer(
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	secretsSvc := secrets.NewService(userSecretStore, log)
+	var automationSecretReferences secretAutomationReferenceReader
+	if services.Automation != nil && services.Automation.Service != nil {
+		automationSecretReferences = services.Automation.Service.Store()
+	}
 	secretsSvc.SetReferenceChecker(secretReferenceChecker{
-		agents: repos.AgentSettings, tasks: repos.Task,
+		agents: repos.AgentSettings, tasks: repos.Task, automations: automationSecretReferences,
 		authorizeWorkspace: services.Task.AuthorizeWorkspaceAccess,
 	}.list)
 	// Workspace classification happens here, at the wiring boundary, where both

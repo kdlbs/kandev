@@ -256,7 +256,7 @@ The desktop and phone flows rendered and exercised the field error, disabled dra
 
 Reviewed captures: `desktop-credential-error.png`, `desktop-personal-secret-picker.png`, `desktop-workspace-grant-confirmation.png`, `desktop-workspace-granted.png`, `desktop-owner-run-stop.png`; and the corresponding `phone-*.png` captures plus `phone-member-safe-run-status.png` and `phone-owner-run-stop.png` in the isolated Playwright result directories. The owner captures show safe status and Stop guidance without a transcript.
 
-The desktop flow exercised the picker with pointer selection and keyboard dismissal. Keyboard selection itself, safe-area measurements, and a separate narrow fine-pointer viewport were not independently checked.
+The follow-up review on 2026-11-27 reran one authenticated desktop test and one phone test in the managed isolated runner. Each run used a fresh fixture database and distinct Owner, Creator, and other-member accounts. Both passed. The desktop test follows Tab from the Enabled control through the editor, opens the personal-secret picker with Enter, searches and selects with the keyboard, and checks focus return. The automation prompt editor now lets Tab move to the next form control. It also renders the disabled draft at a 480 px fine-pointer viewport; `desktop-narrow-fine-credential-draft.png` was inspected. The phone captures `phone-personal-secret-drawer.png`, `phone-workspace-grant-confirmation.png`, and `phone-member-safe-run-status.png` were inspected after the rerun. The phone test retains the existing viewport and touch-target checks. Safe-area insets were not measured separately.
 
 ## Work orders
 
@@ -285,3 +285,10 @@ Implementation and the rendered review completed on 2026-11-27. The v0.103.0 rep
 - The focused frontend suite passed: 6 files and 95 tests. Web typecheck, Oxlint, and locale checks passed.
 - Desktop E2E passed (1 test, 25.4s); phone E2E passed (1 test, 42.2s). Both used fresh isolated databases and distinct Owner, Creator, and other-member accounts. Each run exercised the no-secret successful launch, creator launch, grant and revoke, safe member projection, and owner Stop.
 - SQLGuard passed. Public-doc tests (63 passed), public-doc validation (56 pages), specification catalog validation (467 decisions and 2,120 specs), specification lint, `git diff --check`, and the Go formatting check passed.
+
+PR review regression follow-up completed on 2026-11-27:
+
+- The full `internal/automation` suite passed after the transaction helper refactor. The relevant `internal/backendapp`, `internal/task/service`, `internal/gateway/websocket`, and `internal/agent/runtime/lifecycle` suites passed. The previously failing task-handler and improve-kandev template integration tests passed.
+- `TestPostgresFirstCredentialGrantSerializesDefinitionAndRunAdmission` passed against a disposable PostgreSQL 16 container. The test checks that a concurrent first grant blocks an unapproved definition edit and run admission across separate connections. The container was removed after the test.
+- Authenticated desktop E2E passed (1 test, 26.4s) and authenticated phone E2E passed (1 test, 41.9s), each with a fresh isolated database. Both include the no-secret path through a successful run and the protected credential flow.
+- Changed-Go lint reported zero issues. The desktop and phone E2E runners rebuilt the backend and web assets successfully; Vite emitted only the existing chunk-size and dynamic-import warnings.

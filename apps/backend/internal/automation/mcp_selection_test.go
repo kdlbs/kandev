@@ -219,10 +219,16 @@ func TestAutomationMCPUpdateReturnsCommittedRevisions(t *testing.T) {
 	require.NoError(t, err)
 	_, err = svc.store.db.Exec(`UPDATE automations SET resource_revision=resource_revision+7 WHERE id=?`, a.ID)
 	require.NoError(t, err)
+	a, err = svc.store.GetAutomation(ctx, a.ID)
+	require.NoError(t, err)
 	tx, err := svc.store.db.BeginTxx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	require.NoError(t, writeAutomationUpdateRow(ctx, tx, a.ID, a, automationUpdateCondition{a.MCPSelectionRevision, a.TaskMode}))
+	require.NoError(t, writeAutomationUpdateRow(ctx, tx, a.ID, a, automationUpdateCondition{
+		resourceRevision: a.ResourceRevision,
+		mcpRevision:      a.MCPSelectionRevision,
+		taskMode:         a.TaskMode,
+	}))
 	require.NoError(t, tx.Commit())
 	actual, err := svc.store.GetAutomation(ctx, a.ID)
 	require.NoError(t, err)

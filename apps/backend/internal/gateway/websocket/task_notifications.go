@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"reflect"
 	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -320,9 +321,14 @@ func (b *TaskEventBroadcaster) routeBroadcastContext(
 ) error {
 	switch action {
 	case ws.ActionTaskPlanCommentsChanged, ws.ActionTaskPreviewFeedbackChanged:
-		return b.broadcastTaskSnapshot(data, msg)
+		return b.broadcastTaskSnapshot(ctx, data, msg)
+	case ws.ActionTaskStatusSummaryUpdated, ws.ActionTaskReviewRunUpdated,
+		ws.ActionTaskReviewFindingsPublished, ws.ActionTaskReviewFindingUpdated, ws.ActionTaskReviewCleared:
+		return b.routeTaskProjection(ctx, data, workspaceID, msg)
 	case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
 		return b.broadcastWorkspaceDTO(data, workspaceID, msg)
+	case ws.ActionTaskCreated, ws.ActionTaskUpdated, ws.ActionTaskStateChanged:
+		return b.routeTaskLifecycle(ctx, action, data, workspaceID, msg)
 	case ws.ActionSessionStateChanged:
 		return b.routeSessionStateChanged(ctx, data, sessionID, workspaceID, msg)
 	case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError,
@@ -371,18 +377,111 @@ func (b *TaskEventBroadcaster) routeBroadcastContext(
 	return nil
 }
 
-func (b *TaskEventBroadcaster) broadcastTaskSnapshot(data interface{}, msg *ws.Message) error {
-	taskID := extractStringField(data, "task_id")
-	if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
-		taskID = snapshot.TaskID
+func (b *TaskEventBroadcaster) broadcastTaskSnapshot(ctx context.Context, data interface{}, msg *ws.Message) error {
+	taskID := extractTaskID(data)
+	if taskID == "" || (b.hub.workspaceScopeEnforced() && b.hub.authPolicy.Subscriptions.Task == nil) {
+		return nil
 	}
-	if snapshot, ok := data.(*models.TaskPreviewFeedbackSnapshot); ok {
-		taskID = snapshot.TaskID
+	if b.protectedTaskLookup != nil {
+		_, err := b.protectedTaskLookup(ctx, taskID)
+		if err != nil {
+			b.logger.Warn("failed to resolve protected task snapshot access", zap.String("task_id", taskID), zap.Error(err))
+			return nil
+		}
 	}
-	if taskID != "" {
+	b.hub.BroadcastToTask(taskID, msg)
+	return nil
+}
+
+func (b *TaskEventBroadcaster) routeTaskProjection(
+	ctx context.Context,
+	data interface{},
+	workspaceID string,
+	msg *ws.Message,
+) error {
+	taskID := extractTaskID(data)
+	if taskID == "" {
+		return nil
+	}
+	if b.protectedTaskLookup == nil {
+		if b.hub.workspaceScopeEnforced() {
+			if b.hub.authPolicy.Subscriptions.Task != nil {
+				b.hub.BroadcastToTask(taskID, msg)
+			}
+			return nil
+		}
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	}
+	protected, err := b.protectedTaskLookup(ctx, taskID)
+	if err != nil {
+		b.logger.Warn("failed to resolve protected task projection", zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	if protected {
+		if !b.hub.workspaceScopeEnforced() || b.hub.authPolicy.Subscriptions.Task != nil {
+			b.hub.BroadcastToTask(taskID, msg)
+		}
+		return nil
+	}
+	b.hub.BroadcastToWorkspace(workspaceID, msg)
+	return nil
+}
+
+func (b *TaskEventBroadcaster) routeTaskLifecycle(
+	ctx context.Context,
+	action string,
+	data interface{},
+	workspaceID string,
+	msg *ws.Message,
+) error {
+	taskID := extractTaskID(data)
+	if b.protectedTaskLookup == nil && !b.hub.workspaceScopeEnforced() {
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	}
+	if taskID == "" {
+		return nil
+	}
+	protected, lookupSucceeded := true, false
+	if b.protectedTaskLookup != nil {
+		resolvedProtected, err := b.protectedTaskLookup(ctx, taskID)
+		if err != nil {
+			b.logger.Warn("failed to resolve protected task lifecycle projection", zap.String("task_id", taskID), zap.Error(err))
+		} else {
+			protected = resolvedProtected
+			lookupSucceeded = true
+		}
+	}
+	if !protected {
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	}
+	if safe, ok := safeProtectedTaskLifecyclePayload(data); ok {
+		safeMessage, err := ws.NewNotification(action, safe)
+		if err != nil {
+			return err
+		}
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, safeMessage)
+	}
+	if lookupSucceeded && (!b.hub.workspaceScopeEnforced() || b.hub.authPolicy.Subscriptions.Task != nil) {
 		b.hub.BroadcastToTask(taskID, msg)
 	}
 	return nil
+}
+
+func safeProtectedTaskLifecyclePayload(data interface{}) (map[string]interface{}, bool) {
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	safe := make(map[string]interface{}, 6)
+	for _, key := range []string{"task_id", "workspace_id", "state", "old_state", "new_state", "updated_at"} {
+		if value, exists := payload[key]; exists {
+			safe[key] = value
+		}
+	}
+	return safe, safe["task_id"] != nil && safe["workspace_id"] != nil
 }
 
 func (b *TaskEventBroadcaster) broadcastWorkspaceDTO(data interface{}, workspaceID string, msg *ws.Message) error {
@@ -430,7 +529,10 @@ func (b *TaskEventBroadcaster) routeSessionStateChanged(
 		b.hub.clearSessionLaunchWarning(sessionID)
 	}
 	taskID := extractStringField(data, "task_id")
-	if taskID != "" && b.protectedTaskLookup != nil {
+	if b.protectedTaskLookup != nil {
+		if taskID == "" {
+			return nil
+		}
 		handled, err := b.routeProtectedSessionState(ctx, data, taskID, workspaceID)
 		if handled || err != nil {
 			return err
@@ -462,7 +564,17 @@ func (b *TaskEventBroadcaster) routeProtectedSessionState(
 	if err != nil {
 		return true, err
 	}
-	b.hub.BroadcastToWorkspace(workspaceID, safeMessage)
+	b.hub.BroadcastToWorkspaceOrDrop(workspaceID, safeMessage)
+	if sessionID := extractStringField(data, "session_id"); sessionID != "" &&
+		(!b.hub.workspaceScopeEnforced() || b.hub.authPolicy.Subscriptions.Session != nil) {
+		if transition, ok := safeProtectedSessionTransitionPayload(data); ok {
+			transitionMessage, err := ws.NewNotification(ws.ActionSessionStateChanged, transition)
+			if err != nil {
+				return true, err
+			}
+			b.hub.BroadcastToSession(sessionID, transitionMessage)
+		}
+	}
 	return true, nil
 }
 
@@ -478,6 +590,20 @@ func safeProtectedSessionStatePayload(data interface{}) (map[string]interface{},
 		}
 	}
 	return safe, safe["task_id"] != nil && safe["workspace_id"] != nil
+}
+
+func safeProtectedSessionTransitionPayload(data interface{}) (map[string]interface{}, bool) {
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	safe := make(map[string]interface{}, 5)
+	for _, key := range []string{"task_id", "session_id", "old_state", "new_state", "updated_at"} {
+		if value, exists := payload[key]; exists {
+			safe[key] = value
+		}
+	}
+	return safe, safe["task_id"] != nil && safe["session_id"] != nil
 }
 
 // extractWorkspaceID pulls a workspace ID from event payloads (map- or
@@ -506,6 +632,26 @@ func extractStringField(data interface{}, key string) string {
 	if m, ok := data.(map[string]interface{}); ok {
 		if value, ok := m[key].(string); ok {
 			return value
+		}
+	}
+	return ""
+}
+
+func extractTaskID(data interface{}) string {
+	if taskID := extractStringField(data, "task_id"); taskID != "" {
+		return taskID
+	}
+	value := reflect.ValueOf(data)
+	for value.IsValid() && value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return ""
+		}
+		value = value.Elem()
+	}
+	if value.IsValid() && value.Kind() == reflect.Struct {
+		field := value.FieldByName("TaskID")
+		if field.IsValid() && field.Kind() == reflect.String {
+			return field.String()
 		}
 	}
 	return ""

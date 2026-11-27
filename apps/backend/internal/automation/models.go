@@ -213,22 +213,22 @@ const (
 // automation field. Secret references and authority identities never leave
 // the automation service's public projections.
 type AutomationCredentialChoice struct {
-	AutomationID            string                `json:"-" db:"automation_id"`
-	Kind                    CredentialChoiceKind  `json:"kind" db:"kind"`
-	ProfileID               string                `json:"profile_id,omitempty" db:"profile_id"`
-	RepositoryID            string                `json:"repository_id,omitempty" db:"repository_id"`
-	Key                     string                `json:"key" db:"env_key"`
-	SecretID                string                `json:"-" db:"secret_id"`
-	SourceSecretID          string                `json:"-" db:"source_secret_id"`
-	SourceUpdatedAt         time.Time             `json:"-" db:"source_updated_at"`
-	WorkspaceOwnerUpdatedAt *time.Time            `json:"-" db:"workspace_owner_updated_at"`
-	CreatorUserID           string                `json:"-" db:"creator_user_id"`
-	GrantorUserID           string                `json:"-" db:"grantor_user_id"`
-	State                   CredentialChoiceState `json:"state" db:"state"`
-	Revision                int64                 `json:"-" db:"revision"`
-	SecretName              string                `json:"secret_name,omitempty" db:"secret_name"`
-	CreatedAt               time.Time             `json:"-" db:"created_at"`
-	UpdatedAt               time.Time             `json:"-" db:"updated_at"`
+	AutomationID           string                `json:"-" db:"automation_id"`
+	Kind                   CredentialChoiceKind  `json:"kind" db:"kind"`
+	ProfileID              string                `json:"profile_id,omitempty" db:"profile_id"`
+	RepositoryID           string                `json:"repository_id,omitempty" db:"repository_id"`
+	Key                    string                `json:"key" db:"env_key"`
+	SecretID               string                `json:"-" db:"secret_id"`
+	SourceSecretID         string                `json:"-" db:"source_secret_id"`
+	SourceUpdatedAt        time.Time             `json:"-" db:"source_updated_at"`
+	WorkspaceOwnerRevision *int64                `json:"-" db:"workspace_owner_revision"`
+	CreatorUserID          string                `json:"-" db:"creator_user_id"`
+	GrantorUserID          string                `json:"-" db:"grantor_user_id"`
+	State                  CredentialChoiceState `json:"state" db:"state"`
+	Revision               int64                 `json:"-" db:"revision"`
+	SecretName             string                `json:"secret_name,omitempty" db:"secret_name"`
+	CreatedAt              time.Time             `json:"-" db:"created_at"`
+	UpdatedAt              time.Time             `json:"-" db:"updated_at"`
 }
 
 type PersonalCredentialBindingInput struct {
@@ -238,33 +238,33 @@ type PersonalCredentialBindingInput struct {
 }
 
 type WorkspaceCredentialGrantRequest struct {
-	RepositoryID                    string    `json:"repository_id"`
-	Key                             string    `json:"key"`
-	ExpectedAutomationRevision      uint64    `json:"expected_automation_revision"`
-	ExpectedCredentialRevision      int64     `json:"expected_credential_revision"`
-	ExpectedBindingUpdatedAt        time.Time `json:"expected_binding_updated_at"`
-	ExpectedWorkspaceOwnerUpdatedAt time.Time `json:"expected_workspace_owner_updated_at"`
+	RepositoryID                   string    `json:"repository_id"`
+	Key                            string    `json:"key"`
+	ExpectedAutomationRevision     uint64    `json:"expected_automation_revision"`
+	ExpectedCredentialRevision     int64     `json:"expected_credential_revision"`
+	ExpectedBindingUpdatedAt       time.Time `json:"expected_binding_updated_at"`
+	ExpectedWorkspaceOwnerRevision int64     `json:"expected_workspace_owner_revision"`
 }
 
 // CredentialChoiceProjection is safe to share with workspace readers.
 type CredentialChoiceProjection struct {
-	Kind                    CredentialChoiceKind  `json:"kind" db:"kind"`
-	ProfileID               string                `json:"profile_id,omitempty" db:"profile_id"`
-	RepositoryID            string                `json:"repository_id,omitempty" db:"repository_id"`
-	Key                     string                `json:"key" db:"env_key"`
-	State                   CredentialChoiceState `json:"state" db:"state"`
-	SecretName              string                `json:"secret_name,omitempty" db:"secret_name"`
-	SecretID                string                `json:"secret_id,omitempty" db:"secret_id"`
-	SourceSecretID          string                `json:"-" db:"source_secret_id"`
-	CreatorUserID           string                `json:"-" db:"creator_user_id"`
-	GrantorUserID           string                `json:"-" db:"grantor_user_id"`
-	SourceUpdatedAt         time.Time             `json:"-" db:"source_updated_at"`
-	Revision                int64                 `json:"revision,omitempty" db:"revision"`
-	CanGrant                bool                  `json:"can_grant,omitempty" db:"-"`
-	CanRevoke               bool                  `json:"can_revoke,omitempty" db:"-"`
-	CreatorName             string                `json:"creator_name,omitempty" db:"-"`
-	BindingUpdatedAt        time.Time             `json:"binding_updated_at,omitempty" db:"-"`
-	WorkspaceOwnerUpdatedAt time.Time             `json:"workspace_owner_updated_at,omitempty" db:"-"`
+	Kind                   CredentialChoiceKind  `json:"kind" db:"kind"`
+	ProfileID              string                `json:"profile_id,omitempty" db:"profile_id"`
+	RepositoryID           string                `json:"repository_id,omitempty" db:"repository_id"`
+	Key                    string                `json:"key" db:"env_key"`
+	State                  CredentialChoiceState `json:"state" db:"state"`
+	SecretName             string                `json:"secret_name,omitempty" db:"secret_name"`
+	SecretID               string                `json:"secret_id,omitempty" db:"secret_id"`
+	SourceSecretID         string                `json:"-" db:"source_secret_id"`
+	CreatorUserID          string                `json:"-" db:"creator_user_id"`
+	GrantorUserID          string                `json:"-" db:"grantor_user_id"`
+	SourceUpdatedAt        time.Time             `json:"-" db:"source_updated_at"`
+	Revision               int64                 `json:"revision,omitempty" db:"revision"`
+	CanGrant               bool                  `json:"can_grant,omitempty" db:"-"`
+	CanRevoke              bool                  `json:"can_revoke,omitempty" db:"-"`
+	CreatorName            string                `json:"creator_name,omitempty" db:"-"`
+	BindingUpdatedAt       time.Time             `json:"binding_updated_at,omitempty" db:"-"`
+	WorkspaceOwnerRevision int64                 `json:"workspace_owner_revision,omitempty" db:"-"`
 }
 
 // ThreadAction describes how a dispatched run reached its task/session.
@@ -428,6 +428,7 @@ type AutomationRun struct {
 	RetryResolvedTitle        string     `json:"-" db:"retry_resolved_title"`
 	RetryResolvedTriggerAt    *time.Time `json:"-" db:"retry_resolved_trigger_timestamp"`
 	RetryContinuationSnapshot string     `json:"-" db:"retry_continuation_snapshot"`
+	CredentialChoicesSnapshot string     `json:"-" db:"credential_choices_snapshot"`
 	AutomationRevision        int64      `json:"-" db:"automation_revision"`
 	TriggerRevision           int64      `json:"-" db:"trigger_revision"`
 }

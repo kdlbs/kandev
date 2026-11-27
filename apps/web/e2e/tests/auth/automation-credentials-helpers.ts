@@ -260,6 +260,22 @@ async function createCredentialDraft(base: CredentialTestBase): Promise<Credenti
 
   const enabled = collaboratorPage.getByTestId("automation-enabled-switch");
   await expect(enabled).toBeChecked();
+  if (!base.mobile) {
+    await collaboratorPage.setViewportSize({ width: 480, height: 900 });
+    await expect(
+      collaboratorPage.getByTestId("agent-profile-selector"),
+      "profile selector remains available in a narrow fine-pointer viewport",
+    ).toBeVisible();
+    expect(
+      await collaboratorPage.evaluate(() => window.matchMedia("(pointer: fine)").matches),
+    ).toBe(true);
+    expect(
+      await collaboratorPage.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await expect(enabled).toBeVisible();
   await clickOrTap(enabled, base.mobile);
   await expect(enabled).not.toBeChecked();
   const draftSave = collaboratorWs.waitForResponse("automation.create");
@@ -282,6 +298,25 @@ async function createCredentialDraft(base: CredentialTestBase): Promise<Credenti
   await expect(
     collaboratorPage.getByTestId(`automation-enabled-${automationId}`),
   ).not.toBeChecked();
+  if (!base.mobile) {
+    await collaboratorPage.goto(
+      `/settings/workspaces/${base.workspaceId}/automations/${automationId}`,
+    );
+    const savedDraftEnabled = collaboratorPage.getByTestId("automation-enabled-switch");
+    await expect(savedDraftEnabled).not.toBeChecked();
+    await expect(collaboratorPage.getByTestId("agent-profile-selector")).toBeVisible();
+    expect(
+      await collaboratorPage.evaluate(() => window.matchMedia("(pointer: fine)").matches),
+    ).toBe(true);
+    expect(
+      await collaboratorPage.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await savedDraftEnabled.scrollIntoViewIfNeeded();
+    await capture(collaboratorPage, base.testInfo, "desktop-narrow-fine-credential-draft.png");
+    await collaboratorPage.setViewportSize({ width: 1440, height: 960 });
+  }
 
   return { ...base, automationId, collaboratorPage, collaboratorWs, saveButton };
 }
@@ -304,6 +339,40 @@ async function choosePersonalSecret(state: CredentialDraftState, key: string): P
     await expect(option).toBeVisible();
     await option.click();
   }
+  await expect(trigger).toContainText(COLLABORATOR_SECRET);
+  await expect(trigger).toBeFocused();
+}
+
+async function choosePersonalSecretWithKeyboard(
+  state: CredentialDraftState,
+  key: string,
+): Promise<void> {
+  const page = state.collaboratorPage;
+  const trigger = page.getByTestId(`automation-personal-secret-${key}`);
+  const navigationStart = page.getByTestId("automation-enabled-switch");
+  await expect(trigger).toBeVisible();
+  await navigationStart.focus();
+  await expect(navigationStart).toBeFocused();
+  let triggerReached = false;
+  for (let index = 0; index < 80; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await trigger.evaluate((element) => element === document.activeElement)) {
+      triggerReached = true;
+      break;
+    }
+  }
+  expect(triggerReached, "keyboard tab order reaches the personal-secret picker").toBe(true);
+  await page.keyboard.press("Enter");
+  const picker = page.locator('[data-slot="popover-content"]').last();
+  await expect(picker).toBeVisible();
+  const search = page.getByPlaceholder("Search Global secrets");
+  await expect(search).toBeFocused();
+  await page.keyboard.type(COLLABORATOR_SECRET);
+  const option = page.getByRole("option", { name: COLLABORATOR_SECRET, exact: true });
+  await expect(option).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(picker).toBeHidden();
   await expect(trigger).toContainText(COLLABORATOR_SECRET);
   await expect(trigger).toBeFocused();
 }
@@ -361,7 +430,11 @@ async function bindPersonalSecrets(state: CredentialDraftState): Promise<void> {
   await collaboratorPage.reload();
   await expect(collaboratorPage.getByTestId("automation-editor")).toBeVisible();
   for (const key of [AGENT_SECRET_KEY, EXECUTOR_SECRET_KEY]) {
-    await choosePersonalSecret(state, key);
+    if (!mobile && key === AGENT_SECRET_KEY) {
+      await choosePersonalSecretWithKeyboard(state, key);
+    } else {
+      await choosePersonalSecret(state, key);
+    }
   }
   const bindingSave = state.collaboratorWs.waitForResponse("automation.update");
   await clickOrTap(state.saveButton, mobile);

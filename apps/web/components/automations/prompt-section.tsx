@@ -45,6 +45,7 @@ export function PromptSection({
         height="160px"
         placeholders={scriptPlaceholders}
         promptReferences
+        tabFocusMode
         isDirty={isDirty}
         dirtyLevel="container"
         testId={testId}

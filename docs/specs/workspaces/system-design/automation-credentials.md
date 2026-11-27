@@ -159,8 +159,8 @@ Use the existing activation gate to stop relaunch after revocation or creator re
 Apply the protected creator field to runs with credential choices and to their bound tasks, sessions, and environments.
 General task access remains under workspace collaboration.
 Apply the creator check to manual activation of an automation with a credential choice and to its executable settings.
-Reject a non-creator's request before it changes the definition or its credential choice.
-The owner manages grants and can disable the automation or stop its runs.
+Reject a non-creator's request before it changes the executable definition or a personal binding.
+The workspace owner manages Workspace grants under the separate grant rules below, and can disable the automation or stop its runs.
 The entitled creator controls the definition, prompts, session, filesystem, terminal, preview, and agent or plugin tools for its run.
 Use the stored task and run association to check access on HTTP, WebSocket, and MCP paths.
 Enforce it where task, session, and environment access is authorized. This covers entry by a direct run or task link.

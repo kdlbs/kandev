@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => {
   }> = [];
   const mountedModels = new Map<string, editor.ITextModel>();
   const pendingMounts: Array<() => void> = [];
-  const editorOptions: Array<{ ariaLabel?: string }> = [];
+  const editorOptions: Array<{ ariaLabel?: string; tabFocusMode?: boolean }> = [];
   const monaco = {
     editor: { defineTheme: vi.fn() },
     languages: {
@@ -43,7 +43,7 @@ vi.mock("@/lib/routing/client-dynamic", () => ({
         editor: { getModel: () => editor.ITextModel },
         monaco: typeof mocks.monaco,
       ) => void;
-      options?: { ariaLabel?: string };
+      options?: { ariaLabel?: string; tabFocusMode?: boolean };
     }) {
       mocks.editorOptions.push(options ?? {});
       useEffect(() => {
@@ -91,6 +91,14 @@ describe("ScriptEditor completion ownership", () => {
     render(<ScriptEditor value="" onChange={() => undefined} ariaLabel="Prompt editor" />);
 
     expect(mocks.editorOptions.at(-1)?.ariaLabel).toBe("Prompt editor");
+  });
+
+  it("passes tab focus mode to Monaco when form navigation is preferred", () => {
+    render(
+      <ScriptEditor value="" onChange={() => undefined} tabFocusMode ariaLabel="Prompt editor" />,
+    );
+
+    expect(mocks.editorOptions.at(-1)?.tabFocusMode).toBe(true);
   });
 
   it("keeps completion providers scoped to the Monaco model that mounted them", async () => {

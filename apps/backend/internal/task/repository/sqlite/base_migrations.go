@@ -390,6 +390,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("uniq_tasks_external_id", `CREATE UNIQUE INDEX IF NOT EXISTS uniq_tasks_external_id ON tasks(workspace_id, external_id) WHERE external_id IS NOT NULL`)
 
 	// Office workspace extensions
+	if err := r.migrate.Apply("workspaces.ownership_revision", `ALTER TABLE workspaces ADD COLUMN ownership_revision BIGINT NOT NULL DEFAULT 1`); err != nil {
+		return err
+	}
 	r.migrate.Apply("workspaces.task_prefix", `ALTER TABLE workspaces ADD COLUMN task_prefix TEXT DEFAULT 'KAN'`)
 	r.migrate.Apply("workspaces.task_sequence", `ALTER TABLE workspaces ADD COLUMN task_sequence INTEGER DEFAULT 0`)
 	r.migrate.Apply("workspaces.office_workflow_id", `ALTER TABLE workspaces ADD COLUMN office_workflow_id TEXT DEFAULT ''`)

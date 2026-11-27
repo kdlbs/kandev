@@ -140,10 +140,11 @@ func TestProtectedAutomationRunStopAllowsCreatorAndWorkspaceOwner(t *testing.T) 
 			svc := newTestService(t)
 			ctx := context.Background()
 			a := &Automation{WorkspaceID: "workspace", CreatedByUserID: "creator-1", Name: "protected", Enabled: true}
-			require.NoError(t, svc.store.CreateAutomation(ctx, a))
+			require.NoError(t, svc.store.CreateAutomation(credentialIdentity("creator-1"), a))
+			storePersonalCredentialChoice(t, svc.store, a)
 			run := &AutomationRun{
-				AutomationID: a.ID, ProtectedCreatorUserID: "creator-1",
-				TriggerType: TriggerTypeManual, Status: RunStatusTaskCreated,
+				AutomationID: a.ID,
+				TriggerType:  TriggerTypeManual, Status: RunStatusTaskCreated,
 				TaskID: "task", SessionID: "session", TurnID: "turn",
 			}
 			require.NoError(t, svc.store.CreateRun(ctx, run))
@@ -445,10 +446,11 @@ func TestDeleteAutomationCleanupFailureRetainsProtectedTaskAuthority(t *testing.
 	deleter := &fakeTaskDeleter{errors: map[string]error{"protected-cleanup-task": errors.New("cleanup unavailable")}}
 	svc.SetTaskDeleter(deleter)
 	a := &Automation{WorkspaceID: "workspace-protected-cleanup", Name: "protected cleanup", Enabled: true}
-	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	require.NoError(t, svc.store.CreateAutomation(credentialIdentity("creator-1"), a))
+	storePersonalCredentialChoice(t, svc.store, a)
 	run := &AutomationRun{
 		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded,
-		TaskID: "protected-cleanup-task", ProtectedCreatorUserID: "creator-1",
+		TaskID: "protected-cleanup-task",
 	}
 	require.NoError(t, svc.store.CreateRun(ctx, run))
 
@@ -460,6 +462,10 @@ func TestDeleteAutomationCleanupFailureRetainsProtectedTaskAuthority(t *testing.
 	require.NoError(t, err)
 	require.True(t, protected)
 	require.False(t, allowed)
+	protected, allowed, err = svc.ProtectedAutomationRunUseAccessForTask(credentialIdentity("collaborator-1"), run.TaskID, "collaborator-1")
+	require.NoError(t, err)
+	require.True(t, protected)
+	require.False(t, allowed, "a surviving cleanup task keeps protected runtime admission closed")
 	jobs, err := svc.store.ListCleanupJobs(ctx)
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)

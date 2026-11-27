@@ -80,6 +80,8 @@ Check both accounts on a phone, including the drawer scroll and focus return.
 
 ## Verification
 
+In a fresh worktree, run `cd apps && pnpm install --frozen-lockfile` before the first frontend command.
+
 Use `internal/automation` `TestAutomationWorkspaceSecretGrant` for owner/secret ownership, grant identity, safe projection, revoke resolution, repository-binding replacement, and stale revisions.
 Use `internal/automation` `TestAutomationCredentialExport` for disabled and redacted portable exports.
 Run the conformance suite with SQLite and a disposable PostgreSQL database. Use a temporary Git repository and a mock agent in the authenticated Playwright scenarios.

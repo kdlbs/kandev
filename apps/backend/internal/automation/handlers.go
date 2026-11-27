@@ -155,6 +155,9 @@ func wsUpdate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		if raw, present := payload["mcp_selection"]; present && raw == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "mcp_selection cannot be null", nil)
 		}
+		if raw, present := payload["personal_credential_bindings"]; present && raw == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "personal_credential_bindings cannot be null", nil)
+		}
 		var req UpdateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
@@ -391,7 +394,7 @@ func wsUpdateTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 
 func automationMutationError(msg *ws.Message, err error) (*ws.Message, error) {
 	if errors.Is(err, ErrCredentialsUnavailable) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), CredentialValidationDetails(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, ErrCredentialsUnavailable.Error(), CredentialValidationDetails(err))
 	}
 	if errors.Is(err, ErrCredentialStorageUnavailable) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, ErrCredentialStorageUnavailable.Error(), map[string]interface{}{
@@ -409,6 +412,9 @@ func automationMutationError(msg *ws.Message, err error) (*ws.Message, error) {
 	}
 	if errors.Is(err, ErrCredentialSettingsConflict) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, ErrCredentialSettingsConflict.Error(), nil)
+	}
+	if errors.Is(err, ErrAutomationSettingsConflict) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, ErrAutomationSettingsConflict.Error(), nil)
 	}
 	if errors.Is(err, ErrCredentialStorageUnavailable) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, ErrCredentialStorageUnavailable.Error(), map[string]interface{}{

@@ -32,26 +32,39 @@ func (r credentialChoiceRepositoryReader) GetRepository(_ context.Context, id st
 type credentialChoiceSecretStore struct {
 	secrets.ScopedSecretStore
 	secret *secrets.Secret
+	byID   map[string]*secrets.Secret
 	value  string
 }
 
 func (s *credentialChoiceSecretStore) GetForWorkspace(ctx context.Context, id, workspaceID string) (*secrets.Secret, error) {
 	identity, ok := authn.IdentityFromContext(ctx)
-	if !ok || s.secret == nil || identity.UserID != s.secret.OwnerUserID {
+	secret := s.secretForID(id)
+	if !ok || secret == nil || identity.UserID != secret.OwnerUserID {
 		return nil, secrets.ErrNotFound
 	}
-	if s.secret == nil || s.secret.ID != id || s.secret.WorkspaceID != workspaceID {
+	if secret.WorkspaceID != workspaceID {
 		return nil, secrets.ErrNotFound
 	}
-	return s.secret, nil
+	return secret, nil
 }
 
 func (s *credentialChoiceSecretStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
 	identity, ok := authn.IdentityFromContext(ctx)
-	if !ok || s.secret == nil || identity.UserID != s.secret.OwnerUserID || s.secret.ID != id || s.secret.WorkspaceID != workspaceID || s.value == "" {
+	secret := s.secretForID(id)
+	if !ok || secret == nil || identity.UserID != secret.OwnerUserID || secret.WorkspaceID != workspaceID || s.value == "" {
 		return "", secrets.ErrNotFound
 	}
 	return s.value, nil
+}
+
+func (s *credentialChoiceSecretStore) secretForID(id string) *secrets.Secret {
+	if s.byID != nil {
+		return s.byID[id]
+	}
+	if s.secret != nil && s.secret.ID == id {
+		return s.secret
+	}
+	return nil
 }
 
 func TestAutomationPersonalCredentialBinding(t *testing.T) {
@@ -128,16 +141,21 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 				RepositoryID: "repo-2", Key: "SERVICE_KEY", SecretID: "workspace-secret-2", UpdatedAt: repo2BindingTime,
 			}},
 		}
-		secretStore := &credentialChoiceSecretStore{secret: &secrets.Secret{
-			ID: "workspace-secret", OwnerUserID: "owner-1", Name: "Billing key",
-			Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID,
-		}, value: "billing-value"}
+		secretStore := &credentialChoiceSecretStore{
+			byID: map[string]*secrets.Secret{
+				"workspace-secret":   {ID: "workspace-secret", OwnerUserID: "owner-1", Name: "Billing key", Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID},
+				"workspace-secret-2": {ID: "workspace-secret-2", OwnerUserID: "owner-1", Name: "Legal key", Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID},
+			},
+			value: "billing-value",
+		}
 		svc.SetWorkspaceCredentialGrantDependencies(testWorkspaceOwner, credentialChoiceRepositoryReader{
 			"repo-1": repo1, "repo-2": repo2,
 		}, secretStore, testCredentialOwnerContext, testCredentialCreatorAccess)
 		firstGrant, err := svc.GrantWorkspaceSecret(credentialIdentity("owner-1"), a.ID, workspaceGrantRequest(a, 0))
 		require.NoError(t, err)
 		require.Equal(t, CredentialChoiceGranted, firstGrant.CredentialChoices[0].State)
+		oldRun := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeManual, TaskID: "task-repo-removed", Status: RunStatusTriggered}
+		require.NoError(t, svc.store.CreateRun(context.Background(), oldRun))
 		svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{
 			"repo-1": a.WorkspaceID, "repo-2": a.WorkspaceID,
 		}})
@@ -148,30 +166,38 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, rebound.Enabled)
 		require.Equal(t, []string{"repo-2"}, rebound.RepositoryIDs)
-		secretStore.secret = &secrets.Secret{
-			ID: "workspace-secret-2", OwnerUserID: "owner-1", Name: "Legal key",
-			Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID,
-		}
-
+		protected, allowed, accessErr := svc.ProtectedAutomationRunUseAccessForTask(
+			credentialIdentity("creator-1"), oldRun.TaskID, "creator-1",
+		)
+		require.NoError(t, accessErr)
+		require.True(t, protected)
+		require.False(t, allowed, "a repository binding removed after admission is unavailable to the old run")
+		_, accessErr = svc.ResolveAutomationCredentialBindingValue(
+			credentialIdentity("creator-1"), oldRun.TaskID, a.ID, oldRun.ID, "repo-1", "SERVICE_KEY",
+		)
+		require.ErrorIs(t, accessErr, ErrCredentialsUnavailable)
 		ownerView, err := svc.GetAutomation(credentialIdentity("owner-1"), a.ID)
 		require.NoError(t, err)
 		var newRepositoryChoice *CredentialChoiceProjection
+		var oldRepositoryChoices int
 		for index := range ownerView.CredentialChoices {
 			choice := &ownerView.CredentialChoices[index]
 			if choice.RepositoryID == "repo-2" {
 				newRepositoryChoice = choice
 			}
 			if choice.RepositoryID == "repo-1" {
+				oldRepositoryChoices++
 				require.Equal(t, CredentialChoiceStale, choice.State)
 			}
 		}
+		require.Equal(t, 1, oldRepositoryChoices)
 		require.NotNil(t, newRepositoryChoice)
 		require.Equal(t, CredentialChoiceApproval, newRepositoryChoice.State)
 		require.True(t, newRepositoryChoice.CanGrant)
 
 		grantRequest := &WorkspaceCredentialGrantRequest{
 			RepositoryID: "repo-2", Key: "SERVICE_KEY", ExpectedAutomationRevision: rebound.ResourceRevision,
-			ExpectedBindingUpdatedAt: repo2BindingTime, ExpectedWorkspaceOwnerUpdatedAt: testWorkspaceOwnerUpdatedAt,
+			ExpectedBindingUpdatedAt: repo2BindingTime, ExpectedWorkspaceOwnerRevision: testWorkspaceOwnerRevisionValue,
 		}
 		granted, err := svc.GrantWorkspaceSecret(credentialIdentity("owner-1"), a.ID, grantRequest)
 		require.NoError(t, err)
@@ -246,6 +272,12 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 			ProtectedCreatorUserID: "creator-1", Status: RunStatusTriggered,
 		}
 		require.NoError(t, svc.store.CreateRun(context.Background(), run))
+		_, storedRun, runChoices, err := svc.CredentialChoicesForRun(context.Background(), run.ID)
+		require.NoError(t, err)
+		require.NotNil(t, storedRun)
+		require.Len(t, runChoices, 1)
+		require.Equal(t, CredentialChoiceGranted, runChoices[0].State)
+		require.Equal(t, granted.CredentialChoices[0].Revision, runChoices[0].Revision)
 		protected, allowed, err := svc.ProtectedAutomationRunUseAccessForTask(credentialIdentity("creator-1"), "task-1", "creator-1")
 		require.NoError(t, err)
 		require.True(t, protected)
@@ -258,6 +290,12 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 		revoked, err := svc.RevokeWorkspaceSecret(ownerCtx, a.ID, workspaceGrantRequest(a, choice.Revision))
 		require.NoError(t, err)
 		require.Equal(t, CredentialChoiceRevoked, revoked.CredentialChoices[0].State)
+		require.False(t, revoked.CredentialChoices[0].CanRevoke)
+		_, _, runChoices, err = svc.CredentialChoicesForRun(context.Background(), run.ID)
+		require.NoError(t, err)
+		require.Len(t, runChoices, 1)
+		require.Equal(t, CredentialChoiceGranted, runChoices[0].State, "the run keeps its admitted choice snapshot")
+		require.Equal(t, granted.CredentialChoices[0].Revision, runChoices[0].Revision)
 		_, _, err = svc.ResolveAutomationCredentialChoice(
 			credentialIdentity("creator-1"), a, "repo-1", "SERVICE_KEY",
 		)
@@ -331,8 +369,8 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 	t.Run("ownership moving away and back does not revive the old grant", func(t *testing.T) {
 		svc, a := credentialChoiceService(t)
 		currentOwner := "owner-1"
-		ownerRevision := testWorkspaceOwnerUpdatedAt
-		svc.SetWorkspaceCredentialOwnerRevisionLookup(func(context.Context, string) (time.Time, error) { return ownerRevision, nil })
+		ownerRevision := testWorkspaceOwnerRevisionValue
+		svc.SetWorkspaceCredentialOwnerRevisionLookup(func(context.Context, string) (int64, error) { return ownerRevision, nil })
 		secretStore := &credentialChoiceSecretStore{secret: &secrets.Secret{
 			ID: "workspace-secret", OwnerUserID: "owner-1", Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID,
 		}, value: "value"}
@@ -343,26 +381,88 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 		)
 		granted, err := svc.GrantWorkspaceSecret(credentialIdentity("owner-1"), a.ID, workspaceGrantRequest(a, 0))
 		require.NoError(t, err)
+		run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeManual, TaskID: "owner-revision-task", Status: RunStatusTriggered}
+		require.NoError(t, svc.store.CreateRun(context.Background(), run))
 
-		ownerRevision = ownerRevision.Add(time.Second)
+		ownerRevision++
 		currentOwner = "owner-2"
-		ownerRevision = ownerRevision.Add(time.Second)
+		_, err = svc.store.db.Exec(`UPDATE workspaces SET owner_id = ?, ownership_revision = ? WHERE id = ?`, currentOwner, ownerRevision, a.WorkspaceID)
+		require.NoError(t, err)
+		ownerRevision++
 		currentOwner = "owner-1"
+		_, err = svc.store.db.Exec(`UPDATE workspaces SET owner_id = ?, ownership_revision = ? WHERE id = ?`, currentOwner, ownerRevision, a.WorkspaceID)
+		require.NoError(t, err)
 		_, _, err = svc.ResolveAutomationCredentialChoice(credentialIdentity("creator-1"), a, "repo-1", "SERVICE_KEY")
 		require.ErrorIs(t, err, ErrCredentialsUnavailable)
+		_, err = svc.GrantWorkspaceSecret(credentialIdentity("owner-1"), a.ID, workspaceGrantRequest(a, granted.CredentialChoices[0].Revision))
+		require.ErrorIs(t, err, ErrCredentialSettingsConflict, "ownership changing away and back leaves the old confirmation stale")
+		protected, allowed, accessErr := svc.ProtectedAutomationRunUseAccessForTask(
+			credentialIdentity("creator-1"), run.TaskID, "creator-1",
+		)
+		require.NoError(t, accessErr)
+		require.True(t, protected)
+		require.False(t, allowed)
 
 		ownerView, err := svc.GetAutomation(credentialIdentity("owner-1"), a.ID)
 		require.NoError(t, err)
 		require.Equal(t, CredentialChoiceStale, ownerView.CredentialChoices[0].State)
 		require.True(t, ownerView.CredentialChoices[0].CanRevoke)
-		_, err = svc.RevokeWorkspaceSecret(credentialIdentity("owner-1"), a.ID, workspaceGrantRequest(a, granted.CredentialChoices[0].Revision))
+		revokeRequest := workspaceGrantRequest(a, granted.CredentialChoices[0].Revision)
+		revokeRequest.ExpectedWorkspaceOwnerRevision = ownerRevision
+		_, err = svc.RevokeWorkspaceSecret(credentialIdentity("owner-1"), a.ID, revokeRequest)
 		require.NoError(t, err)
 	})
+}
+
+func TestAutomationRunCredentialChoicesStayPinnedAcrossRetries(t *testing.T) {
+	svc, a := credentialChoiceService(t)
+	secretStore := &credentialChoiceSecretStore{secret: &secrets.Secret{
+		ID: "workspace-secret", OwnerUserID: "owner-1", Scope: secrets.ScopeWorkspace, WorkspaceID: a.WorkspaceID,
+	}, value: "secret-value"}
+	svc.SetWorkspaceCredentialGrantDependencies(testWorkspaceOwner, credentialChoiceRepositoryReader{
+		"repo-1": credentialChoiceRepository(a.WorkspaceID),
+	}, secretStore, testCredentialOwnerContext, testCredentialCreatorAccess)
+	_, err := svc.GrantWorkspaceSecret(credentialIdentity("owner-1"), a.ID, workspaceGrantRequest(a, 0))
+	require.NoError(t, err)
+
+	policy, err := json.Marshal(RetryPolicy{
+		Mode: RetryModeFinite, MaxRetries: "1", DelaySeconds: "0", Backoff: RetryBackoffFixed,
+		HistoryMode: RetryHistoryAttempts,
+	})
+	require.NoError(t, err)
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeManual, Status: RunStatusTriggered,
+		RetryGroupID: "credential-retry-group", RetryGroupGeneration: 1,
+		RetryState: RetryStateTriggered, RetryPolicySnapshot: string(policy),
+	}
+	group := &RetryGroup{ID: run.RetryGroupID, AutomationID: a.ID, Generation: 1, State: RetryGroupLive}
+	creator := withAutomationRunInitiator(credentialIdentity("creator-1"))
+	enabled := true
+	require.NoError(t, svc.store.UpdateAutomation(context.Background(), a.ID, &UpdateAutomationRequest{Enabled: &enabled}))
+	require.NoError(t, svc.store.CreateRetryAdmission(creator, run, group))
+
+	_, parent, parentChoices, err := svc.CredentialChoicesForRun(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "creator-1", parent.ProtectedCreatorUserID)
+	require.Len(t, parentChoices, 1)
+	require.Equal(t, "workspace-secret", parentChoices[0].SecretID)
+
+	child, err := svc.store.FinalizeRetryFailure(context.Background(), run.ID, 1, errors.New("retry"), "launch")
+	require.NoError(t, err)
+	require.NotNil(t, child)
+	_, childRun, childChoices, err := svc.CredentialChoicesForRun(context.Background(), child.ID)
+	require.NoError(t, err)
+	require.Equal(t, parent.CredentialChoicesSnapshot, childRun.CredentialChoicesSnapshot)
+	require.Equal(t, parentChoices, childChoices)
 }
 
 func credentialChoiceService(t *testing.T) (*Service, *Automation) {
 	t.Helper()
 	svc := newTestService(t)
+	_, err := svc.store.db.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL DEFAULT '', ownership_revision BIGINT NOT NULL DEFAULT 1)`)
+	require.NoError(t, err)
+	_, err = svc.store.db.Exec(`INSERT INTO workspaces (id, owner_id, ownership_revision) VALUES ('workspace-1', 'owner-1', ?), ('credential-workspace', 'owner-1', ?)`, testWorkspaceOwnerRevisionValue, testWorkspaceOwnerRevisionValue)
+	require.NoError(t, err)
 	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return nil })
 	svc.SetWorkspaceCredentialOwnerRevisionLookup(testWorkspaceOwnerRevision)
 	a := &Automation{
@@ -394,9 +494,9 @@ func credentialChoiceRepository(workspaceID string) *taskmodels.Repository {
 func workspaceGrantRequest(a *Automation, choiceRevision int64) *WorkspaceCredentialGrantRequest {
 	return &WorkspaceCredentialGrantRequest{
 		RepositoryID: "repo-1", Key: "SERVICE_KEY", ExpectedAutomationRevision: a.ResourceRevision,
-		ExpectedCredentialRevision:      choiceRevision,
-		ExpectedBindingUpdatedAt:        credentialChoiceRepository(a.WorkspaceID).SecretBindings[0].UpdatedAt,
-		ExpectedWorkspaceOwnerUpdatedAt: testWorkspaceOwnerUpdatedAt,
+		ExpectedCredentialRevision:     choiceRevision,
+		ExpectedBindingUpdatedAt:       credentialChoiceRepository(a.WorkspaceID).SecretBindings[0].UpdatedAt,
+		ExpectedWorkspaceOwnerRevision: testWorkspaceOwnerRevisionValue,
 	}
 }
 
@@ -406,10 +506,10 @@ func credentialIdentity(userID string) context.Context {
 
 func testWorkspaceOwner(context.Context, string) (string, error) { return "owner-1", nil }
 
-var testWorkspaceOwnerUpdatedAt = time.Date(2026, 11, 26, 1, 0, 0, 0, time.UTC)
+const testWorkspaceOwnerRevisionValue int64 = 7
 
-func testWorkspaceOwnerRevision(context.Context, string) (time.Time, error) {
-	return testWorkspaceOwnerUpdatedAt, nil
+func testWorkspaceOwnerRevision(context.Context, string) (int64, error) {
+	return testWorkspaceOwnerRevisionValue, nil
 }
 
 func testCredentialOwnerContext(ctx context.Context, userID string) (context.Context, error) {

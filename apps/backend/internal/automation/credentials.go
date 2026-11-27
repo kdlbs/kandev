@@ -14,6 +14,7 @@ var (
 	ErrCredentialCreatorUnavailable   = errors.New("the automation creator is unavailable")
 	ErrWorkspaceCredentialGrantDenied = errors.New("only the current workspace owner who owns the bound secret can manage this grant")
 	ErrCredentialSettingsConflict     = errors.New("automation credential settings changed; reload and try again")
+	ErrAutomationSettingsConflict     = errors.New("automation settings changed; reload and try again")
 	ErrCredentialSettingsUnsupported  = errors.New("credential choices require a new automation-history task with fixed profiles")
 )
 

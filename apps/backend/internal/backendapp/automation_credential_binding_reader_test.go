@@ -60,6 +60,8 @@ func TestLifecycleAutomationCredentialBindingReaderRejectsInvalidProtectedAssoci
 		Status: automation.RunStatusTriggered, ProtectedCreatorUserID: "different-creator",
 	}
 	require.NoError(t, store.CreateRun(ctx, run))
+	_, err = database.Exec(`UPDATE automation_runs SET protected_creator_user_id = ? WHERE id = ?`, "different-creator", run.ID)
+	require.NoError(t, err)
 
 	reader := lifecycleAutomationCredentialBindingReader{service: service}
 	_, err = reader.ResolveAutomationCredentialBindings(ctx, "different-task", definition.ID, run.ID)
@@ -74,6 +76,8 @@ func TestLifecycleAutomationCredentialBindingReaderRejectsInvalidProtectedAssoci
 		Status: automation.RunStatusTriggered, ProtectedCreatorUserID: definition.CreatedByUserID,
 	}
 	require.NoError(t, store.CreateRun(ctx, protectedWithoutChoices))
+	_, err = database.Exec(`UPDATE automation_runs SET protected_creator_user_id = ? WHERE id = ?`, definition.CreatedByUserID, protectedWithoutChoices.ID)
+	require.NoError(t, err)
 	_, err = reader.ResolveAutomationCredentialBindings(
 		ctx, protectedWithoutChoices.TaskID, definition.ID, protectedWithoutChoices.ID,
 	)

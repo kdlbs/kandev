@@ -464,6 +464,49 @@ describe("AutomationDetailPage run selection", () => {
   });
 });
 
+describe("AutomationDetailPage sessionless credential failures", () => {
+  it("shows a sessionless terminal credential failure without Stop authority", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({
+        id: "credential-failure",
+        task_id: "",
+        session_id: "",
+        status: "failed",
+        can_stop: false,
+        error_message:
+          "automation_credentials_unavailable: SERVICE_KEY from agent profile Shared is unavailable",
+      }),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+
+    expect(await screen.findByTestId(ACTIVITY)).toBeTruthy();
+    expect(screen.getByTestId("automation-credential-error")).toBeTruthy();
+    expect(screen.getByTestId("automation-run-read-restricted")).toBeTruthy();
+    expect(screen.queryByTestId(TRANSCRIPT)).toBeNull();
+    expect(screen.queryByTestId(STOP_RUN)).toBeNull();
+  });
+
+  it("keeps other sessionless terminal failures out of the activity pane", async () => {
+    mocks.listAutomationRuns.mockResolvedValue([
+      run({
+        id: "ordinary-failure",
+        task_id: "",
+        session_id: "",
+        status: "failed",
+        can_stop: false,
+        error_message: "process exited with status 1",
+      }),
+    ]);
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+
+    expect(await screen.findByTestId("automation-activity-empty")).toBeTruthy();
+    expect(screen.queryByTestId(ACTIVITY)).toBeNull();
+    expect(screen.queryByTestId(STOP_RUN)).toBeNull();
+  });
+});
+
 describe("AutomationDetailPage projected capabilities", () => {
   it("hides Run now when the viewer lacks the projected trigger capability", async () => {
     mocks.getAutomation.mockResolvedValue({ ...AUTOMATION, can_trigger_now: false });

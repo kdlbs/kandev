@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -126,6 +127,29 @@ func TestAutomationCredentialSave(t *testing.T) {
 		_, err = svc.UpdateAutomation(credentialIdentity("creator-1"), a.ID, &UpdateAutomationRequest{ContinuationPolicy: &policy})
 
 		require.ErrorIs(t, err, ErrCredentialSettingsUnsupported)
+	})
+
+	t.Run("an enabled credential automation revalidates config-only trigger updates", func(t *testing.T) {
+		svc, a := credentialChoiceService(t)
+		storeWorkspaceCredentialChoice(t, svc.store, a)
+		enabled := true
+		require.NoError(t, svc.store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{Enabled: &enabled}))
+		trigger := &AutomationTrigger{
+			AutomationID: a.ID, Type: TriggerTypeManual, Config: json.RawMessage(`{"label":"before"}`), Enabled: true,
+		}
+		require.NoError(t, svc.store.CreateTrigger(ctx, trigger))
+		validationErr := &CredentialValidationError{Field: "SERVICE_KEY", Source: "Workspace secret"}
+		svc.SetCredentialValidator(credentialValidatorFunc(func(context.Context, *Automation, []string) error {
+			return validationErr
+		}))
+		updatedConfig := json.RawMessage(`{"label":"after"}`)
+
+		err := svc.UpdateTrigger(credentialIdentity("creator-1"), trigger.ID, &UpdateTriggerRequest{Config: &updatedConfig})
+
+		require.ErrorIs(t, err, validationErr)
+		saved, readErr := svc.store.GetTrigger(ctx, trigger.ID)
+		require.NoError(t, readErr)
+		require.JSONEq(t, string(trigger.Config), string(saved.Config))
 	})
 
 	t.Run("removing a personal binding from an enabled automation revalidates fallback", func(t *testing.T) {

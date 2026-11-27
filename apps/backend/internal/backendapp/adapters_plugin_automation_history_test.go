@@ -34,11 +34,14 @@ func newAutomationHistoryAdapterTest(t *testing.T) (*automation.Service, *sqlx.D
 func TestPluginAutomationHistoryRedactsProtectedRunForWorkspaceReaders(t *testing.T) {
 	service, database, adapter := newAutomationHistoryAdapterTest(t)
 	ctx := context.Background()
+	creatorCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "creator-1", Role: authn.RoleMember})
 	definition := &automation.Automation{
-		WorkspaceID: "ws-protected", Name: "credential run", CreatedByUserID: "creator-1",
+		WorkspaceID: "ws-protected", Name: "credential run", AgentProfileID: "agent-1",
 		WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true,
 	}
-	if err := service.Store().CreateAutomation(ctx, definition); err != nil {
+	if err := service.Store().CreateAutomationWithCredentialChoices(creatorCtx, definition, []automation.AutomationCredentialChoice{{
+		ProfileID: "agent-1", Key: "SERVICE_KEY", SecretID: "personal-secret", SourceSecretID: "profile-secret",
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`CREATE TABLE task_session_messages (
@@ -49,12 +52,12 @@ func TestPluginAutomationHistoryRedactsProtectedRunForWorkspaceReaders(t *testin
 	}
 	createdAt := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
 	run := &automation.AutomationRun{
-		AutomationID: definition.ID, ProtectedCreatorUserID: "creator-1",
-		TriggerType: automation.TriggerTypeManual, Status: automation.RunStatusFailed,
+		AutomationID: definition.ID,
+		TriggerType:  automation.TriggerTypeManual, Status: automation.RunStatusFailed,
 		TaskID: "private-task", SessionID: "private-session", TurnID: "private-turn",
 		ErrorMessage: "private runtime details", TriggerData: json.RawMessage(`{}`),
 	}
-	if err := service.Store().CreateRun(ctx, run); err != nil {
+	if err := service.Store().CreateRun(creatorCtx, run); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`UPDATE automation_runs SET created_at = ? WHERE id = ?`, createdAt, run.ID); err != nil {
@@ -79,7 +82,6 @@ func TestPluginAutomationHistoryRedactsProtectedRunForWorkspaceReaders(t *testin
 		t.Fatalf("workspace refresh received protected output: %+v, err=%v", refreshed, err)
 	}
 
-	creatorCtx := authn.WithIdentity(ctx, authn.Identity{UserID: "creator-1", Role: authn.RoleMember})
 	creatorRuns, err := service.ListHistoryRuns(creatorCtx, automation.HistoryRunFilter{WorkspaceID: "ws-protected", Limit: 10})
 	if err != nil || len(creatorRuns.Items) != 1 {
 		t.Fatalf("creator history = %+v, err=%v", creatorRuns, err)

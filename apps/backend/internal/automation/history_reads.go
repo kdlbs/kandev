@@ -195,7 +195,7 @@ func historyRunFromRow(row *historyRunRow, observedAt time.Time) HistoryRun {
 	run := row.AutomationRun
 	observation := HistoryRun{
 		ID: run.ID, WorkspaceID: row.WorkspaceID, AutomationID: run.AutomationID,
-		AutomationName: row.AutomationName, ProtectedCreatorUserID: run.ProtectedCreatorUserID,
+		AutomationName: row.AutomationName, ProtectedCreatorUserID: row.ProtectedCreatorUserID,
 		TriggerID: run.TriggerID, TriggerKind: run.TriggerType,
 		TaskID: run.TaskID, SessionID: run.SessionID, TurnID: run.TurnID,
 		ManagedConversationID: run.ManagedConversationID,

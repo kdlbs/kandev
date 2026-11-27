@@ -23,6 +23,9 @@ import { WorkspaceCredentialChoices } from "./automation-credential-choice-contr
 const WORKSPACE_ID = "workspace-credential-controls";
 const AUTOMATION_ID = "automation-credential-controls";
 const REPOSITORY_ID = "repository-credential-controls";
+const CREDENTIAL_ROW = "automation-workspace-credential-SERVICE_KEY";
+const CREDENTIAL_GRANT_BUTTON = "automation-workspace-credential-grant-SERVICE_KEY";
+const CREDENTIAL_REVOKE_BUTTON = "automation-workspace-credential-revoke-SERVICE_KEY";
 const CREATOR_NAME = "Casey Collaborator";
 
 function automation(choice: Record<string, unknown>): Automation {
@@ -41,7 +44,7 @@ function automation(choice: Record<string, unknown>): Automation {
         can_revoke: false,
         creator_name: CREATOR_NAME,
         binding_updated_at: "2026-11-27T10:00:00Z",
-        workspace_owner_updated_at: "2026-11-27T10:01:00Z",
+        workspace_owner_revision: 7,
         ...choice,
       },
     ],
@@ -84,7 +87,7 @@ describe("WorkspaceCredentialChoices", () => {
       can_revoke: true,
     });
 
-    fireEvent.click(screen.getByTestId("automation-workspace-credential-revoke-SERVICE_KEY"));
+    fireEvent.click(screen.getByTestId(CREDENTIAL_REVOKE_BUTTON));
 
     await waitFor(() => {
       expect(mocks.revokeWorkspaceCredential).toHaveBeenCalledWith(AUTOMATION_ID, {
@@ -92,6 +95,7 @@ describe("WorkspaceCredentialChoices", () => {
         key: "SERVICE_KEY",
         expected_automation_revision: 3,
         expected_credential_revision: 2,
+        expected_workspace_owner_revision: 7,
       });
     });
     expect(onAutomationChange).toHaveBeenCalledWith(updated);
@@ -99,9 +103,9 @@ describe("WorkspaceCredentialChoices", () => {
 
   it("names the creator and returns focus to the row when its grant dialog closes", async () => {
     renderChoices({ state: "needs_approval", can_grant: true, can_revoke: false });
-    const row = screen.getByTestId("automation-workspace-credential-SERVICE_KEY");
+    const row = screen.getByTestId(CREDENTIAL_ROW);
 
-    fireEvent.click(screen.getByTestId("automation-workspace-credential-grant-SERVICE_KEY"));
+    fireEvent.click(screen.getByTestId(CREDENTIAL_GRANT_BUTTON));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain(CREATOR_NAME);
@@ -110,11 +114,42 @@ describe("WorkspaceCredentialChoices", () => {
     await waitFor(() => expect(document.activeElement).toBe(row));
   });
 
+  it("returns phone drawer focus to the originating row", async () => {
+    mocks.isMobile = true;
+    renderChoices({ state: "needs_approval", can_grant: true, can_revoke: false });
+    const row = screen.getByTestId(CREDENTIAL_ROW);
+
+    fireEvent.click(screen.getByTestId(CREDENTIAL_GRANT_BUTTON));
+
+    const drawer = await screen.findByTestId("automation-workspace-credential-confirmation-drawer");
+    expect(drawer.textContent).toContain(CREATOR_NAME);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(drawer.getAttribute("data-state")).toBe("closed");
+    fireEvent.animationEnd(drawer);
+
+    await waitFor(() => expect(document.activeElement).toBe(row));
+  });
+
+  it("does not expose workspace grant or revoke actions to a non-owner", () => {
+    render(
+      <WorkspaceCredentialChoices
+        automation={automation({ state: "stale", can_grant: true, can_revoke: true })}
+        repositories={[repository]}
+        selectedRepositoryIds={[REPOSITORY_ID]}
+        isWorkspaceOwner={false}
+        onAutomationChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId(CREDENTIAL_GRANT_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(CREDENTIAL_REVOKE_BUTTON)).toBeNull();
+  });
+
   it("submits the binding and owner revisions shown when grant confirmation opened", async () => {
     mocks.grantWorkspaceCredential.mockResolvedValue(automation({}));
     renderChoices({ state: "needs_approval", can_grant: true, can_revoke: false });
 
-    fireEvent.click(screen.getByTestId("automation-workspace-credential-grant-SERVICE_KEY"));
+    fireEvent.click(screen.getByTestId(CREDENTIAL_GRANT_BUTTON));
     fireEvent.click(await screen.findByRole("button", { name: "Grant use" }));
 
     await waitFor(() => {
@@ -124,7 +159,7 @@ describe("WorkspaceCredentialChoices", () => {
         expected_automation_revision: 3,
         expected_credential_revision: 2,
         expected_binding_updated_at: "2026-11-27T10:00:00Z",
-        expected_workspace_owner_updated_at: "2026-11-27T10:01:00Z",
+        expected_workspace_owner_revision: 7,
       });
     });
   });

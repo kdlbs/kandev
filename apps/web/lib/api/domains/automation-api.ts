@@ -88,7 +88,7 @@ export type WorkspaceCredentialGrantRequest = {
   expected_automation_revision: number;
   expected_credential_revision: number;
   expected_binding_updated_at?: string;
-  expected_workspace_owner_updated_at?: string;
+  expected_workspace_owner_revision?: number;
 };
 
 export async function grantWorkspaceCredential(

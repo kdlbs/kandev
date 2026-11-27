@@ -113,7 +113,7 @@ export type AutomationCredentialChoice = {
   can_revoke?: boolean;
   creator_name?: string;
   binding_updated_at?: string;
-  workspace_owner_updated_at?: string;
+  workspace_owner_revision?: number;
 };
 
 export type PersonalCredentialBindingInput = {

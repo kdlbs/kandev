@@ -3,7 +3,6 @@ package automation
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/secrets"
@@ -21,11 +20,11 @@ func (s *Service) GrantWorkspaceSecret(
 	automationID string,
 	req *WorkspaceCredentialGrantRequest,
 ) (*Automation, error) {
-	a, ownerID, ownerUpdatedAt, err := s.workspaceCredentialGrantContext(ctx, automationID)
+	a, ownerID, ownerRevision, err := s.workspaceCredentialGrantContext(ctx, automationID)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWorkspaceCredentialGrantRequest(req, ownerUpdatedAt); err != nil {
+	if err := validateWorkspaceCredentialGrantRequest(req, ownerRevision); err != nil {
 		return nil, err
 	}
 	if err := validateCredentialChoiceSettings(a, a.Triggers); err != nil {
@@ -41,10 +40,13 @@ func (s *Service) GrantWorkspaceSecret(
 	choice := AutomationCredentialChoice{
 		AutomationID: automationID, Kind: CredentialChoiceWorkspace, RepositoryID: req.RepositoryID,
 		Key: req.Key, SecretID: secret.ID, SourceSecretID: binding.SecretID,
-		SourceUpdatedAt: binding.UpdatedAt, WorkspaceOwnerUpdatedAt: &ownerUpdatedAt, CreatorUserID: a.CreatedByUserID,
+		SourceUpdatedAt: binding.UpdatedAt, WorkspaceOwnerRevision: &ownerRevision, CreatorUserID: a.CreatedByUserID,
 		GrantorUserID: ownerID, State: CredentialChoiceGranted, SecretName: secret.Name,
 	}
-	if err := s.store.SaveWorkspaceCredentialGrant(ctx, choice, req.ExpectedAutomationRevision, req.ExpectedCredentialRevision); err != nil {
+	if err := s.store.SaveWorkspaceCredentialGrant(
+		ctx, choice, req.ExpectedAutomationRevision, req.ExpectedCredentialRevision,
+		req.ExpectedWorkspaceOwnerRevision,
+	); err != nil {
 		return nil, err
 	}
 	return s.GetAutomation(ctx, automationID)
@@ -53,28 +55,28 @@ func (s *Service) GrantWorkspaceSecret(
 func (s *Service) workspaceCredentialGrantContext(
 	ctx context.Context,
 	automationID string,
-) (*Automation, string, time.Time, error) {
+) (*Automation, string, int64, error) {
 	if err := s.authorizeAutomation(ctx, automationID); err != nil {
-		return nil, "", time.Time{}, err
+		return nil, "", 0, err
 	}
 	a, err := s.store.GetAutomation(ctx, automationID)
 	if err != nil || a == nil {
-		return nil, "", time.Time{}, errors.Join(ErrAutomationNotFound, err)
+		return nil, "", 0, errors.Join(ErrAutomationNotFound, err)
 	}
 	ownerID, err := s.requireWorkspaceCredentialOwner(ctx, a.WorkspaceID)
 	if err != nil {
-		return nil, "", time.Time{}, err
+		return nil, "", 0, err
 	}
-	ownerUpdatedAt, err := s.workspaceOwnerRevision(ctx, a.WorkspaceID)
-	return a, ownerID, ownerUpdatedAt, err
+	ownerRevision, err := s.workspaceOwnerRevision(ctx, a.WorkspaceID)
+	return a, ownerID, ownerRevision, err
 }
 
-func validateWorkspaceCredentialGrantRequest(req *WorkspaceCredentialGrantRequest, ownerUpdatedAt time.Time) error {
+func validateWorkspaceCredentialGrantRequest(req *WorkspaceCredentialGrantRequest, ownerRevision int64) error {
 	if req == nil || req.RepositoryID == "" || req.Key == "" || req.ExpectedCredentialRevision < 0 ||
-		req.ExpectedBindingUpdatedAt.IsZero() || req.ExpectedWorkspaceOwnerUpdatedAt.IsZero() {
+		req.ExpectedBindingUpdatedAt.IsZero() || req.ExpectedWorkspaceOwnerRevision <= 0 || ownerRevision <= 0 {
 		return ErrCredentialChoiceUnavailable
 	}
-	if !ownerUpdatedAt.Equal(req.ExpectedWorkspaceOwnerUpdatedAt) {
+	if ownerRevision != req.ExpectedWorkspaceOwnerRevision {
 		return ErrCredentialSettingsConflict
 	}
 	return nil
@@ -144,15 +146,16 @@ func (s *Service) RevokeWorkspaceSecret(
 	if err != nil || a == nil {
 		return nil, errors.Join(ErrAutomationNotFound, err)
 	}
-	if _, err := s.requireWorkspaceCredentialOwner(ctx, a.WorkspaceID); err != nil {
+	ownerID, err := s.requireWorkspaceCredentialOwner(ctx, a.WorkspaceID)
+	if err != nil {
 		return nil, err
 	}
-	if req == nil || req.RepositoryID == "" || req.Key == "" || req.ExpectedCredentialRevision <= 0 {
+	if req == nil || req.RepositoryID == "" || req.Key == "" || req.ExpectedCredentialRevision <= 0 || req.ExpectedWorkspaceOwnerRevision <= 0 {
 		return nil, ErrCredentialChoiceUnavailable
 	}
 	if err := s.store.RevokeWorkspaceCredentialGrant(
 		ctx, automationID, req.RepositoryID, req.Key,
-		req.ExpectedAutomationRevision, req.ExpectedCredentialRevision,
+		req.ExpectedAutomationRevision, req.ExpectedCredentialRevision, ownerID, req.ExpectedWorkspaceOwnerRevision,
 	); err != nil {
 		return nil, err
 	}
@@ -248,7 +251,7 @@ func (s *Service) resolveWorkspaceCredentialChoiceValue(
 
 func workspaceCredentialChoiceMatchesAutomation(a *Automation, choice AutomationCredentialChoice) bool {
 	return a != nil && choice.Kind == CredentialChoiceWorkspace && choice.State == CredentialChoiceGranted &&
-		choice.AutomationID == a.ID && choice.RepositoryID != "" && choice.CreatorUserID == a.CreatedByUserID &&
+		choice.AutomationID == a.ID && automationSelectsRepository(a, choice.RepositoryID) && choice.CreatorUserID == a.CreatedByUserID &&
 		choice.GrantorUserID != "" && choice.SecretID != "" && choice.SecretID == choice.SourceSecretID
 }
 
@@ -268,11 +271,18 @@ func (s *Service) ProtectedAutomationRunUseAccessForTask(
 	ctx context.Context,
 	taskID, userID string,
 ) (bool, bool, error) {
-	run, err := s.store.ProtectedRunForTask(ctx, taskID)
-	if err != nil || run == nil {
+	protectedCreator, err := s.store.ProtectedCreatorForTask(ctx, taskID)
+	if err != nil || protectedCreator == "" {
 		return false, false, err
 	}
-	if run.ProtectedCreatorUserID != userID {
+	run, err := s.store.ProtectedRunForTask(ctx, taskID)
+	if err != nil {
+		return true, false, err
+	}
+	if run == nil || run.ProtectedCreatorUserID != protectedCreator {
+		return true, false, nil
+	}
+	if protectedCreator != userID {
 		return true, false, nil
 	}
 	a, err := s.store.GetAutomation(ctx, run.AutomationID)
@@ -282,22 +292,70 @@ func (s *Service) ProtectedAutomationRunUseAccessForTask(
 	if a == nil {
 		return true, false, nil
 	}
-	choices, err := s.store.credentialChoices(ctx, a.ID)
+	usable, err := s.protectedRunChoicesRemainAuthorized(ctx, a, run)
 	if err != nil {
 		return true, false, err
 	}
-	for _, choice := range choices {
-		if choice.Kind != CredentialChoiceWorkspace {
-			continue
+	return true, usable, nil
+}
+
+func (s *Service) protectedRunChoicesRemainAuthorized(
+	ctx context.Context,
+	a *Automation,
+	run *AutomationRun,
+) (bool, error) {
+	expectedChoices, err := decodeRunCredentialChoiceSnapshot(a.ID, run.CredentialChoicesSnapshot)
+	if err != nil || len(expectedChoices) == 0 {
+		return false, err
+	}
+	currentChoices, err := s.store.credentialChoices(ctx, a.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, expected := range expectedChoices {
+		current := findCredentialChoice(currentChoices, expected)
+		if current == nil || !credentialChoiceAuthorityMatches(expected, *current) {
+			return false, nil
 		}
-		if err := s.validateCurrentWorkspaceCredentialChoice(ctx, a, choice); err != nil {
-			if errors.Is(err, ErrCredentialStorageUnavailable) {
-				return true, false, err
+		if expected.Kind == CredentialChoiceWorkspace {
+			if !automationSelectsRepository(a, expected.RepositoryID) {
+				return false, nil
 			}
-			return true, false, nil
+			if err := s.validateCurrentWorkspaceCredentialChoice(ctx, a, expected); err != nil {
+				if errors.Is(err, ErrCredentialStorageUnavailable) {
+					return false, err
+				}
+				return false, nil
+			}
 		}
 	}
-	return true, true, nil
+	return true, nil
+}
+
+func findCredentialChoice(choices []AutomationCredentialChoice, expected AutomationCredentialChoice) *AutomationCredentialChoice {
+	for index := range choices {
+		current := &choices[index]
+		if current.Kind == expected.Kind && current.ProfileID == expected.ProfileID &&
+			current.RepositoryID == expected.RepositoryID && current.Key == expected.Key {
+			return current
+		}
+	}
+	return nil
+}
+
+func credentialChoiceAuthorityMatches(expected, current AutomationCredentialChoice) bool {
+	return expected.AutomationID == current.AutomationID && expected.SecretID == current.SecretID &&
+		expected.SourceSecretID == current.SourceSecretID && expected.SourceUpdatedAt.Equal(current.SourceUpdatedAt) &&
+		expected.CreatorUserID == current.CreatorUserID && expected.GrantorUserID == current.GrantorUserID &&
+		expected.State == current.State && expected.Revision == current.Revision &&
+		sameOptionalInt64(expected.WorkspaceOwnerRevision, current.WorkspaceOwnerRevision)
+}
+
+func sameOptionalInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func (s *Service) validateCurrentWorkspaceCredentialChoice(
@@ -371,12 +429,12 @@ func (s *Service) currentWorkspaceCredentialOwner(
 	if err != nil {
 		return nil, "", ErrCredentialStorageUnavailable
 	}
-	ownerUpdatedAt, err := s.workspaceOwnerRevision(ctx, a.WorkspaceID)
+	ownerRevision, err := s.workspaceOwnerRevision(ctx, a.WorkspaceID)
 	if err != nil {
 		return nil, "", err
 	}
-	if ownerID == "" || ownerID != choice.GrantorUserID || choice.WorkspaceOwnerUpdatedAt == nil ||
-		!choice.WorkspaceOwnerUpdatedAt.Equal(ownerUpdatedAt) {
+	if ownerID == "" || ownerID != choice.GrantorUserID || choice.WorkspaceOwnerRevision == nil ||
+		*choice.WorkspaceOwnerRevision != ownerRevision {
 		return nil, "", ErrCredentialChoiceUnavailable
 	}
 	if s.credentialOwnerContext == nil {
@@ -442,16 +500,16 @@ func (s *Service) requireWorkspaceCredentialOwner(ctx context.Context, workspace
 	return ownerID, nil
 }
 
-func (s *Service) workspaceOwnerRevision(ctx context.Context, workspaceID string) (time.Time, error) {
-	if s.workspaceOwnerUpdatedAtLookup == nil {
-		return time.Time{}, ErrCredentialStorageUnavailable
+func (s *Service) workspaceOwnerRevision(ctx context.Context, workspaceID string) (int64, error) {
+	if s.workspaceOwnerRevisionLookup == nil {
+		return 0, ErrCredentialStorageUnavailable
 	}
-	revision, err := s.workspaceOwnerUpdatedAtLookup(ctx, workspaceID)
+	revision, err := s.workspaceOwnerRevisionLookup(ctx, workspaceID)
 	if err != nil {
-		return time.Time{}, ErrCredentialStorageUnavailable
+		return 0, ErrCredentialStorageUnavailable
 	}
-	if revision.IsZero() {
-		return time.Time{}, ErrCredentialStorageUnavailable
+	if revision <= 0 {
+		return 0, ErrCredentialStorageUnavailable
 	}
 	return revision, nil
 }

@@ -27,10 +27,10 @@ type CredentialSecretStore interface {
 type CredentialOwnerContext func(context.Context, string) (context.Context, error)
 
 type credentialChoiceViewer struct {
-	identity       authn.Identity
-	hasIdentity    bool
-	ownerID        string
-	ownerUpdatedAt time.Time
+	identity      authn.Identity
+	hasIdentity   bool
+	ownerID       string
+	ownerRevision int64
 }
 
 func (v credentialChoiceViewer) authenticatedUserIs(userID string) bool {
@@ -38,7 +38,7 @@ func (v credentialChoiceViewer) authenticatedUserIs(userID string) bool {
 }
 
 func (v credentialChoiceViewer) canGrantWorkspace() bool {
-	return v.authenticatedUserIs(v.ownerID) && !v.ownerUpdatedAt.IsZero()
+	return v.authenticatedUserIs(v.ownerID) && v.ownerRevision > 0
 }
 
 func (s *Service) SetPersonalCredentialBindingValidator(validator PersonalCredentialBindingValidator) {
@@ -59,8 +59,8 @@ func (s *Service) SetWorkspaceCredentialGrantDependencies(
 	s.credentialCreatorAccess = creatorAccess
 }
 
-func (s *Service) SetWorkspaceCredentialOwnerRevisionLookup(lookup func(context.Context, string) (time.Time, error)) {
-	s.workspaceOwnerUpdatedAtLookup = lookup
+func (s *Service) SetWorkspaceCredentialOwnerRevisionLookup(lookup func(context.Context, string) (int64, error)) {
+	s.workspaceOwnerRevisionLookup = lookup
 }
 
 func (s *Service) SetCredentialCreatorNameLookup(lookup func(context.Context, string) (string, error)) {
@@ -103,10 +103,10 @@ func (s *Service) credentialChoiceViewer(ctx context.Context, a *Automation) (cr
 		return credentialChoiceViewer{}, err
 	}
 	viewer.ownerID = ownerID
-	if s.workspaceOwnerUpdatedAtLookup == nil {
+	if s.workspaceOwnerRevisionLookup == nil {
 		return viewer, nil
 	}
-	viewer.ownerUpdatedAt, err = s.workspaceOwnerUpdatedAtLookup(ctx, a.WorkspaceID)
+	viewer.ownerRevision, err = s.workspaceOwnerRevisionLookup(ctx, a.WorkspaceID)
 	return viewer, err
 }
 
@@ -157,7 +157,7 @@ func (s *Service) projectSavedWorkspaceCredential(
 	viewer credentialChoiceViewer,
 	projection *CredentialChoiceProjection,
 ) error {
-	stale, err := s.workspaceCredentialChoiceIsStale(ctx, a, row, viewer.ownerID, viewer.ownerUpdatedAt)
+	stale, err := s.workspaceCredentialChoiceIsStale(ctx, a, row, viewer.ownerID, viewer.ownerRevision)
 	if err != nil {
 		return err
 	}
@@ -173,10 +173,11 @@ func (s *Service) projectSavedWorkspaceCredential(
 	projection.CanGrant = canGrant
 	projection.SecretName = secretName
 	projection.BindingUpdatedAt = bindingUpdatedAt
-	projection.WorkspaceOwnerUpdatedAt = viewer.ownerUpdatedAt
+	projection.WorkspaceOwnerRevision = viewer.ownerRevision
 	if viewer.authenticatedUserIs(viewer.ownerID) {
 		projection.Revision = row.Revision
-		projection.CanRevoke = row.Revision > 0 && (row.State == CredentialChoiceGranted || stale)
+		projection.CanRevoke = row.Revision > 0 &&
+			(row.State == CredentialChoiceGranted || row.State == CredentialChoiceStale)
 		if canGrant && s.credentialCreatorNameLookup != nil {
 			projection.CreatorName, err = s.credentialCreatorNameLookup(ctx, a.CreatedByUserID)
 		}
@@ -232,7 +233,7 @@ func (s *Service) projectRepositoryWorkspaceChoices(
 		a.CredentialChoices = append(a.CredentialChoices, CredentialChoiceProjection{
 			Kind: CredentialChoiceWorkspace, RepositoryID: repositoryID, Key: binding.Key,
 			State: CredentialChoiceApproval, SecretName: secretName, CanGrant: canGrant,
-			BindingUpdatedAt: bindingUpdatedAt, WorkspaceOwnerUpdatedAt: viewer.ownerUpdatedAt,
+			BindingUpdatedAt: bindingUpdatedAt, WorkspaceOwnerRevision: viewer.ownerRevision,
 		})
 		if canGrant && s.credentialCreatorNameLookup != nil {
 			name, nameErr := s.credentialCreatorNameLookup(ctx, a.CreatedByUserID)
@@ -309,10 +310,10 @@ func (s *Service) workspaceCredentialChoiceIsStale(
 	a *Automation,
 	choice AutomationCredentialChoice,
 	ownerID string,
-	ownerUpdatedAt time.Time,
+	ownerRevision int64,
 ) (bool, error) {
 	if choice.State != CredentialChoiceGranted || ownerID == "" || ownerID != choice.GrantorUserID ||
-		choice.WorkspaceOwnerUpdatedAt == nil || !choice.WorkspaceOwnerUpdatedAt.Equal(ownerUpdatedAt) || s.credentialRepositoryReader == nil {
+		choice.WorkspaceOwnerRevision == nil || *choice.WorkspaceOwnerRevision != ownerRevision || s.credentialRepositoryReader == nil {
 		return true, nil
 	}
 	if !automationSelectsRepository(a, choice.RepositoryID) {
@@ -442,6 +443,6 @@ func (s *Service) CredentialChoicesForRun(ctx context.Context, runID string) (*A
 	if err != nil || a == nil {
 		return nil, run, nil, errors.Join(ErrCredentialChoiceUnavailable, err)
 	}
-	choices, err := s.store.credentialChoices(ctx, a.ID)
+	choices, err := decodeRunCredentialChoiceSnapshot(a.ID, run.CredentialChoicesSnapshot)
 	return a, run, choices, err
 }

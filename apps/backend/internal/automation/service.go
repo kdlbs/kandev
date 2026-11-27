@@ -229,16 +229,16 @@ type Service struct {
 	// repoLookup validates repository_ids on create/update — every ID must
 	// resolve to a repository belonging to the automation's workspace. Nil
 	// = validation skipped (not yet wired at startup, or an isolated test).
-	repoLookup                    RepositoryLookup
-	credentialValidator           CredentialValidator
-	personalCredentialValidator   PersonalCredentialBindingValidator
-	workspaceOwnerLookup          func(context.Context, string) (string, error)
-	workspaceOwnerUpdatedAtLookup func(context.Context, string) (time.Time, error)
-	credentialCreatorNameLookup   func(context.Context, string) (string, error)
-	credentialRepositoryReader    CredentialRepositoryReader
-	credentialSecretStore         CredentialSecretStore
-	credentialOwnerContext        CredentialOwnerContext
-	credentialCreatorAccess       CredentialCreatorAccess
+	repoLookup                   RepositoryLookup
+	credentialValidator          CredentialValidator
+	personalCredentialValidator  PersonalCredentialBindingValidator
+	workspaceOwnerLookup         func(context.Context, string) (string, error)
+	workspaceOwnerRevisionLookup func(context.Context, string) (int64, error)
+	credentialCreatorNameLookup  func(context.Context, string) (string, error)
+	credentialRepositoryReader   CredentialRepositoryReader
+	credentialSecretStore        CredentialSecretStore
+	credentialOwnerContext       CredentialOwnerContext
+	credentialCreatorAccess      CredentialCreatorAccess
 
 	// taskOriginLookup resolves a task's workspace and whether it is a hidden
 	// automation run. It is used by the merged-PR subscriber and by cleanup so
@@ -1731,7 +1731,7 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	if err = s.validatePluginTrigger(ctx, a.WorkspaceID, existing.Type, config, enabled); err != nil {
 		return err
 	}
-	if a.Enabled && req.Enabled != nil && *req.Enabled {
+	if s.credentialValidator != nil && a.Enabled && enabled {
 		credentialCtx, err := s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
 		if err != nil {
 			return err
@@ -1793,6 +1793,13 @@ func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 	}
 	unlock := s.automationRunLock(t.AutomationID)
 	defer unlock()
+	t, err = s.store.GetTrigger(ctx, id)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return nil
+	}
 	a, err := s.store.GetAutomation(ctx, t.AutomationID)
 	if err != nil || a == nil {
 		return ErrAutomationNotFound
@@ -1800,7 +1807,7 @@ func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 	if hasChoices, err := s.requireCreatorForCredentialMutation(ctx, a); err != nil {
 		return err
 	} else if hasChoices {
-		remaining := make([]AutomationTrigger, 0, len(a.Triggers)-1)
+		remaining := make([]AutomationTrigger, 0, len(a.Triggers))
 		for _, trigger := range a.Triggers {
 			if trigger.ID != id {
 				remaining = append(remaining, trigger)
@@ -2277,6 +2284,9 @@ func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error 
 	}
 	unlock := s.automationRunLock(automationID)
 	defer unlock()
+	if err := s.store.CheckProtectedRunCreators(ctx, automationID); err != nil {
+		return err
+	}
 	taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
 	if err != nil {
 		return fmt.Errorf("list run task ids: %w", err)
@@ -2673,11 +2683,6 @@ func (s *Service) admitTriggerLocked(
 		DisplayTitle:  RenderRunDisplayTitleAt(a, triggerType, triggerData, resolvedAt),
 		AttemptNumber: 1,
 		RetryState:    RetryStateNone,
-	}
-	if hasChoices, err := s.store.HasCredentialChoices(ctx, a.ID); err != nil {
-		return nil, "", false, err
-	} else if hasChoices {
-		run.ProtectedCreatorUserID = a.CreatedByUserID
 	}
 	policy, policyErr := NormalizeRetryPolicy(a.RetryPolicy)
 	if policyErr != nil {
