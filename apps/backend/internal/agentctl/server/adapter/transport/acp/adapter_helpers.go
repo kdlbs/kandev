@@ -25,6 +25,9 @@ import (
 // provider gateway to authenticate against.
 func clientCapabilitiesForAgent(agentID string, gateway bool, copilotNative bool) acp.ClientCapabilities {
 	meta := acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true})
+	if agentID == cursorAgentID {
+		meta["subagents"] = map[string]any{}
+	}
 	if copilotNative && agentID == copilotAgentID {
 		meta[copilotCapabilityMetaKey] = map[string]any{
 			"events": []string{

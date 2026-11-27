@@ -336,7 +336,7 @@ func (a *Adapter) sendPrompt(
 
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
-	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+	a.sweepCursorTaskMetaOnPromptEnd(sessionID, promptGeneration)
 
 	if antigravityBoundary != nil {
 		failure, unverified := a.checkAntigravityOutcome(antigravityBoundary, stopReason)
