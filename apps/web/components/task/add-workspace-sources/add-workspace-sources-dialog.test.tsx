@@ -45,7 +45,7 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile }),
+  useResponsiveBreakpoint: () => ({ isMobile, isFinePointer: !isMobile }),
 }));
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: () => ({
@@ -425,10 +425,15 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
       await openRepositoryMenu();
       await selectRepositoryMenuItem(WORKSPACE_REPOSITORY_LABEL);
       fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER_TEST_ID));
-      fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
+      const option = await screen.findByRole("option", { name: /payments/ });
+      const pickerDrawer = option.closest<HTMLElement>('[data-slot="drawer-content"]');
+      fireEvent.click(option);
+      if (pickerDrawer) await finishClose(pickerDrawer, true);
 
       expect(screen.getByTestId("workspace-source-placement")).toBeTruthy();
-      expect(screen.getByRole("alert").textContent).toContain("Choose where to add the sources.");
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Choose where to add the sources.",
+      );
       expect(
         (screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID) as HTMLButtonElement).disabled,
       ).toBe(true);
@@ -495,7 +500,7 @@ describe("AddWorkspaceSourcesDialog placement validation", () => {
     fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
     await waitFor(() => expect(previewTaskWorkspaceSources).toHaveBeenCalledOnce());
 
-    fireEvent.click(screen.getAllByRole("radio")[0]);
+    fireEvent.click((await screen.findAllByRole("radio"))[0]);
     await waitFor(() => expect(previewTaskWorkspaceSources).toHaveBeenCalledTimes(2));
     await waitFor(() => {
       expect(
