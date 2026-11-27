@@ -158,8 +158,12 @@ OpenSSH `sftp-server` on Windows addresses `C:\x` as `/C:/x`. Every SFTP call
 uses `toSFTPPath`. A Windows server can return `SSH_FX_OP_UNSUPPORTED` for
 `chmod`, and `isSFTPOpUnsupported` ignores that error.
 
-`ensureWindowsAgentctlOnHost` compares the sidecar hash with the local helper
-hash, then uploads to a temporary name. Windows rename does not overwrite an
+`ensureWindowsAgentctlOnHost` reuses an installed helper only when the SHA-256
+of the installed `agentctl.exe`, computed on the host with `Get-FileHash`,
+equals the local helper hash. The sidecar is written after the install, so an
+interruption can leave it stale. A missing or mismatched helper triggers an
+upload. A stale sidecar therefore cannot cause reuse of a different helper.
+The upload then goes to a temporary name. Windows rename does not overwrite an
 existing file, and Windows does not delete the image of a running process.
 Windows does allow a running image to be renamed. The upload therefore renames
 any existing `agentctl.exe` to `agentctl.exe.old-<random>`, renames the
@@ -190,6 +194,9 @@ transport and `redactSSHScriptOutput`.
 `gitCredentialHelperCommand` creates the managed helper value
 `!'C:/Users/<user>/.kandev/bin/agentctl.exe' git-credential`. Git for Windows
 runs helper values through its bundled `sh`, which accepts forward slashes.
+Each apostrophe in the path is written as `'\''` inside the single-quoted
+segment, so a user such as `O'Brien` yields
+`!'C:/Users/O'\''Brien/.kandev/bin/agentctl.exe' git-credential`.
 `runWindowsBrokerReachability` runs the managed broker preflight through the
 envelope.
 

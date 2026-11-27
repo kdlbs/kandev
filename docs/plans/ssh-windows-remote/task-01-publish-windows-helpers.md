@@ -158,7 +158,7 @@ Changes beyond the fork:
 | Node release and Desktop smoke tests | 44 passed. One failure is the Desktop render test, which needs a built `dist` |
 | `runtime-bundle.test.sh`, `check-make-shells`, `check-agentctl-deps.sh` | Passed |
 | `release-desktop.test.sh` | Failed at updater signature verification because `cargo` is absent |
-| `cargo test` | Not run, because `cargo` is absent. CI covers it |
+| `cargo test` (`apps/desktop/src-tauri`, `RUSTUP_TOOLCHAIN=1.90.0`) | Passed: 119 unit tests, 0 failed. The crate requires rustc 1.90, so the default 1.88 toolchain fails |
 | `list-docs.py validate`, `lint-spec-files.py --all` | Passed |
 | `lint-go-changed` | 0 issues, after adding the `agentctlExecutable` constant for `goconst` |
 
