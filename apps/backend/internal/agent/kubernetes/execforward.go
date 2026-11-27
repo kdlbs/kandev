@@ -42,6 +42,10 @@ type ExecPortForwarder struct {
 	Logger *zap.Logger
 }
 
+// RequiresContainer reports that every request must name the agentctl
+// container, because the bridge runs inside it.
+func (*ExecPortForwarder) RequiresContainer() bool { return true }
+
 // execBridgeStderrLimit bounds how much bridge stderr is kept for the
 // failure warning. Only the tail is kept; it is credential-redacted before
 // it is logged.

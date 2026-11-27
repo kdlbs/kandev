@@ -58,11 +58,18 @@ func NewStreamOperations(executor PodExecutor, forwarder PortForwarder) *StreamO
 	return &StreamOperations{executor: executor, forwarder: forwarder}
 }
 
+// ContainerScopedForwarder is implemented by forwarders that run a bridge in
+// one container and so need PortForwardRequest.Container. A wrapping
+// forwarder should delegate it.
+type ContainerScopedForwarder interface {
+	RequiresContainer() bool
+}
+
 // ForwardsOverExec reports whether Forward carries connections over pods/exec,
 // which needs the agentctl container in every PortForwardRequest.
 func (s *StreamOperations) ForwardsOverExec() bool {
-	_, ok := s.forwarder.(*ExecPortForwarder)
-	return ok
+	scoped, ok := s.forwarder.(ContainerScopedForwarder)
+	return ok && scoped.RequiresContainer()
 }
 
 func (s *StreamOperations) Exec(ctx context.Context, request ExecRequest) error {
