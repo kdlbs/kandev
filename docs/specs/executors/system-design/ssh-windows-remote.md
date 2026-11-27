@@ -312,11 +312,15 @@ the log to recover the control port.
 
 ## Stop, identity, orphan sweep, and reconciliation
 
-Every Windows stop runs `windowsOwnedAgentctlKillScript`. In the same script
-that signals the PID, it reads `Win32_Process` and continues only when the
-process is `agentctl.exe` with `--workdir "<task dir>"`. Otherwise it leaves
-the process running. An owned controller is terminated with
-`taskkill /T /F`, then `Stop-Process -Force`, and the script polls for exit.
+Every Windows stop runs `windowsOwnedAgentctlKillScript`. Before it reads
+`Win32_Process`, the script opens a process object for the PID and keeps it
+until exit. Windows does not reuse a PID while a handle to its process is open,
+so the identity query, the kill, and the exit wait address the process that was
+checked. The script continues only when that process is `agentctl.exe` with
+`--workdir "<task dir>"`. Otherwise it leaves the process running, and it
+refuses to act when it owns the PID but cannot open the handle. An owned
+controller is terminated with `taskkill /T /F`, then `Process.Kill()` on the
+held handle, and the script polls the handle for exit.
 `stopRemoteWindowsAgentctl` derives the task directory from the session layout
 `<task dir>\.kandev\sessions\<id>` and refuses a PID it cannot verify. A
 tracked stop then removes the session directory with bounded retries.

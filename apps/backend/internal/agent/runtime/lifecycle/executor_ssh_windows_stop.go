@@ -95,12 +95,18 @@ if ($liveOwner.Count -gt 0) {
 }
 
 // windowsOwnedAgentctlKillScript force-stops pid and its descendants only while
-// pid is agentctl.exe started with --workdir "<taskDir>". The identity check and
-// the kill run in one script, so a PID that Windows reuses for another process
-// is left running.
+// pid is agentctl.exe started with --workdir "<taskDir>". The script holds a
+// process handle before the identity query and kills and waits through that
+// handle, so a PID that Windows reuses for another process is left running.
 func windowsOwnedAgentctlKillScript(pid int, taskDir string) string {
 	return fmt.Sprintf(`$targetPid = %[1]d
 $workdirNeedle = '--workdir "' + %[2]s + '"'
+# An open process handle keeps Windows from reusing $targetPid, so the identity
+# query, taskkill, and the wait below all address the process that was checked.
+$targetHandle = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
+if ($null -ne $targetHandle) {
+  try { $null = $targetHandle.StartTime } catch { $targetHandle = $null }
+}
 try {
   $targetProc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $targetPid" -ErrorAction Stop
 } catch {
@@ -112,16 +118,18 @@ $ownsTarget = ($null -ne $targetProc) -and (([string]$targetProc.Name) -ieq 'age
 if (($null -ne $targetProc) -and -not $ownsTarget) {
   [Console]::Error.WriteLine("pid $targetPid is not this task's agentctl; leaving it running")
 }
+if ($ownsTarget -and $null -eq $targetHandle) {
+  [Console]::Error.WriteLine("remote Windows agentctl pid $targetPid could not be opened for identity verification; leaving it running")
+  exit 1
+}
 if ($ownsTarget) {
   Invoke-KandevNative { & taskkill.exe /PID $targetPid /T /F *>$null }
-  try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch {}
+  try { $targetHandle.Kill() } catch {}
   for ($attempt = 0; $attempt -lt %[3]d; $attempt++) {
-    $check = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-    if ($null -eq $check -or $check.HasExited) { break }
+    if ($targetHandle.HasExited) { break }
     Start-Sleep -Milliseconds 100
   }
-  $still = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
-  if ($null -ne $still -and -not $still.HasExited) {
+  if (-not $targetHandle.HasExited) {
     [Console]::Error.WriteLine("remote Windows agentctl pid $targetPid is still running")
     exit 1
   }
