@@ -59,10 +59,20 @@ func (a *Adapter) ignoreCursorChildSession(session string) bool {
 	return a.sessionID != "" && session != a.sessionID
 }
 
+type cursorLaunchKey struct {
+	call       string
+	generation uint64
+}
+
+type cursorLaunch struct {
+	childID    string
+	background bool
+}
+
 type cursorChild struct {
-	id, title, workID   string
+	call, title, workID string
 	generation          uint64
-	background, spawned bool
+	spawned, background bool
 	terminal, reported  streams.RunState
 }
 
@@ -93,47 +103,77 @@ func (a *Adapter) cursorChildUpdateLocked(frame cursorChildFrame, generation uin
 	if !a.backgroundWorkEnabled || !a.cursorShellWatchSessionLocked(frame.SessionID) || a.isLoadingSession || call == "" {
 		return nil
 	}
-	child := a.cursorChildren[call]
-	if child.reported.IsTerminal() {
+	key := cursorLaunchKey{call: call, generation: generation}
+	id, background := a.matchCursorChildLaunchLocked(key, frame)
+	if id == "" {
 		return nil
 	}
-	if !child.apply(frame) {
+	child := a.cursorChildren[id]
+	if child.call != "" && child.call != call {
 		return nil
 	}
 	if child.workID == "" {
-		child.workID = uuid.NewString()
+		child.call = call
 		child.generation = generation
+		child.workID = uuid.NewString()
+	}
+	child.background = child.background || background
+	if !child.apply(frame) {
+		return nil
 	}
 	if a.cursorChildren == nil {
 		a.cursorChildren = make(map[string]cursorChild)
 	}
-	a.cursorChildren[call] = child
-	if !child.spawned || !child.background {
-		return nil
-	}
-	state := child.terminal
-	if state == "" {
-		state = streams.RunStateRunning
-	}
+	a.cursorChildren[id] = child
+	state := child.observedState()
 	if child.reported == state {
 		return nil
 	}
 	child.reported = state
-	a.cursorChildren[call] = child
+	a.cursorChildren[id] = child
 	event := child.event(call, frame.SessionID, state)
 	return &event
 }
 
+// Cursor reuses call IDs across prompts. Only dispatch evidence joins by turn and
+// call ID; later state updates identify the child by its native session ID.
+func (a *Adapter) matchCursorChildLaunchLocked(key cursorLaunchKey, frame cursorChildFrame) (string, bool) {
+	id := frame.Update.SubagentSessionID
+	launch := a.cursorChildLaunches[key]
+	switch {
+	case frame.background:
+		launch.background = true
+	case frame.Update.SessionUpdate == cursorChildSpawned:
+		if id == "" || (launch.childID != "" && launch.childID != id) || a.cursorChildren[id].spawned {
+			return "", false
+		}
+		launch.childID = id
+	default:
+		return id, false
+	}
+	if a.cursorChildLaunches == nil {
+		a.cursorChildLaunches = make(map[cursorLaunchKey]cursorLaunch)
+	}
+	a.cursorChildLaunches[key] = launch
+	return launch.childID, launch.background
+}
+
+func (child cursorChild) observedState() streams.RunState {
+	if !child.spawned || !child.background {
+		return ""
+	}
+	if child.terminal != "" {
+		return child.terminal
+	}
+	return streams.RunStateRunning
+}
+
 func (child *cursorChild) apply(frame cursorChildFrame) bool {
 	if frame.background {
-		child.background = true
 		return true
 	}
 	u := frame.Update
-	if u.SubagentSessionID == "" || (child.id != "" && child.id != u.SubagentSessionID) {
-		return false
-	}
-	child.id = u.SubagentSessionID
+
 	if u.SessionUpdate == cursorChildSpawned {
 		child.spawned = true
 		child.title = u.Task
@@ -141,7 +181,7 @@ func (child *cursorChild) apply(frame cursorChildFrame) bool {
 			child.title = u.Name
 		}
 		if child.title == "" {
-			child.title = child.id
+			child.title = u.SubagentSessionID
 		}
 		return true
 	}

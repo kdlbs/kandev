@@ -139,13 +139,14 @@ func (a *Adapter) advanceNativeGenerationLocked(replacementSessionID string) []A
 			retiredWatches = append(retiredWatches, *event)
 		}
 	}
-	for callID, child := range a.cursorChildren {
+	for _, child := range a.cursorChildren {
 		if child.reported == streams.RunStateRunning {
-			event := child.event(callID, a.sessionID, streams.RunStateUnknown)
+			event := child.event(child.call, a.sessionID, streams.RunStateUnknown)
 			event.SessionID = replacementSessionID
 			retiredWatches = append(retiredWatches, event)
 		}
 	}
+	clear(a.cursorChildLaunches)
 	clear(a.cursorChildren)
 	a.nativeGeneration++
 	clear(a.openCodePluginClaims)

@@ -78,9 +78,14 @@ func (a *Adapter) sweepCursorTaskMetaOnPromptEnd(sessionID string, generation ui
 	a.mu.Lock()
 	a.clearCursorTaskMetaLocked(sessionID)
 	if a.sessionID == sessionID {
-		for callID, child := range a.cursorChildren {
-			if child.generation == generation && child.reported != streams.RunStateRunning {
-				delete(a.cursorChildren, callID)
+		for key := range a.cursorChildLaunches {
+			if key.generation == generation {
+				delete(a.cursorChildLaunches, key)
+			}
+		}
+		for id, child := range a.cursorChildren {
+			if child.generation <= generation && child.reported != streams.RunStateRunning {
+				delete(a.cursorChildren, id)
 			}
 		}
 	}

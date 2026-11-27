@@ -53,3 +53,5 @@ Cursor CLI 2026.10.19-6bbf2c4 ran twice against the patched Kandev adapter. A si
 
 
 A disposable Kandev backend using the same CLI passed a Chromium check. It launched a real child from the initial task description. The workload API returned one running subagent and the composer displayed its chip. The child completed, the parent reported the marker, and the same job appeared as Completed in History after reload. The fixture shut down. The focused ACP and orchestrator suites, adapter race tests, changed-package Go lint, and specification and public documentation checks passed.
+
+Review regressions cover two overlapping children that share a launch call ID in different turns, and a running child's transition to unknown across a context reset. Both tests failed before the correction. The adapter now correlates dispatch by turn and call ID, tracks completion by child session ID, and forwards the retired observation through the lifecycle reset buffer.

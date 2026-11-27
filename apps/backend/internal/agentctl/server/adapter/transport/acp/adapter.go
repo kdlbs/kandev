@@ -268,6 +268,7 @@ type Adapter struct {
 	// on turn end / reset (clearCursorTaskMetaLocked), so it never outlives the
 	// turn that produced it.
 	cursorTaskMetaBySession map[string]map[string]cursorTaskMeta
+	cursorChildLaunches     map[cursorLaunchKey]cursorLaunch
 	cursorChildren          map[string]cursorChild
 	cursorShellWatches      map[string]cursorShellWatch
 	// toolCallParents preserves nested tool lineage while a handed-off
@@ -1028,6 +1029,7 @@ func (a *Adapter) Close() error {
 	a.closed = true
 	clear(a.cursorShellWatches)
 	clear(a.cursorChildren)
+	clear(a.cursorChildLaunches)
 	a.clearCopilotInterruptionLocked()
 	if a.closedCh != nil {
 		close(a.closedCh)
