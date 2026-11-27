@@ -160,7 +160,9 @@ const (
 	// repository-free execution cannot silently reuse the old task.
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
-	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyAutomationRunID links a task to its run before the run stores task_id.
+	MetaKeyAutomationRunID = "automation_run_id"
+	MetaKeyDeferredLaunch  = "deferred_launch"
 	// MetaKeyAutomationStartOwned marks a task whose initial agent start is
 	// owned by the automation run that created it. It is stamped at create
 	// time, before the feeder pull can publish task.moved, so the workflow

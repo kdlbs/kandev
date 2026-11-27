@@ -1950,6 +1950,19 @@ func (s *Service) ProtectedAutomationRunAccessForTask(ctx context.Context, taskI
 	return true, creatorID == userID, nil
 }
 
+// ProtectedCreatorForRun returns the fixed creator before a newly created task
+// has been bound back to its run row.
+func (s *Service) ProtectedCreatorForRun(ctx context.Context, runID string) (string, error) {
+	if runID == "" {
+		return "", nil
+	}
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil || run == nil {
+		return "", err
+	}
+	return run.ProtectedCreatorUserID, nil
+}
+
 func projectCredentialRunOutput(ctx context.Context, run *AutomationRun) *AutomationRun {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if run == nil || run.ProtectedCreatorUserID == "" || !ok || identity.Synthetic || identity.UserID == run.ProtectedCreatorUserID {

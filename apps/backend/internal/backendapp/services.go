@@ -792,6 +792,7 @@ func initAutomationWiring(
 	automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	taskSvc.SetAutomationCredentialRunAccessChecker(automationComponents.Service.ProtectedAutomationRunAccessForTask)
 	taskSvc.SetAutomationCredentialRunUseChecker(automationComponents.Service.ProtectedAutomationRunUseAccessForTask)
+	taskSvc.SetAutomationCredentialRunCreatorLookup(automationComponents.Service.ProtectedCreatorForRun)
 	// A UI filter is not an authorization boundary: reject a workflow owned
 	// by another workspace even when a request names it directly.
 	automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}

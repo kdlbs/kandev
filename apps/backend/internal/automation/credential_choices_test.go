@@ -209,6 +209,17 @@ func TestAutomationWorkspaceSecretGrant(t *testing.T) {
 			}
 		}
 		require.EqualValues(t, 1, newChoiceRevision)
+		newRun := &AutomationRun{
+			AutomationID: a.ID, TriggerType: TriggerTypeManual,
+			TaskID: "task-repo-2", Status: RunStatusTriggered,
+		}
+		require.NoError(t, svc.store.CreateRun(credentialIdentity("creator-1"), newRun))
+		protected, allowed, accessErr = svc.ProtectedAutomationRunUseAccessForTask(
+			credentialIdentity("creator-1"), newRun.TaskID, "creator-1",
+		)
+		require.NoError(t, accessErr)
+		require.True(t, protected)
+		require.True(t, allowed, "the stale grant for repo-1 does not block a run admitted with repo-2")
 
 		validated := 0
 		svc.SetCredentialValidator(credentialValidatorFunc(func(_ context.Context, _ *Automation, repositoryIDs []string) error {

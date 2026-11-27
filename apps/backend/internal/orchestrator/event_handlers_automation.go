@@ -146,7 +146,7 @@ func isDeterministicCommittedRetryTaskError(err error) bool {
 	return errors.Is(err, errDeterministicCommittedRetryTask)
 }
 
-const retryAutomationRunIDMetadataKey = "automation_run_id"
+const retryAutomationRunIDMetadataKey = models.MetaKeyAutomationRunID
 
 type automationContinuationState interface {
 	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error

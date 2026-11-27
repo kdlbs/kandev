@@ -312,6 +312,7 @@ func provideGateway(
 	taskNotifications := gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	if taskSvc != nil {
 		taskNotifications.SetProtectedTaskLookup(taskSvc.IsProtectedAutomationTask)
+		taskNotifications.SetProtectedAutomationRunLookup(taskSvc.IsProtectedAutomationRun)
 	}
 	if taskRepo != nil && eventBus != nil {
 		var loadPullRequests statussummary.PullRequestLoader

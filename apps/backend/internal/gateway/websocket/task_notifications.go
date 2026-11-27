@@ -18,12 +18,18 @@ type TaskEventBroadcaster struct {
 	subscriptions       []bus.Subscription
 	logger              *logger.Logger
 	protectedTaskLookup func(context.Context, string) (bool, error)
+	protectedRunLookup  func(context.Context, string) (bool, error)
 	closeMu             sync.Mutex
 	closed              bool
 }
 
 func (b *TaskEventBroadcaster) SetProtectedTaskLookup(lookup func(context.Context, string) (bool, error)) {
 	b.protectedTaskLookup = lookup
+}
+
+// SetProtectedAutomationRunLookup wires the pre-bind run authority lookup.
+func (b *TaskEventBroadcaster) SetProtectedAutomationRunLookup(lookup func(context.Context, string) (bool, error)) {
+	b.protectedRunLookup = lookup
 }
 
 func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *TaskEventBroadcaster {
@@ -382,13 +388,6 @@ func (b *TaskEventBroadcaster) broadcastTaskSnapshot(ctx context.Context, data i
 	if taskID == "" || (b.hub.workspaceScopeEnforced() && b.hub.authPolicy.Subscriptions.Task == nil) {
 		return nil
 	}
-	if b.protectedTaskLookup != nil {
-		_, err := b.protectedTaskLookup(ctx, taskID)
-		if err != nil {
-			b.logger.Warn("failed to resolve protected task snapshot access", zap.String("task_id", taskID), zap.Error(err))
-			return nil
-		}
-	}
 	b.hub.BroadcastToTask(taskID, msg)
 	return nil
 }
@@ -403,7 +402,7 @@ func (b *TaskEventBroadcaster) routeTaskProjection(
 	if taskID == "" {
 		return nil
 	}
-	if b.protectedTaskLookup == nil {
+	if b.protectedTaskLookup == nil && b.protectedRunLookup == nil {
 		if b.hub.workspaceScopeEnforced() {
 			if b.hub.authPolicy.Subscriptions.Task != nil {
 				b.hub.BroadcastToTask(taskID, msg)
@@ -413,7 +412,7 @@ func (b *TaskEventBroadcaster) routeTaskProjection(
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	}
-	protected, err := b.protectedTaskLookup(ctx, taskID)
+	protected, _, err := b.protectedTaskForEvent(ctx, data, taskID)
 	if err != nil {
 		b.logger.Warn("failed to resolve protected task projection", zap.String("task_id", taskID), zap.Error(err))
 		return nil
@@ -436,22 +435,17 @@ func (b *TaskEventBroadcaster) routeTaskLifecycle(
 	msg *ws.Message,
 ) error {
 	taskID := extractTaskID(data)
-	if b.protectedTaskLookup == nil && !b.hub.workspaceScopeEnforced() {
+	if b.protectedTaskLookup == nil && b.protectedRunLookup == nil && !b.hub.workspaceScopeEnforced() {
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	}
 	if taskID == "" {
 		return nil
 	}
-	protected, lookupSucceeded := true, false
-	if b.protectedTaskLookup != nil {
-		resolvedProtected, err := b.protectedTaskLookup(ctx, taskID)
-		if err != nil {
-			b.logger.Warn("failed to resolve protected task lifecycle projection", zap.String("task_id", taskID), zap.Error(err))
-		} else {
-			protected = resolvedProtected
-			lookupSucceeded = true
-		}
+	protected, lookupSucceeded, err := b.protectedTaskForEvent(ctx, data, taskID)
+	if err != nil {
+		b.logger.Warn("failed to resolve protected task lifecycle projection", zap.String("task_id", taskID), zap.Error(err))
+		protected, lookupSucceeded = true, false
 	}
 	if !protected {
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
@@ -470,6 +464,25 @@ func (b *TaskEventBroadcaster) routeTaskLifecycle(
 	return nil
 }
 
+func (b *TaskEventBroadcaster) protectedTaskForEvent(ctx context.Context, data interface{}, taskID string) (bool, bool, error) {
+	if b.protectedTaskLookup == nil {
+		if b.hub.workspaceScopeEnforced() {
+			return true, false, nil
+		}
+	} else {
+		protected, err := b.protectedTaskLookup(ctx, taskID)
+		if err != nil || protected {
+			return protected, err == nil, err
+		}
+	}
+	runID := extractAutomationRunID(data)
+	if runID != "" && b.protectedRunLookup != nil {
+		protected, err := b.protectedRunLookup(ctx, runID)
+		return protected, err == nil, err
+	}
+	return false, b.protectedTaskLookup != nil, nil
+}
+
 func safeProtectedTaskLifecyclePayload(data interface{}) (map[string]interface{}, bool) {
 	payload, ok := data.(map[string]interface{})
 	if !ok {
@@ -482,6 +495,22 @@ func safeProtectedTaskLifecyclePayload(data interface{}) (map[string]interface{}
 		}
 	}
 	return safe, safe["task_id"] != nil && safe["workspace_id"] != nil
+}
+
+func extractAutomationRunID(data interface{}) string {
+	if runID := extractStringField(data, models.MetaKeyAutomationRunID); runID != "" {
+		return runID
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	metadata, ok := payload["metadata"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	runID, _ := metadata[models.MetaKeyAutomationRunID].(string)
+	return runID
 }
 
 func (b *TaskEventBroadcaster) broadcastWorkspaceDTO(data interface{}, workspaceID string, msg *ws.Message) error {
@@ -529,7 +558,7 @@ func (b *TaskEventBroadcaster) routeSessionStateChanged(
 		b.hub.clearSessionLaunchWarning(sessionID)
 	}
 	taskID := extractStringField(data, "task_id")
-	if b.protectedTaskLookup != nil {
+	if b.protectedTaskLookup != nil || b.protectedRunLookup != nil || b.hub.workspaceScopeEnforced() {
 		if taskID == "" {
 			return nil
 		}
@@ -548,7 +577,7 @@ func (b *TaskEventBroadcaster) routeProtectedSessionState(
 	data interface{},
 	taskID, workspaceID string,
 ) (bool, error) {
-	protected, err := b.protectedTaskLookup(ctx, taskID)
+	protected, _, err := b.protectedTaskForEvent(ctx, data, taskID)
 	if err != nil {
 		b.logger.Warn("failed to resolve protected task state projection", zap.String("task_id", taskID), zap.Error(err))
 		return true, nil
