@@ -17,6 +17,7 @@ import {
 } from "@/hooks/domains/session/use-session-recovery-actions";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
 import { addHistoryContinuationChoice } from "./messages/action-message-recovery";
+import { sessionRecoveryFailureLabel } from "./session-recovery-failure-label";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
 export type SessionStoppedBannerProps = {
@@ -32,6 +33,7 @@ export type SessionStoppedBannerProps = {
   resumingLabel?: string;
   uncertainDelivery?: boolean;
   deliveryRecoveryPhase?: "reconnecting" | "uncertain";
+  workspaceRestorable?: boolean;
   recoveryActions?: SessionRecoveryActions;
 };
 
@@ -136,9 +138,10 @@ function sessionRecoveryChoices(
 function addOptionalRecoveryChoices(
   choices: RecoveryChoice[],
   actions: SessionRecoveryActions,
+  workspaceRestorable: boolean | undefined,
   t: RecoveryTranslator,
 ) {
-  if (actions.recoveryError && !actions.guardDetails) {
+  if (workspaceRestorable !== false && actions.recoveryError && !actions.guardDetails) {
     choices.push({
       kind: "restore",
       label: t("task:restoreReadOnlyWorkspace"),
@@ -193,7 +196,7 @@ function useStoppedRecoveryChoices(
     return [managedCloneRecoveryChoice(onRelocateRequested, t)];
   }
   const choices = sessionRecoveryChoices(props, profileExists, t);
-  addOptionalRecoveryChoices(choices, props.actions, t);
+  addOptionalRecoveryChoices(choices, props.actions, props.workspaceRestorable, t);
   return choices;
 }
 
@@ -288,10 +291,7 @@ function stoppedRecoveryCause(
   const message = actions.guardDetails
     ? sanitizeSessionErrorDetails(actions.recoveryError?.message, 240)
     : "";
-  const fallback =
-    actions.manualRecoveryFailure?.operation === "restore_workspace"
-      ? t("task:failedToRestoreWorkspace")
-      : t("task:failedToResumeSession");
+  const fallback = sessionRecoveryFailureLabel(actions.manualRecoveryFailure?.operation, t);
   return message || fallback;
 }
 

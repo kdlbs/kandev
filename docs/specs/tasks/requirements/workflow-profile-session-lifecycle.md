@@ -177,6 +177,13 @@ requiring its profile to be known when the workflow is authored.
   session options** shall remain a separate behavior. The editor and API shall
   prevent combining it with an explicit session target. Choosing a target shall
   not silently discard existing conditional rules.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.13:** When the original session fails
+  before its target entry commits a recipient route, such as a worktree setup
+  failure at task creation, automatic retry and **Start fresh session** shall
+  retry that session while the task remains on the same step and workflow entry.
+  The retry shall keep the pending initial prompt and the step instructions.
+  A different session, a later entry, a changed step, or an earlier-step target
+  without its committed route shall still be refused.
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-003: Focus the recipient after a manual step move
 
@@ -199,6 +206,8 @@ requiring its profile to be known when the workflow is authored.
 - [Manual workflow session focus](../../../plans/workflow-session-focus/plan.md)
 
 - [Destination executor admission](../../../plans/workflow-switch-executor-admission/plan.md)
+
+- [Initial-session first-launch retry](../../../plans/initial-session-first-launch-retry/plan.md)
 
 ## Example
 

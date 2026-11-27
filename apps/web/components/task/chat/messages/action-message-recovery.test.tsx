@@ -34,6 +34,7 @@ const FRESH_TEST_ID = "recovery-fresh-button";
 const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
 const SESSION_RECOVERY_METHOD = "session.recover";
 const BRANCH_FAILURE_MESSAGE = "The saved branch is no longer available.";
+const PROVIDER_UNAVAILABLE_MESSAGE = "Provider is unavailable";
 const RECOVERY_ERROR_TEST_ID = "session-recovery-error";
 const TEST_SESSION_ID = "sess-1";
 const TEST_TASK_ID = "task-1";
@@ -234,15 +235,42 @@ describe("ActionMessage — recovery history remains after the agent is back", (
   });
 
   it("does not offer branch continuation for an ordinary recovery failure", async () => {
-    requestMock.mockRejectedValueOnce(new Error("Provider is unavailable"));
+    requestMock.mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE_MESSAGE));
 
     renderWithTranscript("WAITING_FOR_INPUT", []);
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
 
-    expect(await screen.findByText("Provider is unavailable")).toBeTruthy();
+    expect(await screen.findByText(PROVIDER_UNAVAILABLE_MESSAGE)).toBeTruthy();
     expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
 
     expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
+  });
+
+  it("labels a failed fresh start by its operation", async () => {
+    requestMock.mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE_MESSAGE));
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(FRESH_TEST_ID));
+
+    expect(await screen.findByText("Failed to start fresh session")).toBeTruthy();
+    expect(screen.getByText(PROVIDER_UNAVAILABLE_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage workspace availability", () => {
+  it("does not offer restore when failure metadata says no workspace exists", async () => {
+    requestMock.mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE_MESSAGE));
+    const comment = recoveryMessage();
+    comment.metadata = {
+      ...(comment.metadata as Record<string, unknown>),
+      workspace_restorable: false,
+    };
+
+    renderWithTranscript("WAITING_FOR_INPUT", [], undefined, comment);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
   });
 });
 

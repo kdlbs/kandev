@@ -268,6 +268,7 @@ function SettledFailureMessage({
             ),
             isRecoveryMessage: metadata?.recovery_actions === true,
             errorStamp: metadata?.error_stamp ?? metadata?.recovery_stamp,
+            metadata,
             onRecoveryRequested,
           })}
           <ActionMessageDetails
@@ -333,6 +334,7 @@ function renderSettledActionButtons({
   extraContent,
   isRecoveryMessage,
   errorStamp,
+  metadata,
   onRecoveryRequested,
 }: {
   actions?: MessageAction[];
@@ -341,6 +343,7 @@ function renderSettledActionButtons({
   extraContent?: ReactElement;
   isRecoveryMessage: boolean;
   errorStamp?: string;
+  metadata: ActionMeta | undefined;
   onRecoveryRequested: () => void;
 }): ReactElement | null {
   if (!actions || actions.length === 0) return extraContent ?? null;
@@ -353,6 +356,7 @@ function renderSettledActionButtons({
           taskId={taskId}
           sessionId={sessionId}
           errorStamp={errorStamp}
+          workspaceRestorable={metadata?.workspace_restorable}
           onRecoveryRequested={onRecoveryRequested}
         />
         {extraContent}
