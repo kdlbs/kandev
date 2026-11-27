@@ -43,6 +43,7 @@ type autoMergeAccumulator struct {
 	contextSeen     map[string]struct{}
 	admissionIDs    []string
 	admissionSeen   map[string]struct{}
+	admissionReason string
 	queuedAt        time.Time
 }
 
@@ -106,6 +107,9 @@ func (a *autoMergeAccumulator) absorb(message *QueuedMessage) bool {
 	a.references = appendOrderedItems(a.references, references, a.referenceSeen, func(reference apiv1.EntityReference) string { return reference.Ref })
 	a.contexts = appendOrderedItems(a.contexts, contexts, a.contextSeen, contextFileKey)
 	a.admissionIDs = appendOrderedItems(a.admissionIDs, admissionIDs, a.admissionSeen, func(id string) string { return id })
+	if reason := knownAdmissionReason(message.Metadata); reason != "" {
+		a.admissionReason = reason
+	}
 	if message.Content != "" {
 		a.bodies = append(a.bodies, message.Content)
 	}
@@ -135,6 +139,7 @@ func (a *autoMergeAccumulator) values() *autoMergedValues {
 	metadata = setAutoMetadataList(metadata, MetadataEntityReferences, a.references)
 	metadata = setAutoMetadataList(metadata, MetadataContextFiles, a.contexts)
 	metadata = setAutoMetadataList(metadata, MetadataQueueAdmissionIDs, a.admissionIDs)
+	metadata = retainAdmissionReason(metadata, a.admissionReason)
 	return &autoMergedValues{
 		content:     strings.Join(a.bodies, "\n\n"),
 		attachments: append([]MessageAttachment(nil), a.attachments...),

@@ -1428,11 +1428,15 @@ type CachedModeState struct {
 
 // CachedModelState holds the last-known session model state for re-sending on subscribe.
 type CachedModelState struct {
-	CurrentModelID string
-	Models         []streams.SessionModelInfo
-	ConfigOptions  []streams.ConfigOption
-	ConfigSource   string
-	ConfigID       string
+	CurrentModelID            string
+	Models                    []streams.SessionModelInfo
+	ConfigOptions             []streams.ConfigOption
+	ConfigSource              string
+	ConfigID                  string
+	SessionSettingsGeneration uint64
+	ConfigOptionsComplete     bool
+	ConfigOptionsDisplayOnly  bool
+	VerifiedConfigOptionIDs   []string
 	// ConfigOptionsSettled is true after startup config application has a
 	// complete provider snapshot, including snapshots with no options.
 	ConfigOptionsSettled bool
@@ -1571,21 +1575,30 @@ func cloneCachedModelState(state *CachedModelState) *CachedModelState {
 	if state == nil {
 		return nil
 	}
-	cloned := &CachedModelState{
-		CurrentModelID:       state.CurrentModelID,
-		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
-		ConfigSource:         state.ConfigSource,
-		ConfigID:             state.ConfigID,
-		ConfigOptionsSettled: state.ConfigOptionsSettled,
-	}
+	cloned := *state
+	cloned.Models = append([]streams.SessionModelInfo(nil), state.Models...)
+	cloned.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	cloned.VerifiedConfigOptionIDs = append([]string(nil), state.VerifiedConfigOptionIDs...)
 	for i := range cloned.ConfigOptions {
 		cloned.ConfigOptions[i].Options = append(
 			[]streams.ConfigOptionValue(nil),
 			state.ConfigOptions[i].Options...,
 		)
 	}
-	return cloned
+	return &cloned
+}
+
+func cachedModelStateFromStream(state *streams.SessionModelState) *CachedModelState {
+	return &CachedModelState{
+		CurrentModelID:            state.CurrentModelID,
+		Models:                    state.Models,
+		ConfigOptions:             state.ConfigOptions,
+		SessionSettingsGeneration: state.SessionSettingsGeneration,
+		ConfigOptionsComplete:     state.ConfigOptionsComplete,
+		ConfigOptionsDisplayOnly:  state.ConfigOptionsDisplayOnly,
+		VerifiedConfigOptionIDs:   state.VerifiedConfigOptionIDs,
+		ConfigOptionsSettled:      state.ConfigOptionsSettled,
+	}
 }
 
 // GetModelState returns the cached session model state.

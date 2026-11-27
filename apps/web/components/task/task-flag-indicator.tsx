@@ -19,13 +19,14 @@ export function TaskFlagIndicator({
       type="button"
       className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-destructive focus-visible:outline focus-visible:outline-ring max-md:size-11 [@media(pointer:coarse)]:size-11"
       aria-label={t("sidebar:flag")}
-      aria-haspopup={onOpen ? "dialog" : undefined}
+      aria-haspopup={touch && onOpen ? "dialog" : undefined}
+      aria-description={touch ? note : undefined}
       onPointerDown={stop}
       onMouseDown={stop}
       onTouchStart={stop}
       onClick={(event) => {
         event.stopPropagation();
-        onOpen?.(event.currentTarget);
+        if (touch) onOpen?.(event.currentTarget);
       }}
     >
       <IconFlagFilled className="size-3.5" aria-hidden="true" />

@@ -149,7 +149,9 @@ test.describe("integration provider authentication errors", () => {
     await expect(testPage).toHaveURL(
       new RegExp(`/settings/workspaces/${seedData.workspaceId}/integrations/github$`),
     );
-    await expect(testPage.getByText("GitHub token is invalid", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("GitHub token is invalid", { exact: true }),
+    ).toBeVisible();
     await expect(token).toHaveValue("ghp_invalid");
     await expect(surface).toHaveAttribute("data-state", "open");
     await expect(

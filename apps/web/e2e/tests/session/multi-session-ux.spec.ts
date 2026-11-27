@@ -796,6 +796,9 @@ test.describe("Session deletion preserves the task workspace", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
+    await testPage.screenshot({
+      path: test.info().outputPath("desktop-replacement-visible.png"),
+    });
 
     // The replacement session reused the retained environment, not a fresh one.
     const { sessions: after } = await apiClient.listTaskSessions(task.id);

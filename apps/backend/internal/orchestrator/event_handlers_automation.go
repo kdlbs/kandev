@@ -716,6 +716,17 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		zap.String("trigger_type", string(evt.TriggerType)))
 
 	if continuationSession != nil {
+		if stepErr := s.movePRTaskToContinuationStep(ctx, a, task); stepErr != nil {
+			s.recordFailedRun(ctx, evt, stepErr.Error())
+			return
+		}
+		if refreshedSession, reason := s.continuationSession(ctx, task.ID); refreshedSession != nil {
+			continuationSession = refreshedSession
+		} else if reason != "" {
+			s.recordFailedRun(ctx, evt, reason)
+			return
+		}
+		prompt = prContinuationPrompt(a, evt, retrySnapshot, retrySnapshot != nil && !retryInitialTriggerData, prompt)
 		if s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reasons.Thread, retryOperation) && retryRun != nil {
 			s.acknowledgeRetryEventAfterBinding(ctx, evt)
 
@@ -759,6 +770,10 @@ func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) 
 		ContinuationTaskID: snapshot.ContinuationTaskID,
 		RetryPolicy:        snapshot.RetryPolicy,
 		Enabled:            true,
+		PRContinuationSettings: automation.PRContinuationSettings{
+			FollowUpPrompt:       snapshot.FollowUpPrompt,
+			PRContinuationStepID: snapshot.PRContinuationStepID,
+		},
 	}
 }
 
@@ -950,7 +965,14 @@ func (s *Service) prepareAutomationTask(
 	}
 	var task *models.Task
 	var continuationSession *models.TaskSession
-	if a.ContinuationPolicy == automation.ContinuationPolicyReuseThread {
+	prSubject := automation.PRSubjectForFiring(a, evt.TriggerType, evt.TriggerData)
+	if prSubject != "" {
+		var prErr error
+		task, continuationSession, action, reasons.Thread, prErr = s.findPRContinuation(ctx, a, evt, prSubject)
+		if prErr != nil {
+			return nil, nil, action, reasons, prErr
+		}
+	} else if a.ContinuationPolicy == automation.ContinuationPolicyReuseThread {
 		task, continuationSession, reasons.Thread = s.findAutomationContinuation(ctx, a, evt)
 		if task != nil {
 			action = automation.ThreadActionResumed
@@ -1008,6 +1030,13 @@ func (s *Service) prepareAutomationTask(
 		if err := validateRetryTaskOwnership(task, a, evt, taskOrigin, false); err != nil {
 			return nil, nil, action, reasons, err
 		}
+	}
+	if prSubject != "" {
+		if err := s.recordPRContinuation(ctx, a.ID, prSubject, task.ID); err != nil {
+			s.deleteAbandonedTask(ctx, a.ID, task.ID)
+			return nil, nil, action, reasons, err
+		}
+		return task, nil, action, reasons, nil
 	}
 	if a.ContinuationPolicy != automation.ContinuationPolicyReuseThread {
 		return task, nil, action, reasons, nil

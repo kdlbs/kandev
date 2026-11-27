@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { installRuntimeUpdateFixture } from "../settings/agent-runtime-update-helpers";
 
 function taskSwitcherModifier() {
   return process.platform === "darwin" ? "Meta" : "Control";
@@ -165,6 +166,69 @@ test.describe("Recent task switcher", () => {
     await expect(switcher).not.toBeVisible({ timeout: 5_000 });
 
     await testPage.keyboard.up(modifier);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}`));
+  });
+
+  // @covers AC-UI-TOAST-INTERACTION-001.2, AC-UI-TOAST-INTERACTION-001.4
+  test("Enter dismisses a toast without selecting a recent task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+    const first = await apiClient.createTask(seedData.workspaceId, "Toast Switcher Alpha", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const second = await apiClient.createTask(seedData.workspaceId, "Toast Switcher Beta", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${first.id}`);
+    await expect(testPage.getByText("Toast Switcher Alpha").first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await testPage.goto(`/t/${second.id}`);
+    await expect(testPage.getByText("Toast Switcher Beta").first()).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const commandPanel = testPage.getByRole("dialog").last();
+    await commandPanel.getByRole("combobox").fill("recent tasks");
+    await commandPanel
+      .getByRole("option")
+      .filter({ hasText: "Open Recent Task Switcher" })
+      .press("Enter");
+
+    const switcher = testPage.getByTestId("recent-task-switcher");
+    await expect(switcher).toBeVisible();
+    await testPage.clock.install();
+    await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now() + 250));
+    await runtime.emit("system.update_available", {
+      occurrence_id: "release-recent-switcher-v99.0.2",
+      version: "v99.0.2",
+      title: "Kandev update available",
+      body: "Kandev v99.0.2 is available.",
+    });
+    const toast = testPage.getByTestId("toast-message").filter({ hasText: "v99.0.2" });
+    await expect(toast).toHaveCount(1);
+
+    const dismiss = toast.getByRole("button", { name: "Dismiss notification" });
+    let dismissFocused = false;
+    for (let index = 0; index < 20 && !dismissFocused; index += 1) {
+      await testPage.keyboard.press("Tab");
+      dismissFocused = await dismiss.evaluate((element) => element === document.activeElement);
+    }
+    await expect(dismiss).toBeFocused();
+    await testPage.keyboard.press("Enter");
+
+    await expect(toast).toHaveCount(0);
+    await expect(switcher).toBeVisible();
     await expect(testPage).toHaveURL(new RegExp(`/t/${second.id}`));
   });
 });

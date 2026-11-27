@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
@@ -34,6 +34,8 @@ export function useStageImages(pendingId: string, sessionId: string, segment: Re
   return { states, retry, sizes, setSize };
 }
 
+export type StageImages = ReturnType<typeof useStageImages>;
+
 export function ImageState({
   state,
   onRetry,
@@ -58,6 +60,27 @@ export function ImageState({
         >
           {t("task:questionImageRetry")}
         </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The stage's bottom edge: which image is shown and status on the left, zoom on
+ * the right. One row, so the left side wraps upward instead of covering zoom.
+ */
+export function StageBottomRow({ start, end }: { start?: ReactNode; end?: ReactNode }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap-reverse items-end gap-1 text-xs">{start}</div>
+      {end && (
+        <div
+          className="pointer-events-auto shrink-0"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {end}
+        </div>
       )}
     </div>
   );

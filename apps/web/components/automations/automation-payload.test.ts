@@ -14,6 +14,7 @@ import {
   buildUpdatePayload,
   canonicalPluginTools,
   normalizeRetryPolicyForTaskMode,
+  prContinuationPayload,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
@@ -37,6 +38,10 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    followUpPrompt: "",
+    prContinuationStepId: "",
+    prMergedAction: "keep",
+    prClosedAction: "keep",
     retryPolicy: {
       mode: "disabled",
       max_retries: "0",
@@ -246,6 +251,32 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
   });
 });
 
+describe("save boundary normalization", () => {
+  it("never saves a hidden workflow or repeat-run choice for a managed conversation", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      workflowId: "wf-1",
+      continuationPolicy: "reuse_per_pr",
+      followUpPrompt: "Review",
+      prMergedAction: "archive",
+    });
+    for (const payload of [
+      buildCreatePayload("ws-1", form, [], []),
+      buildUpdatePayload(form, []),
+    ]) {
+      expect(payload.workflow_id).toBe("");
+      expect(payload.continuation_policy).toBe("new_task");
+      expect(payload.follow_up_prompt).toBe("");
+      expect(payload.pr_merged_action).toBe("keep");
+    }
+  });
+
+  it("creates a disabled automation when Enabled is off", () => {
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: false }), [], []).enabled).toBe(false);
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: true }), [], []).enabled).toBe(true);
+  });
+});
+
 describe("managed destination and retry payloads", () => {
   it("persists only the portable managed destination identity", () => {
     const form = baseForm({
@@ -446,4 +477,44 @@ it("carries the editor revision when switching to a managed conversation", () =>
   const payload = buildUpdatePayload(form, [], undefined, undefined, true);
   expect(payload).not.toHaveProperty("mcp_selection");
   expect(payload.expected_mcp_selection_revision).toBe(3);
+});
+
+// @covers AC-OFFICE-AUTOMATIONS-PR-FOLLOW-UP-006.3
+describe("prContinuationPayload", () => {
+  const perPR = {
+    continuationPolicy: "reuse_per_pr" as const,
+    taskMode: "normal_task" as const,
+    followUpPrompt: "Review only new commits",
+    prContinuationStepId: "step-review",
+    prMergedAction: "archive" as const,
+    prClosedAction: "delete" as const,
+  };
+
+  it("saves the per-PR options for reuse_per_pr", () => {
+    const form = baseForm(perPR);
+    const expected = {
+      follow_up_prompt: "Review only new commits",
+      pr_continuation_step_id: "step-review",
+      pr_merged_action: "archive",
+      pr_closed_action: "delete",
+    };
+    expect(buildCreatePayload("ws-1", form, [], [])).toMatchObject({
+      continuation_policy: "reuse_per_pr",
+      ...expected,
+    });
+    expect(buildUpdatePayload(form, [])).toMatchObject(expected);
+  });
+
+  it("clears options that no longer apply before saving", () => {
+    expect(prContinuationPayload(baseForm({ ...perPR, continuationPolicy: "new_task" }))).toEqual({
+      follow_up_prompt: "",
+      pr_continuation_step_id: "",
+      pr_merged_action: "keep",
+      pr_closed_action: "keep",
+    });
+    expect(
+      prContinuationPayload(baseForm({ ...perPR, taskMode: "automation_run" }))
+        .pr_continuation_step_id,
+    ).toBe("");
+  });
 });

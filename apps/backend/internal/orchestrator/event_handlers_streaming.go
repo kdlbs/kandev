@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -4760,11 +4761,11 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			ctx, sessionID, identity,
 			payload.Data.CurrentModelID, payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
 		)
-	} else {
-		s.persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
-			ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
-			identity,
-		)
+	} else if !s.persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
+		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions, settled,
+		identity, runtimeOptionsFromModelEvent(payload, configOptionsSource),
+	) {
+		return
 	}
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
@@ -5451,6 +5452,7 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlement(
 ) {
 	s.persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 		ctx, sessionID, model, mode, availableModels, options, configOptionsSettled, sessionSettingsEventIdentity{},
+		runtimeConfigOptionsUpdate{options: options},
 	)
 }
 
@@ -5461,22 +5463,27 @@ func (s *Service) persistSessionModelAndRuntimeConfigWithSettlementAndAttempt(
 	options []streams.ConfigOption,
 	configOptionsSettled bool,
 	identity sessionSettingsEventIdentity,
-) {
+	runtimeOptions runtimeConfigOptionsUpdate,
+) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for session model persistence",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return false
 	}
 	if session == nil {
-		return
+		return false
 	}
 	if model != "" {
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
-	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+	persisted := s.persistSessionRuntimeConfigOnSession(ctx, session, model, mode, runtimeOptions)
+	if !persisted && (identity.SettingsGeneration > 0 || runtimeOptions.complete) {
+		return false
+	}
 	s.persistSessionModelsSnapshot(ctx, sessionID, session, model, availableModels, options, configOptionsSettled, identity, "")
+	return true
 }
 
 func (s *Service) persistProviderRestoredSessionModelsSnapshot(
@@ -5654,22 +5661,20 @@ func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, mo
 	if session == nil {
 		return
 	}
-	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+	s.persistSessionRuntimeConfigOnSession(ctx, session, model, mode, runtimeConfigOptionsUpdate{options: options})
 }
 
-func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model, mode string, options []streams.ConfigOption) {
-	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
-	previousModel := cfg.Model
-	applySessionRuntimeConfigUpdate(&cfg, model, mode, options)
-	if cfg.IsZero() {
-		return
-	}
+func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, session *models.TaskSession, model, mode string, options runtimeConfigOptionsUpdate) bool {
+	sessionID := session.ID
 	writeCtx := context.WithoutCancel(ctx)
-	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+	cfg, previousModel, err := repository.UpdateSessionRuntimeConfig(writeCtx, s.repo, session, func(config *models.SessionRuntimeConfig) {
+		applySessionRuntimeConfigUpdate(config, model, mode, options)
+	})
+	if err != nil {
 		s.logger.Warn("failed to persist session runtime config",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return false
 	}
 	if cfg.Model != "" {
 		s.runtimeModelBySession.Store(sessionID, cfg.Model)
@@ -5683,6 +5688,7 @@ func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sess
 				zap.Error(err))
 		}
 	}
+	return true
 }
 
 func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID string, session *models.TaskSession, model string) {
@@ -5712,23 +5718,34 @@ type taskSessionAgentProfileSnapshotUpdater interface {
 	) error
 }
 
-func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mode string, options []streams.ConfigOption) {
+func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mode string, update runtimeConfigOptionsUpdate) {
 	if model != "" {
 		cfg.Model = model
 	}
 	if mode != "" {
 		cfg.Mode = mode
 	}
-	for _, option := range options {
-		if option.ID == "" || option.CurrentValue == "" {
+	previous := cfg.ConfigOptions
+	if update.complete {
+		cfg.ConfigOptions = make(map[string]string, len(update.options))
+	}
+	for _, option := range update.options {
+		if option.ID == "" {
+			continue
+		}
+		value := option.CurrentValue
+		if value == "" && update.complete {
+			value = previous[option.ID]
+		}
+		if value == "" {
 			continue
 		}
 		if cfg.ConfigOptions == nil {
 			cfg.ConfigOptions = make(map[string]string)
 		}
-		cfg.ConfigOptions[option.ID] = option.CurrentValue
+		cfg.ConfigOptions[option.ID] = value
 		if option.ID == sessionModelConfigKey || option.Category == sessionModelConfigKey {
-			cfg.Model = option.CurrentValue
+			cfg.Model = value
 		}
 	}
 }

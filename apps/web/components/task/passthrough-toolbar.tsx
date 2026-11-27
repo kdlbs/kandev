@@ -33,7 +33,7 @@ import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { ReviewComment } from "@/lib/state/slices/comments";
 import { AgentTerminalInput } from "./mobile/mobile-agent-terminal";
 import { TaskChatPanel } from "./task-chat-panel";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
@@ -107,14 +107,20 @@ function usePassthroughSendHandler(
 export function PassthroughToolbar({
   sessionId,
   taskId,
+  isVisible = true,
+  detailActive = true,
+  panelId,
 }: {
   sessionId: string | null | undefined;
   taskId: string | null;
+  isVisible?: boolean;
+  detailActive?: boolean;
+  panelId?: string;
 }) {
   const ended = useAppStore((state) =>
     isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
   );
-  const { openFile } = useFileEditors();
+  const { openFile } = useFileEditors(isVisible && detailActive);
   if (ended) {
     return (
       <TaskChatPanel
@@ -124,6 +130,9 @@ export function PassthroughToolbar({
         onOpenFile={openFile}
         onOpenFileAtLine={openFile}
         hideSessionsDropdown
+        isVisible={isVisible}
+        detailActive={detailActive}
+        panelId={panelId}
       />
     );
   }

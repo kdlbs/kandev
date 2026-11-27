@@ -7,6 +7,7 @@ import {
   DISK_USAGE_QUERY_KEY_PREFIX,
   createSystemInfoQueryKey,
   DATABASE_STATS_QUERY_KEY_PREFIX,
+  SESSION_CAPACITY_QUERY_KEY_PREFIX,
   SYSTEM_INFO_QUERY_KEY_PREFIX,
   useSystemInfoQueryIdentity,
 } from "@/hooks/domains/system/system-info-query";
@@ -60,9 +61,10 @@ function ScopedQueryClient({
         const isDiskUsage = hasQueryKeyPrefix(queryKey, DISK_USAGE_QUERY_KEY_PREFIX);
         const isDatabaseStats = hasQueryKeyPrefix(queryKey, DATABASE_STATS_QUERY_KEY_PREFIX);
         const isBackupList = hasQueryKeyPrefix(queryKey, BACKUP_LIST_QUERY_KEY_PREFIX);
+        const isSessionCapacity = hasQueryKeyPrefix(queryKey, SESSION_CAPACITY_QUERY_KEY_PREFIX);
 
         return (
-          (isSystemInfo || isDiskUsage || isDatabaseStats || isBackupList) &&
+          (isSystemInfo || isDiskUsage || isDatabaseStats || isBackupList || isSessionCapacity) &&
           JSON.stringify(queryKey.slice(2)) !== identityKey
         );
       },

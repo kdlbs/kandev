@@ -296,6 +296,7 @@
   "antigravityLoginStatusError": "无法读取 Google 登录状态。",
   "antigravityLoginCancelError": "无法取消 Google 登录。",
   "installAgents": "安装智能体",
+  "reinstallOpenCode": "重新安装",
   "installQueued": "已排队…",
   "installationNotDetected": "未检测到安装",
   "installed": "已安装",

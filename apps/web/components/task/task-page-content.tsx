@@ -22,6 +22,7 @@ import {
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
+import { isRequestedSessionUnavailable } from "@/lib/state/task-navigation-selection";
 import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -40,7 +41,10 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
-import { useRenderedTaskSession } from "@/components/task/task-page-session-ownership";
+import {
+  hasOwnedTaskPageSelection,
+  useRenderedTaskSession,
+} from "@/components/task/task-page-session-ownership";
 import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -390,6 +394,7 @@ function useTaskPageData(
   initialRepositories: Repository[],
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const store = useAppStoreApi();
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const previousRouteTaskId = useRef<string | null | undefined>(undefined);
@@ -431,6 +436,12 @@ function useTaskPageData(
   const effectiveSessionId = renderedSession.sessionId;
 
   useEffect(() => {
+    const routeTaskId = initialTask?.id ?? fallbackTaskId;
+    if (initialSessionId && isRequestedSessionUnavailable(store, initialSessionId)) return;
+    if (routeTaskId && hasOwnedTaskPageSelection(store, routeTaskId)) {
+      previousRouteTaskId.current = routeTaskId;
+      return;
+    }
     const applied = syncActiveTaskSession({
       initialTaskId: initialTask?.id,
       fallbackTaskId,
@@ -441,7 +452,14 @@ function useTaskPageData(
       setActiveTask,
     });
     if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
-  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
+  }, [
+    initialTask?.id,
+    fallbackTaskId,
+    initialSessionId,
+    setActiveSessionAuto,
+    setActiveTask,
+    store,
+  ]);
 
   const { repositories: effectiveRepositories, repository } = useTaskPageRepositories(
     task,

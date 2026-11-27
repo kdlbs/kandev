@@ -5,6 +5,29 @@ import (
 	"errors"
 )
 
+// MetadataAdmissionReason records the server's reason for deferring accepted input.
+const MetadataAdmissionReason = "admission_reason"
+
+const AdmissionReasonSessionCapacity = "session_capacity"
+
+func knownAdmissionReason(metadata map[string]interface{}) string {
+	if metadataString(metadata, MetadataAdmissionReason) == AdmissionReasonSessionCapacity {
+		return AdmissionReasonSessionCapacity
+	}
+	return ""
+}
+
+func retainAdmissionReason(metadata map[string]interface{}, reason string) map[string]interface{} {
+	if reason == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{}, 1)
+	}
+	metadata[MetadataAdmissionReason] = reason
+	return metadata
+}
+
 // ErrInvalidQueueAdmissionIDs reports malformed internal provenance metadata.
 // A merge must leave both queue entries untouched when its provenance cannot
 // be normalized safely.

@@ -99,7 +99,7 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 	} else {
 		merged[MetadataQueueAdmissionIDs] = admissionIDs
 	}
-	return merged, nil
+	return retainAdmissionReason(merged, knownAdmissionReason(source)), nil
 }
 
 // unionEntityReferences returns the deduplicated union of two entries' entity

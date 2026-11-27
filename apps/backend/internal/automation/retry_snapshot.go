@@ -34,6 +34,11 @@ type RetryLaunchConfigSnapshot struct {
 	ResolvedTitle      string                 `json:"resolved_title"`
 	ResolvedTriggerAt  time.Time              `json:"resolved_trigger_at"`
 	RetryPolicy        RetryPolicy            `json:"retry_policy"`
+	// Per-PR continuation fields. ResolvedFollowUpPrompt is used instead of
+	// ResolvedPrompt when the retry continues an existing PR task.
+	FollowUpPrompt         string `json:"follow_up_prompt,omitempty"`
+	ResolvedFollowUpPrompt string `json:"resolved_follow_up_prompt,omitempty"`
+	PRContinuationStepID   string `json:"pr_continuation_step_id,omitempty"`
 }
 
 func buildRetryLaunchConfigSnapshot(a *Automation, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string, resolvedAt time.Time) (RetryLaunchConfigSnapshot, error) {
@@ -77,6 +82,13 @@ func buildRetryLaunchConfigSnapshot(a *Automation, triggerID string, triggerType
 		ResolvedTitle:      RenderRunDisplayTitleAt(a, triggerType, resolvedTriggerData, resolvedAt),
 		ResolvedTriggerAt:  resolvedAt.UTC(),
 		RetryPolicy:        policy,
+	}
+	if a.ContinuationPolicy == ContinuationPolicyReusePerPR {
+		snapshot.FollowUpPrompt = a.FollowUpPrompt
+		snapshot.PRContinuationStepID = a.PRContinuationStepID
+		if a.FollowUpPrompt != "" {
+			snapshot.ResolvedFollowUpPrompt = InterpolateAgentPromptAt(a.FollowUpPrompt, triggerType, resolvedTriggerData, resolvedAt)
+		}
 	}
 	return snapshot, nil
 }

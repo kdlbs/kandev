@@ -5,6 +5,7 @@ import type { Automation, AutomationSummary, WorkspaceAutomationRun } from "@/li
 const WORKSPACE_ID = "workspace-1";
 const AUTOMATION_ID = "automation-1";
 const NIGHTLY = "Nightly drift";
+const DRIFT_SUMMARY = "Found 3 drifted specs.";
 
 const mocks = vi.hoisted(() => ({
   listAutomations: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/automations",
 }));
 
+import { emitAutomationRunRecorded } from "@/lib/automation-run-recorded";
 import { STATE_DOT_CLASS } from "./automation-rows";
 import { RunsListPage } from "./runs-list-page";
 
@@ -72,7 +74,7 @@ function mkRun(overrides: Partial<WorkspaceAutomationRun> = {}): WorkspaceAutoma
     dedup_key: "",
     trigger_data: {},
     error_message: "",
-    summary: "Found 3 drifted specs.",
+    summary: DRIFT_SUMMARY,
     created_at: "2026-07-30T16:00:00Z",
     ...overrides,
   } as WorkspaceAutomationRun;
@@ -92,6 +94,29 @@ afterEach(() => {
 });
 
 describe("RunsListPage", () => {
+  // @covers AC-OFFICE-AUTOMATION-RUNS-001.23
+  it("shows a run recorded while nothing was open, without a reload", async () => {
+    render(<RunsListPage workspaceId={WORKSPACE_ID} />);
+    await screen.findByTestId("automation-agenda");
+    expect(screen.queryByText(DRIFT_SUMMARY)).toBeNull();
+
+    mocks.listWorkspaceAutomationRuns.mockResolvedValue([mkRun()]);
+    // Re-announce until the page has subscribed; the interval outlasts the
+    // debounce so each announcement can complete a refresh.
+    await vi.waitFor(
+      () => {
+        emitAutomationRunRecorded({
+          workspace_id: WORKSPACE_ID,
+          automation_id: AUTOMATION_ID,
+          run_id: "run-1",
+          status: "succeeded",
+        });
+        expect(screen.getByText(DRIFT_SUMMARY)).toBeTruthy();
+      },
+      { timeout: 10_000, interval: 500 },
+    );
+  });
+
   it("leads with the agenda — the one fact the sidebar cannot hold", async () => {
     // The sidebar already lists automations by name with a health dot. This
     // page has to earn its click, and the time is what it earns it with.
@@ -142,7 +167,7 @@ describe("RunsListPage", () => {
     render(<RunsListPage workspaceId={WORKSPACE_ID} />);
 
     await waitFor(() =>
-      expect(screen.getByTestId("run-outcome").textContent).toContain("Found 3 drifted specs."),
+      expect(screen.getByTestId("run-outcome").textContent).toContain(DRIFT_SUMMARY),
     );
   });
 

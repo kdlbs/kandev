@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Label } from "@kandev/ui/label";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { settingsControlClassName } from "@/components/settings/settings-control";
 import { useAppStore } from "@/components/state-provider";
@@ -40,25 +39,20 @@ export function getExecutorItemDisabledReason(
 
 type ConfigSectionProps = {
   workspaceId: string;
-  workflowId: string;
   agentProfileId: string;
   executorProfileId: string;
-  taskMode?: TaskMode;
   repositorySelections: RepositorySelection[];
   dirtyFields?: {
-    workflowId: boolean;
     agentProfileId: boolean;
     executorProfileId: boolean;
     repositorySelections: boolean;
   };
-  onWorkflowChange: (id: string) => void;
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 };
 
 const CLEAN_FIELDS = {
-  workflowId: false,
   agentProfileId: false,
   executorProfileId: false,
   repositorySelections: false,
@@ -156,21 +150,24 @@ function RepositoryAccess({
   );
 }
 
-export function ConfigSection({
+/**
+ * The workflow each run's task follows: required for a normal task, which needs
+ * a Kanban destination, and optional for automation history.
+ */
+export function WorkflowField({
   workspaceId,
   workflowId,
-  agentProfileId,
-  executorProfileId,
-  taskMode = "automation_run",
-  repositorySelections,
-  dirtyFields = CLEAN_FIELDS,
+  taskMode,
+  isDirty = false,
   onWorkflowChange,
-  onAgentProfileChange,
-  onExecutorProfileChange,
-  onRepositoriesChange,
-}: ConfigSectionProps) {
+}: {
+  workspaceId: string;
+  workflowId: string;
+  taskMode: TaskMode;
+  isDirty?: boolean;
+  onWorkflowChange: (id: string) => void;
+}) {
   const { t } = useTranslation();
-  useSettingsData(true);
   const { workflows: allWorkflows } = useWorkflows(workspaceId);
   useAllWorkflowSnapshots(workspaceId);
   const workflows = useMemo(
@@ -178,6 +175,44 @@ export function ConfigSection({
     [allWorkflows, workspaceId],
   );
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const agentProfiles = useAppStore((state) => state.agentProfiles.items);
+  const required = taskMode === "normal_task";
+  return (
+    <div className="space-y-1.5" data-settings-dirty={isDirty}>
+      <SettingsFieldLabel>{t("automations:workflowLabel")}</SettingsFieldLabel>
+      <WorkflowSelectorRow
+        workflows={workflows}
+        snapshots={snapshots}
+        selectedWorkflowId={workflowId || null}
+        onWorkflowChange={onWorkflowChange}
+        agentProfiles={agentProfiles}
+        clearLabel={required ? undefined : t("automations:noWorkflow")}
+        placeholder={
+          required
+            ? t("automations:selectWorkflowRequired")
+            : t("automations:selectWorkflowOptional")
+        }
+      />
+      {required ? (
+        <p className="text-xs text-muted-foreground">{t("automations:normalTaskWorkflowHelp")}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The agent and executor profiles and the repositories each run can use. */
+export function ConfigSection({
+  workspaceId,
+  agentProfileId,
+  executorProfileId,
+  repositorySelections,
+  dirtyFields = CLEAN_FIELDS,
+  onAgentProfileChange,
+  onExecutorProfileChange,
+  onRepositoriesChange,
+}: ConfigSectionProps) {
+  const { t } = useTranslation();
+  useSettingsData(true);
   const { repositories } = useRepositories(workspaceId, true);
   const discovered = useRepositoryDiscovery(workspaceId, true).repositories;
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
@@ -194,58 +229,37 @@ export function ConfigSection({
     getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null;
 
   return (
-    <div className="space-y-3">
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-        {t("automations:configurationLabel")}
-      </Label>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5 sm:col-span-2" data-settings-dirty={dirtyFields.workflowId}>
-          <SettingsFieldLabel>{t("automations:workflowLabel")}</SettingsFieldLabel>
-          <WorkflowSelectorRow
-            workflows={workflows}
-            snapshots={snapshots}
-            selectedWorkflowId={workflowId || null}
-            onWorkflowChange={onWorkflowChange}
-            agentProfiles={agentProfiles}
-            clearLabel={taskMode === "normal_task" ? undefined : t("automations:noWorkflow")}
-            placeholder={
-              taskMode === "normal_task"
-                ? t("automations:selectWorkflowRequired")
-                : t("automations:selectWorkflowOptional")
-            }
-          />
-        </div>
-        <div className="space-y-1.5" data-settings-dirty={dirtyFields.agentProfileId}>
-          <SettingsFieldLabel>{t("automations:agentProfileLabel")}</SettingsFieldLabel>
-          <AgentSelector
-            options={agents}
-            value={agentProfileId}
-            onValueChange={onAgentProfileChange}
-            disabled={false}
-            placeholder={t("automations:agentProfilePlaceholder")}
-            triggerClassName={settingsControlClassName()}
-          />
-        </div>
-        <div className="space-y-1.5" data-settings-dirty={dirtyFields.executorProfileId}>
-          <SettingsFieldLabel>{t("automations:executorProfileLabel")}</SettingsFieldLabel>
-          <ExecutorProfileSelector
-            options={executorOptions}
-            value={executorProfileId}
-            onValueChange={onExecutorProfileChange}
-            disabled={false}
-            placeholder={t("automations:executorProfilePlaceholder")}
-            triggerClassName={settingsControlClassName()}
-          />
-        </div>
-        <RepositoryAccess
-          workspaceId={workspaceId}
-          repositories={repositories}
-          discovered={discovered}
-          selections={repositorySelections}
-          supportsMultiRepo={supportsMultiRepo}
-          onChange={onRepositoriesChange}
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="space-y-1.5" data-settings-dirty={dirtyFields.agentProfileId}>
+        <SettingsFieldLabel>{t("automations:agentProfileLabel")}</SettingsFieldLabel>
+        <AgentSelector
+          options={agents}
+          value={agentProfileId}
+          onValueChange={onAgentProfileChange}
+          disabled={false}
+          placeholder={t("automations:agentProfilePlaceholder")}
+          triggerClassName={settingsControlClassName()}
         />
       </div>
+      <div className="space-y-1.5" data-settings-dirty={dirtyFields.executorProfileId}>
+        <SettingsFieldLabel>{t("automations:executorProfileLabel")}</SettingsFieldLabel>
+        <ExecutorProfileSelector
+          options={executorOptions}
+          value={executorProfileId}
+          onValueChange={onExecutorProfileChange}
+          disabled={false}
+          placeholder={t("automations:executorProfilePlaceholder")}
+          triggerClassName={settingsControlClassName()}
+        />
+      </div>
+      <RepositoryAccess
+        workspaceId={workspaceId}
+        repositories={repositories}
+        discovered={discovered}
+        selections={repositorySelections}
+        supportsMultiRepo={supportsMultiRepo}
+        onChange={onRepositoriesChange}
+      />
     </div>
   );
 }

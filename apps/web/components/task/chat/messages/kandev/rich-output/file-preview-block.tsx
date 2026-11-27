@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useEffect, useState } from "react";
+import { useCallback, useId, useMemo, useEffect, useState } from "react";
 import { IconChevronDown, IconChevronRight, IconExternalLink, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -20,6 +20,10 @@ import { PluginFilePreview } from "@/components/task/plugin-file-preview";
 
 import { useRichOutputViewState } from "./view-state";
 
+import { parsePreviewDiff } from "./diff-preview-model";
+import { DiffPreview } from "./diff-preview";
+
+const DIFF_PATH = /\.(diff|patch)$/i;
 const TEXT_PREVIEW_CHARS = 2000;
 
 function FilePreviewContent({
@@ -30,6 +34,12 @@ function FilePreviewContent({
   state: WorkspaceFilePreviewState;
 }) {
   const { t } = useTranslation();
+  const content =
+    "response" in state && !state.response.is_binary ? state.response.content : undefined;
+  const diff = useMemo(
+    () => (content && DIFF_PATH.test(file.path) ? parsePreviewDiff(content) : null),
+    [content, file.path],
+  );
   if (state.kind === "loading") {
     return (
       <div className="flex min-h-20 items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -61,6 +71,7 @@ function FilePreviewContent({
       </div>
     );
   }
+  if (diff) return <DiffPreview diff={diff} />;
   const clipped = state.response.content.slice(0, TEXT_PREVIEW_CHARS);
   const wasClipped = state.response.content.length > TEXT_PREVIEW_CHARS;
   return (
@@ -80,6 +91,11 @@ type NativeFilePreviewProps = FilePreviewProps & {
   onOpenFile?: (path: string, repo?: string) => void;
 };
 
+function expandByDefault(path: string, pluginPreview: boolean, expandImages: boolean) {
+  if (pluginPreview) return fileViewerCandidates(path).length > 0;
+  return DIFF_PATH.test(path) || (getFileCategory(path) === "image" && expandImages);
+}
+
 export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePreviewProps) {
   const { t } = useTranslation();
   const previewId = useId();
@@ -95,8 +111,7 @@ export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePrevie
   );
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
-    (pluginPreview && fileViewerCandidates(file.path).length > 0) ||
-      (fileCategory === "image" && defaultExpanded),
+    expandByDefault(file.path, pluginPreview, defaultExpanded),
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 

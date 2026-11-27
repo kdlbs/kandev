@@ -75,8 +75,8 @@
     </td>
     <td align="center" valign="top" width="50%">
       <strong>Automation editor</strong><br>
-      Configure repository access, run destination, context, concurrency, and save changes.<br><br>
-      <img src="screenshots/automation-editor.png" alt="Automation editor showing repository access, run destination, context, and save controls" width="520">
+      Choose where runs go, how repeat runs relate, and what the agent is asked to do.<br><br>
+      <img src="screenshots/automation-editor.png" alt="Automation editor showing run destination, workflow, repeat runs, instructions, and save controls" width="520">
     </td>
   </tr>
   <tr>

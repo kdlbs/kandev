@@ -1,6 +1,6 @@
 import { Terminal } from "@xterm/xterm";
 import { AttachAddon } from "@xterm/addon-attach";
-import { log } from "./use-passthrough-terminal";
+import { log } from "./terminal-debug";
 
 export function teardownWebSocket(
   stopReconnectLoop: () => void,

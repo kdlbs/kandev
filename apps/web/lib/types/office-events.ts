@@ -35,7 +35,7 @@ export type OfficeEventPayload = {
   [key: string]: unknown;
 };
 
-export type OfficeBackendMessageMap = {
+export type OfficeBackendMessageMap = import("./automation").AutomationBackendMessageMap & {
   "office.task.updated": BackendMessage<"office.task.updated", OfficeEventPayload>;
   "office.task.created": BackendMessage<"office.task.created", OfficeEventPayload>;
   "office.task.moved": BackendMessage<"office.task.moved", OfficeEventPayload>;

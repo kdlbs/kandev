@@ -25,13 +25,17 @@ const createAutomationSchema = `{
   "prompt":{"type":"string"},
   "task_title_template":{"type":"string"},
   "max_concurrent_runs":{"type":"integer","description":"Defaults to 1 when omitted or non-positive."},
-  "continuation_policy":{"type":"string","enum":["new_task","reuse_thread"],"description":"Defaults to new_task. reuse_thread requires one concurrent run."},
+  "continuation_policy":{"type":"string","enum":["new_task","reuse_thread","reuse_per_pr"],"description":"Defaults to new_task. reuse_thread requires one concurrent run. reuse_per_pr keeps one task per pull request for github_pr firings; other firings start a new task."},
+  "follow_up_prompt":{"type":"string","description":"reuse_per_pr only. Sent instead of prompt when a firing continues a pull request's existing task. Empty reuses prompt."},
+  "pr_continuation_step_id":{"type":"string","description":"reuse_per_pr with normal_task only. Workflow step a continued task moves to before the prompt is sent; the step's own auto-start prompt does not run."},
+  "pr_merged_action":{"type":"string","enum":["keep","archive","delete"],"description":"reuse_per_pr only. What to do with the pull request's task when it merges. Defaults to keep."},
+  "pr_closed_action":{"type":"string","enum":["keep","archive","delete"],"description":"reuse_per_pr only. What to do with the pull request's task when it closes without merging. Defaults to keep."},
   "task_mode":{"type":"string","enum":["automation_run","normal_task"],"description":"Defaults to hidden automation_run."},
   "repository_mode":{"type":"string","enum":["none","selected"],"description":"Normally omitted and derived from repository selections."},
   "triggers":{"type":"array","items":{"type":"object","required":["type","config"],"additionalProperties":false,"properties":{
    "type":{"type":"string","enum":["scheduled","github_pr","github_pr_merged","github_push","github_ci","webhook","plugin_event"]},
    "enabled":{"type":"boolean","description":"Set true to activate this trigger. Omission leaves it disabled."},
-   "config":{"type":"object","description":"Trigger-specific configuration. scheduled: cron_expression and optional timezone. github_pr: events, repos, branches, authors, labels, exclude_draft. github_pr_merged: all_repos, repos, base_branches. github_push: repos, branches. github_ci: repos, conclusions, check_names, branches. webhook: dedup_key, filters, repository. plugin_event: plugin_id, condition_key, config_version, settings from the installed plugin. GitHub repos entries use owner and name."}
+   "config":{"type":"object","description":"Trigger-specific configuration. scheduled: cron_expression and optional timezone. github_pr: events (opened, new_commits, review_requested), repos, branches, authors, labels, exclude_draft, include_existing_prs (opened also fires for PRs created before the trigger; default false), quiet_period_minutes (0-1440, new_commits only), reviewers (logins or org/team-slug, review_requested only). github_pr_merged: all_repos, repos, base_branches. github_push: repos, branches. github_ci: repos, conclusions, check_names, branches. webhook: dedup_key, filters, repository. plugin_event: plugin_id, condition_key, config_version, settings from the installed plugin. GitHub repos entries use owner and name."}
   }}}
  }
 }`

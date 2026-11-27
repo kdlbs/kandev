@@ -393,8 +393,16 @@ export type QuestionImage = {
   label?: string;
 };
 
+/** An agent-declared review group: a pair is compared, a single is shown alone. */
+export type QuestionImageGroup = {
+  kind: "pair" | "single";
+  image_ids: string[];
+};
+
 export type ClarificationQuestion = {
   images?: QuestionImage[];
+  /** Omitted groups show the question's images as a gallery. */
+  image_groups?: QuestionImageGroup[];
   id: string;
   title: string;
   prompt: string;

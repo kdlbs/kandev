@@ -126,10 +126,9 @@ test("classifies authentication, registry, visibility, identity, and consumer fa
       "authentication",
     ],
     [
-      Object.assign(
-        new Error("Command failed: npm publish --provenance"),
-        { category: "authentication" },
-      ),
+      Object.assign(new Error("Command failed: npm publish --provenance"), {
+        category: "authentication",
+      }),
       "authentication",
     ],
     [
@@ -137,6 +136,13 @@ test("classifies authentication, registry, visibility, identity, and consumer fa
         code: "REGISTRY_READ_FAILURE",
       }),
       "registry_read",
+    ],
+    [
+      Object.assign(new Error("upload history is incomplete"), {
+        code: "SDK_UPLOAD_HISTORY_UNRESOLVED",
+        category: "upload_history",
+      }),
+      "upload_history",
     ],
     [
       Object.assign(new Error("has not become visible"), {
@@ -213,11 +219,11 @@ test("accepted upload visibility timeout reports upload success and pending regi
   assert.equal(summary.publication, "accepted_upload_awaiting_visibility");
   assert.equal(summary.write_outcome, "accepted");
   assert.equal(summary.last_confirmed_phase, "npm_upload");
-  assert.equal(
-    summary.failure_category,
-    "accepted_upload_awaiting_visibility",
+  assert.equal(summary.failure_category, "accepted_upload_awaiting_visibility");
+  assert.match(
+    summary.recovery_action,
+    /rerun the failed job in the same release/,
   );
-  assert.match(summary.recovery_action, /rerun the failed job in the same release/);
 });
 
 test("consumer failure preserves confirmed publication and channel promotion", () => {
@@ -263,7 +269,10 @@ test("uncertain upload summary neither claims publication failure nor success", 
   const summary = diagnostics.summary({ status: "failed", failure });
   assert.equal(summary.publication, "uncertain_upload");
   assert.equal(summary.failure_category, "uncertain_upload");
-  assert.equal(JSON.stringify(summary).includes('"publication":"confirmed"'), false);
+  assert.equal(
+    JSON.stringify(summary).includes('"publication":"confirmed"'),
+    false,
+  );
 });
 
 test("observation records stay bounded while retaining the latest attempts", () => {
@@ -282,10 +291,7 @@ test("observation records stay bounded while retaining the latest attempts", () 
   const summary = diagnostics.summary({ status: "failed" });
   assert.equal(summary.observations.length, 20);
   assert.equal(summary.observations.at(-1).attempt, 50);
-  assert.equal(
-    Object.keys(summary.phases).length,
-    PHASES.length,
-  );
+  assert.equal(Object.keys(summary.phases).length, PHASES.length);
 });
 
 test("command adapter sanitizes successful and failed npm output", async () => {

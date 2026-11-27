@@ -41,6 +41,10 @@ func (c *NoopClient) ListAuthoredPRs(context.Context, string, string) ([]*PR, er
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListOpenPRs(context.Context, string, string) ([]*PR, bool, error) {
+	return nil, false, ErrNoClient
+}
+
 func (c *NoopClient) ListReviewRequestedPRs(context.Context, string, string, string) ([]*PR, error) {
 	return nil, ErrNoClient
 }

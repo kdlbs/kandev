@@ -2,9 +2,11 @@
 
 import { useTranslation } from "react-i18next";
 import type { CompareState } from "@/lib/question-review/compare";
+import { visibleIdentity } from "@/lib/question-review/identity";
 import type { ReviewImage } from "@/lib/question-review/segments";
 import type { Size } from "@/lib/question-review/viewport";
 import { useCompareModeLabel } from "./review-compare-toolbar";
+import { useSlotText } from "./review-identity-badges";
 import type { ReviewDiffState } from "./use-review-diff";
 
 type Props = {
@@ -15,6 +17,8 @@ type Props = {
   diff: ReviewDiffState;
   /** Phone status chips: separate items, and sizes only when they differ. */
   chips?: boolean;
+  /** Short names of the images in A and B, as the identity badges show them. */
+  names?: { a: string; b: string };
 };
 
 function sameSize(a: Size, b: Size) {
@@ -28,7 +32,7 @@ function formatPercent(changed: number, total: number, locale: string) {
 }
 
 /** Image sizes, the difference result, and a live announcement of what the stage shows. */
-export function ReviewCompareStatus({ state, a, b, sizes, diff, chips = false }: Props) {
+export function ReviewCompareStatus({ state, a, b, sizes, diff, chips = false, names }: Props) {
   const Wrapper = chips ? FragmentWrapper : StatusRow;
   return (
     <Wrapper>
@@ -38,7 +42,7 @@ export function ReviewCompareStatus({ state, a, b, sizes, diff, chips = false }:
         chips={chips}
       />
       {state.mode === "diff" && <DiffStatus diff={diff} />}
-      <Announcement state={state} a={a} b={b} />
+      <Announcement state={state} a={a} b={b} names={names} />
     </Wrapper>
   );
 }
@@ -76,21 +80,48 @@ function DiffStatus({ diff }: { diff: ReviewDiffState }) {
   );
 }
 
-function Announcement({ state, a, b }: Pick<Props, "state" | "a" | "b">) {
-  const { t } = useTranslation();
-  const modeLabel = useCompareModeLabel();
-  const shown = state.showB ? b : a;
-  const text =
-    state.mode === "toggle" && shown
-      ? t(state.showB ? "task:questionReviewShowingB" : "task:questionReviewShowingA", {
-          alt: shown.alt,
-        })
-      : modeLabel(state.mode);
+function Announcement({ state, a, b, names }: Pick<Props, "state" | "a" | "b" | "names">) {
+  const text = useIdentityAnnouncement(state, a, b, names);
   return (
     <span role="status" className="sr-only" data-testid="question-review-announcement">
       {text}
     </span>
   );
+}
+
+/** The identity badges' slot names, each with its image's description. */
+function useIdentityAnnouncement(
+  state: CompareState,
+  a: ReviewImage | undefined,
+  b: ReviewImage | undefined,
+  names: { a: string; b: string } = { a: "", b: "" },
+) {
+  const { t } = useTranslation();
+  const modeLabel = useCompareModeLabel();
+  const slotText = useSlotText(names);
+  if (!a || !b) return modeLabel(state.mode);
+  const described = (slot: "a" | "b") =>
+    t("task:questionReviewIdentityDescribed", {
+      image: slotText(slot),
+      alt: (slot === "a" ? a : b).alt,
+    });
+  const identity = visibleIdentity(state, false);
+  switch (identity.kind) {
+    case "one":
+      return t("task:questionReviewShowingImage", { image: described(identity.slot) });
+    case "sides":
+      return t("task:questionReviewAnnounceWipe", { a: described("a"), b: described("b") });
+    case "panes":
+      return t("task:questionReviewAnnounceSide", { a: described("a"), b: described("b") });
+    case "over":
+      return t("task:questionReviewAnnounceOnion", {
+        a: described("a"),
+        b: described("b"),
+        opacity: identity.opacity,
+      });
+    case "versus":
+      return t("task:questionReviewAnnounceDiff", { a: described("a"), b: described("b") });
+  }
 }
 
 function StatusRow({ children }: { children: React.ReactNode }) {

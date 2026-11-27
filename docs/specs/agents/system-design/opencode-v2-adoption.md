@@ -224,6 +224,31 @@ Long commands/logs stay contained. Disable duplicate submission during a job.
 All copy uses the existing translation system and six supported locales.
 The [plan previews](../../../plans/opencode-v2-adoption/plan.md#ascii-ui-preview) define structural review views.
 
+### Reinstall a missing managed runtime
+
+For AC-AGENTS-OPENCODE-V2-001.14, use the configured OpenCode card in Settings > Agents as the
+recovery entry. Show **Reinstall** when discovery reports OpenCode unavailable, the runtime status
+identifies the source as managed, and the install catalog includes an install command. Use the
+same agent management permission that protects the catalog's Install button.
+
+The link opens the existing Install agents page with `?agent=opencode-acp`. Put that card first
+while it is eligible so the operator can reach its Install action immediately. Preserve the catalog
+and its normal ordering for other entries. A URL hint selects a card to show. The operator selects
+Install to submit `POST /api/v1/agent-install/opencode-acp`. The server resolves the current
+selection and prepares its exact package with `OpenCodeACP.SettingsInstallCommand`.
+
+Reuse the catalog's job status, output, and Retry action. The install success hook invalidates
+discovery and schedules a capability probe. Discovery clears the missing status and recovery
+link when the runtime becomes available. Install success and model probe results use the
+existing Settings flows. A missing or failed status lookup still leaves the Install agents entry
+available to authorized operators.
+
+Place Reinstall with the OpenCode card actions. On phones, the action sits below the identity
+and badges and opens the same catalog as a full-page Settings destination. Reuse the Settings
+scroll region and standard action sizing, with a 28px fine-pointer desktop control and a touch
+target of at least 44px on phones and coarse pointers. Follow the
+[desktop and phone previews](../../../plans/opencode-missing-runtime-recovery/plan.md#ascii-ui-preview).
+
 ## Session continuity and failure boundaries
 
 Keep agent/profile/task/session IDs, native session ID, working directory, executor, and HOME/XDG storage identity.

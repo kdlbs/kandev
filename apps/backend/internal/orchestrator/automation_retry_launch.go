@@ -393,6 +393,13 @@ func retryLaunchClaimMatches(launch *automation.RetryLaunch, taskID string) bool
 		launch.State == automation.RetryLaunchPreparing && !launch.CancelRequested
 }
 
+// recoveredContinuationPrompt is the prompt a recovered continuation sends:
+// the resolved follow-up for a per-PR continuation, otherwise the resolved
+// main prompt, matching the selection made when the run first fired.
+func recoveredContinuationPrompt(snapshot automation.RetryLaunchConfigSnapshot) string {
+	return prContinuationPrompt(automationFromRetrySnapshot(snapshot), nil, &snapshot, true, snapshot.ResolvedPrompt)
+}
+
 func (s *Service) dispatchReservedRetryLaunch(ctx context.Context, run *automation.AutomationRun, launch *automation.RetryLaunch) bool {
 	snapshot, err := automation.DecodeRetryLaunchConfigSnapshot(run.RetryLaunchConfigSnapshot, run.RetryLaunchConfigVersion)
 	if err != nil {
@@ -408,7 +415,7 @@ func (s *Service) dispatchReservedRetryLaunch(ctx context.Context, run *automati
 		if err != nil || session == nil {
 			return true
 		}
-		prompt := snapshot.ResolvedPrompt
+		prompt := recoveredContinuationPrompt(snapshot)
 		s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, run.ID, run.ThreadAction, run.ThreadReason, "recovered continuation", func() (automation.RunDispatch, error) {
 			return s.promptAutomationContinuation(ctx, task, session, prompt, run.ID, nil)
 		}, nil, true)

@@ -380,6 +380,7 @@ type Adapter struct {
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+	modelCatalog           modelCatalogEvidence
 
 	// sessionSettingsPolicy is host-selected provenance for unsolicited
 	// settings reports from the currently loaded session. Explicit setter
@@ -862,14 +863,24 @@ func (a *Adapter) GetSessionID() string {
 func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 {
+	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 && a.modelCatalog.generation == 0 {
 		return nil
 	}
-	return &streams.SessionModelState{
-		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
-		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
-		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+	state := &streams.SessionModelState{
+		SessionID:                 a.sessionID,
+		CurrentModelID:            currentModelFromConfig(a.availableConfigOptions),
+		Models:                    cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:             cloneConfigOptions(a.availableConfigOptions),
+		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		ConfigOptionsDisplayOnly:  a.modelCatalog.displayOnly,
 	}
+	if a.modelCatalog.generation != 0 {
+		state.CurrentModelID = a.modelCatalog.modelID
+		state.SessionSettingsGeneration = a.modelCatalog.generation
+		state.ConfigOptionsComplete = a.modelCatalog.complete
+		state.VerifiedConfigOptionIDs = append([]string(nil), a.modelCatalog.verified...)
+	}
+	return state
 }
 
 // ProviderErrorContext implements adapter.ProviderErrorContextProvider.

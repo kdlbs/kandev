@@ -50,18 +50,6 @@ export function resolveAgentLabelFor(
   return t("task:unknownAgent");
 }
 
-export function pickActiveSessionId(
-  sessions: readonly TaskSession[],
-  preferredSessionId: string | null | undefined,
-): string | null {
-  if (sessions.length === 0) return null;
-  if (preferredSessionId && sessions.some((s) => s.id === preferredSessionId)) {
-    return preferredSessionId;
-  }
-  const primary = sessions.find((s) => s.is_primary);
-  return (primary ?? sessions[0]).id;
-}
-
 export function isSessionActive(state: TaskSessionState | null | undefined): boolean {
   return state === "RUNNING" || state === "STARTING";
 }

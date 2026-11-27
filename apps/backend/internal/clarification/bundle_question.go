@@ -53,13 +53,14 @@ func bundleQuestions(msgs []*taskmodels.Message) []Question {
 // question_id (not id, which list_pending_questions_kandev callers never
 // see), plus the question's D3 effective status. Options is never nil (L4a).
 type QuestionStatus struct {
-	QuestionID      string                  `json:"question_id"`
-	Title           string                  `json:"title"`
-	Prompt          string                  `json:"prompt"`
-	Status          string                  `json:"status"`
-	Options         []Option                `json:"options"`
-	AllowCustomText *bool                   `json:"allow_custom_text,omitempty"`
-	Images          protocol.QuestionImages `json:"images,omitempty"`
+	QuestionID      string                       `json:"question_id"`
+	Title           string                       `json:"title"`
+	Prompt          string                       `json:"prompt"`
+	Status          string                       `json:"status"`
+	Options         []Option                     `json:"options"`
+	AllowCustomText *bool                        `json:"allow_custom_text,omitempty"`
+	Images          protocol.QuestionImages      `json:"images,omitempty"`
+	ImageGroups     protocol.QuestionImageGroups `json:"image_groups,omitempty"`
 }
 
 // BundleQuestionStatuses builds the D2/L5-ordered, L4-shaped question list
@@ -85,6 +86,7 @@ func BundleQuestionStatuses(msgs []*taskmodels.Message) []QuestionStatus {
 			Options:         options,
 			AllowCustomText: q.AllowCustomText,
 			Images:          q.Images,
+			ImageGroups:     q.ImageGroups,
 		})
 	}
 	return out
@@ -123,6 +125,12 @@ func questionFromMessageMetadataFull(meta map[string]any) Question {
 		data, err := json.Marshal(raw)
 		if err == nil {
 			_ = json.Unmarshal(data, &q.Images)
+		}
+	}
+	if raw, ok := qData["image_groups"]; ok {
+		data, err := json.Marshal(raw)
+		if err == nil {
+			_ = json.Unmarshal(data, &q.ImageGroups)
 		}
 	}
 	return q

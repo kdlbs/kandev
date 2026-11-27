@@ -145,7 +145,7 @@ func queueStatusEventData(status *messagequeue.QueueStatus) map[string]interface
 		"session_incarnation_id": status.SessionIncarnationID,
 		"status_epoch":           status.StatusEpoch,
 		"status_generation":      status.StatusGeneration,
-		"entries":                status.Entries,
+		"entries":                status.ProjectedEntries(),
 		"count":                  status.Count,
 		queueStatusMaxField:      status.Max,
 		"auto_run":               status.AutoRun,

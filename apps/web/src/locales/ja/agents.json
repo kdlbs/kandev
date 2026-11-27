@@ -166,6 +166,7 @@
   "create": "作成",
   "createAgentProfileTitle": "{{name}} プロファイルを作成",
   "installAgents": "エージェントをインストール",
+  "reinstallOpenCode": "再インストール",
   "profileCount_one": "{{count}} プロファイル",
   "profileCount_other": "{{count}} プロファイル",
   "createProfileIntro": "このエージェント用の新しいプロファイルを作成。",

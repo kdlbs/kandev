@@ -5,6 +5,13 @@ import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { imageShortName, type ReviewImage } from "@/lib/question-review/segments";
 import { cn } from "@/lib/utils";
+import {
+  WipeGripHalves,
+  useWipeGrip,
+  wipeLineForcedColors,
+  type WipeNames,
+} from "./review-wipe-grip";
+import type { WipeNamesReveal } from "./use-wipe-names-reveal";
 
 const iconSize =
   "h-7 w-7 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12";
@@ -109,21 +116,30 @@ export function ChangeOutline({
 
 /**
  * Touch wipe: the line stays at the stage center and the images scrub beneath
- * it. The grip is a keyboard slider over where the line falls on the image.
+ * it. The handle is a keyboard slider over where the line falls on the image;
+ * dragging it moves it up or down the line, out of the way.
  */
 export function PinnedWipeLine({
   value,
   onChange,
+  names,
+  reveal,
 }: {
   value: number;
   onChange: (value: number) => void;
+  names: WipeNames;
+  reveal: WipeNamesReveal;
 }) {
   const { t } = useTranslation();
+  const handle = useWipeGrip(names, reveal);
   const percent = Math.round(value * 100);
   return (
     <>
       <div
-        className="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-primary"
+        className={cn(
+          "pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-primary",
+          wipeLineForcedColors,
+        )}
         aria-hidden="true"
       />
       <div
@@ -136,10 +152,8 @@ export function PinnedWipeLine({
         aria-valuetext={t("task:questionReviewPercent", { value: percent })}
         data-testid="question-review-wipe-handle"
         data-pinned="true"
-        className={cn(
-          "pointer-events-none absolute top-1/2 left-1/2 h-10 w-5 -translate-x-1/2 -translate-y-1/2 rounded-md border border-background bg-primary",
-          "focus-visible:outline-2 focus-visible:outline-ring",
-        )}
+        className="group absolute left-1/2 w-11 -translate-x-1/2 cursor-ns-resize touch-none text-xs outline-none"
+        {...handle.props}
         onKeyDown={(event) => {
           const step = { ArrowLeft: -0.05, ArrowRight: 0.05 }[event.key];
           if (step === undefined) return;
@@ -147,7 +161,9 @@ export function PinnedWipeLine({
           event.stopPropagation();
           onChange(Math.min(1, Math.max(0, value + step)));
         }}
-      />
+      >
+        <WipeGripHalves grip={handle.grip} />
+      </div>
     </>
   );
 }
