@@ -33,4 +33,6 @@ Run from the repository root.
 
 ## Results
 
-The captured statusless update failed the provenance assertion before promotion. The full ACP package passed after the change. Both existing frontend consumer suites passed (50 tests). No browser session was used.
+The captured statusless update failed the provenance assertion before promotion. The full ACP package passed after the change. Both existing frontend consumer suites passed (50 tests). Chromium displayed the package-qualified rich output live and after reload. The walkthrough card navigated changed and unchanged files. The browser fixtures exercise the renderer separately from the local Cursor wire capture.
+
+After a managed build, `(cd apps/web && pnpm e2e:run --no-build --project chromium tests/chat/builtin-rich-output.spec.ts tests/review/walkthrough.spec.ts -- --grep "renders package-qualified previews|floating card walks all steps" --retries=0)` passed both cases in an isolated test environment.

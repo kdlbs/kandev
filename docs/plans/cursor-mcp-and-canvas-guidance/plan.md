@@ -1,6 +1,6 @@
 ---
 created: 2026-11-26
-status: done
+status: implemented
 requirements:
   - REQ-AGENTS-AGENT-RICH-OUTPUT-002
   - REQ-AGENTS-MCP-DISCOVERY-002
@@ -30,3 +30,9 @@ Each work order contains its red test and exact focused command. The second work
 ## Results
 
 Both work orders implement the repair. The second uses an execution-local attachment receipt at the provider dispatch boundary. No database migration is required.
+
+The focused Go command in each linked work order passed.
+
+Repository checks passed: `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
+
+The Chromium rich-output and walkthrough command in work order 01 passed both cases. The slash-command regression in work order 02 passed five runs.

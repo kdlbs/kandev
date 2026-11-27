@@ -34,3 +34,7 @@ Run from the repository root.
 ## Results
 
 The enabled integration case received plain user text before the fix. The corrected provider request contains the authoring instructions. The disabled case receives plain user text.
+
+The Go verification command above passed in all five packages. The command-shape regression failed before the fix. Five runs of `(cd apps/backend && go test -trimpath ./internal/agentctl/server/api -run "CanvasGuidance|PromptOrSteerRouting" -count=5)` passed in one invocation.
+
+Repository checks passed: `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -22,7 +23,8 @@ func (s *Server) resetCanvasGuidance(attemptID string, servers []types.McpServer
 }
 
 func (s *Server) promptWithCanvasGuidance(ctx context.Context, adpt adapter.AgentAdapter, req PromptRequest, pending *string) error {
-	if pending == nil || req.Steer || (req.Text == "" && len(req.Attachments) == 0) {
+	text := strings.TrimSpace(req.Text)
+	if pending == nil || req.Steer || strings.HasPrefix(text, "/") || (text == "" && len(req.Attachments) == 0) {
 		return promptOrSteer(ctx, adpt, req)
 	}
 	req.Text = sysprompt.WithCanvasGuidance(req.Text)

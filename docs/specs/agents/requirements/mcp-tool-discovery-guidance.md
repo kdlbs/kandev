@@ -58,7 +58,7 @@ boundaries.
 - **AC-AGENTS-MCP-DISCOVERY-002.5:** Shorter instructions shall retain the use
   of Kandev plans and native rich output when the user requests those results.
 
-- **AC-AGENTS-MCP-DISCOVERY-002.6:** On the next user prompt in an existing structured task session, Kandev shall supply missing canvas instructions if the execution offers canvas authoring. This includes an ordinary follow-up and the first user prompt after resume. Once the provider accepts the instructions, subsequent prompts in the same conversation and execution shall omit the reminder.
+- **AC-AGENTS-MCP-DISCOVERY-002.6:** On the next ordinary user prompt in an existing structured task session, Kandev shall supply missing canvas instructions if the execution offers canvas authoring. This includes an ordinary follow-up and the first user prompt after resume. Once the provider accepts the instructions, subsequent prompts on the same MCP attachment shall omit the reminder.
 
 ## Out of scope
 

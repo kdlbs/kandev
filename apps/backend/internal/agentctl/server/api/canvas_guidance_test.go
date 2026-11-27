@@ -77,3 +77,16 @@ func TestCanvasGuidanceRetryAndReplacement(t *testing.T) {
 		t.Fatal("completed delivery repeated the reminder")
 	}
 }
+
+func TestCanvasGuidanceLeavesSlashCommandsIntact(t *testing.T) {
+	s := newTestServer(t)
+	attempt := "load"
+	s.pendingCanvasGuidance.Store(&attempt)
+	capture := &recordingAdapter{}
+	for _, text := range []string{"/model example", "  /fast  "} {
+		err := s.promptWithCanvasGuidance(context.Background(), capture, PromptRequest{Text: text}, s.pendingCanvasGuidance.Load())
+		if err != nil || capture.promptCalls[len(capture.promptCalls)-1].text != text || s.pendingCanvasGuidance.Load() != &attempt {
+			t.Fatalf("command %q must reach the provider unchanged and leave guidance pending", text)
+		}
+	}
+}
