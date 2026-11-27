@@ -48,6 +48,19 @@ type BuiltinPolicyService struct {
 	taskScope BuiltinTaskScope
 }
 
+type automationTaskCreationContextKey struct{}
+
+// WithAutomationTaskCreation marks policy checks for a server-owned
+// automation task creation. The task service sets this only for its
+// internal AutomationStartOwned request path.
+func WithAutomationTaskCreation(ctx context.Context, runID string) context.Context {
+	actor := "automation"
+	if runID != "" {
+		actor = "automation-run:" + runID
+	}
+	return context.WithValue(ctx, automationTaskCreationContextKey{}, actor)
+}
+
 func NewBuiltinPolicyService(repo BuiltinPolicyRepository, authorize BuiltinPolicyAuthorizer, taskScope BuiltinTaskScope) *BuiltinPolicyService {
 	return &BuiltinPolicyService{repo: repo, authorize: authorize, taskScope: taskScope}
 }
@@ -105,8 +118,18 @@ func builtinHumanActor(ctx context.Context) (string, error) {
 	identity, identified := authn.IdentityFromContext(ctx)
 	_, agent := scope.PrincipalFromContext(ctx)
 	_, execution := streams.MCPExecutionContextFromContext(ctx)
-	if !identified || identity.UserID == "" || agent || execution || origin.IsTrustedExternalTransport(ctx) || origin.IsTrustedInternalCall(ctx) {
+	automationActor, automationCreation := ctx.Value(automationTaskCreationContextKey{}).(string)
+	if agent || execution || origin.IsTrustedExternalTransport(ctx) || origin.IsTrustedInternalCall(ctx) {
 		return "", ErrBuiltinHumanRequired
+	}
+	if !identified || identity.UserID == "" {
+		if automationCreation {
+			return automationActor, nil
+		}
+		return "", ErrBuiltinHumanRequired
+	}
+	if automationCreation && identity.Synthetic {
+		return automationActor, nil
 	}
 	return identity.UserID, nil
 }

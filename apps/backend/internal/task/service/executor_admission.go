@@ -148,7 +148,15 @@ func (s *Service) PrepareAutomationCredentialActorContext(
 		return actorCtx, s.authorizeCredentialExecutor(actorCtx, profileID)
 	}
 	if creatorID == "" {
-		return actorCtx, models.ErrExecutorOwnershipInvalid
+		restored, err := s.ExecutorActorContext(actorCtx, "")
+		if err != nil {
+			return actorCtx, models.ErrExecutorOwnershipInvalid
+		}
+		identity, ok := authn.IdentityFromContext(restored)
+		if !ok || !identity.Synthetic {
+			return restored, models.ErrExecutorOwnershipInvalid
+		}
+		return restored, s.authorizeCredentialExecutor(restored, profileID)
 	}
 	actorCtx = models.WithExecutorActor(actorCtx, creatorID)
 	actorCtx, err := s.ExecutorActorContext(actorCtx, creatorID)

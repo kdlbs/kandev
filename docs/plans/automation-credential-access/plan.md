@@ -292,3 +292,10 @@ PR review regression follow-up completed on 2026-11-27:
 - `TestPostgresFirstCredentialGrantSerializesDefinitionAndRunAdmission` passed against a disposable PostgreSQL 16 container. The test checks that a concurrent first grant blocks an unapproved definition edit and run admission across separate connections. The container was removed after the test.
 - Authenticated desktop E2E passed (1 test, 26.4s) and authenticated phone E2E passed (1 test, 41.9s), each with a fresh isolated database. Both include the no-secret path through a successful run and the protected credential flow.
 - Changed-Go lint reported zero issues. The desktop and phone E2E runners rebuilt the backend and web assets successfully; Vite emitted only the existing chunk-size and dynamic-import warnings.
+
+PR fixup verification on 2026-11-27:
+
+- `make -C apps/backend build build-e2e-delivery-fixture build-e2e-send-now-fixture e2e-plugin-package` passed after the auth-off and task-template fixes.
+- The focused `mcpconfig`, task service, backend app, automation, orchestrator, lifecycle, and WebSocket package suites passed. Focused regressions cover restoring the synthetic auth-off actor for background validation and preserving the built-in policy check and run audit actor for server-owned task creation.
+- `automations-mcp-selection.spec.ts` passed all eight tests with retries disabled. The auth-off target-mode and desktop webhook tests passed (3 tests); phone Run now, Stop, and webhook tests passed (4 tests).
+- Each of the five remaining failed CI E2E leaves was rerun with retries disabled in an isolated managed fixture and passed: large sidebar copies, payload backup, phone first-profile discovery, sidebar diff badges, and active multi-repository migration recovery. These local passes provide reproduction evidence; current-head PR checks remain the CI result.

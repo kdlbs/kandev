@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/stretchr/testify/require"
 )
@@ -55,7 +56,10 @@ func (f automationCredentialChoiceResolverFake) ResolveAutomationCredentialChoic
 }
 
 func TestCredentialValidatorRequiresCreatorPreparation(t *testing.T) {
-	a := &automation.Automation{WorkspaceID: "workspace", CreatedByUserID: "creator"}
+	a := &automation.Automation{
+		WorkspaceID: "workspace", CreatedByUserID: "creator",
+		CredentialChoices: []automation.CredentialChoiceProjection{{Kind: automation.CredentialChoicePersonal}},
+	}
 	manager := &automationCredentialLifecycleFake{}
 	validator := lifecycleAutomationCredentialValidator{manager: manager}
 	require.ErrorIs(t, validator.ValidateAutomationCredentials(context.Background(), a, nil), automation.ErrCredentialCreatorUnavailable)
@@ -66,6 +70,27 @@ func TestCredentialValidatorRequiresCreatorPreparation(t *testing.T) {
 		return nil, errors.New("creator is inactive")
 	}
 	require.ErrorIs(t, validator.ValidateAutomationCredentials(context.Background(), a, nil), automation.ErrCredentialCreatorUnavailable)
+}
+
+func TestCredentialValidatorPreparesAuthOffContextForUnprotectedAutomation(t *testing.T) {
+	manager := &automationCredentialLifecycleFake{}
+	prepared := false
+	validator := lifecycleAutomationCredentialValidator{
+		manager: manager,
+		prepareCreator: func(ctx context.Context, _, creator, _ string) (context.Context, error) {
+			require.Empty(t, creator)
+			prepared = true
+			return authn.WithIdentity(ctx, authn.Identity{UserID: "single-user", Synthetic: true}), nil
+		},
+	}
+	a := &automation.Automation{
+		ID: "ordinary-automation", WorkspaceID: "workspace", AgentProfileID: "agent", ExecutorProfileID: "executor",
+	}
+
+	require.NoError(t, validator.ValidateAutomationCredentials(context.Background(), a, nil))
+	require.True(t, prepared)
+	require.Equal(t, a.ID, manager.environment.AutomationID)
+	require.Empty(t, manager.environment.CredentialBindings)
 }
 
 func TestCredentialValidatorResolvesAndTranslatesWorkspaceBindings(t *testing.T) {

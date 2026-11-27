@@ -259,6 +259,9 @@ func foundOutcomeFor(task *models.Task) CreateTaskOutcome {
 // call returns, so settlement is their responsibility (see the spec's
 // "Settlement call site" section).
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (CreateTaskResult, error) {
+	if req.AutomationStartOwned && req.BuiltinMCPPreferences != nil {
+		ctx = mcpconfig.WithAutomationTaskCreation(ctx, req.AutomationStartOwner)
+	}
 	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeTaskWrite); err != nil {
 		return CreateTaskResult{}, err
 	}

@@ -32,3 +32,25 @@ func TestBuiltinCreationRequiresHumanConsentAndCurrentPolicy(t *testing.T) {
 	input.ExpectedPolicyRevision = nil
 	require.ErrorIs(t, validator.ValidateTaskCreation(human, "workspace", input), ErrBuiltinPolicyInvalid)
 }
+
+func TestBuiltinCreationAcceptsTrustedAutomationTaskCreation(t *testing.T) {
+	repo, service := builtinPolicyTestService()
+	repo.snapshot.Policy = DefaultBuiltinWorkspacePolicy("workspace")
+	validator := any(service).(interface {
+		ValidateTaskCreation(context.Context, string, *BuiltinCreationPreferences) error
+	})
+	revision := int64(0)
+	input := &BuiltinCreationPreferences{
+		Version: 1, ExpectedPolicyRevision: &revision,
+		Packages: BuiltinPackageChoices{p.PackageConfiguration: "on"},
+	}
+
+	require.ErrorIs(t, validator.ValidateTaskCreation(t.Context(), "workspace", input), ErrBuiltinHumanRequired)
+	ctx := WithAutomationTaskCreation(t.Context(), "run-1")
+	require.NoError(t, validator.ValidateTaskCreation(ctx, "workspace", input))
+	snapshot, err := service.UpdateTask(ctx, "task", 0, 0, input.Packages)
+	require.NoError(t, err)
+	require.Equal(t, "automation-run:run-1", snapshot.Preferences.UpdatedBy)
+	agent := scope.WithPrincipal(ctx, scope.Principal{CallerTaskID: "task", CallerSessionID: "session", Surface: p.SurfaceConfiguration})
+	require.ErrorIs(t, validator.ValidateTaskCreation(agent, "workspace", input), ErrBuiltinHumanRequired)
+}
