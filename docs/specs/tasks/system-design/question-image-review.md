@@ -69,9 +69,12 @@ Paths are repository-relative.
 `ClarificationInputOverlay` owns review state through a new hook,
 `useQuestionReview`, in `components/task/chat/question-review/use-question-review.ts`.
 The hook returns `{ available, open, openReview, closeReview, triggerRef }`.
-`available` is true only when the overlay is in active, answerable mode and any
-question in `sortedMessages` has `question.images` or `options[].images`.
-Late-answer, expired, submitted, and success states set it to false.
+`available` is true when any question in `sortedMessages` has `question.images`
+or `options[].images` and the overlay shows an editable form: an active bundle or
+a late-answer form. Expired, submitted, and late-answer success states set it to
+false. The [question image items design](question-image-items.md) defines the
+late-answer case, agent-declared pairs and singles, segment items, and the
+visible image identity.
 
 All hosts that mount the shared overlay gain the control: task chat, Quick Chat,
 Office, Needs-you Inbox, and coordinator surfaces. No host-specific code is needed.
@@ -382,17 +385,21 @@ History: `AnswerSummary` lists `metadata.response.annotations` as
   the image, `ZoomChip` and `StatusChips` on it, and frequent actions through
   `ReviewBottomBar` (a portal into the bar). The dialog hides the bar while a text
   field has focus (`onFocusCapture`).
+  [Question image items](question-image-items.md) later moved phone zoom from
+  More into a popover on `ZoomChip`.
 - **Carried-over settings:** the dialog keeps `CompareSettings` (mode, wipe,
   opacity, tolerance); `useReviewCompare` starts each segment from it and reports
   changes.
 - **Candidate stepping:** `compareReducer` `step` moves B through the images other
   than A without wrapping; `CandidateStepper` renders it; `[`/`]` step in Toggle and
-  Side by side; `useReviewViewport` `onSwipe` steps on a swipe that starts at Fit.
+  Side by side. A drag never steps candidates.
 - **Hold to compare:** `useHoldToCompare` shows A after a 300ms still press or while
   Space is held; the stage renders an effective Toggle-on-A state.
 - **Pinned wipe:** on touch, Wipe uses `clampPinnedView`, which lets either image
   edge reach the center line, and `pinnedWipeFraction`; `PinnedWipeLine` replaces
-  the draggable handle.
+  the draggable handle. Scrubbing copies the split back into the reducer's wipe
+  value (`useCarryPinnedSplit`), and the viewport's Fit view places the line at
+  that value (`pinnedAt`), so the split carries to the next item or question.
 - **Zoom to changes:** `diffPixels` returns `bounds`; `ChangeOutline` marks them and
   `rectView` fits them.
 - **Marking:** **Mark area** (pen icon, solid primary when on), `AnnotateHint` with

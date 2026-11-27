@@ -10,9 +10,16 @@ import {
   TaskNavigationRecoveryClock,
 } from "@/lib/state/task-navigation-recovery-clock";
 
-/** Shared bounded schedule: five total attempts inside thirty seconds of visible time. */
+/** Recovery schedules use visible time and one attempt deadline per request. */
 export const SIDEBAR_RECOVERY_RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 10_000] as const;
 export const SIDEBAR_RECOVERY_MAX_ATTEMPTS = SIDEBAR_RECOVERY_RETRY_DELAYS_MS.length + 1;
+export const SIDEBAR_RECOVERY_BUDGET_MS = 30_000;
+export const SIDEBAR_RETAINED_ROWS_RECOVERY_RETRY_DELAYS_MS = [
+  2_000, 5_000, 10_000, 10_000, 20_000, 30_000, 30_000, 30_000,
+] as const;
+export const SIDEBAR_RETAINED_ROWS_RECOVERY_MAX_ATTEMPTS =
+  SIDEBAR_RETAINED_ROWS_RECOVERY_RETRY_DELAYS_MS.length + 1;
+export const SIDEBAR_RETAINED_ROWS_RECOVERY_BUDGET_MS = 150_000;
 export const SIDEBAR_RECOVERY_ATTEMPT_DEADLINE_MS = 10_000;
 
 export type SidebarPageRecoveryCycle<T> = {
@@ -23,6 +30,7 @@ export type SidebarPageRecoveryCycle<T> = {
 
 export type SidebarPageRecoveryArgs<T> = {
   attempt: (signal: AbortSignal) => Promise<T>;
+  hasRetainedRows?: boolean;
   onAttemptStarted?: (attempt: number) => void;
   onAttemptFailed?: (error: unknown, nextAttempt: number) => void;
 };
@@ -56,12 +64,20 @@ async function runAttempt<T>(load: (signal: AbortSignal) => Promise<T>, cycleSig
  */
 export function startSidebarPageRecoveryCycle<T>({
   attempt,
+  hasRetainedRows = false,
   onAttemptStarted,
   onAttemptFailed,
 }: SidebarPageRecoveryArgs<T>): SidebarPageRecoveryCycle<T> {
+  const retryDelays = hasRetainedRows
+    ? SIDEBAR_RETAINED_ROWS_RECOVERY_RETRY_DELAYS_MS
+    : SIDEBAR_RECOVERY_RETRY_DELAYS_MS;
+  const maxAttempts = retryDelays.length + 1;
   const controller = new AbortController();
   let cycleExpired = false;
   const clock = new TaskNavigationRecoveryClock({
+    budgetMs: hasRetainedRows
+      ? SIDEBAR_RETAINED_ROWS_RECOVERY_BUDGET_MS
+      : SIDEBAR_RECOVERY_BUDGET_MS,
     onDeadline: () => {
       cycleExpired = true;
       controller.abort();
@@ -69,7 +85,7 @@ export function startSidebarPageRecoveryCycle<T>({
   });
   const run = async () => {
     clock.start();
-    for (let attemptIndex = 0; attemptIndex < SIDEBAR_RECOVERY_MAX_ATTEMPTS; attemptIndex++) {
+    for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
       if (controller.signal.aborted) throw abortError();
       onAttemptStarted?.(attemptIndex);
       try {
@@ -77,13 +93,10 @@ export function startSidebarPageRecoveryCycle<T>({
       } catch (error) {
         if (cycleExpired) throw new TaskNavigationCycleDeadlineError();
         if (controller.signal.aborted || isReadAbort(error)) throw abortError();
-        if (!isTemporaryReadError(error) || attemptIndex === SIDEBAR_RECOVERY_MAX_ATTEMPTS - 1) {
+        if (!isTemporaryReadError(error) || attemptIndex === maxAttempts - 1) {
           throw error;
         }
-        const delayMs = Math.max(
-          SIDEBAR_RECOVERY_RETRY_DELAYS_MS[attemptIndex],
-          readRetryAfterMs(error),
-        );
+        const delayMs = Math.max(retryDelays[attemptIndex] ?? 0, readRetryAfterMs(error));
         onAttemptFailed?.(error, attemptIndex + 1);
         await clock.wait(delayMs, controller.signal);
       }

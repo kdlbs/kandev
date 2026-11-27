@@ -45,6 +45,57 @@ describe("sidebar page recovery cycle", () => {
     expect(attempt).toHaveBeenCalledTimes(5);
     await expect(result).resolves.toBe("recovered");
   });
+
+  it("keeps retained rows quiet through a ninety-second outage", async () => {
+    vi.useFakeTimers();
+    const attempt = vi
+      .fn()
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockResolvedValueOnce("recovered");
+    const recoveryArgs = { attempt, hasRetainedRows: true };
+    const cycle = startSidebarPageRecoveryCycle(recoveryArgs);
+    let settled = false;
+    void cycle.promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(attempt).toHaveBeenCalledTimes(7);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(17_000);
+    await expect(cycle.promise).resolves.toBe("recovered");
+    expect(attempt).toHaveBeenCalledTimes(8);
+  });
+
+  it("uses the full retained-row backoff and attempt count", async () => {
+    vi.useFakeTimers();
+    const attempt = vi.fn().mockRejectedValue(temporaryFailure());
+    const recoveryArgs = { attempt, hasRetainedRows: true };
+    const cycle = startSidebarPageRecoveryCycle(recoveryArgs);
+    const result = cycle.promise.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(attempt).toHaveBeenCalledTimes(1);
+
+    for (const [index, delay] of [
+      2_000, 5_000, 10_000, 10_000, 20_000, 30_000, 30_000, 30_000,
+    ].entries()) {
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(attempt).toHaveBeenCalledTimes(index + 2);
+    }
+    await expect(result).resolves.toMatchObject({ status: 503 });
+    expect(attempt).toHaveBeenCalledTimes(9);
+  });
 });
 
 describe("sidebar page recovery exhaustion", () => {

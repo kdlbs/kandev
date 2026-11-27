@@ -32,9 +32,7 @@ test.describe("managed conversation automation on phone", () => {
     );
     const editor = testPage.getByTestId("automation-editor");
     await expect(editor).toBeVisible();
-    await expect(
-      testPage.getByRole("radio", { name: "Managed conversation", exact: false }),
-    ).toBeChecked();
+    await expect(testPage.getByRole("radio", { name: "Managed conversation" })).toBeChecked();
 
     const trigger = testPage.getByTestId("managed-conversation-destination-trigger");
     await expect(trigger).toContainText("phone-e2e-managed");
@@ -118,7 +116,7 @@ test.describe("managed conversation automation on phone", () => {
     await testPage.reload();
     await expect(testPage.getByTestId("automation-editor")).toBeVisible();
     await expect(saveButton).toHaveCount(0);
-    await testPage.getByRole("radio", { name: /Create a normal task/ }).tap();
-    await expect(testPage.getByRole("radio", { name: "Do not retry" })).toBeChecked();
+    await testPage.getByRole("radio", { name: "Normal task" }).tap();
+    await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
   });
 });

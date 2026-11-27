@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-15
-updated: 2026-11-02
+updated: 2026-11-26
 owners:
   - kandev
 ---
@@ -204,6 +204,17 @@ capacity check or queue.
   current message behavior, including an unreadable population. Explicit
   execution overrides and accepted-turn continuations shall retain their
   existing admission and audit behavior.
+
+- **AC-AGENTS-SESSION-CEILING-003.9:** When Send accepts a message into the
+  queue because session capacity is unavailable, desktop and phone chat shall
+  explain the reason in a yellow composer warning, even with the queue collapsed.
+  The warning shall include the effective session limit when available.
+  The notice shall explain automatic delivery when enabled and how to resume
+  it when Auto-run is off. A user shall never need to resend accepted input.
+- **AC-AGENTS-SESSION-CEILING-003.10:** The notice shall remain available
+  across reload and session navigation while a matching entry is pending.
+  It shall clear when the last matching entry leaves the queue. Ordinary
+  queued input, rejected sends and sibling sessions shall not trigger it.
 
 ### REQ-AGENTS-SESSION-CEILING-005: Opt into total and execution-grade limits
 

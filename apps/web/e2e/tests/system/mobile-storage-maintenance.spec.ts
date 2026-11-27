@@ -54,7 +54,9 @@ test.describe("Mobile storage maintenance", () => {
 
       await toggle.tap();
       await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+      ).toBeVisible();
       await testPage.reload();
       await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
         "data-state",
@@ -67,7 +69,9 @@ test.describe("Mobile storage maintenance", () => {
 
       await testPage.getByTestId("storage-go-cache-allow-busy").tap();
       await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+      ).toBeVisible();
       await testPage.reload();
       await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
         "data-state",
@@ -215,7 +219,9 @@ test.describe("Mobile storage maintenance", () => {
     );
     await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     await testPage.getByTestId("storage-analyze").click();

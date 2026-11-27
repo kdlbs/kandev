@@ -63,6 +63,9 @@ The dialog must explain the shared scope before the user starts the upgrade.
   Without a recent supported detection, a transient failure may use the selected runtime's supported stable version only while the caller context remains live. Caller cancellation or deadline expiry shall stop command admission.
   A definite unsupported-major observation shall remain a rejection for that executable path through later transient failures until a fresh supported observation replaces it.
   A missing executable or an unsupported major is a definite answer and shall not be retried. A final failure shall state a timeout and quote a bounded, home-redacted excerpt of the output.
+- **AC-AGENTS-OPENCODE-V2-001.13:** When a managed OpenCode runtime is selected and a reviewed default update advances the pinned version within that family, availability detection shall continue to report OpenCode as installed if at least one cached npm execution tree for the selected family's package is present, so startup capability discovery and launches can materialize the updated pin on demand.
+  An unprepared installation with no cached execution tree for the selected family's package (including caches containing only the other OpenCode family's package, unrelated packages, or broken or symlinked entries) shall continue to report OpenCode as not installed without triggering a download during discovery.
+- **AC-AGENTS-OPENCODE-V2-001.14:** When a configured, Kandev-managed OpenCode runtime is unavailable, an operator with agent management permission shall be able to open its installer from the OpenCode card on desktop and phone. The installer shall prepare the selected package and exact version after the operator starts the job, show progress, and offer a retry on failure. After successful installation, Settings shall show OpenCode as installed with its existing profiles. Recovery shall preserve the runtime selection and any standalone OpenCode installation.
 
 ### REQ-AGENTS-OPENCODE-V2-002: Existing conversation continuity
 
@@ -95,6 +98,7 @@ Deterministic suites cover Kandev MCP transport conversion, model state, permiss
 
 The [system design](../system-design/opencode-v2-adoption.md) defines persistence, startup import, command resolution, and activation.
 The [plan package](../../../plans/opencode-v2-adoption/plan.md) defines implementation order and acceptance evidence.
+The [missing runtime recovery plan](../../../plans/opencode-missing-runtime-recovery/plan.md) covers the reinstall entry for an empty execution cache.
 The [adoption decision](../../../decisions/2026-09-27-opencode-runtime-adoption.md) amends default activation for OpenCode only.
 Ordinary reviewed updates remain within the adopted family. Use Kandev default does not perform a major migration.
 Other agents retain the existing [runtime update contract](runtime-updates.md).

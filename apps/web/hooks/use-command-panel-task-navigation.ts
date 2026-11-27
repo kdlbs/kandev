@@ -13,7 +13,10 @@ export function useCommandPanelTaskNavigation(pathname: string, activeTaskId: st
     (task: Task) => {
       cancelSidebarTaskReveal();
       setPendingTaskRevealId(task.id);
-      router.push(linkToTask(task.id, { sessionId: task.conversation_match?.session_id }));
+      const sessionId = task.conversation_match?.session_id;
+      const href = linkToTask(task.id, { sessionId });
+      if (sessionId) router.push(href, { taskSessionActivation: { taskId: task.id, sessionId } });
+      else router.push(href);
     },
     [router],
   );

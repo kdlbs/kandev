@@ -417,7 +417,9 @@ describe("GitHubConnectionDialog responsive App setup", () => {
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
     const drawer = await screen.findByTestId("github-connection-mobile");
     expect(drawer.className).toContain("100dvh");
-    expect(drawer.querySelectorAll(".overflow-y-auto")).toHaveLength(1);
+    expect(
+      drawer.querySelectorAll('.overflow-y-auto:not([data-testid="modal-toast-outlet"])'),
+    ).toHaveLength(1);
     expect(screen.queryByTestId(DESKTOP_CONNECTION_TEST_ID)).toBeNull();
   });
 

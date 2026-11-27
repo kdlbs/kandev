@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api/client";
+import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
 import {
   listQuickChatSessions,
   restartConfigChat,
@@ -74,6 +75,7 @@ function clearRetiredSessionCache(store: AppStoreApi, sessionId: string) {
   if (!taskId) return;
   const environmentId = state.environmentIdBySessionId[sessionId];
   cleanupTaskStorage(taskId, [sessionId], environmentId ? [environmentId] : []);
+  invalidateTaskSessionMembership(store, taskId);
   state.removeTaskSession(taskId, sessionId);
 }
 

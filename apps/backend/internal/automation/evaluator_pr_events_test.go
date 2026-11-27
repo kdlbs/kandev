@@ -36,15 +36,14 @@ type eventSelectionTransport struct {
 
 func (r *eventSelectionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	require.Equal(r.t, "api.github.com", req.URL.Host)
-	require.Equal(r.t, "/search/issues", req.URL.Path)
-	query := req.URL.Query().Get("q")
-	require.True(r.t, strings.HasPrefix(query, "is:pr is:open repo:"), "query = %q", query)
-	repo := strings.TrimPrefix(query, "is:pr is:open repo:")
-	owner, name, found := strings.Cut(repo, "/")
-	require.True(r.t, found, "query repo = %q", repo)
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	require.Len(r.t, parts, 4, "path = %q", req.URL.Path)
+	require.Equal(r.t, "repos", parts[0])
+	require.Equal(r.t, "pulls", parts[3])
+	require.Equal(r.t, "open", req.URL.Query().Get("state"))
 	require.Contains(r.t, req.Header.Get("Authorization"), "event-fixture-token")
 	r.searches++
-	body := fmt.Sprintf(`{"items":[{"id":17,"number":17,"title":"Selection fixture","state":"open","draft":%t,"html_url":"https://github.com/%s/%s/pull/17","repository_url":"https://api.github.com/repos/%s/%s","user":{"login":"alice"}}]}`, r.draft, owner, name, owner, name)
+	body := fmt.Sprintf(`[{"number":17,"title":"Selection fixture","state":"open","draft":%t,"html_url":"https://github.com/%s/%s/pull/17","head":{"ref":"feature","sha":"abc123"},"base":{"ref":"main"},"user":{"login":"alice"}}]`, r.draft, parts[1], parts[2])
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 }
 
@@ -56,11 +55,11 @@ func TestGitHubPRScopeUnion(t *testing.T) {
 		RepoScopeOrgs: []string{"acme"}, RepoScopeRepos: []github.RepoFilter{{Owner: "outside", Name: "tool"}},
 	}))
 	trigger := f.add(t, `{"events":["opened"],"repos":[{"owner":"acme","name":"widget"},{"owner":"outside","name":"tool"},{"owner":"other","name":"private"}]}`)
-	prs, err := f.evaluator.githubService.ListAutomationPRs(context.Background(), "ws-1", "outside", "tool", "is:pr is:open repo:outside/tool")
+	prs, _, err := f.evaluator.githubService.ListAutomationOpenPRs(context.Background(), "ws-1", "outside", "tool")
 	require.NoError(t, err)
 	require.Len(t, prs, 1)
 	require.Equal(t, "outside/tool", prs[0].RepoOwner+"/"+prs[0].RepoName)
-	_, err = f.evaluator.githubService.ListAutomationPRs(context.Background(), "ws-1", "other", "private", "is:pr is:open repo:other/private")
+	_, _, err = f.evaluator.githubService.ListAutomationOpenPRs(context.Background(), "ws-1", "other", "private")
 	require.Error(t, err, "unselected repository escaped the workspace scope")
 	require.Equal(t, 1, f.transport.searches, "denied repository reached GitHub")
 	f.transport.searches = 0
@@ -108,6 +107,24 @@ type eventSelectionFixture struct {
 
 func newEventSelectionFixture(t *testing.T) *eventSelectionFixture {
 	t.Helper()
+	transport := &eventSelectionTransport{t: t}
+	base := newPRTriggerFixtureBase(t, transport)
+	return &eventSelectionFixture{svc: base.svc, evaluator: base.evaluator, githubStore: base.githubStore,
+		automation: base.automation, transport: transport, fired: subscribeAutomationTriggered(t, base.svc.eventBus)}
+}
+
+// prTriggerFixtureBase wires a real automation service, GitHub store, PAT
+// credential routing, and evaluator. Only the external HTTP transport is
+// replaced.
+type prTriggerFixtureBase struct {
+	svc         *Service
+	evaluator   *GitHubEvaluator
+	githubStore *github.Store
+	automation  *Automation
+}
+
+func newPRTriggerFixtureBase(t *testing.T, transport http.RoundTripper) prTriggerFixtureBase {
+	t.Helper()
 	svc := newTestService(t)
 	t.Cleanup(svc.eventBus.Close)
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -119,15 +136,13 @@ func newEventSelectionFixture(t *testing.T) *eventSelectionFixture {
 		WorkspaceID: "ws-1", Source: github.ConnectionSourcePAT, GitHubHost: "github.com",
 		Login: "fixture-owner", Status: github.ConnectionStatusActive, CredentialGeneration: 1,
 	}))
-	transport := &eventSelectionTransport{t: t}
 	original := http.DefaultTransport
 	http.DefaultTransport = transport
 	t.Cleanup(func() { http.DefaultTransport = original })
 	githubService := github.NewService(nil, github.AuthMethodPAT, eventSelectionSecrets{}, store, svc.eventBus, svc.logger)
 	t.Cleanup(githubService.Stop)
-	return &eventSelectionFixture{svc: svc, evaluator: NewGitHubEvaluator(svc, githubService, svc.logger),
-		githubStore: store, automation: createTestAutomation(t, svc, "ws-1"), transport: transport,
-		fired: subscribeAutomationTriggered(t, svc.eventBus)}
+	return prTriggerFixtureBase{svc: svc, evaluator: NewGitHubEvaluator(svc, githubService, svc.logger),
+		githubStore: store, automation: createTestAutomation(t, svc, "ws-1")}
 }
 
 func (f *eventSelectionFixture) add(t *testing.T, raw string) *AutomationTrigger {

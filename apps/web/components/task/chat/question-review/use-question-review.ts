@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { SubmitState } from "@/hooks/domains/session/use-clarification-group";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { LateAnswerState, SubmitState } from "@/hooks/domains/session/use-clarification-group";
 
+/**
+ * Review is available while the overlay shows an editable form for an image
+ * bundle: a pending bundle or a late-answer form. Resolved, expired, and
+ * delivered late answers have no form to review against.
+ */
 export function isQuestionReviewAvailable(args: {
   hasImages: boolean;
-  lateInteraction: boolean;
+  lateStatus: LateAnswerState;
   submitState: SubmitState;
 }): boolean {
   return (
     args.hasImages &&
-    !args.lateInteraction &&
+    args.lateStatus !== "sent" &&
+    args.lateStatus !== "queued" &&
     args.submitState !== "ok" &&
     args.submitState !== "expired"
   );
@@ -39,8 +45,29 @@ export function useQuestionReview({
     if (available && pendingId) setOpenFor(pendingId);
   }, [available, pendingId]);
   const closeReview = useCallback(() => setOpenFor(null), []);
+  const wipeLift = useRoundValue(pendingId);
 
-  return { available, open, openReview, closeReview, triggerRef, scopeRef };
+  return { available, open, openReview, closeReview, triggerRef, scopeRef, wipeLift };
+}
+
+/**
+ * A view preference that lasts for one question round: it survives closing and
+ * reopening the review view, and a new bundle starts without it.
+ */
+function useRoundValue(pendingId: string | null) {
+  const [stored, setStored] = useState<{ round: string; value: number } | null>(null);
+  const value = stored && stored.round === pendingId ? stored.value : undefined;
+  // A new round drops the old value, so it never returns with an earlier bundle.
+  useEffect(() => {
+    setStored((current) => (current && current.round !== pendingId ? null : current));
+  }, [pendingId]);
+  const set = useCallback(
+    (next: number) => {
+      if (pendingId) setStored({ round: pendingId, value: next });
+    },
+    [pendingId],
+  );
+  return useMemo(() => ({ value, set }), [value, set]);
 }
 
 export type QuestionReviewController = ReturnType<typeof useQuestionReview>;

@@ -733,6 +733,9 @@ const (
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"
 	ActionAutomationRunsDeleteAll       = "automation.runs.delete_all"
+	// ActionAutomationRunCreated is a workspace-scoped notification that a run
+	// was recorded, so open run pages refresh.
+	ActionAutomationRunCreated = "automation.run.created"
 )
 
 // Error codes

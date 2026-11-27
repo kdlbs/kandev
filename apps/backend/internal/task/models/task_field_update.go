@@ -7,6 +7,7 @@ type TaskFieldUpdate struct {
 	ExecutionGrade *string
 	Title          *string
 	Description    *string
+	FlagNote       *string
 	Priority       *string
 	State          *v1.TaskState
 	WorkflowStepID *string

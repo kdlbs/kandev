@@ -472,7 +472,9 @@ capacity, Kandev still accepts an ordinary message. It persists the visible
 message and a durable queue receipt in one transaction before responding, then
 dispatches one new turn after capacity is released. The success response keeps
 the existing message shape; clients observe the pending input through
-`message.queue.get` and `message.queue.status_changed`. Auto-run OFF leaves the
+`message.queue.get` and `message.queue.status_changed`. On each visible entry,
+the optional `admission_reason` value `session_capacity` indicates that the
+session limit delayed admission to a turn. Auto-run OFF leaves the
 entry pending. Explicit `message.queue.send_now` keeps its override. A failed
 queue or transcript write returns the existing error instead of a false
 success.
@@ -594,6 +596,8 @@ ordinary updates to different fields retain both edits, including requests handl
 separate backend services. Omitted fields and JSON `null` retain current values; explicit
 empty strings keep the field's existing clear behavior, and `repositories: []` clears
 repository associations.
+
+Supply `flag_note` to set the plain-text note on the sidebar flag. The server trims outer whitespace. An empty string removes the flag.
 
 A supplied `metadata` object retains the existing replacement or pending-title merge
 behavior. It does not merge arbitrary keys from competing requests. Server-owned

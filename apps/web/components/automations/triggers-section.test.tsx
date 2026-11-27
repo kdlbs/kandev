@@ -87,4 +87,16 @@ describe("TriggersSection schedule config", () => {
       expect.objectContaining({ cron_expression: "0 9 * * *" }),
     );
   });
+
+  // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.7
+  it("removes the scheduled trigger when No schedule is chosen", () => {
+    const trigger = scheduledTrigger({ cron_expression: "0 9 * * *", timezone: "UTC" });
+    const props = renderTriggersSection({ triggers: [trigger], savedTriggers: [trigger] });
+
+    fireEvent.click(screen.getByTestId("schedule-frequency"));
+    fireEvent.click(screen.getByRole("option", { name: "No schedule" }));
+
+    expect(props.onDeleteTrigger).toHaveBeenCalledWith("trigger-1");
+    expect(props.onUpdateTrigger).not.toHaveBeenCalled();
+  });
 });

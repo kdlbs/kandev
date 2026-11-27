@@ -35,14 +35,20 @@ export type CompareSettings = Pick<CompareState, "mode" | "wipe" | "opacity" | "
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+/** A is the first image and B the second, or the first again when it stands alone. */
+function defaultPair(imageIds: readonly string[]) {
+  return { aId: imageIds[0] ?? "", bId: imageIds[1] ?? imageIds[0] ?? "" };
+}
+
 export function initialCompareState(
   imageIds: readonly string[],
   settings?: CompareSettings,
+  initial: { aId: string; bId: string } = defaultPair(imageIds),
 ): CompareState {
   return {
     mode: settings?.mode ?? "toggle",
-    aId: imageIds[0] ?? "",
-    bId: imageIds[1] ?? imageIds[0] ?? "",
+    aId: initial.aId,
+    bId: initial.bId,
     showB: false,
     wipe: settings?.wipe ?? 0.5,
     opacity: settings?.opacity ?? 0.5,

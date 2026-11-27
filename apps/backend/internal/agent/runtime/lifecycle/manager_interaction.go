@@ -992,12 +992,7 @@ func sessionModelStateFromClient(client *agentctlclient.Client) (*CachedModelSta
 	if state == nil {
 		return nil, false
 	}
-	cached := &CachedModelState{
-		CurrentModelID:       state.CurrentModelID,
-		Models:               state.Models,
-		ConfigOptions:        state.ConfigOptions,
-		ConfigOptionsSettled: state.ConfigOptionsSettled,
-	}
+	cached := cachedModelStateFromStream(state)
 	if !freshSessionModelCatalogReady(cached) {
 		return nil, false
 	}
@@ -3671,7 +3666,7 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	// Preserve the profile's cli_flags and command_prefix across restarts. A
 	// context reset that dropped the launcher prefix would relaunch a
 	// configured agent unwrapped.
-	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
+	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo, agentConfig.ID())
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -3697,6 +3692,27 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)
+	if acpcompat.IsAntigravity(agentConfig.ID()) {
+		launchRequest := &LaunchRequest{
+			LocalRuntimeSelection: execution.LocalRuntimeSelection,
+			McpProfile:            execution.McpProfile,
+		}
+		savedAdapterVersion := ""
+		if execution.AuthPolicy != nil {
+			savedAdapterVersion = execution.AuthPolicy.AdapterVersion
+		}
+		authPolicy, localEnv, resolvedArgs, resolvedContinueArgs, err := m.applyLocalRuntimeCommand(
+			ctx, launchRequest, agentConfig, execution.RuntimeName, args, continueArgs,
+			savedAdapterVersion, execution.AuthPolicy != nil,
+		)
+		if err != nil {
+			return agentCommands{}, err
+		}
+		args, continueArgs = resolvedArgs, resolvedContinueArgs
+		execution.AuthPolicy = authPolicy
+		execution.LocalRuntimeSelection = launchRequest.LocalRuntimeSelection
+		execution.LocalRuntimeEnv = localEnv
+	}
 	if err := validateBuiltAgentCommands(args, continueArgs); err != nil {
 		return agentCommands{}, err
 	}

@@ -22,6 +22,8 @@ import {
   SingleSelectionMenuItems,
 } from "./task-switcher-context-menu-items";
 import { useMenuTouchDragCancel } from "./task-switcher-touch-drag-cancel";
+import { useTaskFlagRemoval, type TaskFlagMenuActions } from "./task-flag-menu-item";
+import { useOpenTaskFlag } from "./task-flag-editor-provider";
 import { ChangeWorkflowDialog } from "./change-workflow-dialog";
 import { useTaskPRUnlinkMenu } from "@/hooks/domains/github/use-task-pr-unlink-menu";
 import type { KanbanCardMenuEntry } from "@/components/kanban-card-menu-items";
@@ -177,23 +179,41 @@ function useTaskRowMoveMenu(
   };
 }
 
-function useRenameAfterMenuClose(
+function useTaskRowMenuHandoff(
+  task: TaskSwitcherItem,
   onRenameTask: ContextMenuProps["onRenameTask"],
   onCloseAutoFocus: (event: Event) => void,
 ) {
   const pending = useRef<(() => void) | null>(null);
+  const invoker = useRef<HTMLElement | null>(null);
+  const openFlag = useOpenTaskFlag();
+  const flagRemoval = useTaskFlagRemoval(task.id);
   return {
-    request: onRenameTask
+    markInvoker: (event: React.MouseEvent<HTMLElement>) => {
+      invoker.current =
+        (event.target instanceof Element &&
+          event.target.closest<HTMLElement>("button, [data-task-row-id]")) ||
+        event.currentTarget;
+    },
+    flag: openFlag
+      ? {
+          ...flagRemoval,
+          edit: () => {
+            pending.current = () => openFlag(task, invoker.current);
+          },
+        }
+      : undefined,
+    rename: onRenameTask
       ? (taskId: string, title: string) => {
           pending.current = () => onRenameTask(taskId, title);
         }
       : undefined,
     close: (event: Event) => {
-      const rename = pending.current;
-      if (!rename) return onCloseAutoFocus(event);
+      const action = pending.current;
+      if (!action) return onCloseAutoFocus(event);
       pending.current = null;
       event.preventDefault();
-      queueMicrotask(rename);
+      queueMicrotask(action);
     },
   };
 }
@@ -226,7 +246,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     isArchiving,
     closeMenu,
   });
-  const rename = useRenameAfterMenuClose(props.onRenameTask, archive.handleMenuCloseAutoFocus);
+  const handoff = useTaskRowMenuHandoff(task, props.onRenameTask, archive.handleMenuCloseAutoFocus);
   const changeWorkflowTriggerRef = archive.archiveAnchorRef;
   const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
   const inlineArchiveConfirmation = isMobile || isFinePointer ? undefined : archiveConfirmation;
@@ -245,13 +265,18 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     <>
       <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
         <ContextMenuTrigger asChild>
-          <div ref={archive.archiveAnchorRef} tabIndex={-1} {...triggerProps}>
+          <div
+            ref={archive.archiveAnchorRef}
+            tabIndex={-1}
+            onContextMenuCapture={handoff.markInvoker}
+            {...triggerProps}
+          >
             {cloneWithMenuOpen(children, contextOpen, inlineArchiveConfirmation)}
             {(isMobile || isFinePointer) && archiveConfirmation}
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent
-          onCloseAutoFocus={rename.close}
+          onCloseAutoFocus={handoff.close}
           className="w-48"
           onInteractOutside={keepWorkflowMoveOpen}
           onMouseDown={stopMenuEvent}
@@ -261,7 +286,8 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
         >
           <TaskContextMenuItems
             {...contextMenuProps}
-            onRenameTask={rename.request}
+            onRenameTask={handoff.rename}
+            flagActions={handoff.flag}
             nativeUnlinkEntries={nativeUnlinkEntries}
             onArchiveTask={archive.requestArchive}
             onChangeWorkflow={createChangeWorkflowOpenHandler(
@@ -302,6 +328,7 @@ export type TaskContextMenuItemsProps = Omit<
   isArchiving: boolean;
   nativeUnlinkEntries?: KanbanCardMenuEntry[];
   onChangeWorkflow?: () => void;
+  flagActions?: TaskFlagMenuActions;
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
   onMoveToStepWithOptions?: (targetStepId: string) => void;

@@ -8,6 +8,7 @@ import {
 import { useAppStoreApi } from "@/components/state-provider";
 import { isRenameReserved, trackRenameOpen } from "./file-rename-continuity";
 import { useCallback } from "react";
+import { useTabletFileOpen } from "./domains/session/use-tablet-file-admission";
 import type { OpenFileTab, FileContentResponse } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
@@ -26,6 +27,7 @@ export function useTaskCenterFileOpen({
   toast,
 }: UseTaskCenterFileOpenOptions) {
   const store = useAppStoreApi();
+  const beginOpen = useTabletFileOpen(activeSessionId);
   return useCallback(
     async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
@@ -42,6 +44,11 @@ export function useTaskCenterFileOpen({
         return;
       }
       const pending = trackRenameOpen(store, activeSessionId, filePath, repo);
+      const operation = beginOpen({ path: filePath, repo });
+      if (!operation) {
+        pending.dispose();
+        return;
+      }
       try {
         const response: FileContentResponse = await requestFileContent(
           client,
@@ -52,7 +59,7 @@ export function useTaskCenterFileOpen({
         const fileName = filePath.split("/").pop() || filePath;
         const hash = await calculateHash(response.content);
         if (!pending.current() || isRenameReserved(store, activeSessionId, filePath, repo)) return;
-        addFileTab({
+        const file: OpenFileTab = {
           path: filePath,
           repo,
           name: fileName,
@@ -62,7 +69,8 @@ export function useTaskCenterFileOpen({
           isDirty: false,
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
-        });
+        };
+        if (operation.current(file)) addFileTab(file);
       } catch (error) {
         if (canFindViewerForFileType(filePath) && pending.current()) {
           addFileTab(previewFileState(filePath, repo));
@@ -75,8 +83,9 @@ export function useTaskCenterFileOpen({
         });
       } finally {
         pending.dispose();
+        operation.finish();
       }
     },
-    [activeSessionId, addFileTab, toast, store],
+    [activeSessionId, addFileTab, toast, store, beginOpen],
   );
 }

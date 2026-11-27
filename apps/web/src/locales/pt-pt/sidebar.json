@@ -1,4 +1,11 @@
 {
+  "addFlag": "Adicionar sinalizador",
+  "changeFlag": "Alterar sinalizador",
+  "editFlag": "Editar sinalizador",
+  "flag": "Sinalizador",
+  "flagNote": "Nota do sinalizador",
+  "removeFlag": "Remover sinalizador",
+  "flagSaveFailed": "Não foi possível atualizar o sinalizador. Tente novamente.",
   "pluginGroupingSection": "Agrupamentos de plugins",
   "pluginGroupingUnavailable": "Este agrupamento de plugin está indisponível ou incompleto. Tente novamente, ative o plugin ou escolha outra vista.",
   "pluginGroupingUnavailableLabel": "{{name}} (indisponível)",

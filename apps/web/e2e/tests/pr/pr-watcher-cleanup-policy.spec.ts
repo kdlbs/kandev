@@ -570,7 +570,9 @@ test.describe("PR watcher cleanup policy", () => {
     await cleanupButton.click();
 
     // Toast surfaces the deletion count.
-    await expect(testPage.getByText(/deleted 1 task/i)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: /deleted 1 task/i }),
+    ).toBeVisible({ timeout: 10_000 });
 
     const { tasks } = await apiClient.listTasks(seedData.workspaceId);
     expect(tasks.find((t) => t.title.includes("PR #901"))).toBeUndefined();

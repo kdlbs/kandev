@@ -10,7 +10,13 @@ import { waitForActiveTaskSession } from "./session-store";
 import { SessionPage } from "../pages/session-page";
 
 export async function withToolFileTask(
-  context: { testPage: Page; apiClient: ApiClient; seedData: SeedData; backend: BackendContext },
+  context: {
+    testPage: Page;
+    apiClient: ApiClient;
+    seedData: SeedData;
+    backend: BackendContext;
+    extraFile?: { name: string; content: string };
+  },
   kind: "read" | "search",
   run: (session: SessionPage, title: string) => Promise<void>,
 ) {
@@ -27,6 +33,7 @@ export async function withToolFileTask(
   let taskId: string | undefined;
   try {
     git.createFile(fileName, content);
+    if (context.extraFile) git.createFile(context.extraFile.name, context.extraFile.content);
     git.stageAll();
     git.commit(`add ${fileName}`);
     publishSeedCommit(git, fixture.remoteURL);

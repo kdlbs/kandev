@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
-import { checkDownload, checkGeometry, openDownloadPlan } from "./plan-download-helpers";
+import { checkDownload, checkGeometry, EXPECTED, openDownloadPlan } from "./plan-download-helpers";
 
 test("downloads the current Plan draft on desktop", async ({
   testPage,
@@ -36,7 +36,10 @@ test("keeps every Plan action reachable at the narrow desktop panel width", asyn
 }) => {
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 1366, height: 900 });
-  const panel = await openDownloadPlan(testPage, apiClient, seedData, false);
+  const { panel, taskId } = await openDownloadPlan(testPage, apiClient, seedData, false);
+  await expect
+    .poll(() => apiClient.getTaskPlan(taskId).then((plan) => plan?.content), { timeout: 30_000 })
+    .toBe(EXPECTED);
   expect(await resizeColumnViaSplitview(testPage, "right", 180)).toBe(180);
   await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(180);
 

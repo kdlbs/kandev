@@ -10,37 +10,35 @@ owners:
 
 ## Overview
 
-The built-in Antigravity profile uses ACP with a personal Google AI subscription.
-When the host has an ACP-capable CLI, the profile uses its existing Google sign-in.
-The standalone server has its own sign-in and session store.
+The built-in agent uses ACP with Google's personal subscription. It selects the
+local CLI and sign-in when available; otherwise it uses the standalone server.
 
-See the [design](../system-design/antigravity-acp-agent.md) and the
-[standalone](../../../plans/antigravity-local-subscription/plan.md) and
-[CLI](../../../plans/antigravity-cli-acp/plan.md) delivery plans.
+Related: [design](../system-design/antigravity-acp-agent.md),
+[standalone](../../../plans/antigravity-local-subscription/plan.md), and
+[CLI](../../../plans/antigravity-cli-acp/plan.md) plans.
 
 ## Terminology
 
-- **Standalone server** means the executable from the `antigravity-acp` registry entry.
-- **Harness** means its companion `localharness_external` or legacy `localharness`.
-- **Native store** means the settings, credentials, and conversations that Google manages for each runtime.
-- **Subscription mode** uses personal Google OAuth. Google determines entitlement and allowance.
-- **Local execution** runs a native process in the Kandev host's user home, including local worktrees.
-- **Estimated cost** is the token count multiplied by model prices.
+- **Standalone server:** bundled `antigravity-acp` executable.
+- **Harness:** companion `localharness_external` or legacy `localharness`.
+- **Native store:** Google's settings, credentials, and conversations.
+- **Subscription mode:** personal Google OAuth; Google sets entitlement and allowance.
+- **Local execution:** native process in the host user home, including worktrees.
+- **Estimated cost:** token count times model prices.
 
 ## Draft revision and traceability
 
-The September draft assumed manual installation and inherited API-key billing.
-The table keeps retired identifiers and identifies their replacements.
+This table preserves retired IDs from the September draft and links replacements.
 
 | Retired draft criteria | Former constraint | Replacement |
 | --- | --- | --- |
-| AC-AGENTS-ANTIGRAVITY-ACP-001.7 | Description explains manual installation only. | REQ-AGENTS-ANTIGRAVITY-ACP-009, REQ-AGENTS-ANTIGRAVITY-ACP-015 |
-| AC-AGENTS-ANTIGRAVITY-ACP-002.1, AC-AGENTS-ANTIGRAVITY-ACP-002.2, AC-AGENTS-ANTIGRAVITY-ACP-002.4, AC-AGENTS-ANTIGRAVITY-ACP-002.5, AC-AGENTS-ANTIGRAVITY-ACP-002.6, AC-AGENTS-ANTIGRAVITY-ACP-002.7 | PATH-only lookup, unchecked harness override, and PATH-derived matched path. | AC-AGENTS-ANTIGRAVITY-ACP-009.3 |
+| AC-AGENTS-ANTIGRAVITY-ACP-001.7 | Manual install only. | REQ-AGENTS-ANTIGRAVITY-ACP-009, REQ-AGENTS-ANTIGRAVITY-ACP-015 |
+| AC-AGENTS-ANTIGRAVITY-ACP-002.1, AC-AGENTS-ANTIGRAVITY-ACP-002.2, AC-AGENTS-ANTIGRAVITY-ACP-002.4, AC-AGENTS-ANTIGRAVITY-ACP-002.5, AC-AGENTS-ANTIGRAVITY-ACP-002.6, AC-AGENTS-ANTIGRAVITY-ACP-002.7 | PATH-only lookup and unchecked harness override. | AC-AGENTS-ANTIGRAVITY-ACP-009.3 |
 | AC-AGENTS-ANTIGRAVITY-ACP-003.9 | Inherit the environment unchanged. | AC-AGENTS-ANTIGRAVITY-ACP-010.2 |
 | AC-AGENTS-ANTIGRAVITY-ACP-004.2, AC-AGENTS-ANTIGRAVITY-ACP-004.9 | Ignore non-default GEMINI_HOME. | AC-AGENTS-ANTIGRAVITY-ACP-010.3 |
-| AC-AGENTS-ANTIGRAVITY-ACP-005.3 | Use only generic -32000 auth classification. | REQ-AGENTS-ANTIGRAVITY-ACP-013 |
+| AC-AGENTS-ANTIGRAVITY-ACP-005.3 | Generic `-32000` auth classification only. | REQ-AGENTS-ANTIGRAVITY-ACP-013 |
 | AC-AGENTS-ANTIGRAVITY-ACP-006.5 | Inherit default API-key billing. | AC-AGENTS-ANTIGRAVITY-ACP-014.1 |
-| AC-AGENTS-ANTIGRAVITY-ACP-007.2, AC-AGENTS-ANTIGRAVITY-ACP-007.3 | Reject local installation and use only existing missing-binary failures. | REQ-AGENTS-ANTIGRAVITY-ACP-009, AC-AGENTS-ANTIGRAVITY-ACP-007.4 |
+| AC-AGENTS-ANTIGRAVITY-ACP-007.2, AC-AGENTS-ANTIGRAVITY-ACP-007.3 | No local install; missing-binary failure only. | REQ-AGENTS-ANTIGRAVITY-ACP-009, AC-AGENTS-ANTIGRAVITY-ACP-007.4 |
 
 ## Requirements
 
@@ -54,10 +52,12 @@ The table keeps retired identifiers and identifies their replacements.
 - **AC-AGENTS-ANTIGRAVITY-ACP-001.2:** Display and catalog names shall remain `Antigravity` and `Antigravity ACP Agent`.
 - **AC-AGENTS-ANTIGRAVITY-ACP-001.3:** The default registry shall include the enabled agent.
 - **AC-AGENTS-ANTIGRAVITY-ACP-001.4:** Display order shall remain `22`, distinct from other built-in agents.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.5:** Light and dark logos shall remain available. Unknown variants shall use the light logo.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.5:** Both logo variants shall use the Antigravity arch. Unknown variants shall use the light logo.
 - **AC-AGENTS-ANTIGRAVITY-ACP-001.6:** The agent shall use ACP and remain non-virtual.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.8:** The catalog shall expose universal auto-approve without agent-specific permission settings.
-- **AC-AGENTS-ANTIGRAVITY-ACP-001.9:** The agent shall have no CLI passthrough mode.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.8:** Profiles shall offer Kandev auto-approve and an off-by-default `--dangerously-skip-permissions` switch.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.9:** CLI passthrough shall be unavailable.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.10:** Any enabled exact duplicate shall turn the switch on. Saving shall persist one entry and preserve unrelated flags.
+- **AC-AGENTS-ANTIGRAVITY-ACP-001.11:** Include the flag only for supported CLI launches that permit blanket approval. Omit it for unsupported, standalone, non-local, coordinator, or managed-tool launches.
 
 ### REQ-AGENTS-ANTIGRAVITY-ACP-002: Discovery that fails closed on a partial install
 

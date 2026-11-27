@@ -320,6 +320,21 @@ func (m *MockClient) ListAuthoredPRs(_ context.Context, owner, repo string) ([]*
 	return result, nil
 }
 
+// ListOpenPRs returns every seeded open PR for the repository, ordered by
+// number so evaluator tests observe a deterministic listing.
+func (m *MockClient) ListOpenPRs(_ context.Context, owner, repo string) ([]*PR, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []*PR
+	for k, pr := range m.prs {
+		if k.Owner == owner && k.Repo == repo && (pr.State == "" || pr.State == prStateOpen) {
+			result = append(result, pr)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Number < result[j].Number })
+	return result, true, nil
+}
+
 func (m *MockClient) ListReviewRequestedPRs(context.Context, string, string, string) ([]*PR, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

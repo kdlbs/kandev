@@ -357,6 +357,8 @@ uncertain prompt outcome remains blocked until a safe recovery action or the
 next backend restart restores it. Runtime replacement does not resend that
 prompt or resolve its external effects.
 
+If the session limit delays your message, chat shows a yellow warning above the queue count. The warning includes the current session limit when available. Your message is saved. With **Auto-run** on, it can run when capacity becomes available. With **Auto-run** off, open the queue and turn it on to resume automatic delivery.
+
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
 The expanded queue also lets you pause or discard stale work. Its compact header places **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
@@ -397,6 +399,16 @@ healthy delivery status clears the blocked-output headline without another
 prompt. A disk warning can remain after that headline clears. An older backend
 that does not report pressure freshness continues to show **Last reported**
 instead of treating capacity time as pressure time.
+
+Delivery pressure shows the cause when the runtime reports one. **Details**
+gives guidance for that cause. If the cause is unknown, the row says **Delivery
+is blocked**. Open **Details** for guidance to inspect runtime logs or use
+session recovery. The pressure headline shows disk usage only for a low-space
+guard. When the delivery cause is not a low-space guard, storage health is in
+the warning state, and a usage value is available, **Details** labels that
+usage as a separate high-usage sample. It can appear below 90%, such as at 88%,
+while the warning remains active. Its free and total values come from the
+capacity sample, not the failed write.
 
 A session that stops because storage is full shows **Session interrupted by low
 disk space**. Free space on the executor filesystem, then use **Resume

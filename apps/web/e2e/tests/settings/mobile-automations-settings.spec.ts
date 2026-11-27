@@ -83,27 +83,23 @@ test.describe("Automation deletion confirmation on mobile", () => {
     );
     await expect(testPage.getByTestId("automation-editor")).toBeVisible({ timeout: 15_000 });
 
-    const finite = testPage.getByRole("radio", { name: "Retry a fixed number of times" });
-    await expect(
-      testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true }),
-    ).toBeVisible();
+    const retryModes = testPage.getByRole("radiogroup", { name: "Automatic retries", exact: true });
+    await expect(retryModes).toBeVisible();
+    const finite = retryModes.getByRole("radio", { name: "Fixed number of times" });
     await finite.tap();
     await expect(finite).toBeChecked();
-    await expect(testPage.locator('label[for="automation-retry-finite"]')).toHaveClass(
-      /border-primary bg-primary\/5/,
-    );
-    const finiteCard = testPage.locator('label[for="automation-retry-finite"]');
-    const finiteCardBox = await finiteCard.boundingBox();
-    expect(finiteCardBox).not.toBeNull();
-    expect(finiteCardBox!.height).toBeGreaterThanOrEqual(44);
+    // Phones stack the retry modes full width with touch-sized targets.
+    const finiteBox = await finite.boundingBox();
+    expect(finiteBox).not.toBeNull();
+    expect(finiteBox!.height).toBeGreaterThanOrEqual(44);
     const modesBox = await testPage.getByTestId("automation-retry-modes").boundingBox();
     expect(modesBox).not.toBeNull();
-    expect(finiteCardBox!.width).toBeCloseTo(modesBox!.width, 0);
+    expect(finiteBox!.width).toBeGreaterThanOrEqual(modesBox!.width - 8);
     await testPage.locator("#automation-retry-max").fill("2");
-    await testPage.getByRole("radio", { name: /Managed conversation/ }).tap();
+    await testPage.getByRole("radio", { name: "Managed conversation" }).tap();
     await expect(testPage.locator("#automation-retry-finite")).toHaveCount(0);
-    await testPage.getByRole("radio", { name: /Create a normal task/ }).tap();
-    await expect(testPage.getByRole("radio", { name: "Do not retry" })).toBeChecked();
+    await testPage.getByRole("radio", { name: "Normal task" }).tap();
+    await expect(testPage.getByRole("radio", { name: "Don't retry" })).toBeChecked();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile managed retry settings");
   });
 });

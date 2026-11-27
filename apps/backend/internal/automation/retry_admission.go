@@ -82,8 +82,18 @@ func (s *Store) bindRetryIntentTask(ctx context.Context, runID, taskID, state st
 	return nil
 }
 
-//nolint:cyclop,funlen // One transaction fences the group, run, intent, operation, and outbox together.
+// CreateRetryAdmission records a retry-enabled run and reports it once the
+// transaction commits.
 func (s *Store) CreateRetryAdmission(ctx context.Context, run *AutomationRun, group *RetryGroup) error {
+	if err := s.createRetryAdmission(ctx, run, group); err != nil {
+		return err
+	}
+	s.notifyRunRecorded(ctx, run.AutomationID, run.ID, run.Status)
+	return nil
+}
+
+//nolint:cyclop,funlen // One transaction fences the group, run, intent, operation, and outbox together.
+func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, group *RetryGroup) error {
 	if run == nil || group == nil || run.RetryGroupID == "" || group.ID == "" {
 		return fmt.Errorf("retry admission identity is incomplete")
 	}

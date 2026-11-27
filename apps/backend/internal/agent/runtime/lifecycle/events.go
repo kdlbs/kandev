@@ -527,6 +527,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ModelSelectionWarning:            event.ModelSelectionWarning,
 		SessionModels:                    event.SessionModels,
 		ConfigOptions:                    event.ConfigOptions,
+		VerifiedConfigOptionIDs:          event.VerifiedConfigOptionIDs,
 		ConfigBaselineCandidate:          event.ConfigBaselineCandidate,
 		OriginalConfigCandidate:          event.OriginalConfigCandidate,
 		SessionTitle:                     event.SessionTitle,

@@ -2,7 +2,9 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -59,7 +61,7 @@ func (a *Adapter) claudeMonitorReaderAdmission(sessionID string) (uint64, *claud
 		return 0, nil, false
 	}
 	name, version := a.connectedAgentIdentity()
-	if name != claudeMonitorEvidenceBridgeName || version != claudeMonitorEvidenceBridgeBuild {
+	if !verifiedClaudeMonitorEvidenceBridge(a.agentID, name, version) {
 		return 0, nil, false
 	}
 	a.mu.RLock()
@@ -360,6 +362,108 @@ func (a *Adapter) applyClaudeMonitorCompletionLocked(
 	return a.settleClaudeMonitorLocked(sessionID, completion, payload)
 }
 
+func recognizeTaskStopCompletedTaskID(
+	meta map[string]any,
+	rawOutput, rawInput any,
+	payload *streams.NormalizedPayload,
+) (string, bool) {
+	if !isTaskStopMeta(meta) {
+		return "", false
+	}
+	claudeCode, _ := meta["claudeCode"].(map[string]any)
+	toolResponse, _ := claudeCode["toolResponse"].(map[string]any)
+	responseTaskID := taskStopTaskID(toolResponse)
+	outputTaskID := taskStopOutputTaskID(rawOutput)
+	if responseTaskID != "" && outputTaskID != "" && responseTaskID != outputTaskID {
+		return "", false
+	}
+	taskID := responseTaskID
+	if taskID == "" {
+		taskID = outputTaskID
+	}
+	if taskID == "" {
+		return "", false
+	}
+	inputTaskID, consistentInput := taskStopInputTaskID(rawInput, payload)
+	if !consistentInput || (inputTaskID != "" && inputTaskID != taskID) {
+		return "", false
+	}
+	return taskID, true
+}
+
+func taskStopInputTaskID(rawInput any, payload *streams.NormalizedPayload) (string, bool) {
+	frameTaskID := taskStopTaskID(rawInput)
+	payloadTaskID := ""
+	if payload != nil && payload.Generic() != nil {
+		args, _ := payload.Generic().Input.(map[string]any)
+		if args != nil {
+			rawArgs, _ := args["raw_input"].(map[string]any)
+			payloadTaskID = taskStopTaskID(rawArgs)
+			if payloadTaskID == "" {
+				payloadTaskID = taskStopTaskID(args)
+			}
+		}
+	}
+	if frameTaskID != "" && payloadTaskID != "" && frameTaskID != payloadTaskID {
+		return "", false
+	}
+	if frameTaskID != "" {
+		return frameTaskID, true
+	}
+	return payloadTaskID, true
+}
+
+func taskStopOutputTaskID(rawOutput any) string {
+	switch output := rawOutput.(type) {
+	case map[string]any, map[string]string:
+		return taskStopTaskID(output)
+	case string:
+		var decoded map[string]any
+		if json.Unmarshal([]byte(output), &decoded) == nil {
+			return taskStopTaskID(decoded)
+		}
+	case json.RawMessage:
+		var decoded map[string]any
+		if json.Unmarshal(output, &decoded) == nil {
+			return taskStopTaskID(decoded)
+		}
+	}
+	return ""
+}
+
+func taskStopTaskID(value any) string {
+	var taskID string
+	switch object := value.(type) {
+	case map[string]any:
+		taskID, _ = object["task_id"].(string)
+	case map[string]string:
+		taskID = object["task_id"]
+	}
+	return strings.TrimSpace(taskID)
+}
+
+func (a *Adapter) settleTrackedMonitorFromTaskStopLocked(sessionID, taskID string) *claudeMonitorSettlement {
+	if sessionID == "" || sessionID != a.sessionID || taskID == "" {
+		return nil
+	}
+	toolCallID, tracked := a.activeMonitors[sessionID][taskID]
+	if !tracked {
+		return nil
+	}
+	payload := a.activeToolCalls[toolCallID]
+	completion := claudeMonitorCompletion{
+		SessionID:  sessionID,
+		TaskID:     taskID,
+		ToolUseID:  toolCallID,
+		State:      streams.RunStateInterrupted,
+		FinishedAt: time.Now().UTC(),
+	}
+	if !payloadMatchesClaudeMonitorCompletion(payload, completion) {
+		return nil
+	}
+	return a.settleClaudeMonitorLocked(sessionID, completion, payload)
+}
+
 func (a *Adapter) holdPendingClaudeMonitorCompletionLocked(
 	sessionID string,
 	key claudeMonitorCompletionKey,
@@ -386,7 +490,9 @@ func payloadMatchesClaudeMonitorCompletion(payload *streams.NormalizedPayload, c
 }
 
 func verifiedClaudeMonitorEvidenceBridge(agentID, agentName, agentVersion string) bool {
-	return agentID == claudeAgentID && agentName == claudeMonitorEvidenceBridgeName && agentVersion == claudeMonitorEvidenceBridgeBuild
+	return agentID == claudeAgentID && agentName == claudeMonitorEvidenceBridgeName &&
+		(agentVersion == verifiedClaudeTerminalBridgeManagedVersion ||
+			agentVersion == verifiedClaudeTerminalBridgeCurrentVersion)
 }
 
 func (a *Adapter) settleClaudeMonitorLocked(
@@ -448,10 +554,7 @@ func claudeMonitorRunObservation(
 	if work == nil {
 		return nil
 	}
-	title := monitorCommandFromPayload(payload)
-	if title == "" {
-		title = monitorToolName
-	}
+	title := monitorTitleFromPayload(payload)
 	observation := &streams.WorkloadRunObservation{
 		SessionID:    sessionID,
 		WorkID:       completion.TaskID,

@@ -9,6 +9,7 @@ import {
   IconLoader2,
   IconLock,
   IconPlus,
+  IconRefresh,
   IconSettings,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -76,6 +77,8 @@ type Props = {
    * after a successful sign-in, making the recovery flow look broken.
    */
   onAuthComplete?: () => void;
+  /** Opens the install catalogue focused on a missing managed OpenCode runtime. */
+  reinstallHref?: string;
   /** The agent's profiles sub-list, rendered inside the group card. */
   children?: ReactNode;
 };
@@ -371,6 +374,9 @@ export function InstalledAgentCard(props: Props) {
         </div>
         <div className="flex min-w-0 w-full flex-wrap items-center justify-end gap-2 md:w-auto">
           {isCollapsed && <CollapsedCountLabel agentName={agent.name} count={profileCount} />}
+          {props.reinstallHref && (
+            <OpenCodeReinstallAction agentName={agent.name} href={props.reinstallHref} />
+          )}
           <RuntimeVersionControl {...props} />
           <AgentCollapseControl
             agentName={agent.name}
@@ -406,6 +412,18 @@ export function InstalledAgentCard(props: Props) {
         onAuthComplete={onAuthComplete}
       />
     </Card>
+  );
+}
+
+function OpenCodeReinstallAction({ agentName, href }: { agentName: string; href: string }) {
+  const { t } = useTranslation();
+  return (
+    <Button asChild variant="outline" className={settingsActionClassName("cursor-pointer")}>
+      <Link href={href} data-testid={`reinstall-${agentName}`}>
+        <IconRefresh className="mr-2 h-4 w-4" />
+        {t("agents:reinstallOpenCode")}
+      </Link>
+    </Button>
   );
 }
 

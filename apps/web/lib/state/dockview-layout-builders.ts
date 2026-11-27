@@ -72,8 +72,10 @@ export function applyLayoutFixups(
   manualRightWidth?: number | null,
   /** Environment whose build owns a reusable right width; omitted for restores. */
   ownerEnvId?: string | null,
+  maximizedGroupId?: string | null,
 ): LayoutGroupIds {
   const sv = getRootSplitviewImpl(api);
+  const overlay = isVerifiedMaximizeOverlay(api, maximizedGroupId);
   // Sidebar/right targets are horizontal widths; a vertical root's children are rows.
   const horizontalRoot = getRootOrientation(api) !== "VERTICAL";
   if (horizontalRoot) captureSidebarTarget(api, sv);
@@ -84,11 +86,23 @@ export function applyLayoutFixups(
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle(t("common:files"));
 
-  if (horizontalRoot) captureRightTarget(api, sv, manualRightWidth, ownerEnvId);
+  if (horizontalRoot && !overlay) captureRightTarget(api, sv, manualRightWidth, ownerEnvId);
+  else refreshPinnedRightConstraints(api, null);
 
   logFixupsCapture(api, sv);
 
-  return resolveGroupIds(api);
+  const ids = resolveGroupIds(api);
+  return overlay ? { ...ids, centerGroupId: maximizedGroupId! } : ids;
+}
+
+function isVerifiedMaximizeOverlay(api: DockviewApi, id: string | null | undefined): boolean {
+  return (
+    !!id &&
+    api.groups.some((group) => group.id === id) &&
+    api.groups.every(
+      (group) => group.id === id || group.panels.some((panel) => panel.id === "sidebar"),
+    )
+  );
 }
 
 /** Resolve the sidebar's target width (clamped to the cap): the GLOBAL width

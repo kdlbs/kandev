@@ -45,7 +45,8 @@ export function selectedToolNames(
   );
 }
 
-function staleSelectionNames(
+/** Saved tool names whose plugin changed since approval, which need reselecting. */
+export function staleSelectionNames(
   savedSelection: AutomationPluginToolSelection[],
   groups: AutomationPluginToolGroup[],
 ): string[] {
@@ -289,7 +290,7 @@ export function AutomationPluginTools({
 
   return (
     <div
-      className="space-y-3 rounded-lg border bg-card p-4"
+      className="space-y-3"
       data-testid="automation-plugin-tools"
       data-settings-dirty={isDirty}
       data-settings-dirty-level="container"

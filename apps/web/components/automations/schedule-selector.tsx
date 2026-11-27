@@ -27,6 +27,10 @@ type ScheduleSelectorProps = {
   config: Record<string, unknown> | null;
   isDirty?: boolean;
   onChange: (config: Record<string, unknown>) => void;
+  /** Removes the schedule. */
+  onClear?: () => void;
+  /** Another trigger can start the automation, so an empty schedule is not "never runs". */
+  hasOtherTrigger?: boolean;
 };
 
 type ScheduleFrequency = Frequency | "none";
@@ -175,7 +179,13 @@ function SchedulePollingHint() {
   );
 }
 
-export function ScheduleSelector({ config, isDirty = false, onChange }: ScheduleSelectorProps) {
+export function ScheduleSelector({
+  config,
+  isDirty = false,
+  onChange,
+  onClear,
+  hasOtherTrigger = false,
+}: ScheduleSelectorProps) {
   const { t } = useTranslation();
   const storedExpression = (config?.cron_expression as string) ?? "";
   const storedTimezone = (config?.timezone as string) ?? "";
@@ -227,6 +237,7 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
     setCustomError(null);
     if (value === "none") {
       setCustomMode(false);
+      if (hasStoredSchedule) onClear?.();
       return;
     }
     if (value === "custom") {
@@ -288,6 +299,7 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
         expression={previewExpression}
         timezone={timezone}
         showTimezonePrompt={wallClock && !storedTimezone && !isNewSchedule}
+        hasOtherTrigger={hasOtherTrigger}
         onAdoptBrowserTimezone={() => emit(currentSpec(), browserTimeZone())}
       />
     </div>
@@ -302,18 +314,13 @@ function FrequencySelect({
   onChange: (value: ScheduleFrequency) => void;
 }) {
   const { t } = useTranslation();
-  const options =
-    value === "none"
-      ? FREQUENCY_OPTIONS
-      : FREQUENCY_OPTIONS.filter((option) => option.value !== "none");
-
   return (
     <Select value={value} onValueChange={(next) => onChange(next as ScheduleFrequency)}>
       <SelectTrigger className="w-[170px]" data-testid="schedule-frequency">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {options.map((option) => (
+        {FREQUENCY_OPTIONS.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {t(option.labelKey)}
           </SelectItem>
@@ -427,18 +434,20 @@ function NextRun({
   expression,
   timezone,
   showTimezonePrompt,
+  hasOtherTrigger,
   onAdoptBrowserTimezone,
 }: {
   expression: string;
   timezone: string;
   showTimezonePrompt: boolean;
+  hasOtherTrigger: boolean;
   onAdoptBrowserTimezone: () => void;
 }) {
   const { t } = useTranslation();
   if (!expression.trim()) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="schedule-next-run">
-        {t("automations:noSchedule")}
+        {t(hasOtherTrigger ? "automations:noScheduleWithTrigger" : "automations:noSchedule")}
       </p>
     );
   }

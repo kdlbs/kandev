@@ -1,6 +1,25 @@
 "use client";
 
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
+
+/** Passive route synchronization cannot consume an independent selection owner. */
+export function hasOwnedTaskPageSelection(store: StoreApi<AppState>, taskId: string): boolean {
+  const state = store.getState();
+  if (state.tasks.activeTaskId !== taskId) return false;
+  const sid = state.tasks.activeSessionId;
+  return (
+    (sid !== null &&
+      state.tasks.pinnedSessionId === sid &&
+      state.taskSessions.items[sid]?.task_id === taskId) ||
+    state.workflowSessionFocus.intent?.taskId === taskId ||
+    state.workflowSessionFocus.request?.taskId === taskId ||
+    getProvenRemovalPredecessor(store, taskId, sid) !== null
+  );
+}
 
 export type RenderedTaskSession = {
   /** The owned session the page may render, or null while ownership is unknown. */
@@ -31,6 +50,23 @@ export function useRenderedTaskSession(
   routeSessionId: string | null,
   agentSessionId: string | null,
 ): RenderedTaskSession {
+  const appStore = useAppStoreApi();
+  const ownsEmptyRemoval = useAppStore((state) => {
+    if (
+      !renderedTaskId ||
+      state.tasks.activeTaskId !== renderedTaskId ||
+      state.tasks.activeSessionId !== null
+    )
+      return false;
+    const proof = state.taskRemoval?.removalHandoff;
+    if (proof && proof.taskId === renderedTaskId && proof.targetSessionId === null) {
+      return (
+        state.taskRemoval.navigationRevision === proof.navigationRevision &&
+        stateReadScopeIdentity(state) === proof.scopeIdentity
+      );
+    }
+    return getProvenRemovalPredecessor(appStore, renderedTaskId, null) !== null;
+  });
   const validatedActiveSessionId = useAppStore((state) => {
     const sid = state.tasks.activeSessionId;
     if (!sid || !renderedTaskId) return null;
@@ -47,6 +83,7 @@ export function useRenderedTaskSession(
   });
 
   if (!renderedTaskId) return { sessionId: null, routeSessionUnresolved: false };
+  if (ownsEmptyRemoval) return { sessionId: null, routeSessionUnresolved: true };
   if (validatedActiveSessionId) {
     return {
       sessionId: validatedActiveSessionId,

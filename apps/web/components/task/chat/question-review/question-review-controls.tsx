@@ -53,8 +53,13 @@ export function QuestionReviewPlaceholder() {
   );
 }
 
-/** Links a choice to its image on the review stage, which replaces the compact thumbnail. */
-export function ChoiceStageImageRef({
+/** The image a choice shows on the review stage when it is selected, if any. */
+export function choiceStageImageId(option: ClarificationOption | undefined): string | undefined {
+  return option?.images?.find((image) => typeof image?.id === "string")?.id;
+}
+
+/** Marks a choice whose image the review stage shows when the choice is selected. */
+export function ChoiceStageImageHint({
   question,
   option,
 }: {
@@ -62,15 +67,21 @@ export function ChoiceStageImageRef({
   option: ClarificationOption;
 }) {
   const { t } = useTranslation();
-  const imageId = option.images?.find((image) => typeof image?.id === "string")?.id;
+  const imageId = choiceStageImageId(option);
   const images = buildSegmentImages(question);
   const index = imageId ? segmentImageIndex(images, imageId) : 0;
   if (index === 0) return null;
+  const name = imageShortName(images[index - 1], index - 1);
   return (
-    <p className="mt-1 text-xs text-muted-foreground" data-testid="question-review-choice-image">
-      {t("task:questionReviewChoiceImageRef", {
-        index: imageShortName(images[index - 1], index - 1),
-      })}
-    </p>
+    <span
+      data-testid="question-review-choice-image"
+      className="mt-0.5 inline-flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground"
+    >
+      <IconPhoto className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="sr-only">{t("task:questionReviewChoiceImageHint", { index: name })}</span>
+      <span aria-hidden="true" className="max-w-24 truncate">
+        {name}
+      </span>
+    </span>
   );
 }

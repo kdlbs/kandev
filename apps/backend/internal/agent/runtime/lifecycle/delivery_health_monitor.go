@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -217,27 +218,39 @@ func (sm *StreamManager) probeDeliveryHealth(
 			return
 		}
 	}
+	revision := state.failureRevision
 	if !owner.current() || owner.submission() != submissionID {
 		return
 	}
 	now := sm.deliveryHealthNow()
-	if failure != nil {
-		if failure.Revision == state.failureRevision && now.Before(state.nextAllowed) {
+	if failure != nil && failure.Revision > 0 {
+		if failure.Revision <= state.failureRevision {
 			return
 		}
-		state.failureRevision = failure.Revision
+		revision = failure.Revision
 	} else if state.hadUnhealthy && now.Before(state.nextAllowed) {
 		return
 	}
 	state.hadUnhealthy = true
 	state.nextAllowed = now.Add(cooldown)
 	result := owner.reconcile(ctx)
+	state.failureRevision = nextDeliveryHealthFailureRevision(state.failureRevision, revision, result)
 	sm.logger.Warn("observed durable delivery failure",
 		zap.String("execution_id", owner.execution.ID),
 		zap.String("submission_id", submissionID),
 		zap.String("reason", reason),
-		zap.Uint64("revision", state.failureRevision),
+		zap.Uint64("revision", revision),
 		zap.String("outcome", string(result.Outcome)))
+}
+
+func nextDeliveryHealthFailureRevision(
+	current, observed uint64,
+	result DeliveryReconciliationResult,
+) uint64 {
+	if observed <= current || (result.Attempts == 0 && errors.Is(result.Err, context.Canceled)) {
+		return current
+	}
+	return observed
 }
 
 // deliveryFailureMatchesPressureScope keeps the specific failure cause on idle

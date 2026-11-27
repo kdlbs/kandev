@@ -5,6 +5,11 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { Draft } from "immer";
 import { original } from "immer";
 import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
+import {
+  admitTaskSessionRows,
+  isConfirmedSessionRemoved,
+  recordConfirmedSessionRemoval,
+} from "@/lib/state/session-removal";
 import type {
   QueueMeta,
   QueueOperationToken,
@@ -901,8 +906,9 @@ function nextPair(
 }
 
 function buildRemoveTaskSessionAction(set: ImmerSet) {
-  return (taskId: string, sessionId: string) =>
+  return (taskId: string, sessionId: string, options?: { confirmed?: boolean }) =>
     set((draft) => {
+      if (options?.confirmed) recordConfirmedSessionRemoval(draft.taskSessions, sessionId);
       delete draft.taskSessions.items[sessionId];
       if (draft.taskSessions.activityEpochBySession) {
         delete draft.taskSessions.activityEpochBySession[sessionId];
@@ -1006,7 +1012,12 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
-        const merged = sessions.map((session) => {
+        const admitted = admitTaskSessionRows(
+          draft.taskSessions,
+          draft.taskSessionsByTask.itemsByTaskId[taskId] ?? [],
+          sessions,
+        );
+        const merged = admitted.map((session) => {
           const existing = draft.taskSessions.items[session.id];
           const requestEpoch = hydrationEpochsAtRequestStart[session.id];
           resetQueueStateForReincarnation(draft, existing, session);
@@ -1050,6 +1061,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
     ) =>
       set((draft) => {
+        if (isConfirmedSessionRemoved(draft.taskSessions, session.id)) return;
         if (Object.prototype.hasOwnProperty.call(session, "foreground_activity")) {
           const epochs = (draft.taskSessions.activityEpochBySession ??= {});
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
@@ -1099,6 +1111,7 @@ function buildTaskSessionActions(set: ImmerSet) {
       hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
     ) =>
       set((draft) => {
+        if (isConfirmedSessionRemoved(draft.taskSessions, session.id)) return;
         const existingSession = draft.taskSessions.items[session.id];
         resetQueueStateForReincarnation(draft, existingSession, session);
         const mergedSnapshot = mergeTaskSessionActionSnapshot(

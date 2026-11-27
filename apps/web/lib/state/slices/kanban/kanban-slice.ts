@@ -401,6 +401,7 @@ function createWorkflowSessionFocusActions(
         });
         draft.workflowSessionFocus = result.state;
         if (!result.sessionId) return;
+        draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
         draft.tasks.activeSessionId = result.sessionId;
         draft.tasks.pinnedSessionId = null;
         draft.tasks.lastSessionByTaskId[taskId] = result.sessionId;

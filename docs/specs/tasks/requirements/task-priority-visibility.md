@@ -244,7 +244,7 @@ leaving my current task.
   the same shape, color and localized accessible name as the corresponding card
   indicator. Priority shall remain distinguishable by more than color alone.
 - **AC-TASKS-PRIORITY-VISIBILITY-005.4:** The single-task action menu shall show a
-  Priority submenu with a leading flag icon, the four localized priority labels
+  Priority submenu with a leading numbered-list icon, the four localized priority labels
   and a visible current-value marker. An absent, empty or unrecognized value
   shall mark no option as current.
 - **AC-TASKS-PRIORITY-VISIBILITY-005.5:** Desktop users shall reach the Priority

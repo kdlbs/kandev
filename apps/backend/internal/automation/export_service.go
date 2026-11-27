@@ -126,6 +126,12 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		}
 	}
 
+	followUpNode, err := buildExportFollowUpPrompt(a, &warnings)
+	if err != nil {
+		return exportAutomation{}, nil, err
+	}
+	mergedAction, closedAction := exportPREndActions(a)
+
 	triggers, triggerWarnings, err := s.buildExportTriggers(a)
 	if err != nil {
 		return exportAutomation{}, nil, err
@@ -173,6 +179,9 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		RetryPolicy:       exportRetryPolicy(policy),
 		TaskTitleTemplate: a.TaskTitleTemplate,
 		Prompt:            promptNode,
+		FollowUpPrompt:    followUpNode,
+		PRMergedAction:    mergedAction,
+		PRClosedAction:    closedAction,
 		AgentProfile:      resolved.AgentProfile,
 		ExecutorProfile:   resolved.ExecutorProfile,
 		Workflow:          resolved.Workflow,

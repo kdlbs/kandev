@@ -1,4 +1,11 @@
 {
+  "addFlag": "Add flag",
+  "changeFlag": "Change flag",
+  "editFlag": "Edit flag",
+  "flag": "Flag",
+  "flagNote": "Flag note",
+  "removeFlag": "Remove flag",
+  "flagSaveFailed": "Could not update the flag. Try again.",
   "pluginGroupingSection": "Plugin groupings",
   "pluginGroupingUnavailable": "This plugin grouping is unavailable or incomplete. Retry, enable the plugin, or choose another view.",
   "pluginGroupingUnavailableLabel": "{{name}} (unavailable)",

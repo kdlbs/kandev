@@ -12,7 +12,7 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []string) ([]string, error) {
+func prepareACPLaunch(cfg *InferenceConfigDTO, agentID, admitted string, args, env []string) ([]string, error) {
 	if !cfg.LaunchWrapper.IsZero() && (len(cfg.CommandPrefix) != 0 || (cfg.Protocol != "" && cfg.Protocol != agent.ProtocolACP)) {
 		return nil, launchwrapper.ErrInvalid
 	}
@@ -20,6 +20,9 @@ func prepareACPLaunch(cfg *InferenceConfigDTO, admitted string, args, env []stri
 	inner[0] = admitted
 	if cfg.AuthPolicy != nil && cfg.AuthPolicy.RuntimeVariant == acpcompat.AntigravityRuntimeCLI {
 		inner = antigravityruntime.RequireWorkerMode(inner)
+	}
+	if agentID == acpcompat.AntigravityAgentID {
+		inner = antigravityruntime.FilterDangerouslySkipPermissions(inner, false)
 	}
 	if !cfg.LaunchWrapper.IsZero() {
 		return launchwrapper.Prepare(cfg.LaunchWrapper, inner, launchwrapper.Context{WorkDir: cfg.WorkDir, Env: env})

@@ -153,6 +153,27 @@ func TestProtectedTaskMetadataForCreateRejectsAutomationStartOwnership(t *testin
 	}
 }
 
+func TestProtectedTaskMetadataForCreateRejectsInterruptedOwnership(t *testing.T) {
+	metadata := map[string]interface{}{
+		"ordinary":                        "keep",
+		models.MetaKeyInterruptedAt:       "forged-projection",
+		models.MetaKeyInterruptedSessions: map[string]interface{}{"forged": "marker"},
+		models.MetaKeyLegacyInterruptedAt: "forged-legacy",
+	}
+	for _, trustedHandoff := range []bool{false, true} {
+		created := protectedTaskMetadataForCreate(metadata, trustedHandoff)
+		if _, exists := created[models.MetaKeyInterruptedSessions]; exists {
+			t.Fatalf("trustedHandoff=%v: create kept caller interruption entries", trustedHandoff)
+		}
+		if _, exists := created[models.MetaKeyInterruptedAt]; exists {
+			t.Fatalf("trustedHandoff=%v: create kept caller interruption projection", trustedHandoff)
+		}
+		if _, exists := created[models.MetaKeyLegacyInterruptedAt]; exists {
+			t.Fatalf("trustedHandoff=%v: create kept caller legacy interruption state", trustedHandoff)
+		}
+	}
+}
+
 func TestBuildTaskStampsAutomationStartOwnershipOnlyFromInternalField(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	ctx := context.Background()

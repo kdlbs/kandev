@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID, uninstallFixturePlugin } from "../helpers/plugin-fixture";
+import { openAutomationTools } from "../helpers/automation-mcp";
 
 const LIST_FINDINGS = `kandev_kandev_plugin_e2e_list_findings`;
 const COMPLETE_REPORT = `kandev_kandev_plugin_e2e_complete_report`;
@@ -49,6 +50,7 @@ test.describe("Private automation plugin tools", () => {
       `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
     );
     await expect(testPage.getByTestId("automation-editor")).toBeVisible({ timeout: 15_000 });
+    await openAutomationTools(testPage);
     await expect(testPage.getByTestId("automation-plugin-tools")).toBeVisible();
 
     const readRow = testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`);
@@ -65,6 +67,7 @@ test.describe("Private automation plugin tools", () => {
     await expect(readRow.getByRole("checkbox")).toBeChecked();
 
     await testPage.reload();
+    await openAutomationTools(testPage);
     await expect(testPage.getByTestId("automation-plugin-tools")).toBeVisible({ timeout: 15_000 });
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),
@@ -113,6 +116,12 @@ test.describe("Private automation plugin tools", () => {
     await testPage.goto(
       `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
     );
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.5
+    await expect(testPage.getByTestId("automation-agent-tools-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+      { timeout: 15_000 },
+    );
     await expect(testPage.getByTestId("automation-plugin-tools-review")).toContainText(
       "Review required",
       { timeout: 15_000 },
@@ -128,6 +137,7 @@ test.describe("Private automation plugin tools", () => {
     await testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).click();
     await saveChanges(testPage);
     await testPage.reload();
+    await openAutomationTools(testPage);
     await expect(
       testPage.getByTestId(`plugin-tool-${PLUGIN_ID}-list_findings`).getByRole("checkbox"),
     ).toBeChecked();

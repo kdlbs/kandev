@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"os"
 	"path/filepath"
@@ -212,14 +213,45 @@ func TestAntigravityACP_RemoteAuth(t *testing.T) {
 
 func TestAntigravityACP_LogosNonEmpty(t *testing.T) {
 	a := NewAntigravityACP()
-	if len(a.Logo(LogoLight)) == 0 {
-		t.Error("Logo(LogoLight) is empty")
+	type svgLogo struct {
+		XMLName xml.Name `xml:"svg"`
+		Fill    string   `xml:"fill,attr"`
+		ViewBox string   `xml:"viewBox,attr"`
+		Title   string   `xml:"title"`
+		Paths   []struct {
+			Data string `xml:"d,attr"`
+		} `xml:"path"`
 	}
-	if len(a.Logo(LogoDark)) == 0 {
-		t.Error("Logo(LogoDark) is empty")
+	var logos [2]svgLogo
+	variants := []struct {
+		variant LogoVariant
+		fill    string
+	}{
+		{variant: LogoLight, fill: "#000000"},
+		{variant: LogoDark, fill: "#FFFFFF"},
 	}
-	if !strings.Contains(string(a.Logo(LogoLight)), "<svg") {
-		t.Error("Logo(LogoLight) is not SVG")
+	for i, tc := range variants {
+		if err := xml.Unmarshal(a.Logo(tc.variant), &logos[i]); err != nil {
+			t.Fatalf("Logo(%v) must be valid SVG: %v", tc.variant, err)
+		}
+		if logos[i].XMLName.Local != "svg" {
+			t.Errorf("Logo(%v) root = %q, want svg", tc.variant, logos[i].XMLName.Local)
+		}
+		if logos[i].Fill != tc.fill {
+			t.Errorf("Logo(%v) fill = %q, want %q", tc.variant, logos[i].Fill, tc.fill)
+		}
+		if logos[i].ViewBox != "0 0 100 100" {
+			t.Errorf("Logo(%v) viewBox = %q, want 0 0 100 100", tc.variant, logos[i].ViewBox)
+		}
+		if logos[i].Title != "Antigravity" {
+			t.Errorf("Logo(%v) title = %q, want Antigravity", tc.variant, logos[i].Title)
+		}
+		if len(logos[i].Paths) != 1 || logos[i].Paths[0].Data == "" {
+			t.Errorf("Logo(%v) must contain one non-empty arch path", tc.variant)
+		}
+	}
+	if len(logos[0].Paths) == 1 && len(logos[1].Paths) == 1 && logos[0].Paths[0].Data != logos[1].Paths[0].Data {
+		t.Error("light and dark logos must use matching arch geometry")
 	}
 	// Any other variant falls back to the light logo (AC-001.5).
 	if !slices.Equal(a.Logo(LogoVariant(99)), a.Logo(LogoLight)) {
@@ -248,8 +280,13 @@ func TestAntigravityACP_DisplayOrderUnique(t *testing.T) {
 
 func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
 	a := NewAntigravityACP()
-	if len(a.PermissionSettings()) != 0 {
-		t.Errorf("PermissionSettings() = %#v, want empty", a.PermissionSettings())
+	setting, ok := a.PermissionSettings()[PermissionKeyAntigravitySkipPermissions]
+	if !ok {
+		t.Fatal("PermissionSettings() missing Antigravity CLI permission flag")
+	}
+	if !setting.Supported || setting.Default || setting.ApplyMethod != PermissionApplyMethodCLIFlag ||
+		setting.CLIFlag != "--dangerously-skip-permissions" {
+		t.Errorf("Antigravity permission setting = %+v, want supported, off-by-default CLI flag", setting)
 	}
 	if got := a.BillingType(); got != usage.BillingTypeSubscription {
 		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeSubscription)
@@ -261,6 +298,9 @@ func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
 	}
 	if auto.ApplyMethod != PermissionApplyMethodAgentctlAutoApprove {
 		t.Errorf("auto_approve ApplyMethod = %q, want agentctl auto-approve", auto.ApplyMethod)
+	}
+	if catalog[PermissionKeyAntigravitySkipPermissions].CLIFlag != "--dangerously-skip-permissions" {
+		t.Errorf("catalog omitted Antigravity CLI flag: %+v", catalog)
 	}
 }
 

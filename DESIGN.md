@@ -47,7 +47,7 @@ The workbench shell should be panel-first. Panels, sidebars, topbars, and dock h
 
 ### Settings
 
-Use a page or section heading before each bordered settings group. Put related simple preferences in divided rows. Do not repeat a row label as a card title. Group related form fields by purpose inside one bordered surface; the automation editor's When and Then sections are examples. Keep one effective inset inside the border, with equal outer insets for the first and last rows.
+Use a page or section heading before each bordered settings group. Put related simple preferences in divided rows. Do not repeat a row label as a card title. Group related form fields by purpose inside one bordered surface; the automation editor's When and Repeat runs sections are examples. Keep one effective inset inside the border, with equal outer insets for the first and last rows.
 
 Resource lists and tables keep their existing interactions, headings, and actions. Specialized editors keep their existing layouts. See the [settings composition design](docs/specs/ui/system-design/settings-composition.md#shared-presentation-and-rollout) for details.
 

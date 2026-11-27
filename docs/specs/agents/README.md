@@ -44,6 +44,7 @@ Kandev host, which retain their own plugin-system ownership.
 
 ### Requirements
 
+- [Rich diff preview](requirements/rich-diff-preview.md)
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
@@ -88,6 +89,7 @@ Kandev host, which retain their own plugin-system ownership.
 
 ### System design
 
+- [Rich diff preview](system-design/rich-diff-preview.md)
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
 - [Agent Install Detection Bounds](system-design/agent-install-detection-bounds.md)

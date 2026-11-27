@@ -132,6 +132,60 @@ func TestTaskFieldUpdatesRequestPresence(t *testing.T) {
 	}
 }
 
+func TestTaskFieldUpdatePublicMetadataRoundTripPreservesTwoInterruptedSessions(t *testing.T) {
+	services, _, gates := taskFieldServicePair(t)
+	repo := gates[0].Repository
+	seedFieldTask(t, repo, map[string]interface{}{"ordinary": "before"})
+	ctx := context.Background()
+	first := models.InterruptedSessionMarker{
+		IncarnationID: "incarnation-first",
+		InterruptedAt: "2026-11-25T10:00:00Z",
+		Token:         "token-first",
+	}
+	second := models.InterruptedSessionMarker{
+		IncarnationID: "incarnation-second",
+		InterruptedAt: "2026-11-25T11:00:00Z",
+		Token:         "token-second",
+	}
+	for sessionID, marker := range map[string]models.InterruptedSessionMarker{
+		"session-first": first, "session-second": second,
+	} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: "field-task", QueueIncarnationID: marker.IncarnationID,
+		}); err != nil {
+			t.Fatalf("create session %s: %v", sessionID, err)
+		}
+		changed, err := repo.SetTaskInterruptedSessionIfNotArchived(ctx, "field-task", sessionID, marker)
+		if err != nil || !changed {
+			t.Fatalf("set interruption for %s: changed=%t err=%v", sessionID, changed, err)
+		}
+	}
+	current, err := repo.GetTask(ctx, "field-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicMetadata := models.PublicTaskMetadata(current.Metadata)
+	if _, exposed := publicMetadata[models.MetaKeyInterruptedSessions]; exposed {
+		t.Fatal("public projection exposed scoped interruption ownership")
+	}
+	updated, err := services[0].UpdateTask(ctx, "field-task", &UpdateTaskRequest{Metadata: publicMetadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _, err := models.LoadInterruptedSessionMarkers(updated.Metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]models.InterruptedSessionMarker{
+		"session-first": first, "session-second": second,
+	}; !reflect.DeepEqual(entries, want) {
+		t.Fatalf("scoped interruption entries after public round-trip = %#v, want %#v", entries, want)
+	}
+	if updated.Metadata[models.MetaKeyInterruptedAt] != second.InterruptedAt {
+		t.Fatalf("warning projection after public round-trip = %v, want %s", updated.Metadata[models.MetaKeyInterruptedAt], second.InterruptedAt)
+	}
+}
+
 // @covers AC-TASKS-FIELD-UPDATES-001.4, AC-TASKS-FIELD-UPDATES-001.5
 func TestTaskFieldUpdatesProtectedOwners(t *testing.T) {
 	t.Run("pending_claim_omitted_metadata", func(t *testing.T) {

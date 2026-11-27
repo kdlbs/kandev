@@ -6,9 +6,16 @@ import { Dialog as SheetPrimitive } from "radix-ui";
 import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
+import { ModalToastOutlet } from "./modal-toast-outlet";
+
+const SheetModalContext = React.createContext(true);
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />;
+  return (
+    <SheetModalContext.Provider value={props.modal !== false}>
+      <SheetPrimitive.Root data-slot="sheet" {...props} />
+    </SheetModalContext.Provider>
+  );
 }
 
 function SheetTrigger({ ...props }: React.ComponentProps<typeof SheetPrimitive.Trigger>) {
@@ -44,11 +51,14 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  toastOutlet = true,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
   showCloseButton?: boolean;
+  toastOutlet?: boolean;
 }) {
+  const modal = React.useContext(SheetModalContext);
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -62,6 +72,7 @@ function SheetContent({
         {...props}
       >
         {children}
+        {toastOutlet && modal && <ModalToastOutlet />}
         {showCloseButton && (
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button variant="ghost" className="absolute top-4 right-4" size="icon-sm">

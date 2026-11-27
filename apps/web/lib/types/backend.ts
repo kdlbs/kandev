@@ -104,7 +104,7 @@ export type TaskReorderedPayload = {
   tasks: Array<{ id: string; position: number }>;
 };
 
-export type TaskEventPayload = {
+export type TaskEventPayload = Pick<import("./http").Task, "flag_note"> & {
   task_id: string;
   workspace_id?: string;
   workflow_id: string;

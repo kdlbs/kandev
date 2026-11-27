@@ -1996,6 +1996,7 @@ func (h *TaskHandlers) recordSuccessfulTaskCreateProfile(ctx context.Context, pr
 type httpUpdateTaskRequest struct {
 	Title          *string                   `json:"title,omitempty"`
 	Description    *string                   `json:"description,omitempty"`
+	FlagNote       *string                   `json:"flag_note,omitempty"`
 	Priority       *string                   `json:"priority,omitempty"`
 	ExecutionGrade *string                   `json:"execution_grade,omitempty"`
 	State          *v1.TaskState             `json:"state,omitempty"`
@@ -2083,6 +2084,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	task, err := h.service.UpdateTaskAsHuman(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
 		Title:          title,
 		Description:    description,
+		FlagNote:       body.FlagNote,
 		Priority:       body.Priority,
 		ExecutionGrade: body.ExecutionGrade,
 		State:          body.State,
@@ -2279,10 +2281,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:                  dto.FromTask(result.Task),
-		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
-		MoveID:                result.MoveID,
-		EntryOptions:          result.EntryOptions,
+		Task:                     dto.FromTask(result.Task),
+		WorkflowEntryIdentity:    result.WorkflowEntryIdentity,
+		WorkflowFocusDisposition: result.WorkflowFocusDisposition,
+		MoveID:                   result.MoveID,
+		EntryOptions:             result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

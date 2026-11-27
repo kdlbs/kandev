@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 func TestInjectedKandevPermissionPolicy(t *testing.T) {
@@ -158,6 +160,48 @@ func TestInjectedKandevPermissionPolicyCoversServerTools(t *testing.T) {
 			})
 			if !approved || response == nil || response.OptionID != "allow-once" {
 				t.Fatalf("tool %q response = %+v, approved = %v", toolName, response, approved)
+			}
+		})
+	}
+}
+
+func TestAntigravityQualifiedKandevNamesRequireKnownUnambiguousInventory(t *testing.T) {
+	const toolName = "mcp__kandev__update_task_plan_kandev"
+	tests := []struct {
+		name        string
+		inventory   []string
+		known       bool
+		wantApprove bool
+	}{
+		{name: "unknown inventory", wantApprove: false},
+		{name: "native kandev registration", inventory: []string{"kandev"}, known: true, wantApprove: false},
+		{name: "known unique registration", known: true, wantApprove: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
+			manager.cfg.AgentType = acpcompat.AntigravityAgentID
+			manager.cfg.AuthPolicy = &acpcompat.AuthPolicy{
+				RuntimeVariant: acpcompat.AntigravityRuntimeCLI,
+			}
+			manager.antigravityMCPNamesKnown = test.known
+			manager.antigravityMCPNames = test.inventory
+			manager.builtinCatalog = func() map[mcpprofile.PackageID][]string {
+				return map[mcpprofile.PackageID][]string{
+					mcpprofile.PackageCore: {"update_task_plan_kandev"},
+				}
+			}
+
+			_, approved := manager.autoApproveInjectedKandevPermission(&adapter.PermissionRequest{
+				ToolName: permissionStringPtr(toolName),
+				Options: []adapter.PermissionOption{{
+					OptionID: "allow-once",
+					Kind:     streams.PermissionOptionKindAllowOnce,
+				}},
+			})
+			if approved != test.wantApprove {
+				t.Fatalf("qualified request approved = %t, want %t", approved, test.wantApprove)
 			}
 		})
 	}
