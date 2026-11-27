@@ -1,12 +1,15 @@
 ---
 created: 2026-11-22
-updated: 2026-11-23
+updated: 2026-11-27
 status: implemented
 requirements:
   - REQ-EXECUTORS-SSH-WINDOWS-001
   - REQ-EXECUTORS-SSH-WINDOWS-002
+  - REQ-EXECUTORS-REPOSITORY-BRANCH-001
+  - REQ-EXECUTORS-REPOSITORY-BRANCH-002
 system_design:
   - ../../specs/executors/system-design/ssh-windows-remote.md
+  - ../../specs/executors/system-design/repository-branch-resolution.md
   - ../../specs/release/system-design/compact-runtime-distribution.md
 legacy_specs: []
 ---
