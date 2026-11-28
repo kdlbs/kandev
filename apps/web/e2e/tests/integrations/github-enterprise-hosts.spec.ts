@@ -108,7 +108,9 @@ test("retains a non-secret host draft after failed PAT verification and filters 
   );
   await surface.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
-    testPage.getByText("Host certificate is not trusted", { exact: true }),
+    testPage.getByTestId("toast-message").getByText("Host certificate is not trusted", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(surface.getByTestId("github-host")).toHaveValue(enterpriseHost);
   await settings.chooseMethod("GitHub App");
