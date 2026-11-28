@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -39,7 +41,76 @@ type BootstrapFailure struct {
 	PromptNotSent    *bool
 	ExitCode         *int
 	SessionFailure   *agentctltypes.SessionOperationFailure
-	Cause            error
+	// Class names the failing boundary when Code is unknown. Only the
+	// BootstrapClass* values below are projected.
+	Class string
+	Cause error
+}
+
+// Bounded classes for bootstrap failures whose cause code stays unknown. They
+// name the failing boundary and never carry error text, so durable records can
+// tell unclassified failures apart without widening the cause-code contract.
+const (
+	BootstrapClassAgentctlStartRejected        = "agentctl_start_rejected"
+	BootstrapClassAgentctlUnreachable          = "agentctl_unreachable"
+	BootstrapClassPassthroughCLIUnavailable    = "passthrough_cli_unavailable"
+	BootstrapClassRemoteInitialPromptUncertain = "remote_initial_prompt_uncertain"
+	BootstrapClassUnclassified                 = "unclassified"
+)
+
+// SafeClass returns the bounded class for an unknown cause code and an empty
+// string for every allowlisted code.
+func (e *BootstrapFailure) SafeClass() string {
+	if e == nil || e.safeCode() != models.AgentErrorCauseCodeUnknown {
+		return ""
+	}
+	switch e.Class {
+	case "":
+		return ClassifyUnknownBootstrapError(e.Cause)
+	case BootstrapClassAgentctlStartRejected,
+		BootstrapClassAgentctlUnreachable,
+		BootstrapClassPassthroughCLIUnavailable,
+		BootstrapClassRemoteInitialPromptUncertain:
+		return e.Class
+	default:
+		return BootstrapClassUnclassified
+	}
+}
+
+// ClassifyUnknownBootstrapError maps an error without an allowlisted cause
+// code to a bounded class from its typed boundary.
+func ClassifyUnknownBootstrapError(err error) string {
+	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
+		return BootstrapClassPassthroughCLIUnavailable
+	}
+	if errors.Is(err, errRemoteInitialPromptUncertain) {
+		return BootstrapClassRemoteInitialPromptUncertain
+	}
+	var rejected *agentctl.StartRejectedError
+	if errors.As(err, &rejected) {
+		return BootstrapClassAgentctlStartRejected
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return BootstrapClassAgentctlUnreachable
+	}
+	return BootstrapClassUnclassified
+}
+
+// unknownBootstrapDetail saves only bounded facts from a start rejection.
+func unknownBootstrapDetail(err error) string {
+	var rejected *agentctl.StartRejectedError
+	if errors.As(err, &rejected) && rejected != nil {
+		detail := fmt.Sprintf("agentctl rejected the start request (HTTP %d).", rejected.StatusCode)
+		// Runtime failures can wrap private provider strings. Only fixed
+		// request-handling reasons are safe to include in durable detail.
+		switch rejected.AgentctlError {
+		case "invalid start request", "authenticated control is required for managed runtime preparation":
+			detail += " " + rejected.AgentctlError
+		}
+		return detail
+	}
+	return bootstrapFailureDetail(models.AgentErrorCauseCodeUnknown)
 }
 
 func (e *BootstrapFailure) Error() string {
@@ -234,10 +305,10 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	}
 	code := models.AgentErrorCauseCodeUnknown
 	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
-		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: ClassifyUnknownBootstrapError(err), Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
 	}
 	if errors.Is(err, errRemoteInitialPromptUncertain) {
-		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: errRemoteInitialPromptUncertain.Error(), Cause: err}
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Class: ClassifyUnknownBootstrapError(err), Detail: errRemoteInitialPromptUncertain.Error(), Cause: err}
 	}
 	if errors.Is(err, agentctl.ErrPassthroughUnsupported) {
 		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: models.AgentErrorCauseCodeTransportUnavailable, Detail: agentctl.ErrPassthroughUnsupported.Error(), Cause: err}
@@ -271,7 +342,8 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),
 		Code:      code,
-		Detail:    bootstrapFailureDetail(code),
+		Class:     ClassifyUnknownBootstrapError(err),
+		Detail:    unknownBootstrapDetail(err),
 		Cause:     err,
 	}
 }

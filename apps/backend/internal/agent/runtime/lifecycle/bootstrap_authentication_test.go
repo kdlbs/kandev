@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"testing"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
@@ -50,11 +52,30 @@ func TestBootstrapAuthenticationCause(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-		err  error
+		name       string
+		err        error
+		wantClass  string
+		wantDetail string
 	}{
 		{name: "forged code text", err: errors.New("ACP error code -32000 authentication required")},
 		{name: "unsupported typed cause", err: &testSessionAuthenticationError{failure: agentctltypes.SessionOperationFailure{Code: "internal_error"}, cause: errors.New("authentication required")}},
+		{
+			name:      "existing bootstrap wrapper keeps the connection class",
+			err:       &BootstrapFailure{Code: models.AgentErrorCauseCodeUnknown, Cause: &net.OpError{Op: "dial", Err: errors.New("fixture unreachable")}},
+			wantClass: BootstrapClassAgentctlUnreachable,
+		},
+		{
+			name:       "start rejection drops unclassified detail",
+			err:        fmt.Errorf("start failed: %w", &agentctl.StartRejectedError{StatusCode: 500, AgentctlError: "opaque-provider-fixture"}),
+			wantClass:  BootstrapClassAgentctlStartRejected,
+			wantDetail: "agentctl rejected the start request (HTTP 500).",
+		},
+		{
+			name:       "start rejection keeps a fixed request reason",
+			err:        &agentctl.StartRejectedError{StatusCode: 400, AgentctlError: "invalid start request"},
+			wantClass:  BootstrapClassAgentctlStartRejected,
+			wantDetail: "agentctl rejected the start request (HTTP 400). invalid start request",
+		},
 		{name: "cancellation", err: context.Canceled},
 		{name: "timeout", err: context.DeadlineExceeded},
 	} {
@@ -62,6 +83,14 @@ func TestBootstrapAuthenticationCause(t *testing.T) {
 			got := bootstrapFailureFor(&AgentExecution{}, tc.err)
 			if got == nil {
 				t.Fatal("bootstrapFailureFor returned nil")
+			}
+			if tc.wantClass != "" {
+				if got.SafeClass() != tc.wantClass {
+					t.Fatalf("safe class = %q, want %q", got.SafeClass(), tc.wantClass)
+				}
+				if tc.wantDetail != "" && got.SafeDetail() != tc.wantDetail {
+					t.Fatalf("safe detail = %q, want %q", got.SafeDetail(), tc.wantDetail)
+				}
 			}
 			if tc.name == "timeout" {
 				if got.SafeCode() != models.AgentErrorCauseCodeTimeout {

@@ -14,6 +14,12 @@ const RestoreReasonTransport = lifecycle.RestoreReasonTransport
 // agent execution fails before it becomes ready.
 type BootstrapFailure = lifecycle.BootstrapFailure
 
+// ClassifyUnknownBootstrapError maps a failure without an allowlisted cause
+// code to its bounded bootstrap class.
+func ClassifyUnknownBootstrapError(err error) string {
+	return lifecycle.ClassifyUnknownBootstrapError(err)
+}
+
 // RepositoryPreparationError identifies the repository whose preparation
 // prevented a multi-repository launch.
 type RepositoryPreparationError = lifecycle.RepositoryPreparationError

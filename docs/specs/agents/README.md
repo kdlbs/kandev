@@ -86,6 +86,7 @@ Kandev host, which retain their own plugin-system ownership.
 - [Workspace MCP Configuration](requirements/workspace-mcp-configuration.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
 - [Probe Failure Diagnostics](requirements/probe-failure-diagnostics.md)
+- [Unknown Bootstrap Failure Class](requirements/unknown-bootstrap-failure-class.md)
 
 ### System design
 

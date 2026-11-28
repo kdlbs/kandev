@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -446,14 +447,16 @@ func TestStart_ReturnsTheExecutedCommand(t *testing.T) {
 
 func TestStart_FailureModes(t *testing.T) {
 	tests := []struct {
-		name    string
-		status  int
-		body    string
-		wantErr string
+		name              string
+		status            int
+		body              string
+		wantErr           string
+		wantRejected      bool
+		wantAgentctlError string
 	}{
-		{"non-2xx status", http.StatusConflict, `already running`, "start request failed with status 409"},
-		{"malformed body", http.StatusOK, `{"success":`, "failed to parse start response"},
-		{"unsuccessful", http.StatusOK, `{"success":false,"error":"binary not found"}`, "start failed: binary not found"},
+		{"non-2xx status", http.StatusConflict, `already running`, "start request failed with status 409", true, ""},
+		{"malformed body", http.StatusOK, `{"success":`, "failed to parse start response", false, ""},
+		{"unsuccessful", http.StatusOK, `{"success":false,"error":"binary not found"}`, "start failed: binary not found", true, "binary not found"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -462,6 +465,13 @@ func TestStart_FailureModes(t *testing.T) {
 			command, err := newHTTPOnlyClient(srv.URL).Start(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+			var rejection *StartRejectedError
+			if errors.As(err, &rejection) != tc.wantRejected {
+				t.Fatalf("typed rejection = %v, want %v", rejection != nil, tc.wantRejected)
+			}
+			if rejection != nil && (rejection.StatusCode != tc.status || rejection.AgentctlError != tc.wantAgentctlError) {
+				t.Fatal("typed rejection did not retain the response status and structured reason")
 			}
 			if command != "" {
 				t.Errorf("command = %q, want empty on failure", command)
