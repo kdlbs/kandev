@@ -40,6 +40,7 @@ import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspa
 import { WorkspaceAccessSettings } from "./workspace-access-settings";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import { WorkspaceRuntimeFootprintSection } from "./workspace-runtime-footprint-section";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -569,6 +570,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onEnabledChange={setIdleSuspensionEnabled}
         onTimeoutChange={setIdleTimeoutMinutes}
       />
+      <WorkspaceRuntimeFootprintSection workspaceId={workspace.id} />
       <WorkspaceAccessSettings workspace={workspace} />
       <DeleteWorkspaceCard
         canManage={canManage}
