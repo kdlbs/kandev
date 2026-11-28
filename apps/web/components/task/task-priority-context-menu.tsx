@@ -1,6 +1,6 @@
 "use client";
 
-import { IconFlag } from "@tabler/icons-react";
+import { IconListNumbers } from "@tabler/icons-react";
 import { ContextMenuItem, ContextMenuSub, ContextMenuSubTrigger } from "@kandev/ui/context-menu";
 import { TaskContextMenuSubContent as ContextMenuSubContent } from "./task-context-menu-sub-content";
 import { useTranslation } from "react-i18next";
@@ -25,7 +25,7 @@ export function TaskPriorityContextMenu({
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid="task-context-priority" disabled={disabled}>
-        <IconFlag className="mr-2 h-4 w-4" />
+        <IconListNumbers className="mr-2 h-4 w-4" />
         {t("kanban:priority")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-40">

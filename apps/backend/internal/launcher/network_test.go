@@ -14,7 +14,6 @@ import (
 )
 
 func TestLogStartupPrintsNetworkAddress(t *testing.T) {
-	t.Setenv("KANDEV_SERVER_HOST", "")
 	oldNetworkInterfaces := networkInterfacesFn
 	oldNetworkInterfaceAddrs := networkInterfaceAddrsFn
 	t.Cleanup(func() {
@@ -39,7 +38,7 @@ func TestLogStartupPrintsNetworkAddress(t *testing.T) {
 		logStartup("test", "", portConfig{
 			BackendPort: 38429,
 			BackendURL:  "http://localhost:38429",
-		}, "", "")
+		}, "", "", "0.0.0.0")
 	})
 
 	for _, want := range []string{
@@ -145,6 +144,13 @@ func TestResolveBackendEndpointsMapsBindsAndPrefersLoopback(t *testing.T) {
 		wantAccess string
 	}{
 		{
+			name:       "explicit ipv4 loopback",
+			server:     config.ServerConfig{Host: "127.0.0.1"},
+			wantBinds:  []string{"127.0.0.1"},
+			wantURLs:   []string{"http://127.0.0.1:38429/health"},
+			wantAccess: "http://127.0.0.1:38429",
+		},
+		{
 			name:       "specific address",
 			server:     config.ServerConfig{Host: "192.0.2.10"},
 			wantBinds:  []string{"192.0.2.10"},
@@ -207,6 +213,9 @@ func TestResolveBackendEndpointsPreservesDefaultBrowserOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveBackendEndpoints() error = %v", err)
 	}
+	if !reflect.DeepEqual(got.bindHosts, []string{"127.0.0.1"}) {
+		t.Fatalf("default bind hosts = %v, want [127.0.0.1]", got.bindHosts)
+	}
 	if got.healthTargets[0] != "http://127.0.0.1:38429/health" {
 		t.Fatalf("default health target = %q, want loopback probe", got.healthTargets[0])
 	}
@@ -248,7 +257,6 @@ func TestLogStartupSuppressesNetworkAddressesForLoopbackBind(t *testing.T) {
 		networkInterfacesFn = oldNetworkInterfaces
 		networkInterfaceAddrsFn = oldNetworkInterfaceAddrs
 	})
-	t.Setenv("KANDEV_SERVER_HOST", "127.0.0.1")
 	networkInterfacesFn = func() ([]net.Interface, error) {
 		return []net.Interface{{Name: "eth0", Flags: net.FlagUp}}, nil
 	}
@@ -260,7 +268,7 @@ func TestLogStartupSuppressesNetworkAddressesForLoopbackBind(t *testing.T) {
 		logStartup("test", "", portConfig{
 			BackendPort: 38429,
 			BackendURL:  "http://localhost:38429",
-		}, "", "")
+		}, "", "", "127.0.0.1")
 	})
 	if strings.Contains(output, "network:") {
 		t.Fatalf("startup output = %q, want no network lines for loopback bind", output)

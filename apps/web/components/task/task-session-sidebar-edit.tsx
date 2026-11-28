@@ -17,6 +17,7 @@ export type SidebarTaskEditTarget = {
   workflowId: string;
   workflowStepId: string;
   state?: Task["state"];
+  manualStartRequired?: boolean;
   repositoryId?: string;
   repositories?: TaskRepositorySnapshot[];
   primaryExecutorProfileId?: string;
@@ -39,6 +40,9 @@ export function buildSidebarTaskEditTarget(
     workflowId: item.workflowId,
     workflowStepId,
     state: sourceTask.state,
+    ...(sourceTask.metadata?.fork_pr_requires_manual_start === true &&
+      !sourceTask.primarySessionId &&
+      !sourceTask.sessionCount && { manualStartRequired: true }),
     repositoryId: sourceTask.repositoryId ?? undefined,
     repositories: sourceTask.repositories,
     primaryExecutorProfileId: sourceTask.primaryExecutorProfileId ?? undefined,
@@ -98,6 +102,7 @@ export function SidebarTaskEditDialog({
               description: target.description,
               workflowStepId: target.workflowStepId,
               state: target.state,
+              manualStartRequired: target.manualStartRequired,
               repositoryId: target.repositoryId,
               repositories: target.repositories,
               primaryExecutorProfileId: target.primaryExecutorProfileId,

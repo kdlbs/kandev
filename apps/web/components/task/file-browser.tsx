@@ -2,19 +2,9 @@
 
 import { TaskFolderPicker } from "./task-folder-picker";
 
-import React, {
-  useEffect,
-  useMemo,
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type Ref,
-} from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState, type Ref } from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
-import { useAppStoreApi } from "@/components/state-provider";
-import { isRenameReserved, trackRenameOpen } from "@/hooks/file-rename-continuity";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 import { useMultiSelect } from "@/hooks/use-multi-select";
@@ -22,6 +12,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isEditableKeydownTarget } from "@/lib/keyboard/utils";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { FileBrowserHeader } from "./file-browser-header";
+import { useFileBrowserOpen } from "./use-file-browser-open";
 import {
   insertNodeInTree,
   removeNodeFromTree,
@@ -34,7 +25,6 @@ import {
   useScrollPersistence,
   loadNodeChildren,
   toggleFolderExpand,
-  fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { useFileBrowserData } from "./file-browser-data";
 import { labelFileBrowserPath } from "./file-browser-repository-labels";
@@ -63,54 +53,6 @@ type FileBrowserProps = {
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
 };
-
-function useFileBrowserOpen(sessionId: string, onOpenFile: (file: OpenFileTab) => void) {
-  const { toast } = useToast();
-  const { t } = useTranslation();
-  const store = useAppStoreApi();
-  const openFileAbortRef = useRef<AbortController | null>(null);
-  useLayoutEffect(
-    () => () => {
-      openFileAbortRef.current?.abort();
-      openFileAbortRef.current = null;
-    },
-    [sessionId],
-  );
-
-  const openFileByPath = useCallback(
-    (path: string) => {
-      if (isRenameReserved(store, sessionId, path)) {
-        toast({
-          title: t("task:failedToOpenFile"),
-          variant: "error",
-        });
-        return;
-      }
-      openFileAbortRef.current?.abort();
-      const pendingOpen = trackRenameOpen(store, sessionId, path);
-      const controller = new AbortController();
-      openFileAbortRef.current = controller;
-      return fetchAndOpenFile(
-        sessionId,
-        path,
-        (file) => {
-          if (pendingOpen.current() && !isRenameReserved(store, sessionId, path)) onOpenFile(file);
-        },
-        toast,
-        {
-          signal: controller.signal,
-        },
-      ).finally(() => {
-        pendingOpen.dispose();
-        if (openFileAbortRef.current === controller) {
-          openFileAbortRef.current = null;
-        }
-      });
-    },
-    [sessionId, onOpenFile, toast, store, t],
-  );
-  return openFileByPath;
-}
 
 function useFileBrowserHandlers(
   sessionId: string,

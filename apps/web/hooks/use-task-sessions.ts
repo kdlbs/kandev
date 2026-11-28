@@ -6,7 +6,11 @@ import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
-import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
+import {
+  getTaskSessionReads,
+  publishTaskSessionMembership,
+  type TaskSessionReads,
+} from "@/lib/state/task-session-reads";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -21,6 +25,7 @@ function resolveForcedReloadWaiters(waitersRef: { current: Array<() => void> }) 
 
 async function hydrateTaskSessions({
   taskId,
+  store,
   force,
   isCurrent,
   reads,
@@ -29,6 +34,7 @@ async function hydrateTaskSessions({
   setTaskSessionsError,
 }: {
   taskId: string;
+  store: ReturnType<typeof useAppStoreApi>;
   force: boolean;
   isCurrent: () => boolean;
   reads: TaskSessionReads;
@@ -43,6 +49,7 @@ async function hydrateTaskSessions({
     stateAtRequestStart,
     taskId,
   );
+  const readGeneration = reads.generation(taskId);
   try {
     const response = await reads.read(
       taskId,
@@ -53,7 +60,7 @@ async function hydrateTaskSessions({
         }),
       { refresh: force },
     );
-    if (!isCurrent()) return false;
+    if (!isCurrent() || !reads.isCurrent(taskId, readGeneration)) return false;
     const fetchedSessions = response.sessions ?? [];
     const fetchedSessionIds = new Set(fetchedSessions.map((session) => session.id));
     const sessionsAddedDuringLoad = storedTaskSessions(getStoreState, taskId).filter(
@@ -65,9 +72,11 @@ async function hydrateTaskSessions({
       hydrationEpochsAtRequestStart,
     );
     getStoreState().reconcileWorkflowSessionFocus?.(taskId);
+    publishTaskSessionMembership(store, reads, taskId, readGeneration, response);
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
-    if (!isCurrent() || isAbortError(error)) return false;
+    if (!isCurrent() || !reads.isCurrent(taskId, readGeneration) || isAbortError(error))
+      return false;
     console.error("Failed to load task sessions:", error);
     // A failed initial request must not turn an empty list into an
     // authoritative snapshot. Reconcile existing live rows when available so
@@ -285,6 +294,7 @@ export function useTaskSessions(taskId: string | null) {
       try {
         await hydrateCurrentTaskSessions({
           taskId,
+          store,
           force,
           isCurrent: () => reads.isCurrent(taskId),
           reads,
@@ -307,6 +317,7 @@ export function useTaskSessions(taskId: string | null) {
     },
     [
       getStoreState,
+      store,
       isLoaded,
       isLoading,
       reads,

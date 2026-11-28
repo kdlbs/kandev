@@ -1,5 +1,7 @@
 {
   "addFlag": "フラグを追加",
+  "changeFlag": "フラグを変更",
+  "editFlag": "フラグを編集",
   "flag": "フラグ",
   "flagNote": "フラグのメモ",
   "removeFlag": "フラグを削除",

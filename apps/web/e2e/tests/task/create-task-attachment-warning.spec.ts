@@ -31,14 +31,16 @@ test("warns when a pasted image is too large for a new task", async ({ testPage 
 
   const overlay = testPage.locator('[data-slot="dialog-overlay"]:visible');
   await expect(overlay).toBeVisible();
-  const [toastZIndex, overlayZIndex] = await Promise.all([
-    testPage
-      .getByTestId("toast-container")
-      .evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
-    overlay.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10)),
-  ]);
+  const dialogWarning = testPage
+    .getByTestId("create-task-dialog")
+    .getByTestId("modal-toast-outlet")
+    .getByTestId("toast-message")
+    .filter({ hasText: "Attachment is too large" });
+  await expect(dialogWarning).toBeVisible();
   expect(
-    toastZIndex,
-    "attachment warning should render above the task dialog overlay",
-  ).toBeGreaterThan(overlayZIndex);
+    await dialogWarning.evaluate(
+      (element) => element.closest('[data-slot="dialog-content"]') !== null,
+    ),
+    "attachment warning should be placed inside the dialog above its overlay",
+  ).toBe(true);
 });

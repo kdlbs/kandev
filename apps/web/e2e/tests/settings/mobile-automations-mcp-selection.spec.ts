@@ -8,6 +8,7 @@ import {
   saveAutomationMCP,
   verifyAutomationMCPRecovery,
   verifyAutomationMCPRepositoryInheritance,
+  openAutomationTools,
 } from "../../helpers/automation-mcp";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
@@ -43,6 +44,7 @@ test("selects and saves every optional package on a phone with reachable control
   });
   const watcher = watchWs(testPage);
   await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`);
+  await openAutomationTools(testPage, true);
   const section = testPage.getByTestId("automation-mcp-access");
   for (const id of OPTIONAL_AUTOMATION_PACKAGES) {
     const row = section.getByTestId(`automation-mcp-package-${id}`);
@@ -70,6 +72,7 @@ test("selects and saves every optional package on a phone with reachable control
   await detail.getByRole("button", { name: "Back to packages", exact: true }).tap();
   await saveAutomationMCP(testPage, watcher);
   await testPage.reload();
+  await openAutomationTools(testPage, true);
   for (const id of OPTIONAL_AUTOMATION_PACKAGES)
     await expect(
       section.getByTestId(`automation-mcp-choice-${id}`).getByRole("switch"),
@@ -113,6 +116,7 @@ test.describe("Narrow fine pointer", () => {
     await testPage.goto(
       `/settings/workspaces/${seedData.workspaceId}/automations/${automation.id}`,
     );
+    await openAutomationTools(testPage);
     const row = testPage.getByTestId("automation-mcp-package-configuration");
     await expect(row).toBeVisible();
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);

@@ -19,6 +19,9 @@ type Question struct {
 	Options         []Option       `json:"options"` // 2-6 options
 	AllowCustomText *bool          `json:"allow_custom_text,omitempty"`
 	Images          QuestionImages `json:"images,omitempty"`
+	// ImageGroups declares which images the review view compares as pairs and
+	// which it shows alone. Omitted groups show the images as a gallery.
+	ImageGroups QuestionImageGroups `json:"image_groups,omitempty"`
 }
 
 // AnswerAttachment identifies one file-backed upload attached to an answer.

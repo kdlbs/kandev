@@ -27,6 +27,8 @@ type Store struct {
 	db                   *sqlx.DB // writer
 	ro                   *sqlx.DB // reader
 	launchIdentityGuards bool
+	// runRecorded, when set, is called after a run row insert commits.
+	runRecorded func(ctx context.Context, automationID, runID string, status RunStatus)
 }
 
 // NewStore creates a new automation store and initializes the schema.
@@ -362,13 +364,14 @@ const automationColumns = `created_by_user_id, id, workspace_id, name, descripti
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
 	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
+	follow_up_prompt, pr_continuation_step_id, pr_merged_action, pr_closed_action,
 	retry_policy, plugin_tools, mcp_selection, mcp_selection_revision, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 // initSchema creates automation tables and applies required migrations for the active database
 // driver.
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL, s.db.DriverName())); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL+prObservationTablesSQL+prContinuationTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)
@@ -438,6 +441,13 @@ func (s *Store) initSchema() error {
 		{"automation_runs.retry_continuation_snapshot", schemaSQLForDriver(migrateRunRetryContinuationSQL, s.db.DriverName())},
 		{"automation_runs.automation_revision", schemaSQLForDriver(migrateRunRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_runs.trigger_revision", schemaSQLForDriver(migrateRunRetryTriggerRevisionSQL, s.db.DriverName())},
+		{"automations.follow_up_prompt", `ALTER TABLE automations ADD COLUMN follow_up_prompt TEXT NOT NULL DEFAULT ''`},
+		{"automations.pr_continuation_step_id", `ALTER TABLE automations ADD COLUMN pr_continuation_step_id TEXT NOT NULL DEFAULT ''`},
+		{"automations.pr_merged_action", `ALTER TABLE automations ADD COLUMN pr_merged_action TEXT NOT NULL DEFAULT 'keep'`},
+		{"automations.pr_closed_action", `ALTER TABLE automations ADD COLUMN pr_closed_action TEXT NOT NULL DEFAULT 'keep'`},
+		{"automation_pr_observations.tracked_events", `ALTER TABLE automation_pr_observations ADD COLUMN tracked_events TEXT NOT NULL DEFAULT ''`},
+		{"automation_pr_observations.pending_review_generation", `ALTER TABLE automation_pr_observations ADD COLUMN pending_review_generation BIGINT NOT NULL DEFAULT 0`},
+		{"automation_pr_observations.pending_review_reviewers", `ALTER TABLE automation_pr_observations ADD COLUMN pending_review_reviewers TEXT NOT NULL DEFAULT '[]'`},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
@@ -704,6 +714,10 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		a.MCPSelectionRevision = 1
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET mcp_selection = ?, mcp_selection_revision = ? WHERE id = ?`), string(selectionJSON), a.MCPSelectionRevision, a.ID); err != nil {
+		return err
+	}
+	a.normalize()
+	if err := writePRContinuationSettings(ctx, tx, a.ID, a.PRContinuationSettings); err != nil {
 		return err
 	}
 	if err := insertAutomationRepositories(ctx, tx, a.ID, a.Repositories); err != nil {
@@ -984,6 +998,14 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if err := writeAutomationUpdateRow(ctx, tx, id, a, automationUpdateCondition{previousMCPRevision, previousTaskMode}); err != nil {
 		return nil, err
 	}
+	if a.ContinuationPolicy != ContinuationPolicyReusePerPR {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+			return nil, err
+		}
+	}
+	if err := writePRContinuationSettings(ctx, tx, id, a.PRContinuationSettings); err != nil {
+		return nil, err
+	}
 	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
 		return nil, err
 	}
@@ -1011,6 +1033,7 @@ func validateAutomationUpdateCondition(a *Automation, req *UpdateAutomationReque
 // the write transaction.
 func prepareAutomationUpdate(a *Automation, req *UpdateAutomationRequest) error {
 	applyAutomationUpdate(a, req)
+	applyPRContinuationUpdate(a, req)
 	selectionJSON, err := json.Marshal(a.MCPSelection)
 	if err != nil {
 		return err
@@ -1062,6 +1085,9 @@ func normalizeAutomationUpdateSettings(a *Automation) error {
 		a.MaxConcurrentRuns = 1
 	}
 	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
+		return err
+	}
+	if err := validatePRContinuationSettings(a.ContinuationPolicy, a.TaskMode, a.PRContinuationSettings); err != nil {
 		return err
 	}
 	a.UpdatedAt = time.Now().UTC()
@@ -1259,6 +1285,12 @@ func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
 	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
 		return err
 	}
@@ -1372,6 +1404,12 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, clea
 	if err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`), id); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
 		return nil, err
 	}
@@ -1393,8 +1431,10 @@ func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string,
 		 FROM automation_run_operations o
 		 JOIN automation_runs ar ON ar.id = o.run_id
 		 WHERE ar.automation_id = ? AND o.operation_kind = ?
-			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
-		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+			AND o.state IN (?, ?) AND o.external_task_id != ''
+		 UNION
+		 SELECT DISTINCT task_id FROM automation_pr_continuations WHERE automation_id = ? AND task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous, id); err != nil {
 		return nil, err
 	}
 	var continuationTaskID string
@@ -1425,8 +1465,10 @@ func listAutomationCleanupTaskIDs(ctx context.Context, tx *sqlx.Tx, id, continua
 		 FROM automation_run_operations o
 		 JOIN automation_runs ar ON ar.id = o.run_id
 		 WHERE ar.automation_id = ? AND o.operation_kind = ?
-			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
-		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+			AND o.state IN (?, ?) AND o.external_task_id != ''
+		 UNION
+		 SELECT DISTINCT task_id FROM automation_pr_continuations WHERE automation_id = ? AND task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous, id); err != nil {
 		return nil, err
 	}
 	if continuationTaskID != "" {
@@ -1687,6 +1729,9 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 
 // DeleteTrigger removes a trigger.
 func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
+	if err := s.deletePRObservationsForTrigger(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_triggers WHERE id = ?`), id)
 	return err
 }
@@ -1759,7 +1804,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.RetryLaunchConfigSnapshot, r.RetryLaunchConfigVersion, r.RetryResolvedPrompt,
 		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot,
 		r.AutomationRevision, r.TriggerRevision, r.CreatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	s.notifyRunRecorded(ctx, r.AutomationID, r.ID, r.Status)
+	return nil
 }
 
 // AdoptTriggeredRun upgrades the admission row for callers that still report
@@ -2806,6 +2855,10 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`), time.Now().UTC(), automationID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), automationID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM automation_retry_event_receipts
 		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
@@ -2856,7 +2909,12 @@ func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID st
 		if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
 			return 0, err
 		}
-		for _, query := range []string{`DELETE FROM automation_triggers WHERE automation_id = ?`, `DELETE FROM automation_runs WHERE automation_id = ?`} {
+		for _, query := range []string{
+			`DELETE FROM automation_pr_observations WHERE trigger_id IN (SELECT id FROM automation_triggers WHERE automation_id = ?)`,
+			`DELETE FROM automation_pr_continuations WHERE automation_id = ?`,
+			`DELETE FROM automation_triggers WHERE automation_id = ?`,
+			`DELETE FROM automation_runs WHERE automation_id = ?`,
+		} {
 			if _, err := tx.ExecContext(ctx, tx.Rebind(query), id); err != nil {
 				return 0, err
 			}

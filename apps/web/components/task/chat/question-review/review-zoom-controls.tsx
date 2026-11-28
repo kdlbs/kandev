@@ -10,6 +10,7 @@ export const reviewToolbarRow =
   "flex flex-wrap items-center gap-x-3 gap-y-1.5 max-md:flex-nowrap max-md:overflow-x-auto max-md:overscroll-x-contain max-md:pb-1 [&>*]:shrink-0";
 
 export const reviewControlSize = "h-7 cursor-pointer [@media(pointer:coarse)]:h-12 max-md:h-12";
+const textControlSize = `${reviewControlSize} [@media(pointer:coarse)]:min-w-12 max-md:min-w-12`;
 const iconControlSize =
   "h-7 w-7 cursor-pointer [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 max-md:h-12 max-md:w-12";
 
@@ -24,7 +25,7 @@ export function ReviewZoomControls({ scale, onZoom, onFit, onActual }: Props) {
   const { t } = useTranslation();
   const level = formatZoom(scale);
   return (
-    <div className="flex items-center gap-1" data-testid="question-review-zoom">
+    <div className="flex flex-wrap items-center gap-1" data-testid="question-review-zoom">
       <Button
         type="button"
         variant="outline"
@@ -56,7 +57,7 @@ export function ReviewZoomControls({ scale, onZoom, onFit, onActual }: Props) {
       <Button
         type="button"
         variant="outline"
-        className={reviewControlSize}
+        className={textControlSize}
         data-testid="question-review-fit"
         onClick={onFit}
       >
@@ -65,7 +66,7 @@ export function ReviewZoomControls({ scale, onZoom, onFit, onActual }: Props) {
       <Button
         type="button"
         variant="outline"
-        className={reviewControlSize}
+        className={textControlSize}
         data-testid="question-review-actual"
         onClick={onActual}
       >

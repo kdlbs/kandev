@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import { IconArrowsExchange, IconChevronDown, IconDots, IconPhoto } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useTranslation } from "react-i18next";
 import { COMPARE_MODES, type CompareMode } from "@/lib/question-review/compare";
 import { imageShortName, type ReviewImage } from "@/lib/question-review/segments";
@@ -11,6 +12,7 @@ import { formatZoom } from "@/lib/question-review/viewport";
 import { cn } from "@/lib/utils";
 import { useCompareModeLabel } from "./review-compare-toolbar";
 import { ReviewImageOptions } from "./review-image-option";
+import { ReviewZoomControls } from "./review-zoom-controls";
 
 const touchButton = "min-h-11 cursor-pointer";
 
@@ -102,7 +104,7 @@ export function ModeSheetButton({
   );
 }
 
-/** Rarely used stage actions on phones: zoom steps, Fit, Actual size, Mark area. */
+/** Rarely used stage actions on phones, such as Mark area. */
 export function MoreSheetButton({ children }: { children: (close: () => void) => ReactNode }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -216,29 +218,50 @@ function PickerSection(props: PickerProps & { slot: "a" | "b" }) {
   );
 }
 
-/** Zoom level on the image; a tap switches between Fit and 100%. */
-export function ZoomChip({ scale, onToggle }: { scale: number; onToggle: () => void }) {
+type ZoomChipProps = {
+  scale: number;
+  onZoom: (direction: 1 | -1) => void;
+  onFit: () => void;
+  onActual: () => void;
+  /** Keeps the popover inside the review dialog's layer. */
+  container?: RefObject<HTMLElement | null>;
+};
+
+/** Zoom level on the image; a tap opens the zoom controls beside it. */
+export function ZoomChip({ scale, onZoom, onFit, onActual, container }: ZoomChipProps) {
   const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      className="pointer-events-auto absolute right-2 bottom-2 z-10 flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border border-border bg-background/90 px-3 text-xs tabular-nums shadow-sm"
-      aria-label={t("task:questionReviewZoomChip", { level: formatZoom(scale) })}
-      data-testid="question-review-zoom-chip"
-      onPointerDown={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-      onClick={onToggle}
-    >
-      {formatZoom(scale)}
-    </button>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-full border border-border bg-background/90 px-3 text-xs tabular-nums shadow-sm"
+          aria-label={t("task:questionReviewZoomChip", { level: formatZoom(scale) })}
+          data-testid="question-review-zoom-chip"
+          onPointerDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {formatZoom(scale)}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="end"
+        portalContainer={container?.current}
+        className="w-auto max-w-[calc(100vw-1rem)] p-2 data-closed:animate-none!"
+        data-testid="question-review-zoom-popover"
+      >
+        <ReviewZoomControls scale={scale} onZoom={onZoom} onFit={onFit} onActual={onActual} />
+      </PopoverContent>
+    </Popover>
   );
 }
 
-/** Status text over the image on phones, instead of a toolbar row. */
+/** Status text over the image, instead of a toolbar row. */
 export function StatusChips({ children }: { children: ReactNode }) {
   return (
     <div
-      className="pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-4.5rem)] flex-wrap gap-1 [&>*]:rounded-full [&>*]:bg-background/90 [&>*]:px-2 [&>*]:py-1 [&>*]:shadow-sm"
+      className="contents [&>*]:rounded-full [&>*]:bg-background/90 [&>*]:px-2 [&>*]:py-1 [&>*]:shadow-sm"
       data-testid="question-review-status-chips"
     >
       {children}

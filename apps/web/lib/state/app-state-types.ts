@@ -258,6 +258,7 @@ export type AppState = KanbanSlice & {
   connection: (typeof defaultUIState)["connection"];
   mobileKanban: (typeof defaultUIState)["mobileKanban"];
   mobileSession: (typeof defaultUIState)["mobileSession"];
+  tabletSession: (typeof defaultUIState)["tabletSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
   transcriptAutoScroll: (typeof defaultUIState)["transcriptAutoScroll"];
   reviewPRSelection: (typeof defaultUIState)["reviewPRSelection"];
@@ -404,6 +405,7 @@ export type AppState = KanbanSlice & {
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
+  setTabletSessionTab: UIA["setTabletSessionTab"];
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
@@ -547,7 +549,7 @@ export type AppState = KanbanSlice & {
     sessionIds: string[],
     projection: WorkspaceRecoveryProjection,
   ) => void;
-  removeTaskSession: (taskId: string, sessionId: string) => void;
+  removeTaskSession: (taskId: string, sessionId: string, options?: { confirmed?: boolean }) => void;
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],

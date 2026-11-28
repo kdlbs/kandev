@@ -816,6 +816,16 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		return nil
 	}
 	monitorCommand := ""
+	if payload != nil && !payload.IsMCPTool() && payload.Generic() != nil &&
+		payload.Generic().Name == acpToolCallKindOther && tcu.RawInput != nil &&
+		(a.agentID == cursorAgentID || a.agentID == grokAgentID) {
+		if frame, ok := a.dialect.parseMCPToolCall(tcu.Meta, tcu.RawInput); ok {
+			promoted := streams.NewMCPTool(frame.name, frame.arguments)
+			promoted.Generic().Output = payload.Generic().Output
+			payload = promoted
+			a.activeToolCalls[emittedToolCallID] = promoted
+		}
+	}
 	canonicalMCPUpdate := payload != nil && payload.IsMCPTool() && payload.Generic() != nil
 	if payload != nil && !canonicalMCPUpdate && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
 		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)

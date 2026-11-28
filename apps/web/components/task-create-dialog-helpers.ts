@@ -122,9 +122,9 @@ export function computeEffectiveStepId(
 
 export function computeIsTaskStarted(
   isEditMode: boolean,
-  editingTask?: { state?: Task["state"] } | null,
+  editingTask?: { state?: Task["state"]; manualStartRequired?: boolean } | null,
 ) {
-  if (!isEditMode || !editingTask?.state) return false;
+  if (!isEditMode || !editingTask?.state || editingTask.manualStartRequired) return false;
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
 

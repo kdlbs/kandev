@@ -136,17 +136,15 @@ function applySavedMaximize(
   api.fromJSON(sanitizedMaximized as SerializedDockview);
   const { width, height } = measureDockviewContainer(api);
   api.layout(width, height);
-  const ids = applyLayoutFixups(api, undefined, manualRightWidth);
-  // The maximize JSON is 2-column — captureRightTarget skips it (sv.length < 3).
-  // Seed the right target directly so enforcePinnedTargets can snap the column
-  // back to the saved width when the user exits maximize mode.
+  const ids = applyLayoutFixups(api, undefined, manualRightWidth, undefined, maximizedGroupId);
+  // Keep the ordinary right width for exit without constraining the overlay.
   if (manualRightWidth !== undefined && manualRightWidth !== null && manualRightWidth > 0) {
     setPinnedTarget("right", manualRightWidth);
   }
   useDockviewStore.setState({
     ...ids,
     preMaximizeLayout,
-    maximizedGroupId: ids.centerGroupId,
+    maximizedGroupId: maximizedGroupId ?? ids.centerGroupId,
     rightPanelsVisible: hasRightColumn(preMaximizeLayout),
   });
   return true;

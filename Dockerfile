@@ -70,20 +70,22 @@ RUN mkdir -p /app/apps/backend/bin /data/worktrees
 #   bundle/bin/agentctl                - native agentctl (per-arch)
 #   bundle/bin/agentctl-linux-amd64    - linux/amd64 agentctl helper
 #   bundle/bin/agentctl-linux-arm64    - linux/arm64 agentctl helper
-#   bundle/bin/agentctl-darwin-arm64   - darwin/arm64 agentctl helper
-#   bundle/bin/agentctl-darwin-amd64   - darwin/amd64 agentctl helper
+#   bundle/bin/agentctl-darwin-arm64       - darwin/arm64 agentctl helper
+#   bundle/bin/agentctl-darwin-amd64       - darwin/amd64 agentctl helper
+#   bundle/bin/agentctl-windows-amd64.exe  - windows/amd64 agentctl helper
 #
 # The bundle's platform-specific agentctl helpers are uploaded into remote
 # SSH hosts and bind-mounted into Docker-executor sandboxes by the lifecycle
 # manager; ship them next to kandev so the AgentctlResolver finds them without
 # manual configuration.
-COPY bundle/bin/kandev                 /app/apps/backend/bin/kandev
-COPY bundle/bin/agentctl-linux-amd64   /app/apps/backend/bin/agentctl-linux-amd64
-COPY bundle/bin/agentctl-linux-arm64   /app/apps/backend/bin/agentctl-linux-arm64
-COPY bundle/bin/agentctl-darwin-arm64  /app/apps/backend/bin/agentctl-darwin-arm64
-COPY bundle/bin/agentctl-darwin-amd64  /app/apps/backend/bin/agentctl-darwin-amd64
-COPY bundle/bin/agentctl               /usr/local/bin/agentctl
-COPY docker-entrypoint.sh              /usr/local/bin/docker-entrypoint.sh
+COPY bundle/bin/kandev                     /app/apps/backend/bin/kandev
+COPY bundle/bin/agentctl-linux-amd64       /app/apps/backend/bin/agentctl-linux-amd64
+COPY bundle/bin/agentctl-linux-arm64       /app/apps/backend/bin/agentctl-linux-arm64
+COPY bundle/bin/agentctl-darwin-arm64      /app/apps/backend/bin/agentctl-darwin-arm64
+COPY bundle/bin/agentctl-darwin-amd64      /app/apps/backend/bin/agentctl-darwin-amd64
+COPY bundle/bin/agentctl-windows-amd64.exe /app/apps/backend/bin/agentctl-windows-amd64.exe
+COPY bundle/bin/agentctl                   /usr/local/bin/agentctl
+COPY docker-entrypoint.sh                  /usr/local/bin/docker-entrypoint.sh
 
 # Re-apply executable bits stripped by tar/COPY edge cases, then link the native
 # launcher onto PATH.
@@ -93,6 +95,7 @@ RUN chmod +x \
         /app/apps/backend/bin/agentctl-linux-arm64 \
         /app/apps/backend/bin/agentctl-darwin-arm64 \
         /app/apps/backend/bin/agentctl-darwin-amd64 \
+        /app/apps/backend/bin/agentctl-windows-amd64.exe \
         /usr/local/bin/agentctl \
         /usr/local/bin/docker-entrypoint.sh && \
     ln -s /app/apps/backend/bin/kandev /usr/local/bin/kandev && \
@@ -105,6 +108,7 @@ VOLUME ["/data"]
 # NPM_CONFIG_PREFIX points npm global installs at the PV so user-installed
 # agent CLIs (claude-code, codex, auggie, ...) survive pod restarts.
 ENV KANDEV_NO_BROWSER=1 \
+    KANDEV_INTERNAL_CONTAINER_RUNTIME=1 \
     KANDEV_HOME_DIR=/data \
     KANDEV_DOCKER_ENABLED=false \
     HOME=/data/home \

@@ -1,11 +1,11 @@
 import { isStaleSessionStateEvent } from "@/lib/session-state";
 import { describe, it, expect } from "vitest";
+import { shouldAdoptNewSession } from "./agent-session";
 import {
   isTerminalSessionState,
   pickReplacementSessionId,
-  shouldAdoptNewSession,
   shouldPreservePinnedSessionForTask,
-} from "./agent-session";
+} from "./session-selection";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionState } from "@/lib/types/http";
 

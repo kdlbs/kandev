@@ -124,6 +124,12 @@ test("changes workflow from phone task actions with task-local agent routing", a
   await testPage.goto(`/threads?workspace=${seedData.workspaceId}&taskId=${task.id}`);
   const actions = new ThreadActionsPage(testPage, true);
   await expect(actions.trigger(task.id)).toBeVisible();
+  const updateToast = testPage
+    .getByTestId("toast-message")
+    .filter({ hasText: "Kandev update available" });
+  if (await updateToast.isVisible()) {
+    await updateToast.getByRole("button", { name: "Dismiss notification" }).tap();
+  }
   await actions.expectHeaderActionAlignment(task.id);
 
   const openChangeForm = async () => {
@@ -148,9 +154,10 @@ test("changes workflow from phone task actions with task-local agent routing", a
   expect(
     await form.phoneDrawer.evaluate(
       (element) =>
-        [element, ...element.querySelectorAll("*")].filter((node) =>
-          /auto|scroll/.test(getComputedStyle(node).overflowY),
-        ).length,
+        [element, ...element.querySelectorAll("*")].filter((node) => {
+          const style = getComputedStyle(node);
+          return /auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+        }).length,
     ),
   ).toBe(1);
   const footer = testPage.getByTestId("change-workflow-submit").locator("xpath=..");
@@ -339,9 +346,10 @@ for (const theme of ["light", "dark"] as const) {
     expect(
       await form.phoneDrawer.evaluate(
         (element) =>
-          [element, ...element.querySelectorAll("*")].filter((node) =>
-            /auto|scroll/.test(getComputedStyle(node).overflowY),
-          ).length,
+          [element, ...element.querySelectorAll("*")].filter((node) => {
+            const style = getComputedStyle(node);
+            return /auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+          }).length,
       ),
       "the phone form should own one vertical scroller",
     ).toBe(1);

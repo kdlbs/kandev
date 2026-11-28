@@ -62,13 +62,24 @@ error wording, plan argument validation order, and task-title limits. Tests
 compare the existing MCP tool schemas and invalid-plan responses before and
 after extraction. A checked-in dependency-graph test must fail whenever
 `go list -deps ./cmd/agentctl` contains `internal/task/service` or any
-`k8s.io/` package. The native and all four CGO-disabled remote builds use the
+`k8s.io/` package. The native and all five CGO-disabled remote builds use the
 same command package and contract.
 
 ## Artifact production
 
+The Windows helper exists for SSH executor Windows hosts. Its requirement is
+[REQ-EXECUTORS-SSH-WINDOWS-002](../../executors/requirements/ssh-windows-remote.md).
+No `windows/arm64` helper is built.
+
+A backfill of a tag cut before the Windows helper shipped republishes that
+tag's four helpers. `prepare` sets `windows_helper` from the tag's own
+`scripts/release/remote-helper-assets.mjs`. The helper build, bundle packaging,
+staged asset checks, and `existing-release.mjs verify --windows-helper` follow
+it. Every new Stable and Nightly release sets it to `true` and requires all five
+helpers.
+
 One required `build-remote-helpers` job in `.github/workflows/release.yml`
-builds the four CGO-disabled Linux/macOS helpers for the exact release ref for
+builds the five CGO-disabled Linux, macOS, and Windows (`windows/amd64`) helpers for the exact release ref for
 both Stable and Nightly. It uses the full commit SHA, the commit timestamp
 instead of a matrix-job wall clock, and `-trimpath` so a retry or backfill
 produces identical helper bytes. The host `kandev` and native `agentctl`
@@ -84,7 +95,7 @@ not publish or need an asset-fetch manifest.
 ### Artifact download boundary
 
 The Actions artifact download extracts files without preserving executable
-permissions. Each consumer restores mode `0755` on the four known helper
+permissions. Each consumer restores mode `0755` on the five known helper
 paths before validation or copying. Both `build-bundles` and
 `verify-release-assets` apply this rule after downloading
 `canonical-remote-helpers` into `dist/remote-helper-artifact`.
@@ -105,7 +116,7 @@ also require restoration before verification and bundle packaging.
 The bundle-local `remote-helpers.json` at the archive root has a schema
 version, Stable version and full commit SHA, bundle variant (`standard` or
 `full`), and
-exactly four enumerated helper records. Each record has the platform, fixed
+exactly five enumerated helper records. Each record has the platform, fixed
 asset basename, uncompressed SHA-256, and uncompressed size. The publisher
 also provides SHA-256 sidecars for each public compressed asset. Runtime code
 derives `https://github.com/kdlbs/kandev/releases/download/v<version>/<asset>`
@@ -116,7 +127,7 @@ asset-CDN redirect. A bounded size is checked before and during decompression.
 | Output                                                     | Contents                                          | Consumer                                                       |
 | ---------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
 | `kandev-<platform>.tar.gz` after cutover                   | Host binaries and `remote-helpers.json`           | Stable GitHub, npm, Homebrew tap, Scoop, Desktop build input   |
-| `kandev-<platform>-full.tar.gz`                            | Same host binaries and manifest plus four helpers | Stable offline command-line download and container build input |
+| `kandev-<platform>-full.tar.gz`                            | Same host binaries and manifest plus five helpers | Stable offline command-line download and container build input |
 | `agentctl-<goos>-<goarch>.gz`                              | One canonical remote helper                       | First-use Stable resolver                                      |
 | `kandev-windows-x64.zip` and `kandev-windows-x64-full.zip` | ZIP equivalents of the two Windows TAR layouts    | winget, Chocolatey, and offline download                       |
 
@@ -137,7 +148,7 @@ name before the matching runtime and consumer switches are present.
 `scripts/release/package-bundle.sh` gains explicit standard/full validation;
 its default remains the complete layout for source builds and existing `make`
 targets. The standard validator refuses bundled remote executables or missing
-manifest entries. The full validator requires all four helpers, verifies their
+manifest entries. The full validator requires all five helpers, verifies their
 manifest digests, and checks the Darwin arm64 signature. Build output
 publication checks every required archive, checksum, and helper before a
 GitHub Release is written. An existing release helper asset with the same
@@ -187,7 +198,7 @@ This host path never adds SDK assets to an already published host release.
 ## Channel consumption
 
 `publish-release` publishes standard/full archives, Windows ZIP variants, and
-the four helper assets with sidecars. `publish-npm.sh` continues to package
+the five helper assets with sidecars. `publish-npm.sh` continues to package
 the exact `kandev-<platform>.tar.gz` Stable archive; the npm runtime packager
 (`scripts/release/package-npm-runtime.sh`) also copies the bundle-root manifest
 beside `bin/`. Homebrew tap, Scoop, winget, and Chocolatey continue to use
@@ -198,7 +209,7 @@ retired in coordination with the first slim release.
 
 The `build-desktop` job consumes the default standard archive. Its preparation
 script copies the host `bin/kandev`, host `bin/agentctl`, and bundle-root
-`remote-helpers.json` into the Tauri resource tree; it does not copy the four
+`remote-helpers.json` into the Tauri resource tree; it does not copy the five
 remote helpers. The shell validator and Rust `validate_runtime_dir` accept a
 manifest-bearing standard resource tree with both host binaries, and also
 accept an older complete tree without a manifest. Neither accepts a partial
@@ -226,7 +237,7 @@ uses that same value. A directly invoked backend uses the executable-path
 fallback. Neither process searches the working directory or accepts a
 manifest from an unrelated install. A valid `standard` manifest requires only
 the native executables and
-manifest; a valid `full` manifest additionally requires the four local
+manifest; a valid `full` manifest additionally requires the five local
 helpers. A legacy bundle with no manifest retains the current complete-bundle
 validation. The installed manifest version and commit must match the running
 `cmd/kandev` build information.

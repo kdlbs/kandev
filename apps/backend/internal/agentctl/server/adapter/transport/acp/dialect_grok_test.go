@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -187,6 +188,18 @@ func TestSetGrokModel_UsesSessionSetModel(t *testing.T) {
 	// Prior effort still valid for target model → carried in meta.
 	if conn.reqs[0].Meta[grokReasoningEffortMetaKey] != "high" {
 		t.Fatalf("meta.reasoningEffort = %v, want high", conn.reqs[0].Meta[grokReasoningEffortMetaKey])
+	}
+	advertised := a.GetSessionModelState()
+	if advertised == nil || advertised.ConfigOptionsComplete ||
+		!slices.Equal(advertised.VerifiedConfigOptionIDs, []string{configOptionIDReasoningEffort}) {
+		t.Fatalf("Grok reasoning catalog evidence: %+v", advertised)
+	}
+
+	if err := a.setModelWithConn(t.Context(), conn, "sess-grok", "grok-build"); err != nil {
+		t.Fatal(err)
+	}
+	if state := a.GetSessionModelState(); state.HasConfigOptionEvidence() {
+		t.Fatalf("model without reasoning published catalog evidence: %+v", state)
 	}
 }
 

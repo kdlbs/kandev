@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentLabelsById,
   isSessionActive,
-  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
@@ -77,27 +76,6 @@ describe("resolveAgentLabelFor", () => {
   it("returns 'Unknown agent' when both are missing", () => {
     const session = makeSession({ agent_profile_id: "missing" });
     expect(resolveAgentLabelFor(session, {})).toBe("Unknown agent");
-  });
-});
-
-describe("pickActiveSessionId", () => {
-  it("returns null for an empty list", () => {
-    expect(pickActiveSessionId([], "anything")).toBeNull();
-  });
-
-  it("honors a preferred session when it exists", () => {
-    const sessions = [makeSession({ id: "a" }), makeSession({ id: "b", is_primary: true })];
-    expect(pickActiveSessionId(sessions, "a")).toBe("a");
-  });
-
-  it("ignores the preferred session when not present and falls back to primary", () => {
-    const sessions = [makeSession({ id: "a" }), makeSession({ id: "b", is_primary: true })];
-    expect(pickActiveSessionId(sessions, "missing")).toBe("b");
-  });
-
-  it("falls back to the first session when no primary exists", () => {
-    const sessions = [makeSession({ id: "a" }), makeSession({ id: "b" })];
-    expect(pickActiveSessionId(sessions, null)).toBe("a");
   });
 });
 

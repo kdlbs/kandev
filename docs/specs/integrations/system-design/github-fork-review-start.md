@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001
 created: 2026-09-23
-updated: 2026-11-23
+updated: 2026-11-27
 owners:
   - kandev
 ---
@@ -26,6 +26,7 @@ continues to own repository-qualified PR preparation.
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.4` | [Manual PR-link creation](#manual-pr-link-creation) |
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.5` | [Identity and auto-start token](#identity-and-auto-start-token) |
 | `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.6` | [Task open](#task-open) |
+| `AC-INTEGRATIONS-GITHUB-FORK-REVIEW-START-001.7` | [Task open](#task-open) |
 
 ## Trust boundary
 
@@ -103,10 +104,13 @@ fork-controlled files. Step-derived automatic starts from other sources are
 also suppressed. An explicit `auto_start: true` continues to reach the central
 `StartTask` rejection.
 
-The web client treats the response like any other session-less ensure result.
-The task page shows no error card, and the user starts the agent through the
-existing manual start actions. The central `StartTask` rejection stays in place
-for other automated callers.
+The web client treats the waiting result as an empty chat state. The task page
+and preview show a localized warning and a Start Task action at the bottom of
+chat. Use the existing edit/start dialog and its launch handler. Direct entry
+through Edit shows the same warning above the launch control. Opening or
+dismissing the dialog leaves the task idle. The durable marker covers a known
+fork or a missing source identity. The central StartTask rejection protects
+other automated callers.
 
 ## Manual PR-link creation
 

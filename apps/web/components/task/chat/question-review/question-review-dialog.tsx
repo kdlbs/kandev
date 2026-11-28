@@ -8,10 +8,11 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import type { CompareSettings } from "@/lib/question-review/compare";
+import { createReviewCarry } from "@/lib/question-review/review-carry";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@kandev/ui/dialog";
+import { ModalToastOutlet } from "@kandev/ui/modal-toast-outlet";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@kandev/ui/resizable";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -22,11 +23,15 @@ import { QuestionReviewSegments } from "./question-review-segments";
 import { QuestionReviewStage } from "./question-review-stage";
 import { ReviewLayoutProvider } from "./review-layout";
 import { RegionsSheet, RegionsSidePanel } from "./review-region-panel";
+import { ShowImageContext, useImageRequest } from "./review-image-request";
+import { WipeLiftContext } from "./review-wipe-grip";
 import type { QuestionReviewController } from "./use-question-review";
 import { useReviewAnnotations, type ReviewAnnotations } from "./use-review-annotations";
 
 export type QuestionReviewSubmit = {
   show: boolean;
+  /** "late" sends the answer as a new chat message and uses that action's copy. */
+  label: "submit" | "late";
   enabled: boolean;
   submitting: boolean;
   onSubmit: () => void;
@@ -75,7 +80,8 @@ export function QuestionReviewDialog(props: Props) {
   useClarificationEscapeGuard(guard);
   const annotations = useReviewAnnotations(props.annotations, props.setAnnotations);
   const [bottomBar, setBottomBar] = useState<HTMLDivElement | null>(null);
-  const [compareSettings, setCompareSettings] = useState<CompareSettings>();
+  const [carry] = useState(createReviewCarry);
+  const imageRequest = useImageRequest();
   const focus = useTextEntryFocus();
   const layout = useMemo(
     () => ({ phone, touch: phone || !breakpoint.isFinePointer, bottomBar }),
@@ -90,13 +96,13 @@ export function QuestionReviewDialog(props: Props) {
       segment={segment}
       annotations={annotations}
       popoverContainer={review.scopeRef}
-      compareSettings={compareSettings}
-      onCompareSettings={setCompareSettings}
+      carry={carry}
+      imageRequest={imageRequest.request}
     />
   ) : null;
   const form = (
     <div
-      className={cn("min-h-0 overflow-y-auto overscroll-contain", phone && "pb-2")}
+      className={cn("min-h-0 overflow-y-auto overscroll-contain", phone && "flex-1 pb-2")}
       data-testid="question-review-form"
     >
       {props.form}
@@ -105,6 +111,7 @@ export function QuestionReviewDialog(props: Props) {
   return (
     <Dialog open onOpenChange={(open) => !open && review.closeReview()}>
       <DialogContent
+        toastOutlet={false}
         showCloseButton={false}
         enterConfirms={false}
         data-testid="question-review-dialog"
@@ -131,28 +138,35 @@ export function QuestionReviewDialog(props: Props) {
         )}
       >
         <ReviewLayoutProvider value={layout}>
-          <div
-            ref={review.scopeRef}
-            tabIndex={-1}
-            className="relative flex min-h-0 flex-1 flex-col outline-none"
-          >
-            <ReviewHeader {...props} />
-            {phone ? (
-              <PhoneBody
-                stage={stage}
-                form={form}
-                hideBar={focus.typing}
-                barRef={setBottomBar}
-                regions={segment && <RegionsSheet segment={segment} controller={annotations} />}
-              />
-            ) : (
-              <DesktopBody
-                stage={stage}
-                form={form}
-                regions={segment && <RegionsSidePanel segment={segment} controller={annotations} />}
-              />
-            )}
-          </div>
+          <WipeLiftContext.Provider value={review.wipeLift}>
+            <ShowImageContext.Provider value={imageRequest.show}>
+              <div
+                ref={review.scopeRef}
+                tabIndex={-1}
+                className="relative flex min-h-0 flex-1 flex-col outline-none"
+              >
+                <ReviewHeader {...props} />
+                <ModalToastOutlet className="px-4 pb-2 max-md:px-3 [@media(max-height:500px)]:max-h-[min(11rem,16dvh)]" />
+                {phone ? (
+                  <PhoneBody
+                    stage={stage}
+                    form={form}
+                    hideBar={focus.typing}
+                    barRef={setBottomBar}
+                    regions={segment && <RegionsSheet segment={segment} controller={annotations} />}
+                  />
+                ) : (
+                  <DesktopBody
+                    stage={stage}
+                    form={form}
+                    regions={
+                      segment && <RegionsSidePanel segment={segment} controller={annotations} />
+                    }
+                  />
+                )}
+              </div>
+            </ShowImageContext.Provider>
+          </WipeLiftContext.Provider>
         </ReviewLayoutProvider>
       </DialogContent>
     </Dialog>
@@ -166,12 +180,14 @@ function PhoneBody(
 ) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-[min(55dvh,32rem)] shrink-0 flex-col px-3 pb-2">{props.stage}</div>
-      <div className="flex min-h-0 flex-1 flex-col border-t border-border">{props.form}</div>
+      <div className="flex h-[min(55dvh,32rem)] min-h-0 shrink flex-col px-3 pb-2">
+        {props.stage}
+      </div>
+      <div className="flex min-h-20 flex-1 flex-col border-t border-border">{props.form}</div>
       <div
         ref={props.barRef}
         className={cn(
-          "flex shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-2",
+          "flex shrink-0 flex-col gap-2 border-t border-border bg-background px-3 py-2",
           props.hideBar && "hidden",
         )}
         data-testid="question-review-bottom-bar"
@@ -195,6 +211,13 @@ function DesktopBody(props: BodyProps) {
       </ResizablePanel>
     </ResizablePanelGroup>
   );
+}
+
+function submitLabel(submit: QuestionReviewSubmit, t: (key: string) => string): string {
+  if (submit.label === "late") {
+    return submit.submitting ? t("task:lateAnswerSending") : t("task:lateAnswerSend");
+  }
+  return submit.submitting ? t("task:submitting") : t("task:submit");
 }
 
 function ReviewHeader(props: Props) {
@@ -227,7 +250,7 @@ function ReviewHeader(props: Props) {
             data-testid="question-review-submit"
             onClick={props.submit.onSubmit}
           >
-            {props.submit.submitting ? t("task:submitting") : t("task:submit")}
+            {submitLabel(props.submit, t)}
             {!props.submit.submitting && <IconCheck className="h-3 w-3" aria-hidden="true" />}
           </Button>
         )}

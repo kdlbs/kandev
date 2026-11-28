@@ -25,6 +25,14 @@ only to hidden automation agents.
 It includes Configuration and preserves the Automation principal, hidden-run lifecycle, and Core coordination restrictions.
 Legacy automations retain the fixed catalog. Explicit selections use the linked extension.
 
+## PR continuation extension
+
+[GitHub PR follow-up](automations-pr-follow-up.md) adds a third policy,
+`reuse_per_pr`, which keeps one task per pull request and can archive or
+delete it when the pull request ends. It reuses this
+document's exact run binding and continuation dispatch. The `new_task` and
+`reuse_thread` contracts here are unchanged.
+
 ## Terminology
 
 - **New-task policy:** `new_task`, which creates an isolated hidden task,
@@ -49,7 +57,7 @@ tasks as ordinary Kanban work.
 #### Acceptance criteria
 
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.1:** When an automation is created or
-  edited, the settings form shall show a visible Context between runs choice
+  edited, the settings form shall show a visible **Task for each run** choice
   with `new_task` and `reuse_thread` options.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.2:** When no policy is selected, the
   system shall use `new_task`.
@@ -60,11 +68,12 @@ tasks as ordinary Kanban work.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.4:** When `reuse_thread` is selected,
   the system shall limit the automation to one open run at a time.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-001.5:** When the hidden target is
-  selected, the form shall state that new-task runs use separate conversation
-  and files and that those tasks do not appear in Kanban or the sidebar.
-- **AC-OFFICE-AUTOMATION-CONTINUITY-001.6:** Both policy descriptions shall
-  remain visible and accessible on desktop and mobile, and each choice shall
-  provide a touch target of at least 44 pixels.
+  selected, the form shall state that its tasks do not appear in Kanban or the
+  sidebar, and that new-task runs start with their own conversation and files.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-001.6:** The selected policy's
+  description shall remain visible, and every policy's description shall be
+  available on desktop and mobile. Each choice shall provide a touch target of
+  at least 44 pixels.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-002: Preserve and focus shared turns
 

@@ -43,7 +43,8 @@ vi.mock("../review-item-selector", () => ({
   ),
 }));
 
-vi.mock("@/components/state-provider", () => ({
+vi.mock("@/components/state-provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/state-provider")>()),
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({ tasks: { activeTaskId: "task-1", activeSessionId: "session-1" } }),
 }));

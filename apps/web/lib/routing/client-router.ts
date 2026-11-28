@@ -4,9 +4,11 @@ import { useMemo, useSyncExternalStore } from "react";
 
 import { LOCATION_CHANGE_EVENT } from "./navigation-event";
 import { pushNavigationState, replaceNavigationState } from "./navigation-guard";
+import { generateUUID } from "@/lib/uuid";
 
 type NavigateOptions = {
   scroll?: boolean;
+  taskSessionActivation?: { taskId: string; sessionId: string };
   /**
    * Runs only once the navigation has actually committed. The unsaved-changes
    * guard can cancel a `push`, and `push` itself returns void, so a caller that
@@ -48,16 +50,41 @@ export function useSearchParams(): URLSearchParams {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
+/** Deliberate conversation hits can repeat without changing their URL. */
+export function useTaskSessionActivation(taskId: string, sessionId?: string): string {
+  return useSyncExternalStore(
+    subscribeLocation,
+    () => {
+      const activation = window.history.state?.taskSessionActivation;
+      return activation?.taskId === taskId &&
+        activation.sessionId === sessionId &&
+        typeof activation.id === "string"
+        ? activation.id
+        : "";
+    },
+    () => "",
+  );
+}
+
 export function useParams(): Record<string, string> {
   const { pathname } = parseLocationKey(useLocationKey());
   return useMemo(() => paramsForPath(pathname), [pathname]);
 }
 
+function nextActivation(mode: "push" | "replace", options?: NavigateOptions) {
+  if (options?.taskSessionActivation)
+    return { ...options.taskSessionActivation, id: generateUUID() };
+  // A replace rewrites the current entry, so its committed activation stays with it.
+  return mode === "replace" ? window.history.state?.taskSessionActivation : undefined;
+}
+
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
+  const activation = nextActivation(mode, options);
+  const state = activation ? { taskSessionActivation: activation } : {};
   if (mode === "push") {
-    pushNavigationState({}, "", href, () => finishNavigation(options));
+    pushNavigationState(state, "", href, () => finishNavigation(options));
   } else {
-    replaceNavigationState({}, "", href, () => finishNavigation(options));
+    replaceNavigationState(state, "", href, () => finishNavigation(options));
   }
 }
 

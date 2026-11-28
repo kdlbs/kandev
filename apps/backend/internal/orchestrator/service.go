@@ -970,6 +970,8 @@ type Service struct {
 	// taskLifecycleDeleter owns cleanup of automation tasks abandoned before
 	// their run was durably recorded.
 	taskLifecycleDeleter taskLifecycleDeleter
+	// prTaskLifecycle moves, archives, and deletes reuse_per_pr tasks.
+	prTaskLifecycle automationPRTaskLifecycle
 	// retrackedSessionCheck reports successful adoption only. A false result
 	// does not prove a remote owner is dead; startup reconciliation consults
 	// pendingRemoteRecoveryCheck first. See SetRetrackedSessionChecker.

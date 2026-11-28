@@ -98,6 +98,23 @@ describe("useEnsureTaskSession", () => {
     expect(result.current.status).toBe("idle");
   });
 
+  it("reports manual start without reloading sessions and clears it when a session appears", async () => {
+    mockEnsureTaskSession.mockResolvedValueOnce({
+      success: true,
+      task_id: TASK.id,
+      source: "awaiting_manual_start",
+      newly_created: false,
+    });
+    const { result, rerender } = renderHook(() => useEnsureTaskSession(TASK));
+    await flushMicrotasks();
+    expect(result.current.status).toBe("manual_start_required");
+    expect(mockLoadSessions).not.toHaveBeenCalled();
+
+    mockSessionsResult = { ...mockSessionsResult, sessions: [{ id: "started" }] };
+    rerender();
+    expect(result.current.status).toBe("idle");
+  });
+
   it("force-reloads the session list after a successful ensure", async () => {
     renderHook(() => useEnsureTaskSession(TASK));
     await flushMicrotasks();

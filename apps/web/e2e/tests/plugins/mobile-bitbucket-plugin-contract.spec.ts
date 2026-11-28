@@ -97,7 +97,9 @@ test.describe("mobile Bitbucket plugin contract", () => {
     await linkDialog.getByRole("button", { name: "Save" }).tap();
     await expect(linkDialog).toBeHidden();
     await expect(
-      testPage.getByText("Bitbucket pull request linked", { exact: true }),
+      testPage
+        .getByTestId("toast-message")
+        .getByText("Bitbucket pull request linked", { exact: true }),
     ).toBeVisible();
 
     // The responsive task layout presents the exact same plugin reviews via

@@ -1,4 +1,5 @@
 {
+  "diagramHeight": "図の高さ",
   "apply": "適用",
   "applyLatestAgentChangesToFile": "最新のエージェントの変更をこのファイルに適用",
   "boldCmdB": "太字 (Cmd+B)",

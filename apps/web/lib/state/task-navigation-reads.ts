@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { isTemporaryReadError } from "@/lib/api/temporary-read-error";
-import { fetchTask, listTaskSessions } from "@/lib/api";
+import { fetchTask } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
@@ -12,12 +12,18 @@ import {
 import {
   abortError,
   loadNavigationAttempt,
-  raceAbort,
   type LoadTaskNavigationIdentity,
 } from "@/lib/state/task-navigation-attempt";
-import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
+import {
+  getTaskSessionReads,
+  readTaskNavigationMembership,
+  reconcileTaskNavigationMembership,
+  type TaskSessionReads,
+} from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
+import { captureTaskNavigationSelection } from "./task-navigation-selection";
+import type { HydrationOptions } from "./hydration/hydrator";
 
 export type TaskNavigationIdentity = {
   task: Task;
@@ -29,6 +35,8 @@ export type TaskNavigationContext = {
   readonly ownerToken: object;
   readonly identity: string;
   readonly generation: number;
+  readonly selectionAtStart?: HydrationOptions["taskSelectionAtRequestStart"];
+  readonly requestedSessionId?: string;
 };
 
 export type TaskNavigationReadSnapshot = {
@@ -445,35 +453,36 @@ async function fetchTaskNavigationIdentity(
   taskId: string,
   signal: AbortSignal,
   sessionReads: TaskSessionReads,
-  scopeIsCurrent: () => boolean,
+  options: { scopeIsCurrent: () => boolean; requestedSessionId?: string },
 ): Promise<TaskNavigationIdentity> {
+  const { scopeIsCurrent } = options;
   // The HTTP attempt owns reconciliation; joined and cached callers do not publish again.
   const overviewReadId = store.getState().beginTaskOverviewRead();
+  const release = sessionReads.retain(taskId);
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-    const release = sessionReads.retain(taskId);
-    const sessionList = raceAbort(
-      sessionReads.read(taskId, (readSignal) =>
-        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-      ),
-      signal,
-    ).finally(release);
-    const [task, sessionResponse] = await Promise.all([
+    const [task, firstMembership] = await Promise.all([
       taskRequest,
-      sessionList.then(
-        (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
-        (error) => {
-          if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
-          return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
-        },
-      ),
+      readTaskNavigationMembership(sessionReads, taskId, signal, scopeIsCurrent),
     ]);
+    const membership = await reconcileTaskNavigationMembership(
+      task,
+      firstMembership,
+      sessionReads,
+      signal,
+      options,
+    );
     if (signal.aborted || !scopeIsCurrent()) throw abortError();
     if (isCurrentTaskDetailRead(store, taskId)) {
       store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
     }
-    return { task, ...sessionResponse };
+    return {
+      task,
+      allSessionsResponse: membership.allSessionsResponse,
+      sessionListUnavailable: membership.sessionListUnavailable,
+    };
   } finally {
+    release();
     store.getState().finishTaskOverviewRead(overviewReadId);
   }
 }
@@ -523,7 +532,10 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
       (taskId, signal) =>
-        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, {
+          scopeIsCurrent,
+          requestedSessionId: nextOwner.navigationContext?.context.requestedSessionId,
+        }),
       scopeIsCurrent,
     );
     owner = nextOwner;
@@ -536,6 +548,7 @@ export function beginTaskNavigation(
   store: StoreApi<AppState>,
   owner: object,
   routeKey: string,
+  requestedSessionId?: string,
 ): TaskNavigationContext {
   const readOwner = getTaskNavigationOwner(store);
   const generation = readOwner.reads.beginNavigation(owner, routeKey);
@@ -551,6 +564,8 @@ export function beginTaskNavigation(
     ownerToken: readOwner.token,
     identity: readOwner.identity,
     generation,
+    selectionAtStart: captureTaskNavigationSelection(store),
+    requestedSessionId,
   });
   readOwner.navigationContext = { navigationOwner: owner, routeKey, context };
   return context;

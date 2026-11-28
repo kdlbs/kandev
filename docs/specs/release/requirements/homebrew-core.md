@@ -61,7 +61,8 @@ The runtime bundle contains exactly:
 - `agentctl-linux-amd64`;
 - `agentctl-linux-arm64`;
 - `agentctl-darwin-arm64`;
-- `agentctl-darwin-amd64`.
+- `agentctl-darwin-amd64`;
+- `agentctl-windows-amd64.exe`.
 
 The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can execute it.
 

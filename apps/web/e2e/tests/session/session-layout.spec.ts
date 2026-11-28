@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import { resizeColumnViaSplitview, getDockviewGroupWidth } from "../../helpers/dockview-resize";
 
 /**
  * Seed a task + session via the API and navigate directly to the session page.
@@ -38,6 +39,29 @@ async function seedTaskWithSession(
   return session;
 }
 
+async function expectTerminalFill(page: Page) {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const api = (
+          window as Window & {
+            __dockviewApi__?: {
+              width: number;
+              getPanel: (id: string) => { group: { width: number } } | undefined;
+            };
+          }
+        ).__dockviewApi__;
+        if (!api) throw new Error("Dockview API missing");
+        return Math.abs(
+          api.width -
+            (api.getPanel("sidebar")?.group.width ?? 0) -
+            (api.getPanel("terminal-default")?.group.width ?? 0),
+        );
+      }),
+    )
+    .toBeLessThan(8);
+}
+
 const TERMINAL_MARKER = "KANDEV_E2E_MARKER_12345";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -67,6 +91,7 @@ test.describe("Session layout", () => {
     test.setTimeout(120_000);
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Refresh Test");
 
+    const rightWidth = await resizeColumnViaSplitview(testPage, "right", 300);
     // Type a command in the terminal, then maximize
     await session.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await session.expectTerminalHasText(TERMINAL_MARKER);
@@ -79,12 +104,18 @@ test.describe("Session layout", () => {
     // After refresh: terminal should still be maximized
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectMaximized();
+    await expectTerminalFill(testPage);
     await session.expectTerminalConnected(60_000);
     await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
     // The restored terminal must also accept new input.
     const restoredMarker = "KANDEV_E2E_MARKER_AFTER_REFRESH";
     await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" REFRESH');
     await session.expectTerminalHasText(restoredMarker, 60_000);
+    await session.clickMaximize();
+    await expect
+      .poll(() => getDockviewGroupWidth(testPage, "terminal-default"))
+      .toBeGreaterThan(rightWidth - 8);
+    expect(await getDockviewGroupWidth(testPage, "terminal-default")).toBeLessThan(rightWidth + 8);
   });
 
   test("task switching preserves maximize per session", async ({
@@ -96,6 +127,7 @@ test.describe("Session layout", () => {
 
     // Create Task A, type a command, and maximize terminal
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Task A Maximize");
+    await resizeColumnViaSplitview(testPage, "right", 300);
     await session.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await session.expectTerminalHasText(TERMINAL_MARKER);
     await session.clickMaximize();
@@ -134,14 +166,19 @@ test.describe("Session layout", () => {
     // Task B should have default (non-maximized) layout.
     await sessionB.expectDefaultLayout();
 
-    // Navigate back to Task A's session URL — this triggers a full page load,
-    // exercising the tryRestoreLayout path that restores maximize from sessionStorage.
-    await testPage.goto(taskAUrl);
+    // Sidebar navigation exercises the same-page environment-return restore.
+    const documentStart = await testPage.evaluate(() => performance.timeOrigin);
+    const taskRow = sessionB.sidebarTaskItem("Task A Maximize");
+    await expect(taskRow).toHaveCount(1);
+    await taskRow.click();
+    await expect(testPage).toHaveURL(taskAUrl);
+    expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(documentStart);
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectTerminalConnected(60_000);
 
     // Task A retains its maximize state, scrollback, and terminal input.
     await session.expectMaximized();
+    await expectTerminalFill(testPage);
     await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
     const restoredMarker = "KANDEV_E2E_MARKER_AFTER_TASK_SWITCH";
     await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" TASK_SWITCH');

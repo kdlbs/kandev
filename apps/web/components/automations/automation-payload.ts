@@ -6,6 +6,8 @@ import type {
   AutomationRepository,
   AutomationPluginToolSelection,
   ContinuationPolicy,
+  PRContinuationSettings,
+  PREndAction,
   ManagedConversationDestination,
   RepositoryMode,
   RetryPolicy,
@@ -49,6 +51,10 @@ export type FormState = {
   enabled: boolean;
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
+  followUpPrompt: string;
+  prContinuationStepId: string;
+  prMergedAction: PREndAction;
+  prClosedAction: PREndAction;
   retryPolicy: RetryPolicy;
   pluginTools: AutomationPluginToolSelection[];
 };
@@ -213,7 +219,7 @@ export function buildCreatePayload(
     workspace_id: workspaceId,
     name: form.name || "New Automation",
     description: form.description,
-    workflow_id: form.workflowId,
+    workflow_id: savedWorkflowId(form),
     workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
@@ -225,8 +231,10 @@ export function buildCreatePayload(
     repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
+    enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
+    continuation_policy: savedContinuationPolicy(form),
+    ...prContinuationPayload(form),
     triggers: pending.map((trigger) => ({
       type: trigger.type,
       config: trigger.config,
@@ -262,7 +270,7 @@ export function buildUpdatePayload(
       : {}),
     name: form.name,
     description: form.description,
-    workflow_id: form.workflowId,
+    workflow_id: savedWorkflowId(form),
     workflow_step_id: "",
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
@@ -276,11 +284,37 @@ export function buildUpdatePayload(
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
+    continuation_policy: savedContinuationPolicy(form),
+    ...prContinuationPayload(form),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
     ...(pluginTools !== undefined
       ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
       : {}),
+  };
+}
+
+/** A managed conversation runs in the plugin's session: it has no workflow. */
+function savedWorkflowId(form: FormState): string {
+  return form.taskMode === "managed_conversation" ? "" : form.workflowId;
+}
+
+/** A managed conversation has no repeat-run choice, so a hidden one never saves. */
+function savedContinuationPolicy(form: FormState): ContinuationPolicy {
+  return form.taskMode === "managed_conversation" ? "new_task" : form.continuationPolicy;
+}
+
+/**
+ * Per-PR options for the save boundary. Options that do not apply to the
+ * selected policy or target are sent empty so a stale draft never saves them.
+ */
+export function prContinuationPayload(form: FormState): PRContinuationSettings {
+  const perPR = savedContinuationPolicy(form) === "reuse_per_pr";
+  return {
+    follow_up_prompt: perPR ? form.followUpPrompt : "",
+    pr_continuation_step_id:
+      perPR && form.taskMode === "normal_task" ? form.prContinuationStepId : "",
+    pr_merged_action: perPR ? form.prMergedAction : "keep",
+    pr_closed_action: perPR ? form.prClosedAction : "keep",
   };
 }
 

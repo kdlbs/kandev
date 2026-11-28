@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppState } from "@/lib/state/store";
+import { createAppStore, type AppState } from "@/lib/state/store";
+import type { TaskSession } from "@/lib/types/http";
+import { sessionId, taskId } from "@/lib/types/ids";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { registerTasksHandlers } from "./tasks";
 import {
@@ -13,6 +15,17 @@ import {
 } from "./tasks.test-helpers";
 
 const SESS_NORMALIZED = "sess-normalized";
+
+function storedSession(id: string, owner = "t1"): TaskSession {
+  return {
+    id: sessionId(id),
+    task_id: taskId(owner),
+    state: "WAITING_FOR_INPUT",
+    started_at: "2026-11-19T12:00:00Z",
+    updated_at: "2026-11-19T12:00:00Z",
+    last_read_message_id: `${id}-read`,
+  };
+}
 
 vi.mock("@/lib/recent-tasks", () => ({ removeRecentTask: vi.fn() }));
 
@@ -109,35 +122,40 @@ describe("task.deleted cleanup", () => {
 
 describe("task.deleted session eviction", () => {
   it("removes every session of the deleted task from the store", () => {
-    const store = makeStore({
+    const foreign = storedSession("sess-t2", "t2");
+    const store = createAppStore({
       kanban: {
         workflowId: "wf1",
         steps: [],
-        tasks: [{ id: "t1", primarySessionId: SESS_PINNED, workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
+        tasks: [
+          {
+            id: "t1",
+            title: "Task",
+            position: 0,
+            workflowId: "wf1",
+            workflowStepId: "step1",
+            primarySessionId: SESS_PINNED,
+          },
+        ],
+      },
       taskSessionsByTask: {
-        itemsByTaskId: { t1: [{ id: SESS_OTHER }] },
+        itemsByTaskId: { t1: [storedSession(SESS_OTHER)] },
         loadedByTaskId: {},
         loadingByTaskId: {},
       },
       taskSessions: {
-        items: {
-          [SESS_NORMALIZED]: { id: SESS_NORMALIZED, task_id: "t1" },
-          "sess-t2": { id: "sess-t2", task_id: "t2" },
-        },
+        items: { [SESS_NORMALIZED]: storedSession(SESS_NORMALIZED), "sess-t2": foreign },
       },
-    } as unknown as Partial<AppState>);
-
+    });
     registerTasksHandlers(store)["task.deleted"]!(
       makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
     );
-
-    const removeTaskSession = vi.mocked(store.getState().removeTaskSession);
-    expect(removeTaskSession.mock.calls.map(([, sid]) => sid).sort()).toEqual(
-      [SESS_OTHER, SESS_PINNED, SESS_NORMALIZED].sort(),
-    );
-    expect(removeTaskSession).toHaveBeenCalledWith("t1", SESS_PINNED);
-    expect(removeTaskSession).not.toHaveBeenCalledWith(expect.anything(), "sess-t2");
+    for (const id of [SESS_OTHER, SESS_PINNED, SESS_NORMALIZED]) {
+      store.getState().upsertTaskSessionFromEvent("t1", storedSession(id));
+      expect(store.getState().taskSessions.items[id]).toBeUndefined();
+    }
+    expect(store.getState().taskSessionsByTask.itemsByTaskId.t1).toEqual([]);
+    expect(store.getState().taskSessions.items["sess-t2"]).toEqual(foreign);
   });
 });
 

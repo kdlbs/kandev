@@ -458,19 +458,20 @@ waiting for the scan, or `503` while persistence is known to be unavailable.
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher derives readiness targets and the access URL from the effective `server.host` or `server.hosts` values. A specific IP or hostname is probed directly. An IPv4 wildcard is probed through `127.0.0.1`, while the default local browser/access URL remains `http://localhost:<port>` to preserve the established browser origin. An IPv6 wildcard is probed and accessed through `[::1]`. With multiple binds, the launcher probes all targets concurrently but preserves target priority: a lower-priority success is selected only after higher-priority targets complete without the launcher's health token. It prefers a loopback target for the printed or opened access URL.
+The launcher derives readiness targets and the access URL from the effective `server.host` or `server.hosts` values. A specific IP or hostname is probed directly. The standalone default and the IPv4 wildcard both use `127.0.0.1` for the probe. Both keep `http://localhost:<port>` as the access URL to preserve the browser origin. An IPv6 wildcard is probed and accessed through `[::1]`. With multiple binds, the launcher probes all targets concurrently but preserves target priority: a lower-priority success is selected only after higher-priority targets complete without the launcher's health token. It prefers a loopback target for the printed or opened access URL.
 
 When it can enumerate non-loopback interfaces, the launcher also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If the effective bind restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
 
 The `dev`, `start`, and `run` startup banners also print a `version:` line. Its value matches `kandev --version`; an unstamped local build reports `dev`.
 
-The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. The launcher uses `localhost` for its default local access URL, but the backend still listens on every interface. Bind it to loopback unless remote access is deliberately protected:
+Without an explicit bind, standalone launches accept connections only on
+`127.0.0.1`. This also applies to `--headless` and `KANDEV_NO_BROWSER=1`.
+Kandev-managed services and the official container still default to `0.0.0.0`.
 
-```bash
-KANDEV_SERVER_HOST=127.0.0.1 kandev
-```
-
-See [Configuration](configuration.md) before putting Kandev behind a reverse proxy or publishing the port.
+If your standalone deployment relied on a wildcard bind, set `server.host`,
+`server.hosts`, or `KANDEV_SERVER_HOST` before upgrading. Choose an address
+reachable by the clients that need access. See [Security and trust](security.md)
+before exposing the port or putting Kandev behind a proxy.
 
 ## Launcher environment
 

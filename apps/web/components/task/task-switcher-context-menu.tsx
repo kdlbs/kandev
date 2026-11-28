@@ -22,6 +22,7 @@ import {
   SingleSelectionMenuItems,
 } from "./task-switcher-context-menu-items";
 import { useMenuTouchDragCancel } from "./task-switcher-touch-drag-cancel";
+import { useTaskFlagRemoval, type TaskFlagMenuActions } from "./task-flag-menu-item";
 import { useOpenTaskFlag } from "./task-flag-editor-provider";
 import { ChangeWorkflowDialog } from "./change-workflow-dialog";
 import { useTaskPRUnlinkMenu } from "@/hooks/domains/github/use-task-pr-unlink-menu";
@@ -186,6 +187,7 @@ function useTaskRowMenuHandoff(
   const pending = useRef<(() => void) | null>(null);
   const invoker = useRef<HTMLElement | null>(null);
   const openFlag = useOpenTaskFlag();
+  const flagRemoval = useTaskFlagRemoval(task.id);
   return {
     markInvoker: (event: React.MouseEvent<HTMLElement>) => {
       invoker.current =
@@ -194,8 +196,11 @@ function useTaskRowMenuHandoff(
         event.currentTarget;
     },
     flag: openFlag
-      ? () => {
-          pending.current = () => openFlag(task, invoker.current);
+      ? {
+          ...flagRemoval,
+          edit: () => {
+            pending.current = () => openFlag(task, invoker.current);
+          },
         }
       : undefined,
     rename: onRenameTask
@@ -282,7 +287,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
           <TaskContextMenuItems
             {...contextMenuProps}
             onRenameTask={handoff.rename}
-            onFlagTask={handoff.flag}
+            flagActions={handoff.flag}
             nativeUnlinkEntries={nativeUnlinkEntries}
             onArchiveTask={archive.requestArchive}
             onChangeWorkflow={createChangeWorkflowOpenHandler(
@@ -323,7 +328,7 @@ export type TaskContextMenuItemsProps = Omit<
   isArchiving: boolean;
   nativeUnlinkEntries?: KanbanCardMenuEntry[];
   onChangeWorkflow?: () => void;
-  onFlagTask?: () => void;
+  flagActions?: TaskFlagMenuActions;
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
   onMoveToStepWithOptions?: (targetStepId: string) => void;

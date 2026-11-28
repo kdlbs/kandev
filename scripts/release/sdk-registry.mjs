@@ -3,10 +3,14 @@ import { createHash } from "node:crypto";
 
 export const packageName = "@kdlbs/plugin-sdk";
 export const registryURL = "https://registry.npmjs.org";
-function registryFailure(message, cause) {
+function registryFailure(message, cause, { retryable = false } = {}) {
   const error = new Error(message, cause ? { cause } : undefined);
   error.code = "REGISTRY_READ_FAILURE";
+  error.retryable = retryable;
   return error;
+}
+export function isTransientRegistryError(error) {
+  return error?.code === "REGISTRY_READ_FAILURE" && error.retryable === true;
 }
 export function publicRegistryURL(raw) {
   const url = new URL(raw);
@@ -22,16 +26,28 @@ export async function readPackage(version, fetchImpl = fetch) {
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {
-    throw registryFailure(`registry read failed: ${error.message}`, error);
+    throw registryFailure(`registry read failed: ${error.message}`, error, {
+      retryable: true,
+    });
   }
   publicRegistryURL(response.url);
+  if (response.status === 429 || response.status >= 500)
+    throw registryFailure(
+      `registry read failed with HTTP ${response.status}`,
+      undefined,
+      { retryable: true },
+    );
+  if (!response.ok && response.status !== 404)
+    throw registryFailure(`registry read failed with HTTP ${response.status}`);
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw registryFailure("registry returned a non-JSON response");
   let text;
   try {
     text = await response.text();
   } catch (error) {
-    throw registryFailure("registry response body could not be read", error);
+    throw registryFailure("registry response body could not be read", error, {
+      retryable: true,
+    });
   }
   if (text.length > 5 * 1024 * 1024)
     throw registryFailure("registry metadata exceeds size limit");
@@ -85,9 +101,16 @@ export async function downloadArchive(
     throw registryFailure(
       `registry archive download failed: ${error.message}`,
       error,
+      { retryable: true },
     );
   }
   publicRegistryURL(response.url);
+  if (response.status === 429 || response.status >= 500)
+    throw registryFailure(
+      `registry archive download failed: HTTP ${response.status}`,
+      undefined,
+      { retryable: true },
+    );
   if (
     !response.ok ||
     /(?:html|json)/i.test(response.headers.get("content-type") ?? "")
@@ -99,7 +122,9 @@ export async function downloadArchive(
   try {
     bytes = Buffer.from(await response.arrayBuffer());
   } catch (error) {
-    throw registryFailure("registry archive body could not be read", error);
+    throw registryFailure("registry archive body could not be read", error, {
+      retryable: true,
+    });
   }
   if (
     bytes.length === 0 ||

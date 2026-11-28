@@ -9,6 +9,7 @@ import {
   expectImageDialogContained,
 } from "./rich-output-image-helpers";
 import {
+  checkRichDiffPreview,
   RICH_OUTPUT_FILE,
   RICH_OUTPUT_FILE_CONTENT,
   RICH_OUTPUT_FILE_UPDATED_CONTENT,
@@ -391,4 +392,19 @@ test("narrow fine-pointer image inspection retains touch-sized controls", async 
   await close.click();
   await expect(testPage.getByRole("dialog")).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test("switches diff preview layouts on the current page", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  await checkRichDiffPreview(testPage, apiClient, seedData);
+  if (prCapture.capturing) {
+    await testPage.getByTestId("rich-output-file").scrollIntoViewIfNeeded();
+    await prCapture.screenshot("expanded-diff", {
+      caption: "Automatically expanded side-by-side diff preview",
+    });
+  }
 });

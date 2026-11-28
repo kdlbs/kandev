@@ -1,7 +1,16 @@
 /* eslint-disable max-lines -- queue panel behavior tests share one fixture matrix. */
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as renderBase,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fetchSessionCapacitySettings } from "@/lib/api/domains/session-capacity-api";
 import { StateProvider } from "@/components/state-provider";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -11,7 +20,23 @@ import { toast } from "sonner";
 import { simulateReorderDrag } from "./queued-ghost-list.test-helpers";
 
 function render(ui: ReactNode) {
-  return renderBase(ui, { wrapper: StateProvider });
+  const queryClient = new QueryClient();
+  return renderBase(ui, {
+    wrapper: ({ children }) => (
+      <StateProvider>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </StateProvider>
+    ),
+  });
+}
+
+vi.mock("@/lib/api/domains/session-capacity-api", () => ({
+  fetchSessionCapacitySettings: vi.fn(),
+}));
+
+function capacitySettings(enabled: boolean, max_sessions: number) {
+  const settings = { enabled, max_sessions };
+  return { settings, effective: { ...settings, source: "environment" as const, locked: true } };
 }
 
 const useQueueMock = vi.fn();
@@ -171,6 +196,117 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe("QueueAffordance capacity notice", () => {
+  const fetchCapacity = vi.mocked(fetchSessionCapacitySettings);
+  const reason = "Message queued because the session limit was reached.";
+  const autoSend = "It will send automatically when capacity is available.";
+  const enableAutoRun = "Turn on Auto-run to send it automatically.";
+  const noticeId = "queue-capacity-notice";
+  const deferred = entry({ admission_reason: "session_capacity" });
+
+  beforeEach(() => {
+    fetchCapacity.mockReset().mockResolvedValue(capacitySettings(true, 1));
+  });
+
+  it("shows the effective limit, refreshes it, and clears a stale number on failure or disable", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchCapacity
+        .mockResolvedValueOnce({
+          ...capacitySettings(true, 1),
+          settings: { enabled: true, max_sessions: 99 },
+        })
+        .mockResolvedValueOnce(capacitySettings(true, 3))
+        .mockRejectedValueOnce(new Error("capacity unavailable"))
+        .mockResolvedValueOnce(capacitySettings(false, 0));
+      useQueueMock.mockReturnValue(queueState([deferred]));
+      const view = render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+      const notice = screen.getByTestId(noticeId);
+      const advance = async (milliseconds: number) => {
+        await act(async () => vi.advanceTimersByTimeAsync(milliseconds));
+      };
+
+      await advance(100);
+      expect(notice.textContent).toContain("The current session limit is 1.");
+      await advance(10_000);
+      expect(notice.textContent).toContain("The current session limit is 3.");
+      await advance(10_000);
+      expect(notice.textContent).toContain(reason);
+      expect(notice.textContent).not.toContain("The current session limit");
+      await advance(10_000);
+      expect(notice.textContent).toContain("The session limit is now off.");
+      expect(notice.textContent).not.toContain("The current session limit");
+
+      view.unmount();
+      await advance(10_000);
+      expect(fetchCapacity).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // @covers AC-AGENTS-SESSION-CEILING-003.9
+  it("shows one polite notice above the collapsed queue and clears it on session switch", () => {
+    useQueueMock.mockImplementation((sessionId) =>
+      queueState(
+        sessionId === SESSION_ID
+          ? [deferred, { ...deferred, id: "q-2" }]
+          : [entry({ session_id: sessionId })],
+      ),
+    );
+    const renderStatusBar = (chip: ReactNode) => <div>{chip}</div>;
+    const view = render(
+      <QueueAffordance sessionId={SESSION_ID} renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+
+    const notice = screen.getByTestId(noticeId);
+    expect(screen.getByRole("status").contains(notice)).toBe(true);
+    expect(notice.textContent).toContain(reason);
+    expect(notice.textContent).toContain(autoSend);
+    expect(notice.compareDocumentPosition(screen.getByTestId(CHIP_ID))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.queryByTestId(PANEL_ID)).toBeNull();
+
+    view.rerender(
+      <QueueAffordance sessionId="sess-2" renderStatusBar={renderStatusBar}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    expect(screen.queryByTestId(noticeId)).toBeNull();
+    expect(screen.getByTestId(CHIP_ID)).toBeTruthy();
+  });
+
+  // @covers AC-AGENTS-SESSION-CEILING-003.10
+  it("shows the Auto-run off instruction and clears the notice as the queue empties", () => {
+    useQueueMock.mockReturnValue(queueState([deferred], { autoRun: false }));
+    const view = render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    const notice = screen.getByTestId(noticeId);
+    expect(notice.textContent).toContain(reason);
+    expect(notice.textContent).toContain(enableAutoRun);
+    expect(notice.textContent).not.toContain(autoSend);
+
+    useQueueMock.mockReturnValue(queueState([]));
+    view.rerender(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    expect(screen.queryByTestId(noticeId)).toBeNull();
+  });
+
+  it.each([
+    { reason: "cancellation is pending", cancellationPending: true, autoDeliveryBlocked: false },
+    { reason: "the conversation is paused", cancellationPending: false, autoDeliveryBlocked: true },
+  ])("omits delivery instructions when $reason", ({ cancellationPending, autoDeliveryBlocked }) => {
+    useQueueMock.mockReturnValue(queueState([deferred], { cancellationPending }));
+    render(
+      <QueueAffordance sessionId={SESSION_ID} autoDeliveryBlocked={autoDeliveryBlocked}>
+        {CHILD}
+      </QueueAffordance>,
+    );
+    expect(screen.getByTestId(noticeId).textContent).toBe(reason);
+  });
 });
 
 describe("QueueAffordance", () => {

@@ -1,5 +1,7 @@
 {
   "addFlag": "플래그 추가",
+  "changeFlag": "플래그 변경",
+  "editFlag": "플래그 편집",
   "flag": "플래그",
   "flagNote": "플래그 메모",
   "removeFlag": "플래그 삭제",

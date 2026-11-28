@@ -54,9 +54,15 @@ const (
 	officeGateFailureThresholdKey      = "office.gateFailureThreshold"
 )
 
+const (
+	catalogBackendOwner   = "backend"
+	catalogInternalWiring = "internal wiring"
+	catalogPackaging      = "packaging"
+)
+
 var startupCatalog = []CatalogEntry{
 	{Key: "homeDir", EnvVars: []string{"KANDEV_HOME_DIR"}, Owner: "common/config", Default: "~/.kandev"},
-	{Key: "server.host", EnvVars: []string{"KANDEV_SERVER_HOST"}, Owner: "backend", Default: "0.0.0.0"},
+	{Key: "server.host", EnvVars: []string{"KANDEV_SERVER_HOST"}, Owner: catalogBackendOwner, Default: defaultServerHost, Description: "Official containers and Kandev-managed services default to 0.0.0.0."},
 	{Key: "server.port", EnvVars: []string{"KANDEV_SERVER_PORT", "KANDEV_BACKEND_PORT", "KANDEV_PORT"}, Owner: "launcher/backend", Default: "38429"},
 	{Key: "server.readTimeout", EnvVars: []string{"KANDEV_SERVER_READTIMEOUT"}, Owner: "backend", Default: "30"},
 	{Key: "server.writeTimeout", EnvVars: []string{"KANDEV_SERVER_WRITETIMEOUT"}, Owner: "backend", Default: "30"},
@@ -149,6 +155,8 @@ var startupCatalog = []CatalogEntry{
 }
 
 var startupExclusions = []CatalogExclusion{
+	{EnvVar: "KANDEV_RUNNING_AS_SERVICE", Class: catalogInternalWiring, Reason: "managed service launch context"},
+	{EnvVar: "KANDEV_INTERNAL_CONTAINER_RUNTIME", Class: catalogPackaging, Reason: "official container launch context"},
 	{EnvVar: InternalConfigFileEnv, Class: "internal wiring", Reason: "launcher-selected configuration file handoff"},
 	{EnvVar: InternalConfigHomeFileEnv, Class: "internal wiring", Reason: "launcher-selected home-file handoff"},
 	{EnvVar: InternalAgentctlStartupConfigEnv, Class: "internal wiring", Reason: "resolved agentctl child configuration handoff"},

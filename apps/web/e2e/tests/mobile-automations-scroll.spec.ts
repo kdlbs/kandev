@@ -40,23 +40,36 @@ test.describe("Automations settings on mobile", () => {
     const workflowSelectorBox = await automations.workflowSelector.boundingBox();
     expect(workflowSelectorBox?.height).toBeGreaterThanOrEqual(44);
 
-    await expect(testPage.getByText("Context between runs", { exact: true })).toBeVisible();
-    await expect(
-      testPage.getByText(
-        "Each run starts with a separate conversation and files. These tasks do not appear in Kanban or the sidebar. Use this option for independent jobs and concurrent runs.",
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(
-      testPage.getByText(
-        "Runs continue the same conversation and files, so the agent keeps prior context and changes. Runs execute one at a time.",
-        { exact: true },
-      ),
-    ).toBeVisible();
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.3, AC-OFFICE-AUTOMATION-CONTINUITY-001.6
+    // Phones stack the options so each label stays readable and each target
+    // stays touch-sized.
+    const taskChoice = testPage.getByRole("radiogroup", { name: "Task for each run" });
+    await expect(taskChoice).toBeVisible();
+    const newTask = taskChoice.getByRole("radio", { name: "New task each run" });
+    const reuse = taskChoice.getByRole("radio", { name: "One shared task" });
+    const newTaskBox = await newTask.boundingBox();
+    const reuseBox = await reuse.boundingBox();
+    expect(newTaskBox?.height).toBeGreaterThanOrEqual(44);
+    expect(reuseBox?.y ?? 0).toBeGreaterThan(newTaskBox?.y ?? 0);
+    await expect(testPage.locator("#automation-continuation-description")).toHaveText(
+      "Each run starts with its own conversation and files. Runs can overlap.",
+    );
 
-    const reuse = testPage.getByRole("radio", { name: "Continue the previous session" });
-    await reuse.check();
-    await expect(testPage.getByRole("spinbutton")).toBeDisabled();
+    await reuse.tap();
+    await expect(reuse).toBeChecked();
+    await expect(testPage.locator("#automation-continuation-description")).toHaveText(
+      "Every run continues the same task and its files, whatever triggered it. Runs execute one at a time.",
+    );
+    await expect(testPage.getByRole("spinbutton", { name: "Max concurrent runs" })).toBeDisabled();
+
+    // @covers AC-OFFICE-AUTOMATIONS-SETTINGS-002.5
+    // The collapsed Tools row is a touch-sized target that opens the switches.
+    const tools = testPage.getByTestId("automation-agent-tools-toggle");
+    await tools.scrollIntoViewIfNeeded();
+    expect((await tools.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect(testPage.getByTestId("automation-mcp-access")).toHaveCount(0);
+    await tools.tap();
+    await expect(testPage.getByTestId("automation-mcp-access")).toBeVisible();
 
     const addRepository = testPage.getByRole("button", { name: "Add repository" });
     const addRepositoryBox = await addRepository.boundingBox();
