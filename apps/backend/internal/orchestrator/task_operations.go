@@ -813,6 +813,9 @@ type startCreatedSessionOptions struct {
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// origin overrides the autoStart-derived admission origin, for example
+	// for an agent-requested start. It round-trips through the replay payload.
+	origin launchOrigin
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -828,8 +831,12 @@ func (s *Service) startCreatedSession(
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
+	origin := options.origin
+	if origin == "" {
+		origin = originFromAutoStart(autoStart)
+	}
 	manualTaskID := ""
-	if !autoStart && retryLaunchInContext(ctx) == nil {
+	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
 	}
 	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
@@ -837,6 +844,9 @@ func (s *Service) startCreatedSession(
 	if !options.lifecycleLockHeld {
 		releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 		defer releaseLifecycleLock()
+	}
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		return nil, err
 	}
 	if options.ceilingEntryBinding == nil {
 		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
@@ -886,7 +896,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, originFromAutoStart(autoStart)), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, origin), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -3698,6 +3708,10 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	if identity, ok := transientLaunchIdentityFromResumeOptions(options); ok {
 		ctx = withTransientLaunchRetryContext(ctx, identity)
 	}
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return nil, err
+	}
+	options = s.inferenceClosureResumeOptions(ctx, sessionID, options)
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -3722,6 +3736,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		}
 	}
 
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, true); err != nil {
+		return nil, err
+	}
 	admission, err := s.prepareResumeSessionAdmission(ctx, taskID, sessionID, options, continuation != nil, entryBinding)
 	if err != nil {
 		return nil, err
@@ -6396,10 +6413,36 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
+	s.primarySwitchMu.Lock()
+	err := s.repo.SetSessionPrimary(ctx, sessionID)
+	s.primarySwitchMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	if previous != nil {
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
+	}
+	return nil
+}
+
+// terminalPrimaryBeforeSwitch returns the current primary when the role is
+// about to move off a session that can no longer accept prompts.
+func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID string) *models.TaskSession {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, session.TaskID)
+	if err != nil {
+		return nil
+	}
+	for _, previous := range sessions {
+		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) && !s.resumeAttemptInFlight(previous.ID) {
+			return previous
+		}
+	}
 	return nil
 }
 
@@ -7212,6 +7255,14 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+		// A cancelled resume continuation keeps reporting its cancellation
+		// rather than the context error of the closure read.
+		if attemptErr := s.validateResumeAttempt(options.resumeAttempt); attemptErr != nil {
+			return nil, attemptErr
+		}
+		return nil, err
+	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -9632,7 +9683,13 @@ func (s *Service) claimSessionRunningForPrompt(
 	); promptErr != nil {
 		return nil, "", "", false, nil, nil, promptErr
 	}
-	if !bypassRecoveryBlock {
+	if bypassRecoveryBlock {
+		// A recovery-block bypass never authorizes crossing an inference
+		// closure that was fenced after the earlier prompt preflight.
+		if err := s.checkInferenceClosureAdmission(ctx, sessionID, false); err != nil {
+			return nil, "", "", false, nil, nil, err
+		}
+	} else {
 		if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 			return nil, "", "", false, nil, nil, err
 		}
@@ -11732,6 +11789,10 @@ func (s *Service) sessionHasCancellableWork(ctx context.Context, sessionID strin
 	if err != nil || turnID != "" {
 		return true
 	}
+	return s.sessionHasCancellableWorkBeyondTurn(ctx, sessionID)
+}
+
+func (s *Service) sessionHasCancellableWorkBeyondTurn(ctx context.Context, sessionID string) bool {
 	if _, active := s.activeTurns.Load(sessionID); active || s.reservedPromptTurnID(sessionID) != "" {
 		return true
 	}
