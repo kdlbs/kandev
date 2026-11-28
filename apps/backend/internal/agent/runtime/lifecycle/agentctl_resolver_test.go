@@ -962,9 +962,9 @@ func TestAgentctlBinaryCandidatesIncludesRemoteHelpersAndHostFallback(t *testing
 		filepath.Join(exeDir, name),
 		filepath.Join(exeDir, "..", "build", name),
 		filepath.Join(exeDir, "..", "bin", name),
-		filepath.Join(exeDir, "agentctl"),
-		filepath.Join(exeDir, "..", "build", "agentctl"),
-		filepath.Join(exeDir, "..", "bin", "agentctl"),
+		filepath.Join(exeDir, agentctlExecutableName(runtime.GOOS)),
+		filepath.Join(exeDir, "..", "build", agentctlExecutableName(runtime.GOOS)),
+		filepath.Join(exeDir, "..", "bin", agentctlExecutableName(runtime.GOOS)),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("agentctlBinaryCandidates = %#v, want %#v", got, want)

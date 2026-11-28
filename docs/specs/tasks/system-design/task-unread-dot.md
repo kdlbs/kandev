@@ -181,6 +181,96 @@ passed through unchanged, which `findUnreadDividerItemId` already treats as
 "the whole loaded window is unread". A cursor outside the loaded window keeps
 that existing behavior.
 
+### Inactive-session acknowledgement
+
+Read acknowledgement is independent of agent execution. A stored session in
+`FAILED`, `COMPLETED`, `CANCELLED`, `IDLE`, or `WAITING_FOR_INPUT` follows the
+same loaded-transcript acknowledgement path as a running session (AC .6).
+Neither starting an agent nor receiving another live message is a prerequisite
+for reading its stored output. Session lifecycle state is not an unread filter.
+
+Desktop selects or reopens the session through `SessionReopenMenuItems` in
+`components/task/session-reopen-menu.tsx`; the phone uses
+`MobileSessionsPicker` in `components/task/mobile/mobile-sessions-section.tsx`.
+Both feed the existing `TaskChatPanel` and `useSessionReadTracking` path.
+Acknowledgement requires the session record, route hydration, its own task's
+visible panel, a visible browser page, and the initial message window to be
+ready. These guards prevent acknowledging another task or a partial transcript;
+they must not wait for executor or agent readiness.
+
+The acknowledgement target remains `newestAcknowledgeableMessageId(messages)`,
+including loaded rows omitted by render-time filtering. Successful
+`markSessionRead` persistence and `TaskSessionReadCursorChanged` remove only
+that session from `unread_session_ids`. The current summary and subsequent
+list-load reconciliation must agree. Verify the persisted cursor and the row
+after leaving and returning: hiding the displayed session's dot alone does not
+prove that acknowledgement succeeded.
+
+A displayed session that fails keeps focus unless the user changes the view or
+the session is authoritatively removed. Opening a task can resume its displayed
+session; a failed resume writes a qualifying resume boot row and a recovery
+card, then the backend promotes another active session to primary.
+`maybeAdoptSessionOnTransition` (`lib/ws/handlers/agent-session.ts`) neither
+hands off from `FAILED` nor adopts an unseen sibling over a failed view.
+
+Generic primary-follow (`lib/ws/handlers/task-primary-focus.ts`) verifies the
+predecessor with the existing no-store session GET. Durable or cached STARTING
+and FAILED preserve the view. Accepted healthy lifecycle versions re-prove under
+the original owner; verification never hydrates cursors. Workspace fan-out/client
+barriers can reorder primary and lifecycle events. Both lifecycle entry paths
+verify even before promotion: terminal fallback needs COMPLETED/CANCELLED;
+new-sibling adoption also permits IDLE. Initial adoption without a predecessor
+remains immediate, subject to explicit workflow ownership.
+
+Navigation, pin, restart, workflow intent/request and selected identity own focus.
+Unchanged primary preserves lifecycle predicates. Durable ended predecessors
+constrain recipients without a lifecycle notice or after primary retargets.
+Creation only retargets an existing check. Explicit workflow focus stays separate;
+denied/uncertain reads never use timers.
+
+Terminal handoffs exclude observed/confirmed removals before choice/publication.
+Rank durable `started_at`, then session ID. When eligible partial rows can affect
+order, wait for normal membership hydration under the original authority; never
+substitute `updated_at`. Missing projected recipients also wait unless removed.
+New intent or predecessor state supersedes the check. Preserve recipient-owned
+agentctl readiness/execution; fallback readiness never borrows an execution ID.
+
+Core `session.removed` and session GET 404 derive task scope from known membership
+or active identity; reject conflicting scope. Complete unique same-task membership
+must exclude the deleted ID; malformed/incomplete/multiple-primary lists fail
+closed. Zero primaries prove retirement. Local deletion captures scope before WS
+admission; its ACK retains a newer view of that same removed ID, not a survivor
+or workflow intent. Retirement and proven successor selection stay separate.
+
+Retirement owns backend/auth/workspace and membership generation, not view intent.
+Trusted removals fence membership/pending candidates; invalidation rechecks absence.
+Focus needs its original owner and a unique proven primary. Clear only the deleted
+selection/pin and workflow requests targeting it. Preserve independent intent,
+surviving pins/cursors and newer user/workflow selection. Owned empty slots can
+re-prove after changed primaries. Proof fills missing recipient identity/lifecycle.
+
+Explicit session queries use scoped identities to disambiguate requests targeting
+the same URL. Routes and workflow transitions reopen hidden session targets, while
+layout restoration preserves flat, tree, and legacy presentation preferences.
+Phone and tablet viewports consume route- and workflow-driven Chat focus; a 404
+vetoes further admission. When a step transition specifies
+`workflow_focus_disposition: "none"`, it is admitted without triggering an
+automatic session launch. Removal leases protect active and parked session groups
+during layout updates, validating changes before committing.
+
+Session membership cache invalidation (`invalidateTaskSessionMembership`) fences
+foreground reads alongside removal queries without affecting unrelated read keys.
+Confirmed session deletion permanently fences admission for that session ID.
+Fresh membership listings settle uncertain reads and confirmed empty slots without
+unbounded retries, while surviving sessions retain cursors and unread dot state.
+
+An unread failed sibling that was never displayed is not evidence of a failed
+cursor write. It remains unread under AC .2, .9, .12, and .17. Preserve this
+distinction when diagnosing a task with no running sessions: opening its
+primary session does not acknowledge other sessions. There is no task-wide
+mark-read operation, lifecycle-based suppression, or cursor backfill in this
+path.
+
 ## Restore and repair
 
 One repository read, `ListSessionUnreadState(ctx, sessionIDs)`, returns for each
@@ -276,12 +366,10 @@ showDot = enabled                                     // AC .1, .3, .4
               || (isSelected && some id != displayedSessionId))  // AC .17
 ```
 
-`isSelected` is the row's existing `task.id === activeTaskId || task.id ===
-selectedTaskId`. The desktop sidebar passes its route-aware `highlightedTaskId`,
-and the mobile switcher passes the store's `activeTaskId`. `displayedSessionId`
-is the store's `tasks.activeSessionId`. A message for the open task's displayed
-session never produces a visible dot; an unread session of the open task that
-is not displayed keeps the dot.
+Rows select by desktop `highlightedTaskId` or phone `activeTaskId`.
+Phone/tablet exclude only rendered Chat, not Plan/file/other panes.
+Desktop excludes hidden, absent or group-inactive chats. Selected but undisplayed
+output keeps its dot under .17; displayed output has no dot, unread siblings do.
 
 `lingering` comes from `useUnreadDotLinger` (`components/task/use-unread-dot-linger.ts`).
 It becomes true when the row turns selected while its dot is showing and the

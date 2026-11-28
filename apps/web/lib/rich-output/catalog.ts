@@ -138,7 +138,8 @@ export const catalog = defineCatalog(schema, {
     },
     FilePreview: {
       props: componentProps.FilePreview,
-      description: "Workspace file reference. The user explicitly previews or opens it.",
+      description:
+        "Workspace file reference. Use a .diff or .patch path for a switchable diff preview.",
     },
   },
   actions: {},

@@ -13,7 +13,7 @@ import { ToastProvider } from "@/components/toast-provider";
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { useTaskRowActions } from "./task-session-sidebar";
 
-const TOAST_CONTAINER = "toast-container";
+const TOAST_MESSAGE = "toast-message";
 const SUBMITTED_TITLE = "Submitted A";
 const NEWER_DRAFT = "  exact newer draft  ";
 
@@ -122,7 +122,7 @@ it.each(["A", "B"] as const)(
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input.value).toBe(NEWER_DRAFT);
     expect(input.selectionStart).toBe(5);
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toBe("");
+    expect(screen.queryByTestId(TOAST_MESSAGE)).toBeNull();
     await save();
     expect(pending).toHaveLength(2);
     expect(pending[1]).toMatchObject({
@@ -144,7 +144,7 @@ it.each(["A", "B"] as const)(
     await settle(pending[0], true);
     expect(screen.getByRole("textbox")).toBe(input);
     expect(input.value).toBe("  untouched draft  ");
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toBe("");
+    expect(screen.queryByTestId(TOAST_MESSAGE)).toBeNull();
     expect(console.error).toHaveBeenCalledWith("Failed to rename task:", expect.any(Error));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -160,7 +160,7 @@ it.each([false, true])(
     await save();
     await settle(pending[0], failure);
     expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByTestId(TOAST_CONTAINER).textContent).toBe("");
+    expect(screen.queryByTestId(TOAST_MESSAGE)).toBeNull();
     expect(console.error).toHaveBeenCalledTimes(failure ? 1 : 0);
   },
 );

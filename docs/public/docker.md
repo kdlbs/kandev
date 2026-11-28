@@ -15,7 +15,8 @@ For Kubernetes, see [Kubernetes](k8s.md). For executor profiles, see [Executors]
 
 ## Quick start
 
-Bind to host loopback unless an authenticated reverse proxy protects the service:
+The official image listens on `0.0.0.0` inside the container by default. Publish
+the port on the host loopback address for local access.
 
 ```bash
 docker volume create kandev-data

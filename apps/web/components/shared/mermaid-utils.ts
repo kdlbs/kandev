@@ -17,7 +17,7 @@ type MermaidFitScaleInput = {
   svgWidth: number;
 };
 
-function clampScale(scale: number): number {
+export function clampScale(scale: number): number {
   return Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
 }
 

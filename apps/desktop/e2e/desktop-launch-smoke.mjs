@@ -29,6 +29,7 @@ const helperNames = [
   "agentctl-linux-arm64",
   "agentctl-darwin-amd64",
   "agentctl-darwin-arm64",
+  "agentctl-windows-amd64.exe",
 ];
 export const RELEASE_DESKTOP_STARTUP_TIMEOUT_MS = 120_000;
 export const DESKTOP_SMOKE_VERSION = "0.0.0-e2e";
@@ -790,6 +791,7 @@ export async function writeFakeRuntime(runtimeDir, stateDir, scenario) {
     ["linux/arm64", "agentctl-linux-arm64.gz"],
     ["darwin/amd64", "agentctl-darwin-amd64.gz"],
     ["darwin/arm64", "agentctl-darwin-arm64.gz"],
+    ["windows/amd64", "agentctl-windows-amd64.exe.gz"],
   ].map(([platform, asset]) => ({ platform, asset, sha256: "0".repeat(64), size_bytes: 1 }));
   await writeFile(
     join(runtimeDir, "remote-helpers.json"),

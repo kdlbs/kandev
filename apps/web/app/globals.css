@@ -1836,9 +1836,56 @@ html[data-rendering-engine="webkit"] .quick-chat-dialog[data-state="closed"] {
 }
 
 /* Mermaid diagram styles */
+.mermaid-frame-grip {
+  display: grid;
+  place-items: center;
+  height: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+}
+.mermaid-frame-grip::after {
+  content: "";
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.mermaid-frame-grip:hover,
+.mermaid-frame-grip:focus-visible {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.mermaid-frame-grip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.mermaid-frame-grip[hidden],
+.mermaid-frame-grip[hidden] + .mermaid-frame-reset {
+  display: none;
+}
+.mermaid-frame-reset {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  padding: 4px 8px;
+  background: var(--popover);
+}
+@media (pointer: coarse) {
+  .mermaid-frame-grip {
+    height: 44px;
+  }
+  .mermaid-frame-reset {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 .tiptap-plan-wrapper .mermaid-container {
   position: relative;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   margin: 0.75rem auto !important;
 }
@@ -1938,7 +1985,8 @@ html[data-rendering-engine="webkit"] .quick-chat-dialog[data-state="closed"] {
   color: var(--muted-foreground);
   cursor: pointer;
   font-variant-numeric: tabular-nums;
-  min-width: 3ch;
+  min-width: 5ch;
+  white-space: nowrap;
   text-align: center;
 }
 

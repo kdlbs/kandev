@@ -235,14 +235,18 @@ func prPlaceholders(data map[string]interface{}) map[string]string {
 		url = data["pr_url"]
 	}
 	return map[string]string{
-		"pr.number":      toString(number),
-		"pr.title":       toString(data[automationTitleKey]),
-		"pr.url":         toString(url),
-		"pr.author":      toString(data[automationAuthorLoginKey]),
-		"pr.repo":        toString(data[automationRepoKey]),
-		"pr.branch":      toString(data[automationHeadBranchKey]),
-		"pr.base_branch": toString(data[automationBaseBranchKey]),
-		"pr.body":        toString(data[automationBodyKey]),
+		"pr.number":              toString(number),
+		"pr.title":               toString(data[automationTitleKey]),
+		"pr.url":                 toString(url),
+		"pr.author":              toString(data[automationAuthorLoginKey]),
+		"pr.repo":                toString(data[automationRepoKey]),
+		"pr.branch":              toString(data[automationHeadBranchKey]),
+		"pr.base_branch":         toString(data[automationBaseBranchKey]),
+		"pr.body":                toString(data[automationBodyKey]),
+		"pr.head_sha":            toString(data[automationHeadSHAKey]),
+		"pr.previous_head_sha":   toString(data[automationPreviousHeadSHAKey]),
+		"pr.event":               toString(data[automationPREventKey]),
+		"pr.requested_reviewers": toString(data[automationRequestedReviewersKey]),
 	}
 }
 

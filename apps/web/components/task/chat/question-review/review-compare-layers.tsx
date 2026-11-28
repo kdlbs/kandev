@@ -4,10 +4,18 @@ import { useEffect, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { CompareState } from "@/lib/question-review/compare";
 import type { ReviewView, Size } from "@/lib/question-review/viewport";
-import { wipeFromPointer } from "@/lib/question-review/wipe";
+import { wipeFromDrag } from "@/lib/question-review/wipe";
+import { cn } from "@/lib/utils";
 import { ReviewImage } from "./review-canvas";
 import { ChangeOutline } from "./review-compare-controls";
 import type { ReviewDiffResult, ReviewDiffState } from "./use-review-diff";
+import {
+  WipeGripHalves,
+  useWipeGrip,
+  wipeLineForcedColors,
+  type WipeNames,
+} from "./review-wipe-grip";
+import type { WipeNamesReveal } from "./use-wipe-names-reveal";
 
 export type LoadedReviewImage = { id: string; alt: string; url: string };
 
@@ -104,17 +112,29 @@ function DiffMask({ result, scale }: { result: ReviewDiffResult; scale: number }
 
 /**
  * Draggable and keyboard-operable divider for Wipe, in stage coordinates. The
- * line reaches the stage edges; the handle stays fully inside the stage.
+ * line reaches the stage edges; the handle carries the names and also drags up
+ * or down along the line.
  */
-export function WipeHandle({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+export function WipeHandle({
+  value,
+  onChange,
+  names,
+  reveal,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  names: WipeNames;
+  reveal: WipeNamesReveal;
+}) {
   const { t } = useTranslation();
-  const percent = Math.round(value * 100);
-  const moveTo = (element: HTMLElement, clientX: number) => {
-    const stage = element.parentElement;
+  const dragStart = useRef(value);
+  const handle = useWipeGrip(names, reveal, (event, dx) => {
+    const stage = event.currentTarget.parentElement;
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    onChange(wipeFromPointer(clientX, { left: rect.left, width: rect.width }));
-  };
+    onChange(wipeFromDrag(dragStart.current, dx, { left: rect.left, width: rect.width }));
+  });
+  const percent = Math.round(value * 100);
   const onKeyDown = (event: React.KeyboardEvent) => {
     const steps: Record<string, number> = { ArrowLeft: -0.05, ArrowRight: 0.05 };
     const targets: Record<string, number> = { Home: 0, End: 1 };
@@ -127,7 +147,7 @@ export function WipeHandle({ value, onChange }: { value: number; onChange: (v: n
   return (
     <>
       <div
-        className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-primary"
+        className={cn("absolute inset-y-0 w-0.5 -translate-x-1/2 bg-primary", wipeLineForcedColors)}
         style={{ left: `${value * 100}%` }}
         aria-hidden="true"
       />
@@ -140,19 +160,21 @@ export function WipeHandle({ value, onChange }: { value: number; onChange: (v: n
         aria-valuenow={percent}
         aria-valuetext={t("task:questionReviewPercent", { value: percent })}
         data-testid="question-review-wipe-handle"
-        className="absolute top-1/2 h-12 w-6 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none rounded-md border border-background bg-primary [--wipe-half:12px] focus-visible:outline-2 focus-visible:outline-ring max-md:w-11 max-md:[--wipe-half:22px] [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:[--wipe-half:22px]"
-        style={{ left: `clamp(var(--wipe-half), ${value * 100}%, calc(100% - var(--wipe-half)))` }}
-        onKeyDown={onKeyDown}
+        className="group absolute w-6 -translate-x-1/2 cursor-move touch-none text-xs outline-none [--wipe-half:12px] max-md:w-11 max-md:[--wipe-half:22px] [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:[--wipe-half:22px]"
+        {...handle.props}
         onPointerDown={(event) => {
-          event.stopPropagation();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
+          dragStart.current = value;
+          handle.props.onPointerDown(event);
         }}
-        onPointerMove={(event) => {
-          if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
-          event.stopPropagation();
-          moveTo(event.currentTarget, event.clientX);
+        style={{
+          // At the ends the grip stays fully inside the stage, beside the line.
+          left: `clamp(var(--wipe-half), ${value * 100}%, calc(100% - var(--wipe-half)))`,
+          ...handle.props.style,
         }}
-      />
+        onKeyDown={onKeyDown}
+      >
+        <WipeGripHalves grip={handle.grip} />
+      </div>
     </>
   );
 }

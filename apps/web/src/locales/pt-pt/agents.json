@@ -438,6 +438,7 @@
   "profileSortable": "perfil ordenável",
   "profileOrderSaveFailed": "Não foi possível guardar a ordem dos perfis",
   "installAgents": "Instalar agentes",
+  "reinstallOpenCode": "Reinstalar",
   "newProfile": "Novo perfil",
   "profileActions": "Ações do perfil",
   "profileCount_one": "{{count}} perfil",

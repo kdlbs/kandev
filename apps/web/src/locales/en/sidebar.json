@@ -1,5 +1,7 @@
 {
   "addFlag": "Add flag",
+  "changeFlag": "Change flag",
+  "editFlag": "Edit flag",
   "flag": "Flag",
   "flagNote": "Flag note",
   "removeFlag": "Remove flag",

@@ -20,6 +20,7 @@ import { isOpenRun } from "./run-status";
 import { AUTOMATIONS_HREF, runHref, type AutomationDetailTab } from "./runs-view";
 import { useAutomationActivity } from "./use-automation-activity";
 import { useLiveRefresh } from "./use-live-refresh";
+import { useAutomationRunRecorded } from "./use-automation-run-recorded";
 import { useRailWidth } from "./use-rail-width";
 import { useManualTrigger } from "./use-manual-trigger";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -386,6 +387,7 @@ export function AutomationDetailPage({
   // Running until the run query returns a terminal status.
   const hasVisibleOpenRun = runs.some((run) => isOpenRun(run.status));
   useLiveRefresh(!foreign && (openRuns > 0 || hasVisibleOpenRun || settling), refresh);
+  useAutomationRunRecorded(foreign ? undefined : automation?.workspace_id, automationId, refresh);
   const rail = useRailWidth();
   const { isMobile } = useResponsiveBreakpoint();
 

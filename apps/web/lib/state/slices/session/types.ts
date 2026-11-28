@@ -13,6 +13,7 @@ import type {
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { ObservedPrompts } from "@/lib/session-last-prompt";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
+import type { ConfirmedSessionRemovals } from "@/lib/state/session-removal";
 
 export type ActiveTurnWindowObservation = {
   activeTurnId: string | null;
@@ -89,6 +90,8 @@ export type TurnChangesState = {
 
 export type TaskSessionsState = {
   items: Record<string, TaskSession>;
+  /** Client-only deletion evidence; ordinary cache eviction does not record it. */
+  confirmedRemovals?: ConfirmedSessionRemovals;
   /** Monotonic client event generation used to order live activity against REST refreshes. */
   activityEpochBySession?: Record<string, number>;
   /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
@@ -242,6 +245,8 @@ export type QueuedMessage = {
   metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
+  /** Server-owned reason recorded when the message entered the queue. */
+  admission_reason?: string;
   /** Response-only: the accepted prompt could not retire the observed turn-error badge. */
   turn_error_acknowledgement_failed?: boolean;
 };
@@ -462,7 +467,7 @@ export type SessionSliceActions = {
     sessionIds: string[],
     projection: WorkspaceRecoveryProjection,
   ) => void;
-  removeTaskSession: (taskId: string, sessionId: string) => void;
+  removeTaskSession: (taskId: string, sessionId: string, options?: { confirmed?: boolean }) => void;
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],

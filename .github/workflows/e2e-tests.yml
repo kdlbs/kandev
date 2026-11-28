@@ -178,7 +178,7 @@ jobs:
       - name: Compile remote platforms and diagnostic commands
         run: >-
           VERSION="0.0.0-e2e.${GITHUB_SHA}"
-          make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg build-codexdbg build-winjob
+          make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-agentctl-windows-amd64 build-acpdbg build-codexdbg build-winjob
 
   build:
     name: Build

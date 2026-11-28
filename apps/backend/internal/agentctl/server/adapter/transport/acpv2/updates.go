@@ -84,7 +84,9 @@ func (a *Adapter) projectUpdate(notification wire.UpdateSessionNotification, bat
 			a.observeForeground(update, batch)
 			return
 		case *wire.ConfigOptionUpdate:
-			a.projectSettings(update.ConfigOptions, "", nil, batch)
+			a.projectSettings(update.ConfigOptions, "", map[string]any{
+				streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceProviderUpdate,
+			}, batch)
 			return
 		case *wire.AvailableCommandsUpdate:
 			a.projectCommands(update.AvailableCommands, batch)

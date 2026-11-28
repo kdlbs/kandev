@@ -1,4 +1,6 @@
 {
+  "before": "更改前",
+  "after": "更改後",
   "add": "新增",
   "addAComment": "新增評論…",
   "addComment": "新增評論",

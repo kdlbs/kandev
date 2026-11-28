@@ -33,10 +33,11 @@ func NewSessionConfigurationRejectedError(err error) error {
 // configuration response. The requested value is not evidence of the value
 // the agent accepted.
 type ConfigurationResult struct {
-	ConfigID  string `json:"config_id,omitempty"`
-	Requested string `json:"requested"`
-	Effective string `json:"effective,omitempty"`
-	Confirmed bool   `json:"confirmed"`
+	ConfigID   string             `json:"config_id,omitempty"`
+	Requested  string             `json:"requested"`
+	Effective  string             `json:"effective,omitempty"`
+	Confirmed  bool               `json:"confirmed"`
+	ModelState *SessionModelState `json:"model_state,omitempty"`
 }
 
 // ConfigurationCommandResult is an ephemeral observation attached to the

@@ -31,7 +31,7 @@ func runDev(ctx context.Context, opts Options, build BuildInfo) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	logStartup("dev mode: using local repo", build.Version, cfg.ports, cfg.dbPath, cfg.logLevel, serverHostForConfig(cfg.startup))
+	logStartup("dev mode: using local repo", build.Version, cfg.ports, cfg.dbPath, cfg.logLevel, cfg.endpoints.bindHosts...)
 
 	ignoreBrokenPipeSignal()
 	setLauncherShutdownDebug(cfg.debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")

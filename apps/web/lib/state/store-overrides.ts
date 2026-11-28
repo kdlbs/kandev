@@ -95,6 +95,7 @@ export function buildStateOverrides(m: DefaultState) {
     connection: m.connection,
     mobileKanban: m.mobileKanban,
     mobileSession: m.mobileSession,
+    tabletSession: m.tabletSession,
     chatInput: m.chatInput,
     reviewPRSelection: m.reviewPRSelection,
     documentPanel: m.documentPanel,

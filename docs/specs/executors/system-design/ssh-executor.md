@@ -18,6 +18,10 @@ The proposed [SSH passthrough design](ssh-passthrough.md) extends this controlle
 lifecycle with remote CLI terminal execution. Its
 [requirements](../requirements/ssh-passthrough.md) own that mode's behavior.
 
+The proposed [Windows remote host design](ssh-windows-remote.md) extends this
+lifecycle to Windows hosts. Its [requirements](../requirements/ssh-windows-remote.md)
+own that platform's behavior.
+
 The [directory-loss reconciliation design](ssh-agentctl-reconciliation.md)
 extends persisted SSH cleanup for AC-001.18 through AC-001.24. It owns that
 extension's launch proof and signalling contract. Existing pidfile guards stay
@@ -288,7 +292,7 @@ task and session state.
 
 ## Out of scope (v1)
 
-- **Remote Windows.** SSH transport to Windows is out of scope.
+- **Remote Windows.** SSH transport to Windows is out of scope for v1. The proposed [Windows remote host design](ssh-windows-remote.md) adds it.
 - **Password / keyboard-interactive auth.** Keys + agent only.
 - **Passphrase-protected keys handled inside kandev.** User must load the key into `ssh-agent`.
 - **Chained ProxyJump.** Single bastion only; multi-hop deferred.

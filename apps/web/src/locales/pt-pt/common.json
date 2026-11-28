@@ -159,6 +159,7 @@
   "discardLocalChangesAtPathDescription": "Iniciar esta tarefa descarta permanentemente as alterações sem commit do seu clone local em {{repoPath}}. Faça uma cópia de segurança do que quiser manter antes de continuar.",
   "discardLocalChangesDescription": "Iniciar esta tarefa descarta permanentemente as alterações sem commit do seu clone local. Faça uma cópia de segurança do que quiser manter antes de continuar.",
   "discoveringAgents": "A descobrir agentes...",
+  "dismissNotification": "Dispensar notificação",
   "doNotShowThisAgain": "Não voltar a mostrar",
   "edit": "Editar",
   "editTask": "Editar tarefa",

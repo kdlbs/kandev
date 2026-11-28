@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -40,6 +41,55 @@ func TestTransientReplayUsesRetainedRuntime(t *testing.T) {
 	require.Empty(t, mgr.stopAgentArgs, "a live retained runtime must not be stopped before replay")
 	require.Len(t, mgr.capturedPromptCalls, 1)
 	require.Equal(t, "execution-1", mgr.capturedPromptCalls[0].ExecutionID)
+}
+
+func TestCursorPromptStreamClosedWithoutOutputReplaysOriginalPrompt(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	installInterruptionTurnService(t, svc)
+	mgr := configureRetainedReplayRuntime(t, svc)
+	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-cursor"
+	session.AgentProfileSnapshot = map[string]any{"model": "cursor-model"}
+	require.NoError(t, svc.repo.UpdateTaskSession(context.Background(), session))
+	armTransientPromptEvidence(svc)
+	svc.rememberTurnPrompt("s1", "original request", "", false, nil)
+
+	message := routingerr.CursorPromptStreamClosedMessage
+	data := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", AgentID: "cursor-acp",
+		OwnerKind: "task", AgentProfileID: "profile-cursor", TurnID: "turn-1", PromptGeneration: 7,
+		ErrorMessage: message, PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		ProviderError: &streams.ProviderError{
+			Source: streams.ProviderErrorSourceCursorACP, ProviderID: "cursor-acp", Message: message,
+		},
+		EvidenceKnown: true,
+		ContinuationSafety: &streams.ContinuationSafetySnapshot{
+			Support: streams.ContinuationAgentManagedToolsV3, PromptGeneration: 7,
+			Known: true, PermissionsResolved: true,
+		},
+	}
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok, "the pre-result failure should use the existing transient retry owner")
+	entry := value.(*transientRetryEntry)
+	require.Equal(t, 1, entry.attempt)
+	require.Equal(t, transientMaxAttempts, entry.policy.maxAttempts())
+	require.Equal(t, recoveryModeReplay, entry.mode)
+	require.Nil(t, entry.continuation, "no-output failure must not bind continuation")
+	require.NotNil(t, entry.retainedRuntime)
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+	require.Equal(t, 1, entry.started, "one admitted failure dispatches at most one replay")
+	require.False(t, entry.claim(), "the same retry owner cannot dispatch a second replay")
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	require.Len(t, mgr.capturedPrompts, 1)
+	require.Equal(t, "original request", mgr.capturedPrompts[0])
+	require.NotEqual(t, "continue", mgr.capturedPrompts[0])
 }
 
 func TestRetainedRetryCancellationAfterFailedReplayKeepsRuntime(t *testing.T) {

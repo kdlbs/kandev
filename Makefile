@@ -373,6 +373,7 @@ runtime-bundle:
 		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
+		"$(BACKEND_DIR)/bin/agentctl-windows-amd64.exe" \
 		"$$staging_bundle_dir/bin/"; \
 		scripts/release/package-bundle.sh --bundle-dir "$$staging_bundle_dir"; \
 		rm -rf "$$resolved_bundle_dir/bin"; \

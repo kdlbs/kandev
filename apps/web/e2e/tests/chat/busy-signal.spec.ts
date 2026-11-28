@@ -179,12 +179,12 @@ test.describe.serial("Claude background prompt handoff experiment", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
     await waitForActiveSessionForegroundActivity(testPage, "background");
 
-    await session.sendMessage("/slow 2s");
+    const foregroundGeneration = waitForActiveSessionForegroundActivity(testPage, "generating");
+    await Promise.all([session.sendMessage("/slow 2s"), foregroundGeneration]);
     await expect(
       session.activeChat().getByTestId("user-message-bubble").filter({ hasText: "/slow 2s" }),
     ).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
-    await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionForegroundActivity(testPage, "background");
     await waitForActiveSessionForegroundActivity(testPage, null);

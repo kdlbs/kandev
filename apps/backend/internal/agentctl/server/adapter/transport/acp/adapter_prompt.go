@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -228,7 +227,7 @@ func (a *Adapter) sendPrompt(
 	a.clearPromptTraceCtx(turn)
 	stopReason := ""
 	if err != nil {
-		promptSpan.RecordError(err)
+		promptSpan.RecordError(a.promptErrorForTrace(err))
 	} else {
 		stopReason = string(resp.StopReason)
 		promptSpan.SetAttributes(attribute.String("stop_reason", stopReason))
@@ -239,7 +238,7 @@ func (a *Adapter) sendPrompt(
 		a.logger.Debug("suppressing completion from handed-off prompt RPC",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration),
-			zap.Error(err))
+			zap.Error(a.promptErrorForTrace(err)))
 		return nil
 	}
 	if err != nil {
@@ -274,6 +273,9 @@ func (a *Adapter) sendPrompt(
 		disposition := a.promptFailureDisposition(
 			conn, sessionID, turn, promptGeneration, notificationsDrained,
 		)
+		if a.sendCursorPromptStreamClosedFailure(sessionID, promptGeneration, turn, disposition, normalizedErr) {
+			return nil
+		}
 		if providerError, ok := a.antigravityPromptProviderError(normalizedErr); ok && disposition != "" {
 			a.sendRetainedPromptError(
 				sessionID, promptGeneration, turn, notificationsDrained, disposition, providerError,
@@ -336,7 +338,7 @@ func (a *Adapter) sendPrompt(
 
 	// Drop any Cursor `cursor/task` metadata for this session that never matched
 	// a subagent tool_call this turn.
-	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
+	a.sweepCursorTaskMetaOnPromptEnd(sessionID, promptGeneration)
 
 	if antigravityBoundary != nil {
 		failure, unverified := a.checkAntigravityOutcome(antigravityBoundary, stopReason)
@@ -365,30 +367,13 @@ func (a *Adapter) sendPrompt(
 	}
 
 	if cursorRetriable, safeMessage, occurredAt, identityComplete := turn.cursorRetriableFailureDetails(); cursorRetriable {
-		if occurredAt.IsZero() {
-			occurredAt = time.Now().UTC()
-		}
 		a.logger.Info("cursor prompt ended with retriable provider-error evidence",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration))
-		a.cancelAsyncTurnComplete(sessionID)
-		a.sendUpdate(AgentEvent{
-			Type:               streams.EventTypeError,
-			SessionID:          sessionID,
-			PromptGeneration:   promptGeneration,
-			Error:              safeMessage,
-			ContinuationSafety: continuationSafety,
-			PromptFailureDisposition: a.promptFailureDisposition(
-				conn, sessionID, turn, promptGeneration, notificationsDrained,
-			),
-			ProviderError: &streams.ProviderError{
-				Source:                     streams.ProviderErrorSourceCursorACP,
-				ProviderID:                 acpcompat.CursorAgentID,
-				Message:                    safeMessage,
-				OccurredAt:                 occurredAt,
-				DiagnosticIdentityComplete: identityComplete,
-			},
-		})
+		disposition := a.promptFailureDisposition(conn, sessionID, turn, promptGeneration, notificationsDrained)
+		a.sendCursorTransportFailure(
+			sessionID, promptGeneration, continuationSafety, disposition, safeMessage, occurredAt, identityComplete,
+		)
 		return nil
 	}
 

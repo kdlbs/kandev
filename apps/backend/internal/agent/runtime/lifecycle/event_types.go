@@ -333,9 +333,10 @@ type AgentStreamEventData struct {
 	AuthMethods                      []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
-	CurrentModelID string                     `json:"current_model_id,omitempty"`
-	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
-	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	CurrentModelID          string                     `json:"current_model_id,omitempty"`
+	SessionModels           []streams.SessionModelInfo `json:"session_models,omitempty"`
+	ConfigOptions           []streams.ConfigOption     `json:"config_options,omitempty"`
+	VerifiedConfigOptionIDs []string                   `json:"verified_config_option_ids,omitempty"`
 	// ConfigBaselineCandidate is an authoritative startup response snapshot.
 	// ConfigOptions remains the latest live provider state.
 	ConfigBaselineCandidate []streams.ConfigOption `json:"config_baseline_candidate,omitempty"`

@@ -155,6 +155,7 @@ function useWorkflowStepMoveFocus({
           updatedAt: response.task?.updated_at,
           workflowStepId: response.task?.workflow_step_id,
           entryIdentity: response.workflow_entry_identity,
+          focusDisposition: response.workflow_focus_disposition,
         });
       } finally {
         if (activeFocusRequestIdRef.current === requestId) {

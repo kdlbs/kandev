@@ -3,10 +3,14 @@ import { test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import { waitForQueuedCount } from "../../helpers/session-resume-prompt-queue";
 import {
+  CAPACITY_AUTO_RUN,
+  CAPACITY_AUTO_RUN_OFF,
+  capacityNotice,
   cleanupMessageCapacityFixture,
+  expectCollapsedCapacityNotice,
+  expectOneAgentReply,
   seedMessageCapacityFixture,
   submitFollowUp,
-  waitForAgentMessage,
 } from "./message-turn-capacity.helpers";
 import { waitForSessionState } from "../workflow/queued-session-ownership-helpers";
 
@@ -18,6 +22,7 @@ test.describe("Message turns wait for session capacity", () => {
     apiClient,
     seedData,
     backend,
+    isMobile,
   }) => {
     test.setTimeout(180_000);
     const marker = "capacity follow-up delivered";
@@ -30,9 +35,9 @@ test.describe("Message turns wait for session capacity", () => {
     );
 
     try {
-      await submitFollowUp(testPage, fixture, marker);
+      await submitFollowUp(fixture, marker, isMobile);
       await waitForQueuedCount(apiClient, fixture.identity, 1);
-      await expect(fixture.session.activeChat().getByTestId("queue-chip")).toBeVisible();
+      await expectCollapsedCapacityNotice(fixture.session, CAPACITY_AUTO_RUN);
       await waitForSessionState(
         apiClient,
         fixture.target.id,
@@ -43,6 +48,7 @@ test.describe("Message turns wait for session capacity", () => {
       await testPage.reload();
       await fixture.session.waitForLoad();
       await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expectCollapsedCapacityNotice(fixture.session, CAPACITY_AUTO_RUN);
 
       await apiClient.stopSession({
         session_id: fixture.filler.session_id,
@@ -50,7 +56,8 @@ test.describe("Message turns wait for session capacity", () => {
         force: true,
       });
       await waitForQueuedCount(apiClient, fixture.identity, 0, 60_000);
-      await waitForAgentMessage(apiClient, fixture.target.session_id, marker);
+      await expect(capacityNotice(fixture.session)).toHaveCount(0);
+      await expectOneAgentReply(apiClient, fixture, marker);
     } finally {
       await cleanupMessageCapacityFixture(apiClient, fixture);
     }
@@ -61,6 +68,7 @@ test.describe("Message turns wait for session capacity", () => {
     apiClient,
     seedData,
     backend,
+    isMobile,
   }) => {
     test.setTimeout(180_000);
     const marker = "capacity auto-run off";
@@ -76,8 +84,9 @@ test.describe("Message turns wait for session capacity", () => {
       await expect(apiClient.setQueueAutoRun(fixture.identity, false)).resolves.toMatchObject({
         auto_run: false,
       });
-      await submitFollowUp(testPage, fixture, marker);
+      await submitFollowUp(fixture, marker, isMobile);
       await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expectCollapsedCapacityNotice(fixture.session, CAPACITY_AUTO_RUN_OFF);
 
       await apiClient.stopSession({
         session_id: fixture.filler.session_id,
@@ -91,12 +100,14 @@ test.describe("Message turns wait for session capacity", () => {
         "No event announces that Auto-run OFF intentionally leaves the entry pending",
       );
       await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expectCollapsedCapacityNotice(fixture.session, CAPACITY_AUTO_RUN_OFF);
 
       await expect(apiClient.setQueueAutoRun(fixture.identity, true)).resolves.toMatchObject({
         auto_run: true,
       });
       await waitForQueuedCount(apiClient, fixture.identity, 0, 60_000);
-      await waitForAgentMessage(apiClient, fixture.target.session_id, marker);
+      await expect(capacityNotice(fixture.session)).toHaveCount(0);
+      await expectOneAgentReply(apiClient, fixture, marker);
     } finally {
       await cleanupMessageCapacityFixture(apiClient, fixture);
     }

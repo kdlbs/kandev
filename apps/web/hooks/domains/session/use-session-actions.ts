@@ -9,6 +9,8 @@ import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { resumeSession as requestSessionResume } from "@/lib/services/session-recovery-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionRestart } from "./use-session-restart";
+import { invalidateTaskSessionMembership } from "@/lib/state/task-session-reads";
+import { prepareSessionRemoval } from "@/lib/ws/handlers/task-primary-focus";
 
 export { isSessionStoppable, isSessionDeletable, isSessionResumable } from "./session-action-state";
 
@@ -144,6 +146,10 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
         taskId,
         appStoreApi.getState().quickChat.sessions,
       );
+      const confirmRemoval =
+        deletionTarget.kind === "session"
+          ? prepareSessionRemoval(appStoreApi, sessionId, taskId)
+          : undefined;
       const ok = await wsAction(
         "session.delete",
         "task:sessionActionDelete",
@@ -159,22 +165,12 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       );
       if (!ok) return false;
 
-      // Switch the active session BEFORE removing from the store so callers
-      // observing activeSessionId don't briefly point at a deleted session.
-      const state = appStoreApi.getState();
-      if (state.tasks.activeSessionId === sessionId) {
-        const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-        const remaining = sessions
-          .filter((s) => s.id !== sessionId)
-          .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
-        if (remaining.length > 0) {
-          state.setActiveSessionAuto(taskId, remaining[0].id);
-        } else {
-          state.clearActiveSession();
-        }
+      if (confirmRemoval) {
+        confirmRemoval();
+      } else {
+        invalidateTaskSessionMembership(appStoreApi, taskId);
+        removeTaskSession(taskId, sessionId, { confirmed: true });
       }
-
-      removeTaskSession(taskId, sessionId);
       removeQuickChatSession(sessionId);
       onDeleted?.();
       return true;

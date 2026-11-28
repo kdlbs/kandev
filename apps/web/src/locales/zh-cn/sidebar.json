@@ -1,5 +1,7 @@
 {
   "addFlag": "添加标记",
+  "changeFlag": "更改标记",
+  "editFlag": "编辑标记",
   "flag": "标记",
   "flagNote": "标记备注",
   "removeFlag": "移除标记",

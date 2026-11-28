@@ -426,3 +426,44 @@ describe("Plan editor extension ownership", () => {
     }
   });
 });
+
+// @covers AC-UI-MERMAID-RENDERING-003.1, AC-UI-MERMAID-RENDERING-003.3
+it.each(["editable", "read-only"])(
+  "captures pinch over the diagram in the %s plan",
+  async (mode) => {
+    const content = ["```mermaid", "graph LR", "A-->B", "```"].join("\n");
+    const mermaid = (await import("mermaid")).default;
+    const renderer = vi
+      .spyOn(mermaid, "render")
+      .mockResolvedValue({ svg: "<svg></svg>", diagramType: "flowchart" });
+    try {
+      const view = render(
+        mode === "editable" ? (
+          <TipTapPlanEditor taskId="task-1" value={content} onChange={() => undefined} />
+        ) : (
+          <PlanReadOnlyMarkdown content={content} />
+        ),
+      );
+      await waitFor(() =>
+        expect(view.container.querySelector(".mermaid-container svg")).toBeTruthy(),
+      );
+      const grip = view.container.querySelector<HTMLElement>(".mermaid-frame-grip")!;
+      const viewport = document.getElementById(grip.getAttribute("aria-controls")!)!;
+      grip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toMatch(/px$/);
+      grip.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(viewport.style.getPropertyValue("--mermaid-frame-height")).toBe("");
+      const pinch = new WheelEvent("wheel", { deltaY: 1000, bubbles: true, cancelable: true });
+      Object.defineProperty(pinch, "ctrlKey", { value: true });
+      view.container.querySelector(".mermaid-container svg")!.dispatchEvent(pinch);
+      expect(pinch.defaultPrevented).toBe(true);
+      expect(view.container.querySelector(".mermaid-zoom-label")?.textContent).toBe("10%");
+      view.container.querySelector<HTMLButtonElement>(".mermaid-toolbar [title]")!.click();
+      const outside = new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true });
+      Object.defineProperty(outside, "ctrlKey", { value: true });
+      expect(view.container.querySelector(".mermaid-code-view")!.dispatchEvent(outside)).toBe(true);
+    } finally {
+      renderer.mockRestore();
+    }
+  },
+);

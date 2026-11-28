@@ -279,16 +279,10 @@ const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProp
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
   const openFlag = useOpenTaskFlag();
-  const selected = props.selectedTaskIds;
-  const readOnly =
-    isArchived ||
-    props.deletingTaskId === task.id ||
-    task.isPendingRemoval ||
-    (selected?.has(task.id) && selected.size > 1);
   const flag = task.flagNote ? (
     <TaskFlagIndicator
       note={task.flagNote}
-      onOpen={openFlag && ((invoker) => openFlag(task, invoker, readOnly))}
+      onOpen={openFlag && ((invoker) => openFlag(task, invoker, true))}
     />
   ) : undefined;
   return (

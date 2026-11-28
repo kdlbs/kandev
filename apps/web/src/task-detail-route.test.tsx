@@ -1,5 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
 import { StateProvider } from "@/components/state-provider";
@@ -7,7 +7,6 @@ import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Task, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 
 const mocks = vi.hoisted(() => ({
@@ -36,38 +35,24 @@ const LOADING_TASK_COPY = "Loading task";
 const TASK_ONE_ID = "task-1";
 const TASK_TWO_ID = "task-2";
 
-vi.mock("@/components/state-hydrator", async () => {
-  const { useLayoutEffect, useRef } = await import("react");
-  const { useAppStoreApi } = await import("@/components/state-provider");
+vi.mock("@/components/state-hydrator", async (original) => {
+  const { StateHydrator: RealHydrator } =
+    await original<typeof import("@/components/state-hydrator")>();
   return {
-    StateHydrator: ({
-      initialState,
-      sessionId,
-      taskSessionHydrationEpochsAtRequestStart,
-      onHydrated,
-    }: {
-      initialState: Partial<AppState>;
-      sessionId?: string;
-      taskSessionHydrationEpochsAtRequestStart?: Readonly<
-        Record<string, TaskSessionHydrationEpoch>
-      >;
-      onHydrated?: () => void;
-    }) => {
-      const store = useAppStoreApi();
-      const onHydratedRef = useRef(onHydrated);
-      onHydratedRef.current = onHydrated;
-      useLayoutEffect(() => {
-        if (Object.keys(initialState).length) {
-          store.getState().hydrate(initialState, {
-            forceMergeSessionId: sessionId,
-            taskSessionHydrationEpochsAtRequestStart,
-          });
-        }
-        const markHydrated = () => onHydratedRef.current?.();
-        mocks.onHydrated = markHydrated;
-        if (!mocks.deferRouteHydration) markHydrated();
-      }, [initialState, sessionId, store, taskSessionHydrationEpochsAtRequestStart]);
-      return <div data-testid={STATE_HYDRATOR_TEST_ID} data-force-session-id={sessionId ?? ""} />;
+    StateHydrator: (props: ComponentProps<typeof RealHydrator>) => {
+      const markHydrated = () => props.onHydrated?.();
+      mocks.onHydrated = markHydrated;
+      return (
+        <>
+          <RealHydrator
+            {...props}
+            onHydrated={() => {
+              if (!mocks.deferRouteHydration) markHydrated();
+            }}
+          />
+          <div data-testid={STATE_HYDRATOR_TEST_ID} data-force-session-id={props.sessionId ?? ""} />
+        </>
+      );
     },
   };
 });

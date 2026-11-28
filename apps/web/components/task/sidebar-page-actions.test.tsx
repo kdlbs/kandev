@@ -6,14 +6,16 @@ import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import type { KanbanState } from "@/lib/state/slices";
 it("uses bounded page records for editing and linking without a board snapshot", () => {
-  const task = {
+  const task: KanbanState["tasks"][number] = {
     id: "child",
     title: "Page child",
     description: "Description",
     workflowId: "workflow",
     workflowStepId: "step",
     repositoryId: "repository",
-  } as KanbanState["tasks"][number];
+    position: 0,
+    metadata: { fork_pr_requires_manual_start: true },
+  };
   const { result } = renderHook(
     () => {
       const store = useAppStoreApi();
@@ -40,6 +42,7 @@ it("uses bounded page records for editing and linking without a board snapshot",
     id: task.id,
     description: "Description",
     repositoryId: "repository",
+    manualStartRequired: true,
   });
   expect(result.current.links.linkingMergeRequestTask).toMatchObject({
     id: task.id,

@@ -27,6 +27,12 @@ implementation boundaries. The [plan](../../../plans/question-image-review/plan.
 defines delivery. Local changes implement this contract; it does not yet describe
 a released version.
 
+[Question image items](question-image-items.md) extends this view with
+late-answer review, agent-declared pairs and singles, a gallery for ungrouped
+images, and a visible image identity. Its terms (late-answer form, item, pair,
+single, gallery, operator comparison) apply to AC-001.1, AC-003.5, AC-005.1,
+and AC-005.11.
+
 ## Terms
 
 - **Review view:** The large image stage with the active question's answer form below it.
@@ -47,10 +53,11 @@ so that small questions stay quick and visual questions stay reviewable.
 
 #### Acceptance criteria
 
-- **AC-TASKS-QUESTION-IMAGE-REVIEW-001.1:** When a pending, answerable bundle has
-  at least one question or choice image, the question panel shall show a labelled
-  Review images control. Image-free bundles, historical messages, and submitted,
-  expired, or late-answer success states shall not show it.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-001.1:** When a pending, answerable bundle or a
+  late-answer form has at least one question or choice image, the question panel
+  shall show a labelled Review images control. Image-free bundles, historical
+  messages without an open late-answer form, and submitted, expired, or
+  late-answer success states shall not show it.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-001.2:** The compact panel shall remain the
   default. The review view shall open only from an explicit operator action.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-001.3:** Selections, custom-text drafts, answer
@@ -111,9 +118,10 @@ so that small questions stay quick and visual questions stay reviewable.
   title or prompt summary, image count, and answered state. The operator can move to
   any segment by pointer, touch, or keyboard. Questions without images remain
   segments and show an image-free stage state.
-- **AC-TASKS-QUESTION-IMAGE-REVIEW-003.5:** Moving to another segment shall keep the
-  comparison mode and its slider values (wipe position, opacity, tolerance). Image
-  choices and zoom shall start fresh for the new segment.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-003.5:** Moving to another segment or item shall
+  keep the comparison mode and its slider values (wipe position, opacity,
+  tolerance). Image choices shall start fresh for the new segment or item; zoom and
+  pan follow AC-TASKS-QUESTION-IMAGE-ITEMS-003.9.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-003.2:** A segment's images shall be its question
   images in authored order, then its choice images in option order. Each image
   shall show its agent-authored description, and each choice image shall also show
@@ -152,9 +160,11 @@ so that small questions stay quick and visual questions stay reviewable.
 
 #### Acceptance criteria
 
-- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.1:** With one image, the stage shall show it
-  alone. With two or more images, the operator can choose images A and B and pick
-  one of five modes: Toggle, Wipe, Side by side, Onion skin, and Difference.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.1:** A single or gallery item shall show its
+  image alone. A pair, and an operator comparison, shall offer five modes: Toggle,
+  Wipe, Side by side, Onion skin, and Difference. In an operator comparison the
+  operator can choose images A and B from the segment's images. A pair fixes its
+  two images in the declared order and offers neither image pickers nor swap.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.2:** Toggle shall show A or B in the same
   place. A visible control and a stage keyboard shortcut shall flip between them.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.3:** Wipe shall show A and B divided by a
@@ -185,10 +195,11 @@ so that small questions stay quick and visual questions stay reviewable.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.10:** Comparison shall use only image bytes
   already loaded through the authorized question-image read. It shall not add a
   server-side image transformation, image archive, or new file-read route.
-- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.11:** In Toggle and Side by side with three
-  or more images, Previous and Next controls, the `[` and `]` keys, and a horizontal
-  swipe at Fit shall step B through the other images while A stays fixed, without
-  wrapping. A label shall show B's name and position.
+- **AC-TASKS-QUESTION-IMAGE-REVIEW-005.11:** In an operator comparison with three
+  or more images, in Toggle and Side by side, Previous and Next candidate controls,
+  and the `[` and `]` keys shall step B through the other images while A stays
+  fixed, without wrapping. A label shall show B's name and position. Pairs have no
+  candidates. A drag on the image shall not step candidates.
 - **AC-TASKS-QUESTION-IMAGE-REVIEW-005.12:** Pressing and holding the image, or
   holding Space while it has focus, shall show A until released. A press that
   moves shall pan instead.

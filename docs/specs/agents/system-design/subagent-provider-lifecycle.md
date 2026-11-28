@@ -6,6 +6,7 @@ requirements:
   - REQ-AGENTS-SUBAGENT-LIFECYCLE-002
   - REQ-AGENTS-SUBAGENT-LIFECYCLE-003
   - REQ-AGENTS-SUBAGENT-LIFECYCLE-004
+  - REQ-AGENTS-SUBAGENT-LIFECYCLE-005
 ---
 
 # Subagent Provider Lifecycle System Design
@@ -25,6 +26,16 @@ admission, and session activity stay with their existing owners.
 | `REQ-AGENTS-SUBAGENT-LIFECYCLE-002` | [Copilot dialect](#copilot-dialect) |
 | `REQ-AGENTS-SUBAGENT-LIFECYCLE-003` | [Claude settlement and resume](#claude-settlement-and-resume) |
 | `REQ-AGENTS-SUBAGENT-LIFECYCLE-004` | [Control labels](#control-labels) |
+
+## Cursor background children
+
+For REQ-AGENTS-SUBAGENT-LIFECYCLE-005, advertise `clientCapabilities._meta.subagents = {}` on the Cursor interactive ACP v1 connection. Preserve existing capability metadata. Cursor 2026.10.19-6bbf2c4 confirms support in `agentCapabilities.sessionCapabilities.subagents`. Negotiate completion independently of the Background Work display setting.
+
+Decode Cursor's parent-session `subagent_spawned` and `subagent_state_update` discriminators at the wire boundary. The pinned SDK's `subagent_update` is a different discriminator. Preserve receive order with ordinary tool updates and the prompt response. Accept lifecycle evidence only for the bound Cursor session. Keep child-session messages out of the parent transcript.
+
+Join the launch and spawn using `_meta.cursor.toolCallId`. Use `rawOutput.isBackground` to distinguish a background dispatch. Key the job by native session binding and `subagentSessionId`; the legacy `cursor/task.agentId` can differ. Preserve the originating turn. Emit existing inspection-only subagent workload observations once for running and terminal state, with terminal precedence across duplicate or reordered frames. Release transient bindings on session replacement and apply existing unknown-state handling for lost ownership. A successful launch remains distinct from a successful child.
+
+Cursor owns delivery of the parent's follow-up before `session/prompt` returns. Kandev renders the parent response through the ordinary message path. A child state update never submits a prompt or releases foreground admission.
 
 ## Wire evidence
 

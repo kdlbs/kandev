@@ -2292,10 +2292,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task:                  dto.FromTask(result.Task),
-		WorkflowEntryIdentity: result.WorkflowEntryIdentity,
-		MoveID:                result.MoveID,
-		EntryOptions:          result.EntryOptions,
+		Task:                     dto.FromTask(result.Task),
+		WorkflowEntryIdentity:    result.WorkflowEntryIdentity,
+		WorkflowFocusDisposition: result.WorkflowFocusDisposition,
+		MoveID:                   result.MoveID,
+		EntryOptions:             result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)

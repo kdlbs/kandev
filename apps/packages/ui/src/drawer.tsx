@@ -5,6 +5,7 @@ import { Drawer as DrawerPrimitive } from "vaul";
 
 import { cn } from "./lib/utils";
 import { ModalDrawerContentContext } from "./modal-drawer-context";
+import { ModalToastOutlet } from "./modal-toast-outlet";
 
 const DrawerModalContext = React.createContext(true);
 
@@ -55,8 +56,9 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  toastOutlet = true,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & { toastOutlet?: boolean }) {
   const modal = React.useContext(DrawerModalContext);
   return (
     <DrawerPortal data-slot="drawer-portal">
@@ -72,6 +74,7 @@ function DrawerContent({
         <div className="bg-muted mx-auto mt-4 hidden h-1.5 w-[100px] shrink-0 rounded-full group-data-[vaul-drawer-direction=bottom]/drawer-content:block bg-muted mx-auto hidden shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
         <ModalDrawerContentContext.Provider value={modal}>
           {children}
+          {toastOutlet && modal && <ModalToastOutlet />}
         </ModalDrawerContentContext.Provider>
       </DrawerPrimitive.Content>
     </DrawerPortal>

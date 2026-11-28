@@ -25,10 +25,11 @@ var (
 	remoteHelperCommitPattern  = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 	remoteHelperVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
 	remoteHelperPlatformAssets = map[string]string{
-		"linux/amd64":  "agentctl-linux-amd64.gz",
-		"linux/arm64":  "agentctl-linux-arm64.gz",
-		"darwin/amd64": "agentctl-darwin-amd64.gz",
-		"darwin/arm64": "agentctl-darwin-arm64.gz",
+		"linux/amd64":   "agentctl-linux-amd64.gz",
+		"linux/arm64":   "agentctl-linux-arm64.gz",
+		"darwin/amd64":  "agentctl-darwin-amd64.gz",
+		"darwin/arm64":  "agentctl-darwin-arm64.gz",
+		"windows/amd64": "agentctl-windows-amd64.exe.gz",
 	}
 )
 
@@ -128,6 +129,15 @@ func validateRemoteHelperManifestIdentity(manifest RemoteHelperManifest, expecte
 		return fmt.Errorf("remote helper manifest identity does not match the running build")
 	}
 	return nil
+}
+
+// requireRemoteHelperPlatform accepts exactly the platforms that ship an
+// agentctl helper. Each executor checks its own platform support separately.
+func requireRemoteHelperPlatform(platform SSHRemotePlatform) error {
+	if _, ok := remoteHelperPlatformAssets[platform.String()]; ok {
+		return nil
+	}
+	return fmt.Errorf("no agentctl helper is published for remote platform %q", reportedRemotePlatform(platform))
 }
 
 func validateRemoteHelperRecord(helper RemoteHelperRecord) error {
