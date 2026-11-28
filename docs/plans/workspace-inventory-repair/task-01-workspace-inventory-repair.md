@@ -136,3 +136,64 @@ final production edit. PostgreSQL inventory-repair regressions passed with
 against a disposable PostgreSQL 17 database. SQL guard, documentation catalog,
 specification lint, and public-doc validators passed. Final broad checks and
 exact-head GitHub CI/review verification are recorded in the Kandev task.
+
+
+### Explicit local metadata-only recovery follow-up
+
+The optional workspace-only request reuses existing authorization, durable
+environment claims, reciprocal Git preservation proof, and atomic inventory
+repair. It permits one server-derived local repository/worktree only in this
+explicit metadata-only path. A server-read task/session/dynamic-route fence is
+checked in the existing transaction and retained in receipt JSON. Agent launch,
+primary-session changes and route rewriting are excluded; ordinary retry is
+separate. Automatic local-source rejection and external filter guards remain.
+
+Windows reciprocal registration comparison now canonicalizes Git's forward-slash
+worktree path before comparing the existing server-canonical path. The change
+does not relax branch, HEAD or common-repository identity checks.
+
+Disposable overlay checks use real SQLite, Git and dirty staged/untracked
+checkouts. Initial failures were isolated to Windows registration syntax and
+host-global external-filter configuration. Only the registration comparison
+needed production repair; synthetic tests isolate global/system Git config and
+separately prove that configured external filters remain rejected. No operating
+repair, installation or runtime retry was added; permanent tests were added
+later in the review follow-up below.
+
+Final disposable race checks: executor 83.706s, orchestrator metadata-only API
+5.654s, SQLite repair regressions 7.177s, and Git preservation 22.647s passed.
+Task-entry/route-generation races, same-key replay after generation change,
+ordinary attestation after repair, active writer, foreign repository/task,
+changed branch, and configured external filter denial were exercised. SQL guard,
+384 decisions/1616 specifications, specification lint, and public-doc validation
+(63 validator tests and 48 pages) passed. PostgreSQL was not run: no dedicated
+authorized test DSN is available. These results do not claim operating recovery.
+
+The first normal commit hook rejected cyclomatic complexity 16 (limit 15).
+Task/session lookup and validation were extracted without changing the contract;
+the applicable focused checks and ordinary hook are rerun after this refactor.
+
+Review follow-up: an ordinary launch after a completed metadata-only repair
+rejected the repaired local checkout through the automatic local-source denial.
+Branch continuity now applies the task-scoped local checkout checks to a fenced
+local receipt only. A focused executor test covers repair followed by ordinary
+Resume; it needs the host Git config isolated on this Windows host.
+
+Review follow-up (permanent tests): committed tests now cover the fence
+comparison, fence read with and without a route row, fence drift (task,
+workflow step, session, route) inside the repair transaction and between the
+executor's fence read and that transaction, the environment and repository
+boundary of the metadata-only request, the scoped local-candidate validator,
+the claim that refuses the requesting session's own live runtime, the
+orchestrator `workspace_only` response (`not_started`, no launch) and the
+handler rejection of `workspace_only` with a non-repair action.
+
+Review follow-up (post-commit fence): a fence change after the repair committed
+was reported as a conflict, and the same key then failed as an idempotency
+conflict, so the committed repair could not be confirmed. Per the owner
+decision, the executor now returns the committed receipt without re-reading the
+fence, the executor retry identity requires only the same repair mode (fenced
+or not), and the store resolves a same-key retry before its fence check. Fence
+drift before the commit still conflicts. Tests cover post-commit drift (task,
+workflow step, session, route) followed by a same-key retry, and same-key
+replay after a fence change in the executor and the store.

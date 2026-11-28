@@ -1612,6 +1612,7 @@ type RecoverSessionOptions struct {
 	SettingsPolicy         executor.ResumeSettingsPolicy
 	ErrorStamp             string
 	Origin                 string
+	WorkspaceOnly          bool
 	transientLaunchFailure *transientLaunchFailureIdentity
 }
 
@@ -1649,6 +1650,16 @@ func (s *Service) RecoverSessionWithOptions(
 	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
+	}
+	if options.WorkspaceOnly {
+		// Metadata-only recovery retains the transient identity fence before admission.
+		if options.transientLaunchFailure != nil {
+			ctx = withTransientLaunchRetryContext(ctx, *options.transientLaunchFailure)
+			if err := s.validateTransientLaunchFailure(ctx, taskID, sessionID, *options.transientLaunchFailure); err != nil {
+				return nil, err
+			}
+		}
+		return s.recoverInventoryMetadataOnly(ctx, taskID, sessionID, action, options.IdempotencyKey)
 	}
 	if options.transientLaunchFailure != nil {
 		ctx = withTransientLaunchRetryContext(ctx, *options.transientLaunchFailure)
