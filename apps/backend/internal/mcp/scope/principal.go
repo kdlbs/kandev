@@ -13,12 +13,13 @@ import (
 // Automation handlers use the principal as their workspace and self-target
 // boundary in addition to the normal owner identity attached to the context.
 type Principal struct {
-	AutomationID    string
-	WorkspaceID     string
-	CallerTaskID    string
-	CallerSessionID string
-	Surface         mcpprofile.Surface
-	CoordinatorID   string
+	AutomationID        string
+	WorkspaceID         string
+	CallerTaskID        string
+	CallerSessionID     string
+	Surface             mcpprofile.Surface
+	CoordinatorID       string
+	TaskVisibilityGrant bool
 }
 
 func (p Principal) IsAutomation() bool {
@@ -81,12 +82,13 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		}
 	}
 	return WithPrincipal(ctx, Principal{
-		AutomationID:    automationID,
-		WorkspaceID:     workspaceID,
-		CallerTaskID:    taskID,
-		CallerSessionID: sessionID,
-		Surface:         surface,
-		CoordinatorID:   coordinatorID,
+		AutomationID:        automationID,
+		WorkspaceID:         workspaceID,
+		CallerTaskID:        taskID,
+		CallerSessionID:     sessionID,
+		Surface:             surface,
+		CoordinatorID:       coordinatorID,
+		TaskVisibilityGrant: surface == mcpprofile.SurfaceKanbanTask && models.HasTaskVisibilityGrant(task, session),
 	}), nil
 }
 

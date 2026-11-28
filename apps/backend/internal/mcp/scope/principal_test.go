@@ -65,6 +65,28 @@ func TestScopePrincipalRejectsSessionFromAnotherTask(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestScopePrincipalBindsManualVisibilityGrant(t *testing.T) {
+	task := &models.Task{ID: "manual-coordinator", WorkspaceID: "workspace-a", Origin: models.TaskOriginManual}
+	session := &models.TaskSession{ID: "approved", TaskID: task.ID, Metadata: map[string]interface{}{
+		models.SessionMetaKeyTaskVisibilityGrant: models.TaskVisibilityGrant{
+			Version: 1, TaskID: task.ID, SessionID: "approved", WorkspaceID: task.WorkspaceID,
+		},
+	}}
+	resolver := &Resolver{tasks: principalLookup{task: task, workspace: &models.Workspace{ID: task.WorkspaceID}, session: session}}
+	ctx, err := resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok := PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, mcpprofile.SurfaceKanbanTask, principal.Surface)
+	require.True(t, principal.TaskVisibilityGrant)
+	session.Metadata = nil
+	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok = PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.False(t, principal.TaskVisibilityGrant)
+}
+
 // fakeCoordinatorLookup is a test double for CoordinatorLookup.
 type fakeCoordinatorLookup struct {
 	coordinatorID string
