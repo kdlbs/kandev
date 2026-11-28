@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/executor"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -81,7 +82,7 @@ func (r *KubernetesExecutor) createTaskInstance(ctx context.Context, original *E
 	}()
 	instance.Metadata[metadataKubernetesTaskOwned] = true
 	instance.Metadata[MetadataKeyCleanupScript] = getMetadataString(req.Metadata, MetadataKeyCleanupScript)
-	record.Metadata = cloneKubernetesMetadata(instance.Metadata)
+	record.Metadata = kubernetesEnvironmentInventoryMetadata(instance.Metadata)
 	if err := r.persistKubernetesEnvironmentSecrets(ctx, record, instance); err != nil {
 		return nil, err
 	}
@@ -115,10 +116,16 @@ func (r *KubernetesExecutor) adoptKubernetesEnvironment(ctx context.Context, req
 	if candidate == nil {
 		return nil
 	}
-	record.Metadata = cloneKubernetesMetadata(candidate.Metadata)
+	record.Metadata = kubernetesEnvironmentInventoryMetadata(candidate.Metadata)
 	record.ControlSecretID = getMetadataString(record.Metadata, MetadataKeyAuthTokenSecret)
 	record.BootstrapSecretID = getMetadataString(record.Metadata, MetadataKeyBootstrapNonceSecret)
 	return nil
+}
+
+func kubernetesEnvironmentInventoryMetadata(metadata map[string]interface{}) map[string]interface{} {
+	inventory := cloneKubernetesMetadata(metadata)
+	delete(inventory, p.BuiltinBindingMetadataKey)
+	return inventory
 }
 
 func (r *KubernetesExecutor) attachKubernetesEnvironmentRequest(ctx context.Context, req *ExecutorCreateRequest, record *models.KubernetesEnvironment) error {
@@ -159,6 +166,10 @@ func (r *KubernetesExecutor) attachKubernetesEnvironmentRequest(ctx context.Cont
 		}
 	}
 	for key, value := range record.Metadata {
+		// The shared environment owns Pod inventory, never a session's MCP authority.
+		if key == p.BuiltinBindingMetadataKey {
+			continue
+		}
 		req.Metadata[key] = value
 	}
 	req.Metadata[metadataKubernetesTaskOwned] = true
@@ -257,7 +268,7 @@ func (r *KubernetesExecutor) taskKubernetesCreateRequest(ctx context.Context, or
 	req.CheckpointRuntimeInventory = func(checkpointCtx context.Context, metadata map[string]interface{}) error {
 		metadata[metadataKubernetesTaskOwned] = true
 		metadata[MetadataKeyCleanupScript] = getMetadataString(req.Metadata, MetadataKeyCleanupScript)
-		record.Metadata = cloneKubernetesMetadata(metadata)
+		record.Metadata = kubernetesEnvironmentInventoryMetadata(metadata)
 		if err := r.environmentStore.SaveKubernetesEnvironment(checkpointCtx, record, false); err != nil {
 			return err
 		}

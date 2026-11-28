@@ -332,42 +332,42 @@ qualified name, not assume every tool belongs to `mcp__kandev__...`.
 
 ## Execution binding and compatibility
 
-Prepare one manifest before new prompt admission and runtime launch. Send the
-same prepared value to injection, all package registries, backend dispatch, and
-prompt generation. `Normalize`, clone/equality, `SetMode`, `SetProfile`, JSON
-round trips, every executor DTO, and helper recovery must preserve and validate
-it. Publish bound state only after successful process-start acceptance for that
-execution generation; a launch attempt is not accepted evidence.
+Before prompt admission or launch, freeze one manifest for injection, package
+registries, dispatch authorization, and guidance. Preserve and validate it through
+`Normalize`, clone/equality, `SetMode`, `SetProfile`, JSON round trips, executor
+DTOs, and helper recovery. Publish bound state only after accepted process start
+for that execution generation; a launch attempt is not accepted evidence.
 
-An unused workspace helper can precede the agent process. Before configuring its
-agent command, the backend binds its prepared profile through authenticated
-`PUT /api/v1/mcp/builtin-binding`. The helper serializes this operation with
-process start. It accepts one binding and an identical retry; it rejects a
-changed binding, an explicitly configured command, or prior process use.
-The prepared-workspace start path must bind packages even when the backend has
-already built the command and skips a second launch. An inherited helper default
-command does not establish explicit configuration. A new
-workspace helper drops the previous process binding and binds the prepared
-selection before launch; a retained helper verifies its original binding. Optional
-routes become available only after binding. The response must confirm the exact
-canonical profile. This preparation does not claim accepted process evidence.
-Persist an unavailable marker before a remote binding or capability update.
-Persist the confirmed value only after helper success. Use an execution-ID CAS
-that changes only the binding metadata key. Status snapshots preserve that key
-for an existing execution, so delayed status writes cannot restore an old grant.
+Before configuring an unused workspace helper's command, bind its prepared
+profile through authenticated `PUT /api/v1/mcp/builtin-binding`, serialized with
+process start. Accept one binding and identical retries; reject changed bindings,
+explicitly configured commands, or prior process use. Prepared-workspace starts
+must bind packages even when their command was built before launch. An inherited
+default command is not explicit configuration. New workspace helpers drop the
+previous process binding and bind the prepared selection before launch; retained
+helpers verify their original binding. Optional routes require a binding, and
+the response must confirm its exact canonical profile. Preparation alone is not
+accepted process evidence.
 
-If policy R+1 is saved while a start uses R, the accepted manifest remains R and
-R+1 is pending. Failed or superseded starts cannot replace accepted state. Compare
-resolved package content and provenance; a revision-only no-op does not require
-a false pending badge. Profile capability changes may narrow eligible tools
-inside a selected package under existing contracts but cannot resurrect an
-excluded package. Required title and question transitions retain their guards.
+Persist an unavailable marker before remote binding or capability updates, then
+the confirmed value after helper success. Use an execution-ID CAS that changes
+only binding metadata. Existing execution status snapshots preserve that key,
+preventing delayed writes from restoring an old grant.
 
-Saving changes only desired state. Same-process reconnect, idle, continuation,
-context reset, and backend adoption retain the bound manifest. A fresh process
-resolves current policy. Workspace/task rebind cannot reuse another owner's
-manifest; reject or require the normal restart boundary. Multi-session tasks
-can therefore show different bound packages, correctly labelled per execution.
+A start accepted with policy R keeps R when R+1 is saved concurrently; R+1 is
+pending. Failed or superseded starts cannot replace accepted state. Compare
+resolved content and provenance: revision-only no-ops need no pending badge.
+Capability changes may narrow eligible tools within selected packages but cannot
+restore excluded packages. Title and question transitions retain their guards.
+
+Desired policy does not change admitted authority. Reconnect, idle, continuation,
+context reset, and backend adoption retain the bound manifest. Kubernetes
+restores the saved binding and creation profile only for authenticated helpers
+with matching task/session identity. Shared Pod/PVC inventory carries no session
+binding. Active refresh and container restart derive both values from the current
+execution, never a historical launch request. A normal new process resolves
+current policy. Rebinding to another owner rejects or requires the normal restart
+boundary; multi-session tasks label bound packages per execution.
 
 Use an agentctl capability `builtin-mcp-packages-v1`, with backend catalog-version
 agreement. A fresh package-mode launch on an old helper or unsupported injection

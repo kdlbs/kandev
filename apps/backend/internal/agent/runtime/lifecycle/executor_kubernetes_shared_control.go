@@ -70,8 +70,14 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 			return nil, false, err
 		}
+		if info.TaskID != request.TaskID || info.SessionID != request.SessionID {
+			return nil, false, errors.New("kubernetes instance owner does not match request")
+		}
 		if info.WorkspacePath != request.WorkspacePath {
 			return nil, false, fmt.Errorf("kubernetes instance workspace mismatch")
+		}
+		if err := retainKubernetesBuiltinBinding(req); err != nil {
+			return nil, false, err
 		}
 		return response, false, nil
 	}

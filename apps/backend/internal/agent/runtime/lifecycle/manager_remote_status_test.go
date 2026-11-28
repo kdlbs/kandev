@@ -16,6 +16,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -490,6 +491,9 @@ func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *
 		AuthToken: "old-token", BootstrapNonce: "durable-nonce",
 		Metadata: map[string]interface{}{
 			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+			MetadataKeyKubernetesConfigNamespace:    "stale-refresh-namespace",
+			mcpprofile.BuiltinBindingMetadataKey:    "stale-refresh-binding",
+			"session_setting":                       "stale-refresh-setting",
 		},
 	}}
 	provider := &refreshingStatusExecutor{
@@ -529,6 +533,9 @@ func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *
 			MetadataKeyAuthTokenSecret:              "kandev-runtime:exec-1:agentctl-auth",
 			MetadataKeyBootstrapNonceSecret:         "kandev-runtime:exec-1:agentctl-bootstrap",
 			MetadataKeyKubernetesAgentctlRemotePort: "41001",
+			MetadataKeyKubernetesConfigNamespace:    "current-namespace",
+			mcpprofile.BuiltinBindingMetadataKey:    "current-binding",
+			"session_setting":                       "current-setting",
 		},
 	}
 	require.NoError(t, mgr.executionStore.Add(execution))
@@ -538,6 +545,9 @@ func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	require.Same(t, newClient, client)
 	releaseClient()
+	require.Equal(t, "current-binding", getMetadataString(execution.MetadataSnapshot(), mcpprofile.BuiltinBindingMetadataKey))
+	require.Equal(t, "current-setting", getMetadataString(execution.MetadataSnapshot(), "session_setting"))
+	require.Equal(t, "stale-refresh-namespace", getMetadataString(execution.MetadataSnapshot(), MetadataKeyKubernetesConfigNamespace))
 	require.Zero(t, configureCalls.Load(), "local transport reattachment must not restart the remote agent")
 	require.Zero(t, startCalls.Load(), "local transport reattachment must not restart the remote agent")
 }

@@ -384,7 +384,7 @@ func (m *Manager) persistActiveKubernetesRefresh(
 	if err := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &instance.AuthToken}); err != nil {
 		return nil, fmt.Errorf("rotate Kubernetes auth token: %w", err)
 	}
-	rollbackMetadata := execution.mergeMetadataWithRollback(instance.Metadata)
+	rollbackMetadata := execution.mergeMetadataWithRollback(kubernetesRefreshMetadata(instance.Metadata))
 	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 		rollbackMetadata()
 		restoreErr := m.secretStore.Update(ctx, authID, &secrets.UpdateSecretRequest{Value: &oldToken})
@@ -401,6 +401,24 @@ func (m *Manager) persistActiveKubernetesRefresh(
 		return errors.Join(secretErr, rowErr)
 	}
 	return rollback, nil
+}
+
+func kubernetesRefreshMetadata(metadata map[string]interface{}) map[string]interface{} {
+	keys := append([]string(nil), kubernetesConnectionMetadataKeys[:]...)
+	keys = append(keys,
+		MetadataKeyKubernetesExecutorConfigHash,
+		MetadataKeyKubernetesAgentctlRemotePort,
+		MetadataKeyKubernetesContainerRestartCount,
+		MetadataKeyKubernetesInventoryState,
+		MetadataKeyIsRemote,
+	)
+	refreshed := make(map[string]interface{}, len(keys))
+	for _, key := range keys {
+		if value, exists := metadata[key]; exists {
+			refreshed[key] = value
+		}
+	}
+	return refreshed
 }
 
 // prepareRestartedProjectMCP rebuilds Pi's project file on the staged helper

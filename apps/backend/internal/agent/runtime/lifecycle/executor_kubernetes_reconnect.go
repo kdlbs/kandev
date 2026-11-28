@@ -14,6 +14,7 @@ import (
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 var errKubernetesInstanceModeRead = errors.New("kubernetes lifecycle: retained agentctl route mode could not be read")
@@ -199,6 +200,7 @@ func kubernetesRequestWithRecordedIdentity(
 	identity kubeexecutor.ResourceIdentity,
 ) *ExecutorCreateRequest {
 	recorded := *req
+	recorded.Metadata = cloneKubernetesMetadata(req.Metadata)
 	recorded.TaskID = identity.TaskID
 	if !getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
 		recorded.SessionID = identity.SessionID
@@ -341,7 +343,28 @@ func (r *KubernetesExecutor) reattachKubernetesAgentctl(
 		_ = forward.Close()
 		return nil, nil, fmt.Errorf("kubernetes lifecycle: recorded instance health: %w", healthErr)
 	}
+	if err := retainKubernetesBuiltinBinding(req); err != nil {
+		client.Close()
+		_ = forward.Close()
+		return nil, nil, fmt.Errorf("%w: %w", errKubernetesInstanceModeRead, err)
+	}
 	return client, forward, nil
+}
+
+// Only an authenticated, retained helper keeps its original authority. New
+// helpers receive the current profile through their creation request.
+func retainKubernetesBuiltinBinding(req *ExecutorCreateRequest) error {
+	if req.RetainedBuiltinBinding == nil {
+		return nil
+	}
+	profile, err := mcpprofile.ParseBuiltinBindingMetadata(req.RetainedBuiltinBinding)
+	if err != nil {
+		return fmt.Errorf("invalid retained built-in MCP binding: %w", err)
+	}
+	req.Metadata[mcpprofile.BuiltinBindingMetadataKey] = req.RetainedBuiltinBinding
+	// Active helper recreation must use the same admitted authority as its metadata.
+	req.McpProfile = profile
+	return nil
 }
 
 func (r *KubernetesExecutor) connectRestartedKubernetesAgentctl(

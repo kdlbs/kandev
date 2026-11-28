@@ -13,6 +13,7 @@ import (
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"go.uber.org/zap"
 )
 
@@ -47,6 +48,10 @@ func (r *KubernetesExecutor) RefreshRemoteInstance(
 		return nil, nil
 	}
 	req := kubernetesActiveRefreshRequest(current.request, instance, inspection.identity)
+	// Active refresh restores the admitted execution, not a previous launch's policy.
+	if err := retainKubernetesBuiltinBinding(req); err != nil {
+		return nil, err
+	}
 	client, forward, token, remotePort, err := r.connectKubernetesRefresh(
 		ctx, freshRuntime, current, req, inspection,
 	)
@@ -185,6 +190,7 @@ func kubernetesActiveRefreshRequest(
 	}
 	req.TaskEnvironmentID = identity.EnvironmentID
 	req.Metadata = cloneKubernetesMetadata(instance.Metadata)
+	req.RetainedBuiltinBinding = instance.Metadata[p.BuiltinBindingMetadataKey]
 	req.AuthToken = instance.AuthToken
 	req.BootstrapNonce = instance.BootstrapNonce
 	return req

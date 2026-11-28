@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"go.uber.org/zap"
 )
 
 // verifyBuiltinExecution does not resolve desired policy. A retained process
@@ -36,18 +38,18 @@ func (m *Manager) verifyBuiltinExecutionBinding(ctx context.Context, execution *
 	}
 	profile, err := p.ParseBuiltinBindingMetadata(value)
 	if err != nil {
-		return fmt.Errorf("invalid built-in MCP execution binding: %w", err)
+		return m.builtinMCPVerificationFailure(execution, "binding_metadata", fmt.Errorf("invalid built-in MCP execution binding: %w", err))
 	}
 	if err := m.validateBuiltinOwner(ctx, execution.TaskID, execution.SessionID, execution.WorkspaceID, profile); err != nil {
-		return err
+		return m.builtinMCPVerificationFailure(execution, "owner_validation", err)
 	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
-		return errors.New("built-in MCP helper is unavailable")
+		return m.builtinMCPVerificationFailure(execution, "helper_connection", errors.New("built-in MCP helper is unavailable"))
 	}
 	if err := client.VerifyBuiltinMCP(ctx, *profile); err != nil {
-		return fmt.Errorf("verify built-in MCP execution binding: %w", err)
+		return m.builtinMCPVerificationFailure(execution, "helper_confirmation", fmt.Errorf("verify built-in MCP execution binding: %w", err))
 	}
 	return nil
 }
@@ -75,4 +77,13 @@ func (m *Manager) validateBuiltinOwner(ctx context.Context, taskID, sessionID, w
 		return errors.New("built-in MCP action registry is unavailable")
 	}
 	return nil
+}
+
+func (m *Manager) builtinMCPVerificationFailure(execution *AgentExecution, stage string, err error) error {
+	m.logger.Warn("built-in MCP binding verification refused",
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("failure_stage", stage),
+		zap.Bool("binding_mismatch", errors.Is(err, agentctl.ErrBuiltinMCPBindingMismatch)))
+	return err
 }

@@ -39,6 +39,9 @@ func TestBuiltinWorkspaceBindingRequiresHelperAgreement(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
+				if result == "different" {
+					require.ErrorIs(t, err, ErrBuiltinMCPBindingMismatch)
+				}
 			}
 			require.Equal(t, 1, calls)
 		})
@@ -69,6 +72,9 @@ func TestBuiltinVerificationRejectsMissingOrDifferentHelperBinding(t *testing.T)
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
+				if result == "different" {
+					require.ErrorIs(t, err, ErrBuiltinMCPBindingMismatch)
+				}
 			}
 		})
 	}
