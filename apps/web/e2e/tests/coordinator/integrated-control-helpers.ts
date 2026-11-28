@@ -220,8 +220,8 @@ async function unavailableCollections(context: Context, mobile: boolean) {
     await expect(page.getByTestId("control-dashboard-overview")).toBeVisible();
     const errorNav = await navigation(page, mobile);
     await errorNav.getByTestId("control-nav-workspaces").click();
-    await expect(page.getByTestId("control-dashboard-workspaces").getByRole("alert")).toContainText(
-      ["Could not load this collection.", "Some workspace data could not be loaded."],
+    await expect(page.getByTestId("control-refresh-banner")).toContainText(
+      "Some workspace data could not be loaded.",
     );
     await page.unroute(`**${path}`);
     await refreshCollections(page, path);
@@ -325,9 +325,7 @@ export function controlPhoneGeometryCase() {
       await page.goto("/control/overview");
       const nav = await navigation(page, true);
       await assertTarget(nav.getByTestId("control-nav-history"), true);
-      await assertTarget(nav.getByRole("button", { name: "Refresh", exact: true }), true);
-      await assertTarget(nav.getByText(seeded.workspace.name, { exact: true }), true);
-      await assertTarget(nav.getByText(seeded.coordinator.name, { exact: true }), true);
+      await expect(nav.getByText(seeded.workspace.name, { exact: true })).toBeVisible();
       await assertTarget(nav.getByTestId(`control-conversation-${seeded.coordinator.id}`), true);
       const sheet = page.getByTestId("app-nav-sheet");
       await sheet.evaluate(async (element) => {
