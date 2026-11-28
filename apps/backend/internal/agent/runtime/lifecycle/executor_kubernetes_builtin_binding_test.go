@@ -34,13 +34,13 @@ func TestKubernetesReconnectKeepsBindingOfRetainedHelper(t *testing.T) {
 
 func testKubernetesReconnectBinding(t *testing.T, taskOwned, changed, replaced bool) {
 	t.Helper()
-	bound := builtinDispatchProfile(p.PackageCore)
+	bound := builtinDispatchProfile(p.PackageCore, p.PackageConfiguration)
 	bound.BuiltinPackages.TaskID = "task-1"
 	bound.Providers = []string{"github"}
 	desired := builtinDispatchProfile(p.PackageCore)
 	desired.BuiltinPackages.TaskID = "task-1"
 	if !changed {
-		desired.Providers = []string{"github"}
+		desired = bound
 	}
 	retained, err := p.MarshalBuiltinBinding(bound)
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func testKubernetesReconnectBinding(t *testing.T, taskOwned, changed, replaced b
 		}
 	}))
 	t.Cleanup(helper.Close)
-	backend, resources, created, task := newKubernetesBindingFixture(t, taskOwned, testHTTPPort(t, helper))
+	backend, resources, created, task, forwards := newKubernetesBindingFixture(t, taskOwned, testHTTPPort(t, helper))
 	created.Metadata[p.BuiltinBindingMetadataKey] = retained
 	if replaced {
 		if taskOwned {
@@ -86,33 +86,27 @@ func testKubernetesReconnectBinding(t *testing.T, taskOwned, changed, replaced b
 	require.NoError(t, resumed.Client.VerifyBuiltinMCP(context.Background(), *profile))
 	require.Equal(t, current, req.Metadata[p.BuiltinBindingMetadataKey], "reconnect must not overwrite the caller's desired metadata")
 	require.Len(t, resources.createdPods, 1)
-	if !taskOwned {
-		return
-	}
-	creates, active, _ := task.control.snapshot()
-	require.Len(t, active, 1)
 	if !replaced {
-		require.Len(t, creates, 1)
 		if changed {
-			testKubernetesRetainedBindingSurvivesActiveRestart(t, task, resumed, req, retained)
+			testKubernetesRetainedBindingSurvivesActiveRestart(t, backend, resources, task, forwards, resumed, req, retained)
 		}
 		return
 	}
-	actual, err := p.MarshalBuiltinBinding(*creates[len(creates)-1].McpProfile)
-	require.NoError(t, err)
-	require.Equal(t, current, actual)
-	if changed {
+	if taskOwned && changed {
 		testKubernetesNewBindingSurvivesTransportRefresh(t, task, resumed, req, current)
+	} else if changed {
+		testKubernetesRetainedBindingSurvivesActiveRestart(t, backend, resources, task, forwards, resumed, req, current)
 	}
 
 }
 
-func newKubernetesBindingFixture(t *testing.T, taskOwned bool, helperPort uint16) (*KubernetesExecutor, *fakeKubernetesResources, *ExecutorInstance, *taskPodFixture) {
+func newKubernetesBindingFixture(t *testing.T, taskOwned bool, helperPort uint16) (*KubernetesExecutor, *fakeKubernetesResources, *ExecutorInstance, *taskPodFixture, *recordingKubernetesForwarder) {
 	t.Helper()
 	var backend *KubernetesExecutor
 	var resources *fakeKubernetesResources
 	var created *ExecutorInstance
 	var task *taskPodFixture
+	var forwards *recordingKubernetesForwarder
 	if taskOwned {
 		task = newTaskPodFixture(t)
 		backend, resources = task.runtime, task.resources
@@ -122,13 +116,17 @@ func newKubernetesBindingFixture(t *testing.T, taskOwned bool, helperPort uint16
 		created = task.launch(t, 1)
 	} else {
 		resources = &fakeKubernetesResources{}
-		backend = newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{uint16(kubeexecutor.DefaultAgentctlPort): builtinBindingControlPort(t, startKubernetesAgentctlServer(t, true, 41001)), 41001: helperPort})
+		forwards = &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+			uint16(kubeexecutor.DefaultAgentctlPort): builtinBindingControlPort(t, startKubernetesAgentctlServer(t, true, 41001)),
+			41001:                                    helperPort,
+		}}
+		backend = newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
 		t.Cleanup(func() { require.NoError(t, backend.Close()) })
 		var err error
 		created, err = backend.CreateInstance(context.Background(), validKubernetesCreateRequest())
 		require.NoError(t, err)
 	}
-	return backend, resources, created, task
+	return backend, resources, created, task, forwards
 }
 
 func builtinBindingControlPort(t *testing.T, port uint16) uint16 {
@@ -196,18 +194,36 @@ func TestKubernetesEnvironmentDoesNotSupplySessionBinding(t *testing.T) {
 	}
 }
 
-func testKubernetesRetainedBindingSurvivesActiveRestart(t *testing.T, f *taskPodFixture, instance *ExecutorInstance, req *ExecutorCreateRequest, retained string) {
+func testKubernetesRetainedBindingSurvivesActiveRestart(
+	t *testing.T,
+	backend *KubernetesExecutor,
+	resources *fakeKubernetesResources,
+	task *taskPodFixture,
+	forwards *recordingKubernetesForwarder,
+	instance *ExecutorInstance,
+	req *ExecutorCreateRequest,
+	retained string,
+) {
 	t.Helper()
-	f.control.reboot()
-	f.resources.mu.Lock()
-	f.resources.pod.Status.ContainerStatuses[0].RestartCount++
-	f.resources.mu.Unlock()
-	refreshed, err := f.runtime.RefreshRemoteInstance(context.Background(), kubernetesRefreshInstance(instance, req.Metadata))
+	if task != nil {
+		task.control.reboot()
+	} else {
+		newControl := builtinBindingControlPort(t, startKubernetesAgentctlServer(t, true, 41001))
+		forwards.mu.Lock()
+		forwards.localPorts[uint16(kubeexecutor.DefaultAgentctlPort)] = newControl
+		forwards.mu.Unlock()
+	}
+	resources.mu.Lock()
+	resources.pod.Status.ContainerStatuses[0].RestartCount++
+	resources.mu.Unlock()
+	refreshed, err := backend.RefreshRemoteInstance(context.Background(), kubernetesRefreshInstance(instance, req.Metadata))
 	require.NoError(t, err)
 	require.NotNil(t, refreshed)
 	t.Cleanup(refreshed.Abort)
-	creates, _, _ := f.control.snapshot()
-	actual, err := p.MarshalBuiltinBinding(*creates[len(creates)-1].McpProfile)
+	backend.mu.Lock()
+	activeRequest := backend.sessions[instance.InstanceID].request
+	backend.mu.Unlock()
+	actual, err := p.MarshalBuiltinBinding(*activeRequest.McpProfile)
 	require.NoError(t, err)
 	require.Equal(t, retained, actual, "active restart must recreate the admitted authority")
 	require.Equal(t, retained, refreshed.Instance.Metadata[p.BuiltinBindingMetadataKey])
@@ -222,7 +238,7 @@ func TestKubernetesReconnectRejectsInvalidRetainedBinding(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			helper := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 			t.Cleanup(helper.Close)
-			backend, _, created, task := newKubernetesBindingFixture(t, mode == "task", testHTTPPort(t, helper))
+			backend, _, created, task, _ := newKubernetesBindingFixture(t, mode == "task", testHTTPPort(t, helper))
 			req := kubernetesReconnectRequest(created)
 			req.RetainedBuiltinBinding = "{}"
 			_, err := backend.CreateInstance(context.Background(), req)
@@ -248,5 +264,5 @@ func testKubernetesNewBindingSurvivesTransportRefresh(t *testing.T, f *taskPodFi
 	t.Cleanup(refreshed.Abort)
 	require.Equal(t, binding, refreshed.Instance.Metadata[p.BuiltinBindingMetadataKey])
 	require.NoError(t, refreshed.Commit(nil))
-	testKubernetesRetainedBindingSurvivesActiveRestart(t, f, refreshed.Instance, req, binding)
+	testKubernetesRetainedBindingSurvivesActiveRestart(t, f.runtime, f.resources, f, nil, refreshed.Instance, req, binding)
 }

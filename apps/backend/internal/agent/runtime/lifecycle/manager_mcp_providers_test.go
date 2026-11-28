@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetMcpProvidersForSessionCallsLiveAgentctl(t *testing.T) {
@@ -37,6 +40,84 @@ func TestSetMcpProvidersForSessionCallsLiveAgentctl(t *testing.T) {
 	if !reflect.DeepEqual(got, providers) {
 		t.Fatalf("agentctl providers = %v, want %v", got, providers)
 	}
+}
+
+type blockingRemoteRefresher struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingRemoteRefresher) RefreshRemoteInstance(context.Context, *ExecutorInstance) (*RemoteInstanceRefresh, error) {
+	close(r.entered)
+	<-r.release
+	return nil, nil
+}
+
+func TestSetMcpProvidersForSessionWaitsForRemoteRefresh(t *testing.T) {
+	providerRequests := make(chan []string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Providers []string `json:"mcp_providers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		providerRequests <- body.Providers
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	mgr, execution := workspaceSourceTestManager(t, server.URL, nil)
+	profile := builtinDispatchProfile(mcpprofile.PackageCore)
+	encoded, err := mcpprofile.MarshalBuiltinBinding(profile)
+	require.NoError(t, err)
+	execution.setMetadataValue(mcpprofile.BuiltinBindingMetadataKey, encoded)
+
+	refresher := &blockingRemoteRefresher{entered: make(chan struct{}), release: make(chan struct{})}
+	refreshDone := make(chan error, 1)
+	var releaseOnce sync.Once
+	releaseRefresh := func() { releaseOnce.Do(func() { close(refresher.release) }) }
+	refreshFinished := false
+	t.Cleanup(func() {
+		releaseRefresh()
+		if !refreshFinished {
+			select {
+			case <-refreshDone:
+			case <-time.After(time.Second):
+				t.Error("remote refresh did not finish after releasing its test barrier")
+			}
+		}
+	})
+	go func() {
+		refreshDone <- mgr.refreshTrackedRemoteInstanceOnce(context.Background(), execution, refresher)
+	}()
+	<-refresher.entered
+
+	updateDone := make(chan error, 1)
+	updateStarted := make(chan struct{})
+	go func() {
+		close(updateStarted)
+		updateDone <- mgr.SetMcpProvidersForSession(context.Background(), execution.SessionID, []string{"gitlab"})
+	}()
+	<-updateStarted
+	select {
+	case providers := <-providerRequests:
+		t.Fatalf("provider update reached agentctl during remote refresh: %v", providers)
+	case err := <-updateDone:
+		t.Fatalf("provider update completed during remote refresh: %v", err)
+	case <-time.After(time.Second):
+	}
+
+	releaseRefresh()
+	require.NoError(t, <-refreshDone)
+	refreshFinished = true
+	require.NoError(t, <-updateDone)
+	require.Equal(t, []string{"gitlab"}, <-providerRequests)
+	value, present := execution.metadataValue(mcpprofile.BuiltinBindingMetadataKey)
+	require.True(t, present)
+	updated, err := mcpprofile.ParseBuiltinBindingMetadata(value)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gitlab"}, updated.Providers)
 }
 
 func TestSetMcpProvidersForSession_NoExecutionIsNoOp(t *testing.T) {

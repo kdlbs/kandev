@@ -3285,6 +3285,13 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
@@ -3306,6 +3313,13 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 	if !exists || execution == nil {
 		m.logger.Debug("MCP provider refresh skipped: no execution for session",
 			zap.String("session_id", sessionID))
+		return nil
+	}
+	if err := execution.remoteInstanceLifecycleMu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if current, currentExists := m.executionStore.Get(execution.ID); !currentExists || current != execution {
 		return nil
 	}
 	client, releaseClient := execution.AcquireAgentCtlClient()

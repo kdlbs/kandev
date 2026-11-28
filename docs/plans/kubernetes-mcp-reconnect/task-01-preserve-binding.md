@@ -62,6 +62,34 @@ retained A with desired B followed by active restart, then admitted B followed
 by transport refresh and another restart. The old behavior failed these
 assertions before correction.
 
+### PR review follow-up
+
+The review found an overlap between active refresh and a live provider or mode
+update. Refresh could persist a stale execution snapshot after the update had
+already changed the helper and binding. Both operations now use the execution
+lifecycle lock. Refresh persistence applies only Kubernetes connection and
+inventory fields. Shared environment writes also remove the session binding at
+creation, legacy adoption, and runtime checkpoint. The existing read guard stays
+in place for older records.
+
+These changes cover AC-AGENTS-BUILTIN-MCP-003.2. The regressions assert that a
+live provider update waits for active refresh, stale refresh metadata keeps the
+new binding and session fields, active recovery retains distinct package sets
+for session-owned and task-owned Pods, and shared environment writes omit the
+session binding.
+
+The following focused race checks passed after this follow-up:
+
+```sh
+(cd apps/backend && go test -race -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl -run '^(Test(Kubernetes|GetOrCreateSharedKubernetes|Builtin|Standalone.*Builtin|IdleActivityRecovery|SetMcpProvidersForSession)|TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent)' -count=1)
+```
+
+The changed-file Go lint also passed:
+
+```sh
+bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/manager_launch.go apps/backend/internal/agent/runtime/lifecycle/manager_kubernetes_refresh.go apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_environment.go apps/backend/internal/agent/runtime/lifecycle/manager_remote_status_test.go apps/backend/internal/agent/runtime/lifecycle/manager_mcp_providers_test.go apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_builtin_binding_test.go apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes_environment_binding_test.go
+```
+
 A disposable Kind v0.33.0 / Kubernetes v1.36.1 cluster on Linux ARM64 ran real
 Kubernetes resource/stream clients and agentctl helpers in both ownership modes.
 Actual MCP initialize and tools/list passed after retained A, active container
