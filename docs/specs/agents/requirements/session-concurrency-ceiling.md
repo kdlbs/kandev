@@ -216,6 +216,37 @@ capacity check or queue.
   It shall clear when the last matching entry leaves the queue. Ordinary
   queued input, rejected sends and sibling sessions shall not trigger it.
 
+### REQ-AGENTS-SESSION-CEILING-004: Hold launches under host memory pressure
+
+**Intent:** When enabled, a new agent process is not started while the host is
+short of memory, so running sessions are not pushed into swap, allocation
+failures, or a host watchdog restart.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-004.1:** When `features.sessionMemoryGuard` is on
+  and host available physical memory is below the configured floor or system
+  commit charge is above the configured ceiling, an automatic launch that would
+  add an agent process shall be deferred through the existing ceiling queue
+  with the `memory_pressure` reason, whether or not the session-count ceiling
+  is enabled. Its card note shall describe the host condition rather than a
+  session count.
+- **AC-AGENTS-SESSION-CEILING-004.2:** A manual launch (a user-initiated start,
+  resume, or prompt, including when the admitted population cannot be read), a
+  prompt or resume into an already counted session, a dynamic-route hand-off of
+  a counted session, running turns, and Office coordinator conversations shall
+  not be held by memory pressure, and a manual launch shall not read the host.
+- **AC-AGENTS-SESSION-CEILING-004.3:** A deferred launch shall be replayed by the
+  existing retry sweep once the host is no longer under pressure.
+- **AC-AGENTS-SESSION-CEILING-004.4:** When host memory cannot be read or the
+  platform reports an incomplete reading, launches shall proceed and one warning
+  per failure streak shall be logged.
+- **AC-AGENTS-SESSION-CEILING-004.5:** The flag shall be off in every shipped
+  profile. With it off, the host shall not be read and admission shall be
+  unchanged. `KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB` (default 8192) and
+  `KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT` (default 75) shall set the
+  thresholds; an invalid value shall keep its default.
+
 ### REQ-AGENTS-SESSION-CEILING-005: Opt into total and execution-grade limits
 
 **Intent:** Administrators can explicitly include manual task launches in a
@@ -247,9 +278,15 @@ shared total and per-grade capacity policy without changing automatic-only defau
 
 - Per-workspace or per-user ceilings.
 - Changing workflow WIP limits or changing manual-launch behavior under the
-  default automatic-only policy.
-- A new release toggle, YAML setting, or automatic CPU-based capacity selection.
+  default automatic-only policy. The host-memory hold applies only to automatic launches.
+- A release toggle or YAML setting for the session-count ceiling, or automatic
+  CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.
 - A separate message-capacity setting or a new release toggle.
 - Direct terminal keystrokes and provider input within an already admitted turn.
 - A global priority guarantee across launch, automation, and message queues.
+
+## System design
+
+- [Session concurrency ceiling](../system-design/session-concurrency-ceiling.md)
+- [Session memory guard](../system-design/session-memory-guard.md)

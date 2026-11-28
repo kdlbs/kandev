@@ -624,6 +624,11 @@ type FeaturesConfig struct {
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 
+	// SessionMemoryGuard holds launches that would add an agent process while
+	// the host is low on available memory or above its commit ceiling. Off in
+	// every shipped profile; launches otherwise follow only the session ceiling.
+	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
+
 	// ACPV2 opts qualified local structured sessions into ACP v2.
 	ACPV2 bool `mapstructure:"acp_v2" json:"acpV2"`
 

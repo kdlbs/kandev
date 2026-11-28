@@ -1168,6 +1168,10 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
 
+      - name: Test Windows host memory probe
+        if: matrix.suite == 'native'
+        run: go test -race -v -json -timeout 25m ./internal/system/hostmemory/...
+
       - name: Test Windows Git executable memo
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run '^TestNewGitCommand'
