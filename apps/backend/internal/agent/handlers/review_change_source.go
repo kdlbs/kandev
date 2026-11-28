@@ -57,7 +57,28 @@ func (s *ReviewChangeSource) agentctlUncommittedFiles(ctx context.Context, sessi
 	if status == nil {
 		return nil, nil
 	}
-	return status.Files, nil
+	return filesWithRepositoryName(status.Files, status.RepositoryName), nil
+}
+
+func filesWithRepositoryName(files map[string]any, repositoryName string) map[string]any {
+	if repositoryName == "" || files == nil {
+		return files
+	}
+	stamped := make(map[string]any, len(files))
+	for path, value := range files {
+		file, ok := value.(map[string]any)
+		if !ok {
+			stamped[path] = value
+			continue
+		}
+		copy := make(map[string]any, len(file)+1)
+		for key, fileValue := range file {
+			copy[key] = fileValue
+		}
+		copy["repository_name"] = repositoryName
+		stamped[path] = copy
+	}
+	return stamped
 }
 
 // CommittedFiles returns the cumulative committed-on-branch per-file payloads.

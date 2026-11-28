@@ -63,6 +63,8 @@ The evidence comparison and its errors are unchanged.
 
 `GetGitStatusWithDetails` and the existing agentctl status route retain their wire shapes.
 `Client.GetGitStatusWithDetails` already requests `fresh=true&details=wait`.
+When the workspace root returns `repository_unavailable` (such as a `plugin_remote` workspace whose single repository is materialized in a branch-scoped subdirectory), the client checks `/api/v1/git/turn-changes/scopes`; if agentctl registers exactly one non-root scope, it re-reads `/api/v1/git/status?fresh=true&details=wait&repo=<scope>`.
+Root-repository layouts keep a single request; zero scopes, multiple scopes, and other error codes preserve the root result unchanged.
 `Executor.captureBaseCommit` continues to consume a successful enriched result.
 Completion, archive, and Review consumers retain their existing completion requirements.
 

@@ -13,6 +13,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/review"
 )
 
 func TestReviewChangeSourceExecutionFailures(t *testing.T) {
@@ -123,6 +124,45 @@ func TestReviewChangeSourceUncommittedFiles(t *testing.T) {
 				t.Fatalf("files = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+// @covers AC-AGENTS-NATIVE-CODE-REVIEW-001.7, AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5
+func TestReviewChangeSourceCollectsScopedFilesWithRepositoryIdentity(t *testing.T) {
+	const repoScope = "owner/repo"
+	const rootUnavailable = `{"success":false,"status_state":"unavailable","detail_state":"unavailable","error_code":"repository_unavailable"}`
+	const scopedStatus = `{"success":true,"status_state":"ready","files_complete":true,"detail_state":"ready","repository_name":"owner/repo","files":{"src/main.go":{"path":"src/main.go","diff":"review diff","status":"modified"}}}`
+	source := reviewSourceServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body string
+		switch r.URL.Path {
+		case "/api/v1/git/status":
+			if r.URL.Query().Get("repo") == "" {
+				body = rootUnavailable
+			} else {
+				if got := r.URL.Query().Get("repo"); got != repoScope {
+					t.Errorf("repo scope = %q, want %q", got, repoScope)
+				}
+				body = scopedStatus
+			}
+		case "/api/v1/git/turn-changes/scopes":
+			body = `{"scopes":["owner/repo"]}`
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	})
+
+	files, err := review.CollectChanges(context.Background(), source, "s", "")
+	if err != nil {
+		t.Fatalf("CollectChanges: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("changed files = %+v, want one file", files)
+	}
+	if files[0].RepositoryName != repoScope || files[0].Key() != repoScope+"\x00src/main.go" {
+		t.Fatalf("changed file identity = (%q, %q), want repository-scoped key", files[0].RepositoryName, files[0].Key())
 	}
 }
 

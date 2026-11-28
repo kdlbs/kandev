@@ -138,7 +138,7 @@ Do not add checkpoint logic to the mutable monitor or large existing orchestrato
 
 1. Reserve or adopt the durable turn under existing turn ownership.
 2. Resolve the initiating settings identity and persist policy once.
-3. Prepare the real executor and attached source manifest; resolve actual checkout bindings.
+3. Prepare the real executor and attached source manifest; resolve actual checkout bindings. For `plugin_remote` executors, project checkout repository subpaths through `launchRepositoryProjectionKey` so they match the materialized `<repo>-<branch>` scopes registered by agentctl.
 4. After prompt generation admission and before `triggerPrompt`, call a new synchronous runtime capture callback with immutable ownership evidence.
 5. Capture a fresh start for every eligible checkout. Persist exact accepted object IDs before external dispatch.
 6. If bounded capture fails, persist per-checkout unavailability and continue dispatch. Never manufacture replacement start content.
@@ -436,3 +436,5 @@ No source-only latency claims are acceptable.
 [Presentation plan](../../../plans/turn-changed-files-presentation/plan.md).
 
 [Multi-repository status, start capture, and retention load fixes](../../../plans/capture-and-retention-load-fixes/plan.md).
+
+[Plugin remote turn-change checkouts and base-commit capture](../../../plans/plugin-remote-turn-changes-and-base-commit/plan.md).
