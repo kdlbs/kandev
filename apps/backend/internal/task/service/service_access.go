@@ -280,6 +280,9 @@ func (s *Service) authorizeTaskScopeActionWorkspace(ctx context.Context, taskID 
 		if s.collaborationApplies(ctx) {
 			return "", repoerrors.ErrTaskNotFound
 		}
+		if err := s.authorizeAutomationCredentialScope(ctx, taskID, scope); err != nil {
+			return "", err
+		}
 		return task.WorkspaceID, nil
 	case err != nil:
 		return "", err
@@ -296,7 +299,20 @@ func (s *Service) authorizeTaskScopeActionWorkspace(ctx context.Context, taskID 
 	if err := s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, action); err != nil {
 		return "", err
 	}
+	if err := s.authorizeAutomationCredentialScope(ctx, taskID, scope); err != nil {
+		return "", err
+	}
 	return task.WorkspaceID, nil
+}
+
+func (s *Service) authorizeAutomationCredentialScope(ctx context.Context, taskID string, scope authz.Scope) error {
+	if err := s.authorizeAutomationCredentialRun(ctx, taskID); err != nil {
+		return err
+	}
+	if scope != authz.ScopeSessionPrompt && scope != authz.ScopeSessionExec {
+		return nil
+	}
+	return s.authorizeAutomationCredentialRunUse(ctx, taskID)
 }
 
 // authorizeTaskIDWorkspace checks task reach and returns the workspace ID
@@ -629,7 +645,10 @@ func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironment
 			return err
 		}
 	}
-	return s.authorizeTaskScope(ctx, env.TaskID, scope)
+	if err := s.authorizeTaskScope(ctx, env.TaskID, scope); err != nil {
+		return err
+	}
+	return s.authorizeAutomationCredentialRunUse(ctx, env.TaskID)
 }
 
 // AuthorizeTaskEnvironmentAccess checks that both identifiers are visible to

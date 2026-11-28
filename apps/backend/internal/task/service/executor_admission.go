@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -26,6 +27,9 @@ func (s *Service) SetExecutorIdentityResolver(resolve func(context.Context, stri
 // ExecutorActorContext restores only explicit durable attribution. Unknown
 // creators cannot inherit the workspace owner's or scheduler's authority.
 func (s *Service) ExecutorActorContext(ctx context.Context, userID string) (context.Context, error) {
+	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic && identity.UserID == userID {
+		return ctx, nil
+	}
 	if s.executorIdentityResolver == nil {
 		return ctx, fmt.Errorf("executor actor resolver is unavailable")
 	}
@@ -108,13 +112,78 @@ func (s *Service) PrepareAutonomousExecutor(ctx context.Context, creatorID, prof
 		}
 	}
 	creatorCtx := models.WithExecutorActor(ctx, creatorID)
-	if restored, err := s.ExecutorActorContext(creatorCtx, creatorID); err == nil {
+	if creatorID != "" {
+		restored, err := s.ExecutorActorContext(creatorCtx, creatorID)
+		if err != nil {
+			return creatorCtx, err
+		}
 		creatorCtx = restored
 	}
 	if err := s.AuthorizeExecutorConfiguration(creatorCtx, executorID, profileID); err != nil {
 		return creatorCtx, err
 	}
 	return creatorCtx, nil
+}
+
+// PrepareAutomationCredentialActor validates the saved automation creator
+// independently of the workspace owner who is approving a repository grant.
+func (s *Service) PrepareAutomationCredentialActor(
+	ctx context.Context,
+	workspaceID, creatorID, profileID string,
+) error {
+	_, err := s.PrepareAutomationCredentialActorContext(ctx, workspaceID, creatorID, profileID)
+	return err
+}
+
+// PrepareAutomationCredentialActorContext restores the saved creator and
+// checks the workspace permission required to start or resume a credential
+// bearing automation before any secret value is resolved.
+func (s *Service) PrepareAutomationCredentialActorContext(
+	ctx context.Context,
+	workspaceID, creatorID, profileID string,
+) (context.Context, error) {
+	actorCtx := models.WithExecutorWorkspace(ctx, workspaceID)
+	caller, hasCaller := authn.IdentityFromContext(ctx)
+	if hasCaller && caller.Synthetic {
+		return actorCtx, s.authorizeCredentialExecutor(actorCtx, profileID)
+	}
+	if creatorID == "" {
+		restored, err := s.ExecutorActorContext(actorCtx, "")
+		if err != nil {
+			return actorCtx, models.ErrExecutorOwnershipInvalid
+		}
+		identity, ok := authn.IdentityFromContext(restored)
+		if !ok || !identity.Synthetic {
+			return restored, models.ErrExecutorOwnershipInvalid
+		}
+		return restored, s.authorizeCredentialExecutor(restored, profileID)
+	}
+	actorCtx = models.WithExecutorActor(actorCtx, creatorID)
+	actorCtx, err := s.ExecutorActorContext(actorCtx, creatorID)
+	if err != nil {
+		return actorCtx, err
+	}
+	identity, ok := authn.IdentityFromContext(actorCtx)
+	if !ok || identity.Synthetic || identity.UserID != creatorID {
+		return actorCtx, models.ErrExecutorOwnershipInvalid
+	}
+	if workspaceID != "" {
+		if err := s.AuthorizeWorkspaceScope(actorCtx, workspaceID, authz.ScopeSessionPrompt); err != nil {
+			return actorCtx, err
+		}
+	}
+	if err := s.authorizeCredentialExecutor(actorCtx, profileID); err != nil {
+		return actorCtx, err
+	}
+	return actorCtx, nil
+}
+
+func (s *Service) authorizeCredentialExecutor(ctx context.Context, profileID string) error {
+	executorID, err := s.autonomousExecutorID(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	return s.AuthorizeExecutorConfiguration(ctx, executorID, profileID)
 }
 
 func (s *Service) executorAdmissionActor(ctx context.Context, session *models.TaskSession) context.Context {

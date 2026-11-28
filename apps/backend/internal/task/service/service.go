@@ -585,6 +585,9 @@ type Service struct {
 	wsGroupMembership               WorkspaceGroupMembershipReader
 	executorCapabilityProber        ExecutorCapabilityProber
 	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
+	automationCredentialRunAccess   AutomationCredentialRunAccessChecker
+	automationCredentialRunUse      AutomationCredentialRunAccessChecker
+	automationCredentialRunCreator  AutomationCredentialRunCreatorLookup
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation

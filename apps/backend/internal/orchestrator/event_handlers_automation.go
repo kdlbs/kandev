@@ -127,6 +127,10 @@ type automationRetryRunLock interface {
 	WithRetryRunLock(ctx context.Context, runID string, fn func(context.Context) error) error
 }
 
+type automationCredentialLaunchValidator interface {
+	ValidateAutomationCredentials(context.Context, *automation.Automation, []string) error
+}
+
 const (
 	retryOperationCommittedState = "committed"
 	retryOperationAmbiguousState = "ambiguous"
@@ -142,7 +146,7 @@ func isDeterministicCommittedRetryTaskError(err error) bool {
 	return errors.Is(err, errDeterministicCommittedRetryTask)
 }
 
-const retryAutomationRunIDMetadataKey = "automation_run_id"
+const retryAutomationRunIDMetadataKey = models.MetaKeyAutomationRunID
 
 type automationContinuationState interface {
 	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error
@@ -436,6 +440,13 @@ func (s *Service) automationDestinationForEvent(
 	return nil, false, nil
 }
 
+func (s *Service) getAutomationForRunLaunch(ctx context.Context, automationID string) (*automation.Automation, error) {
+	if reader, ok := s.automationService.(automationDispatchReader); ok {
+		return reader.GetAutomationForDispatch(ctx, automationID)
+	}
+	return s.automationService.GetAutomation(ctx, automationID)
+}
+
 func (s *Service) createAutomationTask(ctx context.Context, evt *automation.AutomationTriggeredEvent) {
 	if evt.RunID != "" {
 		if locker, ok := s.automationService.(automationRetryRunLock); ok {
@@ -526,7 +537,7 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 	}
 	if retryRun == nil {
 		var loadErr error
-		a, loadErr = s.automationService.GetAutomation(ctx, evt.AutomationID)
+		a, loadErr = s.getAutomationForRunLaunch(ctx, evt.AutomationID)
 		if loadErr != nil || a == nil {
 			s.logger.Error("failed to load automation for trigger",
 				zap.String("automation_id", evt.AutomationID), zap.Error(loadErr))
@@ -545,15 +556,20 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 	}
 	// Retry snapshots carry launch configuration, while creator authority is
 	// always restored from the current durable source.
-	source, sourceErr := s.automationService.GetAutomation(ctx, a.ID)
+	source, sourceErr := s.getAutomationForRunLaunch(ctx, a.ID)
 	if sourceErr != nil || source == nil {
 		s.recordFailedRun(ctx, evt, "automation creator unavailable")
 		return
 	}
+	a = automationWithCurrentCredentialAuthority(a, source)
 	var executorErr error
 	ctx, executorErr = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, source.WorkspaceID), source.CreatedByUserID, a.ExecutorProfileID)
 	if executorErr != nil {
-		s.recordFailedRun(ctx, evt, executorErr.Error())
+		failure := executorErr.Error()
+		if len(a.CredentialChoices) > 0 {
+			failure = automation.ErrCredentialCreatorUnavailable.Error()
+		}
+		s.recordFailedRun(ctx, evt, failure)
 		return
 	}
 	if evt.RetryAmbiguousRecovery {
@@ -620,7 +636,7 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 	if taskErr != nil {
 		if retryOperation != nil && retryOperation.State == retryOperationCommittedState {
 			if isDeterministicCommittedRetryTaskError(taskErr) {
-				s.recordFailedRun(ctx, evt, taskErr.Error())
+				s.recordFailedRunError(ctx, evt, taskErr)
 				return
 			}
 			s.logger.Error("failed to adopt committed retry task",
@@ -630,7 +646,7 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 				zap.Error(taskErr))
 			return
 		}
-		s.recordFailedRun(ctx, evt, taskErr.Error())
+		s.recordFailedRunError(ctx, evt, taskErr)
 		return
 	}
 	if retryOperation != nil && retryOperation.State == retryOperationCommittedState {
@@ -775,6 +791,33 @@ func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) 
 			PRContinuationStepID: snapshot.PRContinuationStepID,
 		},
 	}
+}
+
+func automationWithCurrentCredentialAuthority(snapshot, current *automation.Automation) *automation.Automation {
+	if snapshot == nil || current == nil {
+		return snapshot
+	}
+	result := *snapshot
+	result.CreatedByUserID = current.CreatedByUserID
+	result.CredentialChoices = append([]automation.CredentialChoiceProjection(nil), current.CredentialChoices...)
+	return &result
+}
+
+func (s *Service) refreshAutomationCredentialAuthority(
+	ctx context.Context,
+	a *automation.Automation,
+) (*automation.Automation, error) {
+	if a == nil || s.automationService == nil {
+		return a, nil
+	}
+	current, err := s.getAutomationForRunLaunch(ctx, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, errors.New("automation is unavailable")
+	}
+	return automationWithCurrentCredentialAuthority(a, current), nil
 }
 
 // automationRunReasons carries both disposition tokens recorded for a firing
@@ -981,6 +1024,13 @@ func (s *Service) prepareAutomationTask(
 		}
 	}
 	if task != nil {
+		repositoryIDs, err := s.automationTaskRepositoryIDs(ctx, task.ID)
+		if err != nil {
+			return nil, nil, action, reasons, err
+		}
+		if err := s.validateAutomationCredentials(ctx, a, repositoryIDs); err != nil {
+			return nil, nil, action, reasons, err
+		}
 		// No repository resolution happens on this path (site 395 below never
 		// executes), so the token is set here: the firing's disposition is
 		// genuinely "inherited from the continued task", recorded on this new
@@ -991,6 +1041,9 @@ func (s *Service) prepareAutomationTask(
 
 	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)
 	reasons.Repository = repoReason
+	if err := s.validateAutomationCredentials(ctx, a, reviewTaskRepositoryIDs(repositories)); err != nil {
+		return nil, nil, action, reasons, err
+	}
 	// The automation dispatch owns this task's initial start. The marker is
 	// stamped before CreateTask runs its feeder pull, so the pull's task.moved
 	// auto-start cannot launch the same task first. Continuation reuses an
@@ -1776,6 +1829,24 @@ func (s *Service) startAutomationTask(
 	workflowStepID string,
 	run *automationRunLaunch,
 ) (automation.RunDispatch, error) {
+	var err error
+	if run != nil || (a != nil && len(a.CredentialChoices) > 0) {
+		a, err = s.refreshAutomationCredentialAuthority(ctx, a)
+		if err != nil {
+			return automationRunDispatchFor(task.ID, nil, err)
+		}
+	}
+	ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, a.WorkspaceID), a.CreatedByUserID, a.ExecutorProfileID)
+	if err != nil {
+		return automationRunDispatchFor(task.ID, nil, err)
+	}
+	repositoryIDs, err := s.automationTaskRepositoryIDs(ctx, task.ID)
+	if err != nil {
+		return automationRunDispatchFor(task.ID, nil, err)
+	}
+	if err := s.validateAutomationCredentials(ctx, a, repositoryIDs); err != nil {
+		return automationRunDispatchFor(task.ID, nil, err)
+	}
 	execution, err := s.startTask(
 		ctx,
 		task.ID,
@@ -1791,6 +1862,44 @@ func (s *Service) startAutomationTask(
 		startTaskOptions{AutomationRun: run},
 	)
 	return automationRunDispatchFor(task.ID, execution, err)
+}
+
+func (s *Service) validateAutomationCredentials(ctx context.Context, a *automation.Automation, repositoryIDs []string) error {
+	validator, ok := s.automationService.(automationCredentialLaunchValidator)
+	if !ok {
+		return nil
+	}
+	return validator.ValidateAutomationCredentials(ctx, a, repositoryIDs)
+}
+
+func reviewTaskRepositoryIDs(repositories []ReviewTaskRepository) []string {
+	ids := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		if repository.RepositoryID != "" {
+			ids = append(ids, repository.RepositoryID)
+		}
+	}
+	return ids
+}
+
+func (s *Service) automationTaskRepositoryIDs(ctx context.Context, taskID string) ([]string, error) {
+	reader, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return nil, errors.New("automation task repository reader is unavailable")
+	}
+	repositories, err := reader.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load automation task repositories: %w", err)
+	}
+	ids := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		if repository != nil && repository.RepositoryID != "" {
+			ids = append(ids, repository.RepositoryID)
+		}
+	}
+	return ids, nil
 }
 
 // Repository-selector disposition tokens (A5's wire format). A bare token is
@@ -2062,10 +2171,18 @@ func (s *Service) associateAutomationPR(ctx context.Context, taskID, repositoryI
 
 //nolint:nestif // Retry failure admission must verify both service and run identity.
 func (s *Service) recordFailedRun(ctx context.Context, evt *automation.AutomationTriggeredEvent, errMsg string) {
+	s.recordFailedRunError(ctx, evt, errors.New(errMsg))
+}
+
+func (s *Service) recordFailedRunError(ctx context.Context, evt *automation.AutomationTriggeredEvent, failure error) {
+	if failure == nil {
+		failure = errors.New("automation launch failed")
+	}
+	errMsg := failure.Error()
 	if retryService, ok := s.automationService.(automationRetryFailure); ok && evt.RunID != "" {
 		if binding, bindOK := s.automationService.(automationRunBinding); bindOK {
 			if run, err := binding.GetRun(ctx, evt.RunID); err == nil && run != nil && run.RetryGroupID != "" {
-				if _, err := retryService.FinalizeAutomationRetryFailure(ctx, evt.RunID, run.RetryGroupGeneration, errors.New(errMsg), "launch"); err != nil {
+				if _, err := retryService.FinalizeAutomationRetryFailure(ctx, evt.RunID, run.RetryGroupGeneration, failure, "launch"); err != nil {
 					s.logger.Error("failed to finalize automation retry", zap.Error(err))
 				}
 				return

@@ -123,6 +123,16 @@ The editor reads top to bottom, and each choice sits above the fields it changes
 
 The form can save an empty agent or executor selection, but launch still needs a usable profile. Scheduled, manual, webhook, and provider-triggered runs can remain repository-free. When a provider event supplies an exact repository through its established contract, Kandev uses that event context. A GitHub pull-request run with configured repository access checks out that PR's head branch and uses its base branch.
 
+### Automation credentials
+
+When an automation is enabled, **Save** checks that its known agent-profile, executor-profile, and repository secret references are readable by its creator. A failed check names the field and source, then keeps the draft in the editor. Turn **Enabled** off to save the draft while you repair access. Kandev checks the current references again before each launch, including scheduled and manual runs.
+
+Credential choices apply to automation-history runs that create a new task, use fixed agent and executor profiles, and start from a manual or scheduled trigger. Task-based webhook and provider-event runs keep checking their existing references. Continued-task runs and managed-conversation delivery do not use these choice controls.
+
+For a supported secret-backed environment field on a shared agent or executor profile, the automation creator can choose one of their own Global secrets beside that field. This binding applies only to that automation and does not edit the shared profile. The resolved value is available to the agent and commands in the run environment. Portable exports omit personal bindings and import as disabled automations for review.
+
+A Workspace secret already bound to a selected repository needs owner approval before an automation creator can use it. The current workspace owner can grant that exact secret at that repository field on one saved automation, if the owner also owns the secret. The approval applies to that automation's fixed creator; another automation needs its own grant. Revoking approval blocks future starts, retries, prompts, and runtime attachments. A process that already received the value keeps it until it stops. Portable exports omit grants. See [Team Access](team-access.md#what-stays-with-the-owner) and [Executor profiles](executors.md#automation-credential-bindings).
+
 ### What a firing produces
 
 Every firing produces a distinct `AutomationRun` with exact task, session, and turn identity. A hidden destination uses `origin = automation_run`; that origin, not `is_ephemeral`, keeps its persistent task out of Kanban and task lists. A normal-task destination uses a separate visible automation origin, enters the selected workflow at its configured start step, and follows the ordinary task lifecycle. The workflow selector shows the same ordered step preview as New Task; automations do not have a separate step selector. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
@@ -133,7 +143,7 @@ A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can 
 
 The run destination and ordered repository/base-branch pairs are explicit saved settings. Existing empty repository selections migrate to scratch execution; there is no workspace-default fallback. Existing selected repositories use their configured default branch until the automation is saved with an explicit branch. Changing the destination, workflow, repository pairs, or runtime profiles replaces an incompatible reusable continuation on its next firing. Visible automation tasks survive automation deletion; hidden tasks use the automation cleanup lifecycle.
 
-Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
+Selecting an unprotected run opens the shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies. When a run uses a personal or Workspace credential choice, only its creator can open or reply to the transcript. Other workspace members see safe run status without task or session details. The workspace owner can stop a protected live run but cannot read its transcript.
 
 CLI passthrough output does not appear in the run transcript. You cannot recover this output from the run transcript. To record output in future sessions, disable CLI passthrough in the automation's agent profile.
 

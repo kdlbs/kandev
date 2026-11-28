@@ -14,6 +14,8 @@ const mockRepositories = [
 ];
 
 const mockState = {
+  auth: { user: null },
+  workspaces: { items: [] },
   workflows: {
     items: [
       {
@@ -52,6 +54,29 @@ const mockState = {
       },
     ],
   },
+  settingsAgents: {
+    items: [
+      {
+        id: "agent-1",
+        name: "codex",
+        profiles: [
+          {
+            id: "agent-1",
+            name: "Default",
+            agentId: "agent-1",
+            agentDisplayName: "Codex",
+            model: "",
+            allowIndexing: false,
+            autoApprove: true,
+            cliFlags: [],
+            cliPassthrough: false,
+            envVars: [{ key: "SERVICE_KEY", secret_id: "profile-secret" }],
+          },
+        ],
+      },
+    ],
+  },
+  secrets: { items: [], loaded: true, loading: false },
   executors: {
     items: [
       {
@@ -72,6 +97,7 @@ const mockState = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => null,
   useOptionalAppStoreApi: () => null,
   useOptionalAppStore: (_selector: unknown, fallback: unknown) => fallback,
 }));
@@ -135,15 +161,25 @@ vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
   ),
 }));
 
-import { ConfigSection, WorkflowField, getExecutorItemDisabledReason } from "./config-section";
+import {
+  ConfigSection,
+  getExecutorItemDisabledReason,
+  supportsPersonalCredentialChoices,
+  WorkflowField,
+} from "./config-section";
 
 function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
   return render(
     <ConfigSection
       workspaceId={WORKSPACE_ID}
+      automation={null}
+      onAutomationChange={() => {}}
       agentProfileId=""
       executorProfileId=""
+      credentialChoicesEligible
       repositorySelections={[]}
+      personalCredentialBindings={[]}
+      onPersonalCredentialBindingsChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}
@@ -178,6 +214,34 @@ describe("ConfigSection shared task selectors", () => {
     expect(screen.queryByTestId("workflow-step-selector")).toBeNull();
   });
 
+  it("requires a workflow for a normal task and explains why", () => {
+    render(
+      <WorkflowField
+        workspaceId={WORKSPACE_ID}
+        workflowId=""
+        taskMode="normal_task"
+        onWorkflowChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText("Choose a workflow so this task appears in Kanban and the sidebar."),
+    ).toBeTruthy();
+  });
+
+  it("keeps a workflow optional for automation history", () => {
+    render(
+      <WorkflowField
+        workspaceId={WORKSPACE_ID}
+        workflowId=""
+        taskMode="automation_run"
+        onWorkflowChange={() => {}}
+      />,
+    );
+    expect(
+      screen.queryByText("Choose a workflow so this task appears in Kanban and the sidebar."),
+    ).toBeNull();
+  });
+
   it("uses the shared searchable profile selectors", async () => {
     renderConfig();
 
@@ -188,6 +252,22 @@ describe("ConfigSection shared task selectors", () => {
     fireEvent.click(screen.getByTestId("executor-profile-selector"));
     expect(screen.getAllByTestId("shared-executor-logo")).toHaveLength(2);
     expect(screen.getByPlaceholderText("Search profiles...")).toBeTruthy();
+  });
+
+  it("shows credential fields from the full agent profile snapshot", () => {
+    renderConfig({ agentProfileId: "agent-1" });
+
+    expect(screen.getByTestId("automation-personal-credential-SERVICE_KEY")).toBeTruthy();
+  });
+
+  it("hides personal secret selection when the draft uses unsupported settings", () => {
+    const unsupportedDraft = {
+      agentProfileId: "agent-1",
+      credentialChoicesEligible: false,
+    } as unknown as Partial<ComponentProps<typeof ConfigSection>>;
+    renderConfig(unsupportedDraft);
+
+    expect(screen.queryByTestId("automation-personal-credential-fields")).toBeNull();
   });
 
   it("uses paired repository chips and has no workspace-default choice", () => {
@@ -213,36 +293,6 @@ describe("ConfigSection shared task selectors", () => {
   });
 });
 
-describe("WorkflowField", () => {
-  it("requires a workflow for a normal task and explains why", () => {
-    render(
-      <WorkflowField
-        workspaceId={WORKSPACE_ID}
-        workflowId=""
-        taskMode="normal_task"
-        onWorkflowChange={() => {}}
-      />,
-    );
-    expect(
-      screen.getByText("Choose a workflow so this task appears in Kanban and the sidebar."),
-    ).toBeTruthy();
-  });
-
-  it("keeps the workflow optional for automation history", () => {
-    render(
-      <WorkflowField
-        workspaceId={WORKSPACE_ID}
-        workflowId=""
-        taskMode="automation_run"
-        onWorkflowChange={() => {}}
-      />,
-    );
-    expect(
-      screen.queryByText("Choose a workflow so this task appears in Kanban and the sidebar."),
-    ).toBeNull();
-  });
-});
-
 describe("getExecutorItemDisabledReason", () => {
   it("allows Worktree to use a repository-free scratch workspace", () => {
     expect(getExecutorItemDisabledReason("worktree", [])).toBeNull();
@@ -255,5 +305,33 @@ describe("getExecutorItemDisabledReason", () => {
         { kind: "registered", id: "repo-2", branch: "main" },
       ]),
     ).not.toBeNull();
+  });
+});
+
+describe("supportsPersonalCredentialChoices", () => {
+  it.each([
+    ["manual", { type: "manual" }],
+    ["scheduled", { type: "scheduled" }],
+  ] as const)("allows the %s trigger for a new automation-history task", (_, trigger) => {
+    expect(supportsPersonalCredentialChoices("automation_run", "new_task", [trigger])).toBe(true);
+  });
+
+  it.each([
+    ["continuing a thread", "automation_run", "reuse_thread", [{ type: "scheduled" }]],
+    ["webhook delivery", "automation_run", "new_task", [{ type: "webhook" }]],
+    ["provider events", "automation_run", "new_task", [{ type: "github_pr" }]],
+    ["managed conversations", "managed_conversation", "new_task", [{ type: "scheduled" }]],
+  ] as const)("rejects credential choices for %s", (_, taskMode, continuation, triggers) => {
+    expect(
+      supportsPersonalCredentialChoices(
+        taskMode,
+        continuation,
+        triggers as unknown as { type: "manual" | "scheduled" | "webhook" | "github_pr" }[],
+      ),
+    ).toBe(false);
+  });
+
+  it("allows credentials when Run now is the only trigger", () => {
+    expect(supportsPersonalCredentialChoices("automation_run", "new_task", [])).toBe(true);
   });
 });

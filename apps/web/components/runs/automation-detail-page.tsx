@@ -16,6 +16,10 @@ import { nextFiring } from "./automation-rows";
 import { RunsDrawer } from "./runs-drawer";
 import { RunsRail } from "./runs-rail";
 import { RunTranscript } from "./run-transcript";
+import {
+  AutomationCredentialErrorMessage,
+  parseAutomationCredentialRunError,
+} from "@/components/automations/automation-credential-error";
 import { isOpenRun } from "./run-status";
 import { AUTOMATIONS_HREF, runHref, type AutomationDetailTab } from "./runs-view";
 import { useAutomationActivity } from "./use-automation-activity";
@@ -44,6 +48,14 @@ function useWorkspaceGuard(automation: Automation | null, onLeave: () => void): 
   return foreign;
 }
 
+function isSessionlessCredentialFailure(run: AutomationRun): boolean {
+  return (
+    !run.session_id &&
+    !isOpenRun(run.status) &&
+    parseAutomationCredentialRunError(run.error_message) !== null
+  );
+}
+
 /**
  * The run the pane is showing. An explicit `?run=` wins; otherwise the newest,
  * because "what did it say last night" is the question this page exists for.
@@ -51,11 +63,19 @@ function useWorkspaceGuard(automation: Automation | null, onLeave: () => void): 
  * empty pane that reads as a broken link.
  */
 function selectRun(runs: AutomationRun[], requestedId: string | undefined): AutomationRun | null {
-  const openable = runs.filter((run) => Boolean(run.session_id));
-  if (openable.length === 0) return null;
-  const requested = requestedId ? openable.find((run) => run.id === requestedId) : undefined;
+  // A workspace owner may receive stop authority while the protected session
+  // identifier remains redacted. Keep that run selectable for its safe status
+  // and Stop control without opening its transcript.
+  const selectable = runs.filter(
+    (run) =>
+      Boolean(run.session_id) ||
+      (run.can_stop && isOpenRun(run.status)) ||
+      isSessionlessCredentialFailure(run),
+  );
+  if (selectable.length === 0) return null;
+  const requested = requestedId ? selectable.find((run) => run.id === requestedId) : undefined;
   if (requested) return requested;
-  return openable.reduce((newest, run) =>
+  return selectable.reduce((newest, run) =>
     Date.parse(run.created_at) > Date.parse(newest.created_at) ? run : newest,
   );
 }
@@ -113,17 +133,19 @@ function DetailHeader({
         <>
           {/* Waiting until tomorrow to find out whether a schedule works is the
               reason this sits on the reading surface and not only in settings. */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer text-xs"
-            onClick={runNow}
-            disabled={disabled}
-            data-testid="automation-run-now"
-          >
-            <IconPlayerPlay className="h-3.5 w-3.5" />
-            {triggering ? t("automations:starting") : t("automations:runNow")}
-          </Button>
+          {automation?.can_trigger_now ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="max-md:min-h-11 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer text-xs"
+              onClick={runNow}
+              disabled={disabled}
+              data-testid="automation-run-now"
+            >
+              <IconPlayerPlay className="h-3.5 w-3.5" />
+              {triggering ? t("automations:starting") : t("automations:runNow")}
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -227,6 +249,7 @@ function ActivityView({
       </p>
     );
   }
+  const credentialError = parseAutomationCredentialRunError(selected.error_message);
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="automation-activity">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
@@ -238,7 +261,7 @@ function ActivityView({
             {t(statusLabelKey(selected.status))}
           </p>
         </div>
-        {isOpenRun(selected.status) && (
+        {isOpenRun(selected.status) && selected.can_stop && (
           <Button
             variant="destructive"
             size="sm"
@@ -257,14 +280,25 @@ function ActivityView({
           {t("automations:failedToStopRun", { error: stopError })}
         </p>
       )}
+      {credentialError ? (
+        <div className="shrink-0 border-b border-border/60 px-4 py-3">
+          <AutomationCredentialErrorMessage error={credentialError} context="run" />
+        </div>
+      ) : null}
       {/* Keyed on the exact session turn so selecting two runs in one shared
           session remounts the conversation for the requested firing. */}
-      <RunTranscript
-        key={`${selected.session_id}:${selected.turn_id ?? ""}:${selected.id}`}
-        sessionId={selected.session_id ?? ""}
-        taskId={selected.task_id || null}
-        turnId={selected.turn_id}
-      />
+      {selected.session_id ? (
+        <RunTranscript
+          key={`${selected.session_id}:${selected.turn_id ?? ""}:${selected.id}`}
+          sessionId={selected.session_id}
+          taskId={selected.task_id || null}
+          turnId={selected.turn_id}
+        />
+      ) : (
+        <p className={MUTED_NOTE} data-testid="automation-run-read-restricted">
+          {t("automations:credentialRunOwnerStopInfo")}
+        </p>
+      )}
     </div>
   );
 }

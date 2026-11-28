@@ -114,15 +114,27 @@ test.describe("Agents browse page on mobile", () => {
         body: JSON.stringify(AVAILABLE_AGENTS),
       }),
     );
+    // Keep the catalog fixture consistent when the host broadcasts a probe result.
+    const payload = { agents: AVAILABLE_AGENTS.agents, tools: AVAILABLE_AGENTS.tools };
+    await testPage.routeWebSocket(/\/ws$/, (socket) => {
+      const server = socket.connectToServer();
+      server.onMessage((message) => {
+        if (typeof message !== "string") {
+          socket.send(message);
+          return;
+        }
+        const frames = message.split("\n").map((frame) => {
+          if (!frame.includes('"agent.available.updated"')) return frame;
+          const event = JSON.parse(frame) as { type: string; action: string };
+          return event.type === "notification" && event.action === "agent.available.updated"
+            ? JSON.stringify({ ...event, payload })
+            : frame;
+        });
+        socket.send(frames.join("\n"));
+      });
+    });
 
-    const availableAgentsResponse = testPage.waitForResponse(
-      (response) =>
-        response.url().includes("/api/v1/agents/available") &&
-        response.request().method() === "GET",
-    );
     await testPage.goto("/settings/agents/browse");
-    const response = await availableAgentsResponse;
-    expect(response.ok()).toBe(true);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });

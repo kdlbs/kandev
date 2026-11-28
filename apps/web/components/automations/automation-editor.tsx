@@ -33,6 +33,7 @@ import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import { useSaveHandler, type SaveHandlerOpts } from "./automation-editor-save";
+import type { AutomationCredentialError } from "./automation-credential-error";
 import { AutomationDeleteConfirmDialog } from "./automation-delete-confirm-dialog";
 import { useAutomationMCPReconciliation } from "@/hooks/domains/settings/use-automation-mcp-reconciliation";
 import { useAutomationPluginTools } from "@/hooks/domains/settings/use-automation-plugin-tools";
@@ -85,6 +86,7 @@ const defaultForm: FormState = {
   repositoryMode: "none",
   retryPolicy: DEFAULT_RETRY_POLICY,
   pluginTools: [],
+  personalCredentialBindings: [],
 };
 /**
  * Initialize an editor draft from persisted settings, including the current MCP selection revision.
@@ -116,6 +118,11 @@ function formFromAutomation(a: Automation): FormState {
     ...prContinuationFormFields(a),
     retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
     pluginTools: a.plugin_tools ?? [],
+    personalCredentialBindings: (a.credential_choices ?? []).flatMap((choice) =>
+      choice.kind === "personal" && choice.profile_id && choice.secret_id
+        ? [{ profile_id: choice.profile_id, key: choice.key, secret_id: choice.secret_id }]
+        : [],
+    ),
     mcpSelection: a.mcp_selection,
     mcpSelectionRevision: a.mcp_selection_revision ?? 0,
   };
@@ -153,7 +160,7 @@ type LoadAutomationOpts = {
   workspaceId: string;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   loadTriggers: (triggers: AutomationTrigger[]) => void;
-  onLoaded: (form: FormState, triggers: AutomationTrigger[]) => void;
+  onLoaded: (form: FormState, triggers: AutomationTrigger[], automation: Automation) => void;
   router: ReturnType<typeof useRouter>;
 };
 
@@ -170,7 +177,7 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
           retryPolicy: normalizeRetryPolicyForTaskMode(loadedForm.taskMode, loadedForm.retryPolicy),
         });
         loadTriggers(loadedTriggers);
-        onLoaded(loadedForm, loadedTriggers);
+        onLoaded(loadedForm, loadedTriggers, a);
       })
       .catch(() => {
         router.push(`/settings/workspaces/${workspaceId}/automations`);
@@ -386,11 +393,13 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const { create, update, remove } = useAutomations(workspaceId);
   const [form, setForm] = useState<FormState>(defaultForm);
   const [saving, setSaving] = useState(false);
+  const [credentialError, setCredentialError] = useState<AutomationCredentialError | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(automationId);
   const [createdWebhook, setCreatedWebhook] = useState<CreatedWebhookDetails | null>(null);
   const isNew = currentId === null;
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
+  const [savedAutomation, setSavedAutomation] = useState<Automation | null>(null);
   const mcpReconciliation = useAutomationMCPReconciliation(
     workspaceId,
     currentId,
@@ -414,11 +423,15 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     workspaceId,
     setForm,
     loadTriggers: triggerActions.loadTriggers,
-    onLoaded: (loadedForm) => setSavedForm(loadedForm),
+    onLoaded: (loadedForm, _loadedTriggers, automation) => {
+      setSavedForm(loadedForm);
+      setSavedAutomation(automation);
+    },
     router,
   });
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setCredentialError(null);
     setForm((prev) => {
       const next = { ...prev, [key]: value };
       if (key === "taskMode") {
@@ -431,7 +444,26 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     });
   }, []);
 
+  const handleCredentialValidationFailed = useCallback(
+    (error: AutomationCredentialError | null) => {
+      setCredentialError(error);
+      if (!error || typeof document === "undefined") return;
+      window.requestAnimationFrame(() => {
+        const field = document.querySelector<HTMLElement>(
+          `[data-credential-field="${error.target}"]`,
+        );
+        if (!field) return;
+        field.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        field
+          .querySelector<HTMLElement>("button, input, [tabindex]")
+          ?.focus({ preventScroll: true });
+      });
+    },
+    [],
+  );
+
   const discard = useCallback(() => {
+    setCredentialError(null);
     setForm(isNew ? defaultForm : savedForm);
     triggerActions.discardDrafts();
   }, [isNew, savedForm, triggerActions]);
@@ -454,11 +486,13 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     savedRevision,
     discard,
     remove,
-    onSaved: (nextSavedForm) => {
+    onSaved: (nextSavedForm, _triggers, automation) => {
       setSavedForm(nextSavedForm);
+      if (automation) setSavedAutomation(automation);
       mcpReconciliation.saved();
     },
     onMCPSelectionSaveFailed: mcpReconciliation.failed,
+    onCredentialValidationFailed: handleCredentialValidationFailed,
     onPluginToolsSaveFailed: pluginToolOptions.reload,
   });
   const { dirtyBaseline, triggersDirty } = useEditorDirtyState(isNew, savedForm, triggerActions);
@@ -510,6 +544,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         updateField={updateField}
         mcp={mcpReconciliation}
         pluginTools={pluginToolOptions}
+        automation={savedAutomation}
+        onAutomationChange={setSavedAutomation}
+        triggers={triggerActions.allTriggers}
+        credentialError={credentialError}
       />
       <FailureSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />

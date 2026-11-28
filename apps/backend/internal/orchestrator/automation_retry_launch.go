@@ -410,9 +410,33 @@ func (s *Service) dispatchReservedRetryLaunch(ctx context.Context, run *automati
 		return true
 	}
 	a := automationFromRetrySnapshot(snapshot)
+	current, err := s.getAutomationForRunLaunch(ctx, snapshot.AutomationID)
+	if err != nil || current == nil {
+		s.recordFailedRun(ctx, &automation.AutomationTriggeredEvent{AutomationID: snapshot.AutomationID, RunID: run.ID}, "automation creator unavailable")
+		return true
+	}
+	a = automationWithCurrentCredentialAuthority(a, current)
 	if run.ThreadAction == automation.ThreadActionResumed {
 		session, err := s.repo.GetTaskSession(ctx, launch.SessionID)
 		if err != nil || session == nil {
+			return true
+		}
+		ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, a.WorkspaceID), a.CreatedByUserID, a.ExecutorProfileID)
+		if err != nil {
+			failure := err.Error()
+			if len(a.CredentialChoices) > 0 {
+				failure = automation.ErrCredentialCreatorUnavailable.Error()
+			}
+			s.recordFailedRun(ctx, &automation.AutomationTriggeredEvent{AutomationID: a.ID, RunID: run.ID}, failure)
+			return true
+		}
+		repositoryIDs, err := s.automationTaskRepositoryIDs(ctx, task.ID)
+		if err != nil {
+			s.recordFailedRun(ctx, &automation.AutomationTriggeredEvent{AutomationID: a.ID, RunID: run.ID}, err.Error())
+			return true
+		}
+		if err := s.validateAutomationCredentials(ctx, a, repositoryIDs); err != nil {
+			s.recordFailedRunError(ctx, &automation.AutomationTriggeredEvent{AutomationID: a.ID, RunID: run.ID}, err)
 			return true
 		}
 		prompt := recoveredContinuationPrompt(snapshot)

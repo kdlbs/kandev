@@ -105,7 +105,29 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockRetryAutomation(ctx, tx, run.AutomationID); err != nil {
+	state, err := lockCredentialAutomation(ctx, tx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	choices, err := s.credentialChoicesTx(ctx, tx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	selectedRepositories, err := s.selectedRepositoryIDsTx(ctx, tx, run.AutomationID)
+	if err != nil {
+		return err
+	}
+	choices = credentialChoicesForSelectedRepositories(choices, selectedRepositories)
+	if len(choices) > 0 {
+		if err := credentialMutationActor(ctx, state.CreatorUserID); err != nil {
+			return err
+		}
+		run.ProtectedCreatorUserID = state.CreatorUserID
+	} else {
+		run.ProtectedCreatorUserID = ""
+	}
+	run.CredentialChoicesSnapshot, err = encodeRunCredentialChoiceSnapshot(run.AutomationID, choices)
+	if err != nil {
 		return err
 	}
 	if err := checkRetryAdmissionCapacity(ctx, tx, run.AutomationID); err != nil {
@@ -139,7 +161,7 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automation_runs (
-			id, automation_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
+			id, automation_id, protected_creator_user_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
 			error_message, session_id, turn_id, thread_action, thread_reason, display_title,
 			retry_group_id, retry_parent_run_id, attempt_number, retry_state, retry_scheduled_at,
 			retry_claimed_at, retry_claim_expires_at, retry_claim_token, retry_group_generation,
@@ -147,9 +169,13 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 			retry_task_intent_id, retry_policy_snapshot, retry_trigger_snapshot,
 			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
 			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
-			automation_revision, trigger_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		run.ID, run.AutomationID, run.TriggerID, run.TriggerType, run.TaskID, run.Status, run.DedupKey,
+			credential_choices_snapshot, automation_revision, trigger_revision, created_at)
+		VALUES (
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		run.ID, run.AutomationID, run.ProtectedCreatorUserID, run.TriggerID, run.TriggerType, run.TaskID, run.Status, run.DedupKey,
 		run.TriggerDataJSON, run.ErrorMessage, run.SessionID, run.TurnID, run.ThreadAction, run.ThreadReason,
 		run.DisplayTitle, run.RetryGroupID, run.RetryParentRunID, run.AttemptNumber, run.RetryState,
 		run.RetryScheduledAt, run.RetryClaimedAt, run.RetryClaimExpiresAt, run.RetryClaimToken,
@@ -157,7 +183,7 @@ func (s *Store) createRetryAdmission(ctx context.Context, run *AutomationRun, gr
 		run.RetryFailureClass, run.RetryTaskIntentID, run.RetryPolicySnapshot, run.RetryTriggerSnapshot,
 		run.RetryLaunchConfigSnapshot, run.RetryLaunchConfigVersion, run.RetryResolvedPrompt,
 		run.RetryResolvedTitle, run.RetryResolvedTriggerAt, run.RetryContinuationSnapshot,
-		run.AutomationRevision, run.TriggerRevision, run.CreatedAt); err != nil {
+		run.CredentialChoicesSnapshot, run.AutomationRevision, run.TriggerRevision, run.CreatedAt); err != nil {
 		return err
 	}
 	group.CreatedAt, group.UpdatedAt = now, now

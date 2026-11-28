@@ -31,6 +31,7 @@ func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.TaskPrefix == "" {
 		workspace.TaskPrefix = "KAN"
 	}
+	workspace.OwnershipRevision = 1
 	if workspace.ACPIdleTimeoutMinutes == 0 {
 		workspace.ACPIdleTimeoutMinutes = 120
 	}
@@ -43,6 +44,7 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			name,
 			description,
 			owner_id,
+			ownership_revision,
 			org_id,
 			unit_id,
 			default_executor_id,
@@ -57,8 +59,8 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OwnershipRevision, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -72,7 +74,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	return workspace, err
 }
 
-const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at"
+const workspaceSelectColumns = "id, name, description, owner_id, ownership_revision, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at"
 
 type workspaceScanner interface {
 	Scan(...any) error
@@ -91,6 +93,7 @@ func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 		&workspace.Name,
 		&workspace.Description,
 		&workspace.OwnerID,
+		&workspace.OwnershipRevision,
 		&workspace.OrgID,
 		&workspace.UnitID,
 		&defaultExecutorID,

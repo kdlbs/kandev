@@ -518,7 +518,7 @@ websocat ws://127.0.0.1:38429/ws
 
 ## Registered request action catalog
 
-The following 279 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
+The following 281 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
 
 Payloads are not uniform. Read the corresponding handler request struct before building a non-first-party client. Names below are exact, including `vscode.openFile` and underscore-separated `user_shell.*` actions.
 
@@ -800,6 +800,8 @@ secrets.reveal
 secrets.update
 
 automation.create
+automation.credential.grant_workspace
+automation.credential.revoke_workspace
 automation.delete
 automation.disable
 automation.enable
@@ -845,6 +847,18 @@ omit workflow and repository data and use a Local scratch workspace. Normal
 tasks require a workflow and remain visible in Kanban and the sidebar. A
 repository-required provider trigger rejects `repository_mode=none` before it
 creates an `AutomationRun`.
+
+`automation.credential.grant_workspace` and
+`automation.credential.revoke_workspace` manage an existing Workspace secret
+binding for one saved automation. Both payloads include `id`, `repository_id`,
+`key`, `expected_automation_revision`, and `expected_credential_revision` from
+the current automation projection. Granting also includes
+`expected_binding_updated_at` and `expected_workspace_owner_updated_at` so the
+approval applies to the binding and ownership revision shown to the owner.
+Granting requires the current workspace owner to own the bound Workspace
+secret; revoking requires the current workspace owner. The response is the updated automation with its safe
+`credential_choices` projection. Secret values and private grant identities are
+not returned. These actions are unavailable to automation configuration MCP.
 
 ### GitHub and GitLab
 
@@ -1081,6 +1095,11 @@ notifications expose the same count aggregated across the task's sessions as
 `active_subagent_count`. Count-only changes may emit
 `session.activity_changed` and `task.updated` even when the coarse lifecycle
 state does not change.
+
+For a credential-protected automation run, the workspace-level
+`session.state_changed` notification contains only `task_id`, `workspace_id`,
+`old_state`, `new_state`, and `updated_at`. It omits session IDs, agent
+summaries, metadata, and error details.
 
 Office workspace notifications are also global; clients filter on `workspace_id`:
 

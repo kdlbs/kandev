@@ -1,0 +1,15 @@
+package runtime
+
+import "github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+
+type AutomationCredentialBinding = lifecycle.AutomationCredentialBinding
+type AutomationCredentialBindingReader = lifecycle.AutomationCredentialBindingReader
+type AutomationCredentialEnvironmentError = lifecycle.AutomationCredentialEnvironmentError
+type AutomationCredentialRequest = lifecycle.AutomationCredentialRequest
+type PersonalCredentialBindingInput = lifecycle.PersonalCredentialBindingInput
+type ValidatedPersonalCredentialBinding = lifecycle.ValidatedPersonalCredentialBinding
+
+var (
+	ErrAutomationCredentialStorage     = lifecycle.ErrAutomationCredentialStorage
+	ErrAutomationCredentialUnavailable = lifecycle.ErrAutomationCredentialUnavailable
+)

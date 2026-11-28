@@ -210,6 +210,12 @@ The check protects references present during lookup. It does not serialize concu
 
 ## Resolution and recovery
 
+Repository bindings supply reference definitions to the runtime.
+For authenticated runs, `GetForWorkspace` checks the active account as well as the reference scope.
+The same account check applies to Global and Workspace secret lookups.
+When the launch actor lacks access to a required reference, the runtime fails before provisioning.
+See [automation credential grants](automation-credentials.md#workspace-grant-authority) for the proposed automation-specific resolution path.
+
 `environment.SecretError` retains redacted errors and adds a repair instruction for the source environment.
 Lifecycle error wrapping includes the selected agent profile name for agent-profile failures.
 Origin classification and precedence remain unchanged. Secret IDs and underlying reveal errors stay out of rendered errors.

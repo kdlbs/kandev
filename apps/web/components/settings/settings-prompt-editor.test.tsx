@@ -60,6 +60,7 @@ describe("SettingsPromptEditor", () => {
         excludedPromptIds={["review"]}
         minLines={5}
         isDirty
+        tabFocusMode
         ariaLabel="Prompt editor"
         testId="prompt-editor"
       />,
@@ -69,6 +70,7 @@ describe("SettingsPromptEditor", () => {
     expect(props.placeholders).toBe(placeholders);
     expect(props.mentionPrompts).toEqual([mocks.promptState.prompts[1]]);
     expect(props.height).toBe("20px");
+    expect(props.tabFocusMode).toBe(true);
     expect(props.ariaLabel).toBe("Prompt editor");
     expect(props.testId).toBe("prompt-editor-editor");
     expect(document.body.textContent).toContain("settings:promptEditorBothHint");

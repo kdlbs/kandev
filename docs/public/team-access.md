@@ -148,6 +148,8 @@ These are shared credentials and destructive actions, so they do not follow memb
 - Renaming, changing defaults, moving it between units, and **deleting** the workspace
 - Adding, re-roling and removing **members**
 
+Workspace secrets remain owner-managed. A workspace owner can approve a Workspace secret that they own for one existing repository binding on a saved automation. The grant lets that automation's fixed creator use the secret. Each automation needs its own grant. The owner can revoke it at the same binding. Revocation blocks future starts, retries, prompts, and runtime attachments. A running process keeps its injected value until it stops. The grant does not transfer secret ownership. Only the automation creator can open or reply to a protected run's transcript; other workspace members see safe status, and the owner can still stop the run.
+
 A member acts under their **own** GitHub connection wherever per-user identity is supported, so "Approve as ..." on a pull request is that person, not the workspace owner.
 
 ## Upgrading an existing server

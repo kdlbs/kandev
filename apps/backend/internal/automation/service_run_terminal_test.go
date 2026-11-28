@@ -126,6 +126,50 @@ func TestStopRun(t *testing.T) {
 	}
 }
 
+func TestProtectedAutomationRunStopAllowsCreatorAndWorkspaceOwner(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		userID  string
+		wantErr error
+	}{
+		{name: "creator", userID: "creator-1"},
+		{name: "workspace owner", userID: "owner-1"},
+		{name: "collaborator", userID: "member-1", wantErr: ErrAutomationNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc := newTestService(t)
+			ctx := context.Background()
+			a := &Automation{WorkspaceID: "workspace", CreatedByUserID: "creator-1", Name: "protected", Enabled: true}
+			require.NoError(t, svc.store.CreateAutomation(credentialIdentity("creator-1"), a))
+			storePersonalCredentialChoice(t, svc.store, a)
+			run := &AutomationRun{
+				AutomationID: a.ID,
+				TriggerType:  TriggerTypeManual, Status: RunStatusTaskCreated,
+				TaskID: "task", SessionID: "session", TurnID: "turn",
+			}
+			require.NoError(t, svc.store.CreateRun(ctx, run))
+			svc.SetWorkspaceCredentialGrantDependencies(func(context.Context, string) (string, error) {
+				return "owner-1", nil
+			}, nil, nil, nil, nil)
+			stopper := &recordingRunStopper{}
+			svc.SetRunStopper(stopper)
+
+			_, err := svc.StopRun(credentialIdentity(test.userID), a.ID, run.ID)
+			require.ErrorIs(t, err, test.wantErr)
+			if test.wantErr != nil {
+				require.Empty(t, stopper.taskID)
+				stored, readErr := svc.store.GetRun(ctx, run.ID)
+				require.NoError(t, readErr)
+				require.Equal(t, RunStatusTaskCreated, stored.Status)
+				return
+			}
+			require.Equal(t, "task", stopper.taskID)
+			require.Equal(t, "session", stopper.sessionID)
+			require.Equal(t, "turn", stopper.turnID)
+		})
+	}
+}
+
 func TestAmbiguousRetryIdentityStopsProviderForStopAndDelete(t *testing.T) {
 	for _, action := range []string{"stop", "delete"} {
 		t.Run(action, func(t *testing.T) {
@@ -395,6 +439,44 @@ func TestDeleteAutomationStopsRetryRunBeforeCancellingGroup(t *testing.T) {
 	require.NoError(t, svc.DeleteAutomation(ctx, a.ID))
 	require.Equal(t, RetryStateTriggered, observedState)
 }
+
+func TestDeleteAutomationCleanupFailureRetainsProtectedTaskAuthority(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	deleter := &fakeTaskDeleter{errors: map[string]error{"protected-cleanup-task": errors.New("cleanup unavailable")}}
+	svc.SetTaskDeleter(deleter)
+	a := &Automation{WorkspaceID: "workspace-protected-cleanup", Name: "protected cleanup", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(credentialIdentity("creator-1"), a))
+	storePersonalCredentialChoice(t, svc.store, a)
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded,
+		TaskID: "protected-cleanup-task",
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	require.NoError(t, svc.DeleteAutomation(ctx, a.ID))
+	creator, err := svc.store.ProtectedCreatorForTask(ctx, run.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, "creator-1", creator)
+	protected, allowed, err := svc.ProtectedAutomationRunAccessForTask(credentialIdentity("collaborator-1"), run.TaskID, "collaborator-1")
+	require.NoError(t, err)
+	require.True(t, protected)
+	require.False(t, allowed)
+	protected, allowed, err = svc.ProtectedAutomationRunUseAccessForTask(credentialIdentity("collaborator-1"), run.TaskID, "collaborator-1")
+	require.NoError(t, err)
+	require.True(t, protected)
+	require.False(t, allowed, "a surviving cleanup task keeps protected runtime admission closed")
+	jobs, err := svc.store.ListCleanupJobs(ctx)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	deleter.errors = nil
+	require.NoError(t, svc.ReconcileCleanupJobs(ctx))
+	jobs, err = svc.store.ListCleanupJobs(ctx)
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+}
+
 func TestWithRetryRunLockSerializesAndSupportsNestedDispatch(t *testing.T) {
 	svc := newTestService(t)
 	svc.store.db.SetMaxOpenConns(1)

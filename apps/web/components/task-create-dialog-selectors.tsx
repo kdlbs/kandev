@@ -189,6 +189,7 @@ type ExecutorSelectorProps = {
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  ariaDescribedBy?: string;
 };
 
 export const ExecutorSelector = memo(function ExecutorSelector({
@@ -226,6 +227,7 @@ export type ExecutorProfileSelectorProps = {
   placeholder: string;
   triggerClassName?: string;
   popoverPortal?: boolean;
+  ariaDescribedBy?: string;
 };
 
 function TouchExecutorProfileSelector({
@@ -235,6 +237,7 @@ function TouchExecutorProfileSelector({
   disabled,
   placeholder,
   triggerClassName,
+  ariaDescribedBy,
 }: ExecutorProfileSelectorProps) {
   const { t } = useTranslation();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -246,6 +249,7 @@ function TouchExecutorProfileSelector({
           variant="ghost"
           role="combobox"
           aria-label={t("task:executorProfile2")}
+          aria-describedby={ariaDescribedBy}
           aria-expanded={drawerOpen}
           aria-haspopup="dialog"
           disabled={disabled}
@@ -324,6 +328,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   placeholder,
   triggerClassName,
   popoverPortal,
+  ariaDescribedBy,
 }: ExecutorProfileSelectorProps) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
@@ -336,6 +341,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
         disabled={disabled}
         placeholder={placeholder}
         triggerClassName={triggerClassName}
+        ariaDescribedBy={ariaDescribedBy}
       />
     );
   }
@@ -349,6 +355,7 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
       emptyMessage={t("task:noProfileFound")}
       disabled={disabled}
       dropdownLabel={t("task:executorProfile2")}
+      ariaDescribedBy={ariaDescribedBy}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}

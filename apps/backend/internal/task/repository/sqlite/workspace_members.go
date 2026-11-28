@@ -144,6 +144,9 @@ func (r *Repository) CountWorkspaceMembers(ctx context.Context) (map[string]int,
 // TransferWorkspaceOwnership moves the accountable owner in one transaction:
 // workspaces.owner_id and the mirroring owner row must never disagree.
 func (r *Repository) TransferWorkspaceOwnership(ctx context.Context, workspaceID, fromUserID, toUserID string) error {
+	if fromUserID == toUserID {
+		return nil
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -156,7 +159,9 @@ func (r *Repository) TransferWorkspaceOwnership(ctx context.Context, workspaceID
 	// this the second would move ownership off B while demoting the stale A,
 	// leaving B holding an owner row that owner_id no longer names.
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workspaces SET owner_id = ?, updated_at = ? WHERE id = ? AND owner_id = ?
+		UPDATE workspaces
+		SET owner_id = ?, ownership_revision = ownership_revision + 1, updated_at = ?
+		WHERE id = ? AND owner_id = ?
 	`), toUserID, now, workspaceID, fromUserID)
 	if err != nil {
 		return err

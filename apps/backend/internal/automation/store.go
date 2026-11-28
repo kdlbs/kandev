@@ -43,6 +43,8 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	return s, nil
 }
 
+const postgresForUpdateClause = ` FOR UPDATE`
+
 const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS automations (
 		id TEXT PRIMARY KEY,
@@ -104,6 +106,7 @@ const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS automation_runs (
 		id TEXT PRIMARY KEY,
 		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		protected_creator_user_id TEXT NOT NULL DEFAULT '',
 		trigger_id TEXT NOT NULL,
 		trigger_type TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
@@ -148,6 +151,7 @@ const createTablesSQL = `
 		retry_resolved_title TEXT NOT NULL DEFAULT '',
 		retry_resolved_trigger_timestamp DATETIME,
 		retry_continuation_snapshot TEXT NOT NULL DEFAULT '{}',
+		credential_choices_snapshot TEXT NOT NULL DEFAULT '[]',
 		automation_revision BIGINT NOT NULL DEFAULT 0,
 		trigger_revision BIGINT NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL
@@ -240,12 +244,36 @@ const createTablesSQL = `
 		UNIQUE(automation_id, repository_id)
 	);
 
+	CREATE TABLE IF NOT EXISTS automation_credential_choices (
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		kind TEXT NOT NULL,
+		profile_id TEXT NOT NULL DEFAULT '',
+		repository_id TEXT NOT NULL DEFAULT '',
+		env_key TEXT NOT NULL,
+		secret_id TEXT NOT NULL,
+		source_secret_id TEXT NOT NULL DEFAULT '',
+		source_updated_at DATETIME,
+		workspace_owner_updated_at DATETIME,
+		workspace_owner_revision BIGINT NOT NULL DEFAULT 0,
+		creator_user_id TEXT NOT NULL DEFAULT '',
+		grantor_user_id TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL,
+		revision BIGINT NOT NULL DEFAULT 1,
+		secret_name TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		PRIMARY KEY (automation_id, kind, profile_id, repository_id, env_key)
+	);
+	CREATE INDEX IF NOT EXISTS idx_automation_credential_choices_task
+		ON automation_credential_choices(automation_id, kind, state);
+
 	CREATE INDEX IF NOT EXISTS idx_automation_repositories_automation ON automation_repositories(automation_id);
 
 	CREATE TABLE IF NOT EXISTS automation_task_cleanup_jobs (
 		task_id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		automation_id TEXT NOT NULL,
+		protected_creator_user_id TEXT NOT NULL DEFAULT '',
 		last_error TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -298,6 +326,9 @@ const (
 	migrateRunManagedInputSQL                   = `ALTER TABLE automation_runs ADD COLUMN managed_input_id TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
+	migrateRunProtectedCreatorSQL               = `ALTER TABLE automation_runs ADD COLUMN protected_creator_user_id TEXT NOT NULL DEFAULT ''`
+	migrateCredentialOwnerUpdatedSQL            = `ALTER TABLE automation_credential_choices ADD COLUMN workspace_owner_updated_at {{timestamp}}`
+	migrateCleanupProtectedCreatorSQL           = `ALTER TABLE automation_task_cleanup_jobs ADD COLUMN protected_creator_user_id TEXT NOT NULL DEFAULT ''`
 	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
 	migratePluginToolsSQL                       = `ALTER TABLE automations ADD COLUMN plugin_tools TEXT NOT NULL DEFAULT '[]'`
 	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
@@ -397,6 +428,10 @@ func (s *Store) initSchema() error {
 		{"automations.resource_revision", schemaSQLForDriver(migrateAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_repositories.base_branch", schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName())},
 		{"automation_runs.session_id", schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName())},
+		{"automation_runs.protected_creator_user_id", schemaSQLForDriver(migrateRunProtectedCreatorSQL, s.db.DriverName())},
+		{"automation_credential_choices.workspace_owner_updated_at", schemaSQLForDriver(migrateCredentialOwnerUpdatedSQL, s.db.DriverName())},
+		{"automation_credential_choices.workspace_owner_revision", `ALTER TABLE automation_credential_choices ADD COLUMN workspace_owner_revision BIGINT NOT NULL DEFAULT 0`},
+		{"automation_task_cleanup_jobs.protected_creator_user_id", migrateCleanupProtectedCreatorSQL},
 		{"automation_runs.managed_conversation_id", schemaSQLForDriver(migrateRunManagedConversationSQL, s.db.DriverName())},
 		{"automation_runs.managed_destination_installation_id", schemaSQLForDriver(migrateRunManagedDestinationInstallationSQL, s.db.DriverName())},
 		{"automation_runs.managed_destination_plugin_id", schemaSQLForDriver(migrateRunManagedDestinationPluginSQL, s.db.DriverName())},
@@ -439,6 +474,7 @@ func (s *Store) initSchema() error {
 		{"automation_runs.retry_resolved_title", schemaSQLForDriver(migrateRunRetryTitleSQL, s.db.DriverName())},
 		{"automation_runs.retry_resolved_trigger_timestamp", schemaSQLForDriver(migrateRunRetryTriggerTimestampSQL, s.db.DriverName())},
 		{"automation_runs.retry_continuation_snapshot", schemaSQLForDriver(migrateRunRetryContinuationSQL, s.db.DriverName())},
+		{"automation_runs.credential_choices_snapshot", `ALTER TABLE automation_runs ADD COLUMN credential_choices_snapshot TEXT NOT NULL DEFAULT '[]'`},
 		{"automation_runs.automation_revision", schemaSQLForDriver(migrateRunRetryAutomationRevisionSQL, s.db.DriverName())},
 		{"automation_runs.trigger_revision", schemaSQLForDriver(migrateRunRetryTriggerRevisionSQL, s.db.DriverName())},
 		{"automations.follow_up_prompt", `ALTER TABLE automations ADD COLUMN follow_up_prompt TEXT NOT NULL DEFAULT ''`},
@@ -453,6 +489,9 @@ func (s *Store) initSchema() error {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
 			return fmt.Errorf("required automation migration: %w", err)
 		}
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_automation_runs_task_creator ON automation_runs(task_id, protected_creator_user_id, created_at DESC)`); err != nil {
+		return fmt.Errorf("create protected automation run task index: %w", err)
 	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required automation migration: %w", err)
@@ -618,6 +657,27 @@ func (s *Store) backfillRepositoryModes() error {
 
 // CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
+	return s.CreateAutomationWithCredentialChoices(ctx, a, nil)
+}
+
+// CreateAutomationWithCredentialChoices persists the definition and its initial
+// personal credential bindings in one transaction.
+func (s *Store) CreateAutomationWithCredentialChoices(ctx context.Context, a *Automation, choices []AutomationCredentialChoice) error {
+	if err := prepareAutomationForCreate(ctx, a); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.insertAutomationWithCredentialChoices(ctx, tx, a, choices); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func prepareAutomationForCreate(ctx context.Context, a *Automation) error {
 	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if a.ID == "" {
 		a.ID = uuid.New().String()
@@ -670,11 +730,15 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+	return nil
+}
+
+func (s *Store) insertAutomationWithCredentialChoices(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	a *Automation,
+	choices []AutomationCredentialChoice,
+) error {
 
 	// execution_mode is written as the empty string rather than left to the
 	// column's DEFAULT. Nothing reads the mode to decide anything — but the
@@ -684,7 +748,7 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// indistinguishable from a pre-upgrade one, and the one-time notice would
 	// never stop being true. Empty means "no mode was ever chosen", which is
 	// the honest record for a row created after the choice was withdrawn.
-	_, err = tx.ExecContext(ctx, tx.Rebind(`
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automations (created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
 			task_mode, managed_owner_installation_id, managed_destination_installation_id,
@@ -723,7 +787,12 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if err := insertAutomationRepositories(ctx, tx, a.ID, a.Repositories); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if len(choices) > 0 {
+		if err := s.ReplacePersonalCredentialBindingsTx(ctx, tx, a.ID, a.CreatedByUserID, choices); err != nil {
+			return fmt.Errorf("insert automation credential choices: %w", err)
+		}
+	}
+	return nil
 }
 
 // insertAutomationRepositories inserts one automation_repositories row per
@@ -774,7 +843,412 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 	}
 	a.Repositories = repositories[id]
 	a.RepositoryIDs = repositoryIDs(a.Repositories)
+	if err := s.hydrateCredentialChoices(ctx, &a); err != nil {
+		return nil, err
+	}
 	return &a, nil
+}
+
+func (s *Store) hydrateCredentialChoices(ctx context.Context, a *Automation) error {
+	if a == nil || a.ID == "" {
+		return nil
+	}
+	return s.ro.SelectContext(ctx, &a.CredentialChoices, s.ro.Rebind(`
+		SELECT kind, profile_id, repository_id, env_key, state, secret_name, secret_id,
+			source_secret_id, source_updated_at, creator_user_id, grantor_user_id, revision
+		FROM automation_credential_choices WHERE automation_id = ? ORDER BY kind, profile_id, repository_id, env_key`), a.ID)
+}
+
+func (s *Store) credentialChoices(ctx context.Context, automationID string) ([]AutomationCredentialChoice, error) {
+	var rows []AutomationCredentialChoice
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
+		SELECT automation_id, kind, profile_id, repository_id, env_key, secret_id,
+			source_secret_id, source_updated_at, workspace_owner_revision, creator_user_id, grantor_user_id,
+			state, revision, secret_name, created_at, updated_at
+		FROM automation_credential_choices WHERE automation_id = ? ORDER BY kind, profile_id, repository_id, env_key`), automationID)
+	return rows, err
+}
+
+type runCredentialChoiceSnapshot struct {
+	Kind                   CredentialChoiceKind  `json:"kind"`
+	ProfileID              string                `json:"profile_id,omitempty"`
+	RepositoryID           string                `json:"repository_id,omitempty"`
+	Key                    string                `json:"key"`
+	SecretID               string                `json:"secret_id"`
+	SourceSecretID         string                `json:"source_secret_id"`
+	SourceUpdatedAt        time.Time             `json:"source_updated_at"`
+	WorkspaceOwnerRevision *int64                `json:"workspace_owner_revision,omitempty"`
+	CreatorUserID          string                `json:"creator_user_id"`
+	GrantorUserID          string                `json:"grantor_user_id"`
+	State                  CredentialChoiceState `json:"state"`
+	Revision               int64                 `json:"revision"`
+}
+
+func encodeRunCredentialChoiceSnapshot(automationID string, choices []AutomationCredentialChoice) (string, error) {
+	snapshot := make([]runCredentialChoiceSnapshot, 0, len(choices))
+	for _, choice := range choices {
+		choice.AutomationID = automationID
+		snapshot = append(snapshot, runCredentialChoiceSnapshot{
+			Kind: choice.Kind, ProfileID: choice.ProfileID, RepositoryID: choice.RepositoryID,
+			Key: choice.Key, SecretID: choice.SecretID, SourceSecretID: choice.SourceSecretID,
+			SourceUpdatedAt: choice.SourceUpdatedAt, WorkspaceOwnerRevision: choice.WorkspaceOwnerRevision,
+			CreatorUserID: choice.CreatorUserID, GrantorUserID: choice.GrantorUserID,
+			State: choice.State, Revision: choice.Revision,
+		})
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("encode run credential choices: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func decodeRunCredentialChoiceSnapshot(automationID, encoded string) ([]AutomationCredentialChoice, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	var snapshot []runCredentialChoiceSnapshot
+	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+		return nil, fmt.Errorf("decode run credential choices: %w", err)
+	}
+	choices := make([]AutomationCredentialChoice, 0, len(snapshot))
+	for _, choice := range snapshot {
+		choices = append(choices, AutomationCredentialChoice{
+			AutomationID: automationID, Kind: choice.Kind, ProfileID: choice.ProfileID,
+			RepositoryID: choice.RepositoryID, Key: choice.Key, SecretID: choice.SecretID,
+			SourceSecretID: choice.SourceSecretID, SourceUpdatedAt: choice.SourceUpdatedAt,
+			WorkspaceOwnerRevision: choice.WorkspaceOwnerRevision, CreatorUserID: choice.CreatorUserID,
+			GrantorUserID: choice.GrantorUserID, State: choice.State, Revision: choice.Revision,
+		})
+	}
+	return choices, nil
+}
+
+func (s *Store) credentialChoicesTx(ctx context.Context, tx *sqlx.Tx, automationID string) ([]AutomationCredentialChoice, error) {
+	var rows []AutomationCredentialChoice
+	err := tx.SelectContext(ctx, &rows, tx.Rebind(`
+		SELECT automation_id, kind, profile_id, repository_id, env_key, secret_id,
+			source_secret_id, source_updated_at, workspace_owner_revision, creator_user_id, grantor_user_id,
+			state, revision, secret_name, created_at, updated_at
+		FROM automation_credential_choices WHERE automation_id = ? ORDER BY kind, profile_id, repository_id, env_key`), automationID)
+	return rows, err
+}
+
+func (s *Store) selectedRepositoryIDsTx(ctx context.Context, tx *sqlx.Tx, automationID string) (map[string]struct{}, error) {
+	var repositoryIDs []string
+	if err := tx.SelectContext(ctx, &repositoryIDs, tx.Rebind(`SELECT repository_id FROM automation_repositories WHERE automation_id = ?`), automationID); err != nil {
+		return nil, err
+	}
+	selected := make(map[string]struct{}, len(repositoryIDs))
+	for _, repositoryID := range repositoryIDs {
+		selected[repositoryID] = struct{}{}
+	}
+	return selected, nil
+}
+
+func credentialChoicesForSelectedRepositories(
+	choices []AutomationCredentialChoice,
+	selectedRepositories map[string]struct{},
+) []AutomationCredentialChoice {
+	selected := make([]AutomationCredentialChoice, 0, len(choices))
+	for _, choice := range choices {
+		if choice.Kind == CredentialChoiceWorkspace {
+			if _, ok := selectedRepositories[choice.RepositoryID]; !ok {
+				continue
+			}
+		}
+		selected = append(selected, choice)
+	}
+	return selected
+}
+
+func (s *Store) HasCredentialChoices(ctx context.Context, automationID string) (bool, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`
+		SELECT COUNT(*) FROM automation_credential_choices WHERE automation_id = ?`), automationID)
+	return count > 0, err
+}
+
+func (s *Store) HasCredentialChoicesTx(ctx context.Context, tx *sqlx.Tx, automationID string) (bool, error) {
+	var count int
+	err := tx.GetContext(ctx, &count, tx.Rebind(`
+		SELECT COUNT(*) FROM automation_credential_choices WHERE automation_id = ?`), automationID)
+	return count > 0, err
+}
+
+func (s *Store) ReplacePersonalCredentialBindingsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	automationID, creatorUserID string,
+	choices []AutomationCredentialChoice,
+) error {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_credential_choices WHERE automation_id = ? AND kind = ?`), automationID, CredentialChoicePersonal); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, choice := range choices {
+		choice.AutomationID = automationID
+		choice.Kind = CredentialChoicePersonal
+		choice.CreatorUserID = creatorUserID
+		choice.State = CredentialChoiceSelected
+		choice.Revision = 1
+		choice.CreatedAt = now
+		choice.UpdatedAt = now
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO automation_credential_choices (
+				automation_id, kind, profile_id, repository_id, env_key, secret_id,
+				source_secret_id, source_updated_at, creator_user_id, grantor_user_id,
+				state, revision, secret_name, created_at, updated_at)
+			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)`),
+			choice.AutomationID, choice.Kind, choice.ProfileID, choice.Key, choice.SecretID,
+			choice.SourceSecretID, choice.SourceUpdatedAt, choice.CreatorUserID,
+			choice.State, choice.Revision, choice.SecretName, choice.CreatedAt, choice.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) SaveWorkspaceCredentialGrant(
+	ctx context.Context,
+	choice AutomationCredentialChoice,
+	expectedAutomationRevision uint64,
+	expectedChoiceRevision int64,
+	expectedWorkspaceOwnerRevision int64,
+) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	currentRevision, err := validateWorkspaceCredentialGrantWrite(
+		ctx, tx, choice, expectedAutomationRevision, expectedChoiceRevision, expectedWorkspaceOwnerRevision,
+	)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO automation_credential_choices (
+			automation_id, kind, profile_id, repository_id, env_key, secret_id,
+			source_secret_id, source_updated_at, workspace_owner_revision, creator_user_id, grantor_user_id,
+			state, revision, secret_name, created_at, updated_at)
+		VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (automation_id, kind, profile_id, repository_id, env_key) DO UPDATE SET
+			secret_id = excluded.secret_id, source_secret_id = excluded.source_secret_id,
+			source_updated_at = excluded.source_updated_at, workspace_owner_revision = excluded.workspace_owner_revision,
+			creator_user_id = excluded.creator_user_id,
+			grantor_user_id = excluded.grantor_user_id, state = excluded.state, revision = excluded.revision,
+			secret_name = excluded.secret_name, updated_at = excluded.updated_at`),
+		choice.AutomationID, CredentialChoiceWorkspace, choice.RepositoryID, choice.Key, choice.SecretID,
+		choice.SourceSecretID, choice.SourceUpdatedAt, expectedWorkspaceOwnerRevision, choice.CreatorUserID, choice.GrantorUserID,
+		CredentialChoiceGranted, currentRevision+1, choice.SecretName, now, now)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func validateWorkspaceCredentialGrantWrite(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	choice AutomationCredentialChoice,
+	expectedAutomationRevision uint64,
+	expectedChoiceRevision, expectedWorkspaceOwnerRevision int64,
+) (int64, error) {
+	state, err := lockCredentialAutomation(ctx, tx, choice.AutomationID)
+	if err != nil {
+		return 0, err
+	}
+	if state.ResourceRevision != expectedAutomationRevision || state.CreatorUserID != choice.CreatorUserID {
+		return 0, ErrCredentialSettingsConflict
+	}
+	if expectedWorkspaceOwnerRevision <= 0 || choice.WorkspaceOwnerRevision == nil ||
+		*choice.WorkspaceOwnerRevision != expectedWorkspaceOwnerRevision {
+		return 0, ErrCredentialSettingsConflict
+	}
+	if err := lockWorkspaceCredentialOwner(ctx, tx, state.WorkspaceID, choice.GrantorUserID, expectedWorkspaceOwnerRevision); err != nil {
+		return 0, err
+	}
+	var selected int
+	if err := tx.GetContext(ctx, &selected, tx.Rebind(`SELECT COUNT(*) FROM automation_repositories WHERE automation_id = ? AND repository_id = ?`), choice.AutomationID, choice.RepositoryID); err != nil {
+		return 0, err
+	}
+	if selected != 1 {
+		return 0, ErrCredentialSettingsConflict
+	}
+	existing, err := credentialChoiceForUpdate(ctx, tx, choice.AutomationID, CredentialChoiceWorkspace, choice.RepositoryID, choice.Key)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	currentRevision := int64(0)
+	if existing != nil {
+		currentRevision = existing.Revision
+	}
+	if currentRevision != expectedChoiceRevision {
+		return 0, ErrCredentialSettingsConflict
+	}
+	return currentRevision, nil
+}
+
+func (s *Store) RevokeWorkspaceCredentialGrant(
+	ctx context.Context,
+	automationID, repositoryID, key string,
+	expectedAutomationRevision uint64,
+	expectedChoiceRevision int64,
+	expectedWorkspaceOwnerID string,
+	expectedWorkspaceOwnerRevision int64,
+) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	state, err := lockCredentialAutomation(ctx, tx, automationID)
+	if err != nil {
+		return err
+	}
+	if state.ResourceRevision != expectedAutomationRevision {
+		return ErrCredentialSettingsConflict
+	}
+	if expectedWorkspaceOwnerRevision <= 0 {
+		return ErrCredentialSettingsConflict
+	}
+	if err := lockWorkspaceCredentialOwner(ctx, tx, state.WorkspaceID, expectedWorkspaceOwnerID, expectedWorkspaceOwnerRevision); err != nil {
+		return err
+	}
+	choice, err := credentialChoiceForUpdate(ctx, tx, automationID, CredentialChoiceWorkspace, repositoryID, key)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCredentialChoiceUnavailable
+		}
+		return err
+	}
+	if choice.Revision != expectedChoiceRevision || (choice.State != CredentialChoiceGranted && choice.State != CredentialChoiceStale) {
+		return ErrCredentialSettingsConflict
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE automation_credential_choices SET state = ?, revision = revision + 1, updated_at = ?
+		WHERE automation_id = ? AND kind = ? AND repository_id = ? AND env_key = ? AND revision = ?`),
+		CredentialChoiceRevoked, time.Now().UTC(), automationID, CredentialChoiceWorkspace, repositoryID, key, expectedChoiceRevision)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return ErrCredentialSettingsConflict
+	}
+	return tx.Commit()
+}
+
+func (s *Store) WithWorkspaceCredentialGrant(
+	ctx context.Context,
+	automationID, repositoryID, key string,
+	expectedRevision int64,
+	resolve func(AutomationCredentialChoice) error,
+) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	choice, err := credentialChoiceForUpdate(ctx, tx, automationID, CredentialChoiceWorkspace, repositoryID, key)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCredentialChoiceUnavailable
+		}
+		return err
+	}
+	if choice.State != CredentialChoiceGranted || choice.Revision != expectedRevision {
+		return ErrCredentialChoiceUnavailable
+	}
+	if err := resolve(*choice); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) MarkWorkspaceCredentialGrantsStaleTx(ctx context.Context, tx *sqlx.Tx, automationID string) error {
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE automation_credential_choices SET state = ?, revision = revision + 1, updated_at = ?
+		WHERE automation_id = ? AND kind = ? AND state IN (?, ?)`),
+		CredentialChoiceStale, time.Now().UTC(), automationID, CredentialChoiceWorkspace,
+		CredentialChoiceGranted, CredentialChoiceApproval)
+	return err
+}
+
+type credentialAutomationState struct {
+	WorkspaceID      string `db:"workspace_id"`
+	CreatorUserID    string `db:"created_by_user_id"`
+	ResourceRevision uint64 `db:"resource_revision"`
+}
+
+func lockCredentialAutomation(ctx context.Context, tx *sqlx.Tx, automationID string) (*credentialAutomationState, error) {
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET id = id WHERE id = ?`), automationID)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrAutomationNotFound
+	}
+	query := `SELECT workspace_id, created_by_user_id, resource_revision FROM automations WHERE id = ?`
+	if dialect.IsPostgres(tx.DriverName()) {
+		query += postgresForUpdateClause
+	}
+	var state credentialAutomationState
+	if err := tx.GetContext(ctx, &state, tx.Rebind(query), automationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAutomationNotFound
+		}
+		return nil, err
+	}
+	return &state, nil
+}
+
+func credentialChoiceForUpdate(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	automationID string,
+	kind CredentialChoiceKind,
+	repositoryID, key string,
+) (*AutomationCredentialChoice, error) {
+	query := `SELECT automation_id, kind, profile_id, repository_id, env_key, secret_id,
+		source_secret_id, source_updated_at, workspace_owner_revision, creator_user_id, grantor_user_id,
+		state, revision, secret_name, created_at, updated_at
+		FROM automation_credential_choices WHERE automation_id = ? AND kind = ? AND repository_id = ? AND env_key = ?`
+	if dialect.IsPostgres(tx.DriverName()) {
+		query += postgresForUpdateClause
+	}
+	var choice AutomationCredentialChoice
+	if err := tx.GetContext(ctx, &choice, tx.Rebind(query), automationID, kind, repositoryID, key); err != nil {
+		return nil, err
+	}
+	return &choice, nil
+}
+
+func lockWorkspaceCredentialOwner(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	workspaceID, expectedOwnerID string,
+	expectedRevision int64,
+) error {
+	query := `SELECT owner_id, ownership_revision FROM workspaces WHERE id = ?`
+	if dialect.IsPostgres(tx.DriverName()) {
+		query += postgresForUpdateClause
+	}
+	var owner struct {
+		ID       string `db:"owner_id"`
+		Revision int64  `db:"ownership_revision"`
+	}
+	if err := tx.GetContext(ctx, &owner, tx.Rebind(query), workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrCredentialChoiceUnavailable
+		}
+		return err
+	}
+	if expectedOwnerID == "" || owner.ID != expectedOwnerID || owner.Revision != expectedRevision {
+		return ErrCredentialSettingsConflict
+	}
+	return nil
 }
 
 func (s *Store) IsManagedConversationAutomation(ctx context.Context, id string) (bool, error) {
@@ -982,8 +1456,23 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	if a == nil {
 		return nil, ErrAutomationNotFound
 	}
-	previousTaskMode := a.TaskMode
-	previousMCPRevision := a.MCPSelectionRevision
+	return s.updateAutomationReturningFromSnapshot(ctx, id, req, a)
+}
+
+func (s *Store) updateAutomationReturningFromSnapshot(
+	ctx context.Context,
+	id string,
+	req *UpdateAutomationRequest,
+	a *Automation,
+) (*Automation, error) {
+	if a == nil || a.ID != id {
+		return nil, ErrAutomationNotFound
+	}
+	condition := automationUpdateCondition{
+		resourceRevision: a.ResourceRevision,
+		mcpRevision:      a.MCPSelectionRevision,
+		taskMode:         a.TaskMode,
+	}
 	if err := validateAutomationUpdateCondition(a, req); err != nil {
 		return nil, err
 	}
@@ -995,18 +1484,7 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := writeAutomationUpdateRow(ctx, tx, id, a, automationUpdateCondition{previousMCPRevision, previousTaskMode}); err != nil {
-		return nil, err
-	}
-	if a.ContinuationPolicy != ContinuationPolicyReusePerPR {
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
-			return nil, err
-		}
-	}
-	if err := writePRContinuationSettings(ctx, tx, id, a.PRContinuationSettings); err != nil {
-		return nil, err
-	}
-	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
+	if err := s.writeAutomationUpdateTx(ctx, tx, id, req, a, condition); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1014,6 +1492,77 @@ func (s *Store) updateAutomationReturning(ctx context.Context, id string, req *U
 	}
 	a.PluginTools = decodePluginTools(a.PluginToolsJSON)
 	return a, nil
+}
+
+func (s *Store) writeAutomationUpdateTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	id string,
+	req *UpdateAutomationRequest,
+	a *Automation,
+	condition automationUpdateCondition,
+) error {
+	state, err := lockCredentialAutomation(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if state.CreatorUserID != a.CreatedByUserID {
+		return ErrCredentialSettingsConflict
+	}
+	if err := validateCredentialMutationActorTx(ctx, s, tx, id, req, state.CreatorUserID); err != nil {
+		return err
+	}
+	if err := writeAutomationUpdateRow(ctx, tx, id, a, condition); err != nil {
+		return err
+	}
+	return s.writeAutomationRelatedSettingsTx(ctx, tx, id, req, a)
+}
+
+func validateCredentialMutationActorTx(
+	ctx context.Context,
+	s *Store,
+	tx *sqlx.Tx,
+	id string,
+	req *UpdateAutomationRequest,
+	creatorUserID string,
+) error {
+	hasChoices, err := s.HasCredentialChoicesTx(ctx, tx, id)
+	if err != nil || !hasChoices || req == nil ||
+		(!automationExecutableUpdate(req) && req.PersonalCredentialBindings == nil && (req.Enabled == nil || !*req.Enabled)) {
+		return err
+	}
+	return credentialMutationActor(ctx, creatorUserID)
+}
+
+func (s *Store) writeAutomationRelatedSettingsTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	id string,
+	req *UpdateAutomationRequest,
+	a *Automation,
+) error {
+	if a.ContinuationPolicy != ContinuationPolicyReusePerPR {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_pr_continuations WHERE automation_id = ?`), id); err != nil {
+			return err
+		}
+	}
+	if err := writePRContinuationSettings(ctx, tx, id, a.PRContinuationSettings); err != nil {
+		return err
+	}
+	if err := replaceAutomationUpdateRepositories(ctx, tx, id, a, req); err != nil {
+		return err
+	}
+	if req.PersonalCredentialBindings != nil {
+		if err := s.ReplacePersonalCredentialBindingsTx(ctx, tx, id, a.CreatedByUserID, req.validatedPersonalBindings); err != nil {
+			return fmt.Errorf("replace personal credential bindings: %w", err)
+		}
+	}
+	if req.invalidateWorkspaceCredentialChoices {
+		if err := s.MarkWorkspaceCredentialGrantsStaleTx(ctx, tx, id); err != nil {
+			return fmt.Errorf("invalidate workspace credential grants: %w", err)
+		}
+	}
+	return nil
 }
 
 // validateAutomationUpdateCondition rejects stale selection edits and stale mode-dependent
@@ -1096,8 +1645,9 @@ func normalizeAutomationUpdateSettings(a *Automation) error {
 }
 
 type automationUpdateCondition struct {
-	revision int64
-	taskMode TaskMode
+	resourceRevision uint64
+	mcpRevision      int64
+	taskMode         TaskMode
 }
 
 // writeAutomationUpdateRow compares the observed mode and MCP revision before returning
@@ -1112,7 +1662,7 @@ func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Au
 			repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
 			retry_policy = ?, plugin_tools = ?, mcp_selection = ?, mcp_selection_revision = ?, automation_revision = automation_revision + 1, updated_at = ?
-		WHERE id = ? AND mcp_selection_revision = ? AND task_mode = ? RETURNING resource_revision, automation_revision`),
+		WHERE id = ? AND resource_revision = ? AND mcp_selection_revision = ? AND task_mode = ? RETURNING resource_revision, automation_revision`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -1120,9 +1670,10 @@ func writeAutomationUpdateRow(ctx context.Context, tx *sqlx.Tx, id string, a *Au
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
-		a.RetryPolicyJSON, a.PluginToolsJSON, a.MCPSelectionJSON, a.MCPSelectionRevision, a.UpdatedAt, id, condition.revision, condition.taskMode).Scan(&a.ResourceRevision, &a.AutomationRevision)
+		a.RetryPolicyJSON, a.PluginToolsJSON, a.MCPSelectionJSON, a.MCPSelectionRevision, a.UpdatedAt,
+		id, condition.resourceRevision, condition.mcpRevision, condition.taskMode).Scan(&a.ResourceRevision, &a.AutomationRevision)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrMCPSelectionConflict
+		return ErrAutomationSettingsConflict
 	}
 	return err
 }
@@ -1301,12 +1852,13 @@ func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
 // automation references have already been removed. The job deliberately has
 // no foreign key to the deleted automation: it must survive that deletion.
 type AutomationTaskCleanupJob struct {
-	TaskID       string    `db:"task_id" json:"task_id"`
-	WorkspaceID  string    `db:"workspace_id" json:"workspace_id"`
-	AutomationID string    `db:"automation_id" json:"automation_id"`
-	LastError    string    `db:"last_error" json:"last_error,omitempty"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	TaskID                 string    `db:"task_id" json:"task_id"`
+	WorkspaceID            string    `db:"workspace_id" json:"workspace_id"`
+	AutomationID           string    `db:"automation_id" json:"automation_id"`
+	ProtectedCreatorUserID string    `db:"protected_creator_user_id" json:"-"`
+	LastError              string    `db:"last_error" json:"last_error,omitempty"`
+	CreatedAt              time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt              time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // ListOpenRuns returns all admitted runs that still occupy an automation
@@ -1502,20 +2054,37 @@ func insertAutomationCleanupJobs(
 		if !owned {
 			continue
 		}
+		protectedCreator, err := protectedCreatorForAutomationTask(ctx, tx, automationID, taskID)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO automation_task_cleanup_jobs
-				(task_id, workspace_id, automation_id, last_error, created_at, updated_at)
-			VALUES (?, ?, ?, '', ?, ?)
+				(task_id, workspace_id, automation_id, protected_creator_user_id, last_error, created_at, updated_at)
+			VALUES (?, ?, ?, ?, '', ?, ?)
 			ON CONFLICT(task_id) DO UPDATE SET
 				workspace_id = excluded.workspace_id,
 				automation_id = excluded.automation_id,
+				protected_creator_user_id = CASE WHEN excluded.protected_creator_user_id != '' THEN excluded.protected_creator_user_id ELSE automation_task_cleanup_jobs.protected_creator_user_id END,
 				updated_at = excluded.updated_at`),
-			taskID, owner.WorkspaceID, automationID, now, now); err != nil {
+			taskID, owner.WorkspaceID, automationID, protectedCreator, now, now); err != nil {
 			return nil, err
 		}
 		jobs = append(jobs, taskID)
 	}
 	return jobs, nil
+}
+
+func protectedCreatorForAutomationTask(ctx context.Context, tx *sqlx.Tx, automationID, taskID string) (string, error) {
+	var creator string
+	err := tx.GetContext(ctx, &creator, tx.Rebind(`
+		SELECT protected_creator_user_id FROM automation_runs
+		WHERE automation_id = ? AND task_id = ? AND protected_creator_user_id != ''
+		ORDER BY created_at DESC, id DESC LIMIT 1`), automationID, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return creator, err
 }
 
 func automationCleanupTaskIsUnreferenced(ctx context.Context, tx *sqlx.Tx, automationID, taskID string) (bool, error) {
@@ -1763,6 +2332,9 @@ func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType Trigg
 
 // CreateRun records a trigger firing.
 func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
+	if r == nil || r.AutomationID == "" {
+		return ErrAutomationNotFound
+	}
 	if r.ID == "" {
 		r.ID = uuid.New().String()
 	}
@@ -1777,9 +2349,39 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.RetryLaunchConfigVersion = 1
 	}
 	r.TriggerDataJSON = string(r.TriggerData)
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	state, err := lockCredentialAutomation(ctx, tx, r.AutomationID)
+	if err != nil {
+		return err
+	}
+	choices, err := s.credentialChoicesTx(ctx, tx, r.AutomationID)
+	if err != nil {
+		return err
+	}
+	selectedRepositories, err := s.selectedRepositoryIDsTx(ctx, tx, r.AutomationID)
+	if err != nil {
+		return err
+	}
+	choices = credentialChoicesForSelectedRepositories(choices, selectedRepositories)
+	if len(choices) > 0 {
+		if err := credentialMutationActor(ctx, state.CreatorUserID); err != nil {
+			return err
+		}
+		r.ProtectedCreatorUserID = state.CreatorUserID
+	} else {
+		r.ProtectedCreatorUserID = ""
+	}
+	r.CredentialChoicesSnapshot, err = encodeRunCredentialChoiceSnapshot(r.AutomationID, choices)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO automation_runs (
-			id, automation_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
+			id, automation_id, protected_creator_user_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
 			error_message, session_id, turn_id, thread_action, thread_reason, display_title,
 			dedup_reason, repository_reason, managed_input_id, delivery_status, managed_delivery_attempts,
 			managed_conversation_id, managed_destination_installation_id, managed_destination_plugin_id,
@@ -1790,9 +2392,9 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 			retry_task_intent_id, retry_policy_snapshot, retry_trigger_snapshot,
 			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
 			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
-			automation_revision, trigger_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status, r.DedupKey,
+			credential_choices_snapshot, automation_revision, trigger_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		r.ID, r.AutomationID, r.ProtectedCreatorUserID, r.TriggerID, r.TriggerType, r.TaskID, r.Status, r.DedupKey,
 		r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID, r.ThreadAction, r.ThreadReason,
 		r.DisplayTitle, r.DedupReason, r.RepositoryReason, r.ManagedInputID, r.DeliveryStatus,
 		r.DeliveryAttempts, r.ManagedConversationID, r.ManagedDestinationInstallationID,
@@ -1802,9 +2404,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.RetryCancelledAt, r.RetryBaseTitle, r.RetryFailurePhase, r.RetryFailureClass,
 		r.RetryTaskIntentID, r.RetryPolicySnapshot, r.RetryTriggerSnapshot,
 		r.RetryLaunchConfigSnapshot, r.RetryLaunchConfigVersion, r.RetryResolvedPrompt,
-		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot,
-		r.AutomationRevision, r.TriggerRevision, r.CreatedAt)
-	if err != nil {
+		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot, r.CredentialChoicesSnapshot,
+		r.AutomationRevision, r.TriggerRevision, r.CreatedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.notifyRunRecorded(ctx, r.AutomationID, r.ID, r.Status)
@@ -2364,7 +2968,7 @@ const runObservedStatusSQL = `
 		END AS status`
 
 const runTaskStateColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		ar.id, ar.automation_id, ar.protected_creator_user_id, ar.trigger_id, ar.trigger_type,
 		-- A run keeps its task_id after the task row is deleted, which reads as a
 		-- transcript that can still be opened. Report no task rather than a link
 		-- that dead-ends; the derived cancelled status below already says why.
@@ -2776,6 +3380,41 @@ func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
 	return &r, nil
 }
 
+// ProtectedCreatorForTask returns the fixed creator for a credential-bearing
+// automation run attached to taskID. An empty result means the task has no
+// protected automation run.
+func (s *Store) ProtectedCreatorForTask(ctx context.Context, taskID string) (string, error) {
+	var creator string
+	err := s.ro.GetContext(ctx, &creator, s.ro.Rebind(`
+		SELECT protected_creator_user_id FROM (
+			SELECT protected_creator_user_id, created_at FROM automation_runs
+			WHERE task_id = ? AND protected_creator_user_id != ''
+			UNION ALL
+			SELECT protected_creator_user_id, created_at FROM automation_task_cleanup_jobs
+			WHERE task_id = ? AND protected_creator_user_id != ''
+		) ORDER BY created_at DESC LIMIT 1`), taskID, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return creator, err
+}
+
+func (s *Store) ProtectedRunForTask(ctx context.Context, taskID string) (*AutomationRun, error) {
+	var run AutomationRun
+	err := s.ro.GetContext(ctx, &run, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE task_id = ? AND protected_creator_user_id != ''
+		ORDER BY created_at DESC, id DESC LIMIT 1`), taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	return &run, nil
+}
+
 // DeleteRun removes a single run row.
 func (s *Store) DeleteRun(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
@@ -2847,6 +3486,9 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 	if err := lockRetryAutomation(ctx, tx, automationID); err != nil {
 		return err
 	}
+	if err := s.checkProtectedRunCreators(ctx, tx, automationID); err != nil {
+		return err
+	}
 	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", automationID); err != nil {
 		return err
 	}
@@ -2888,6 +3530,31 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) CheckProtectedRunCreators(ctx context.Context, automationID string) error {
+	return s.checkProtectedRunCreators(ctx, nil, automationID)
+}
+
+func (s *Store) checkProtectedRunCreators(ctx context.Context, tx *sqlx.Tx, automationID string) error {
+	query := `SELECT DISTINCT protected_creator_user_id FROM automation_runs
+		WHERE automation_id = ? AND protected_creator_user_id != ''`
+	var creators []string
+	var err error
+	if tx != nil {
+		err = tx.SelectContext(ctx, &creators, tx.Rebind(query), automationID)
+	} else {
+		err = s.ro.SelectContext(ctx, &creators, s.ro.Rebind(query), automationID)
+	}
+	if err != nil {
+		return err
+	}
+	for _, creatorID := range creators {
+		if err := credentialMutationActor(ctx, creatorID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteAutomationsByWorkspace removes all automations (and their triggers/runs) for a workspace.

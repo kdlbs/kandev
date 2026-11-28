@@ -6,13 +6,16 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -363,6 +366,67 @@ func TestTaskEventBroadcaster_PreservesAllFields(t *testing.T) {
 	if string(origJSON) != string(capturedJSON) {
 		t.Errorf("event data was modified\noriginal: %s\ncaptured: %s", origJSON, capturedJSON)
 	}
+}
+
+func TestTaskEventBroadcasterRedactsProtectedSessionStateFromPersistedAuthority(t *testing.T) {
+	database, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	database.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = database.Close() })
+	store, err := automation.NewStore(database, database)
+	require.NoError(t, err)
+	creatorContext := authn.WithIdentity(context.Background(), authn.Identity{UserID: "creator-1", Role: authn.RoleMember})
+	a := &automation.Automation{WorkspaceID: "workspace-credential-event", Name: "protected event", AgentProfileID: "profile-1"}
+	require.NoError(t, store.CreateAutomationWithCredentialChoices(creatorContext, a, []automation.AutomationCredentialChoice{{
+		ProfileID: "profile-1", Key: "SERVICE_KEY", SecretID: "personal-secret", SourceSecretID: "profile-secret",
+	}}))
+	run := &automation.AutomationRun{
+		AutomationID: a.ID, TaskID: "protected-event-task", Status: automation.RunStatusTaskCreated,
+		TriggerType: automation.TriggerTypeManual,
+	}
+	require.NoError(t, store.CreateRun(creatorContext, run))
+
+	hub := NewHub(nil, testLogger())
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	broadcaster.SetProtectedTaskLookup(func(ctx context.Context, taskID string) (bool, error) {
+		creator, lookupErr := store.ProtectedCreatorForTask(ctx, taskID)
+		return creator != "", lookupErr
+	})
+	data := map[string]interface{}{
+		"task_id": "protected-event-task", "workspace_id": a.WorkspaceID,
+		"session_id": "private-session", "old_state": "starting", "new_state": "running",
+		"updated_at": "2026-11-27T12:00:00Z", "metadata": map[string]interface{}{"agent_profile": "private-profile"},
+		"session_metadata": map[string]interface{}{"credential_error": "private failure"},
+		"error_message":    "private launch error", "agent_summary": "private agent output",
+	}
+	event := bus.NewEvent(events.TaskSessionStateChanged, "test", data)
+	require.NoError(t, broadcaster.broadcastEvent(context.Background(), event, ws.ActionSessionStateChanged))
+
+	var message *ws.Message
+	select {
+	case message = <-hub.broadcast:
+	default:
+		t.Fatal("expected a workspace session state notification")
+	}
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(message.Payload, &payload))
+	require.Equal(t, ws.ActionSessionStateChanged, message.Action)
+	require.Equal(t, map[string]interface{}{
+		"task_id": "protected-event-task", "workspace_id": a.WorkspaceID,
+		"old_state": "starting", "new_state": "running", "updated_at": "2026-11-27T12:00:00Z",
+	}, payload)
+
+	ordinary := map[string]interface{}{"task_id": "ordinary-task", "workspace_id": a.WorkspaceID, "session_id": "ordinary-session", "new_state": "running", "metadata": map[string]interface{}{"visible": true}}
+	event = bus.NewEvent(events.TaskSessionStateChanged, "test", ordinary)
+	require.NoError(t, broadcaster.broadcastEvent(context.Background(), event, ws.ActionSessionStateChanged))
+	select {
+	case message = <-hub.broadcast:
+	default:
+		t.Fatal("expected an ordinary workspace session state notification")
+	}
+	var ordinaryPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(message.Payload, &ordinaryPayload))
+	require.Equal(t, ordinary, ordinaryPayload)
 }
 
 func TestTaskEventBroadcaster_ProjectsConversationReceiptFromEventData(t *testing.T) {

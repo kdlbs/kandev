@@ -607,6 +607,7 @@ const infraSchemaDDL = `
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		owner_id TEXT DEFAULT '',
+		ownership_revision BIGINT NOT NULL DEFAULT 1,
 		org_id TEXT NOT NULL DEFAULT '',
 		default_executor_id TEXT DEFAULT '',
 		default_environment_id TEXT DEFAULT '',

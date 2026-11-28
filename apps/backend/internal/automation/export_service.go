@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const exportCredentialChoiceReviewWarning = "credential choices are omitted; select credentials again before enabling this automation"
+
 // ErrExportWorkspaceLookupUnavailable is returned when AC-44 step 2's
 // workspace-existence check has no lookup wired via
 // SetExportWorkspaceLookup. Distinct from repoerrors.ErrWorkspaceNotFound so
@@ -109,6 +111,10 @@ func (s *Service) collectExportAutomations(ctx context.Context, workspaceID stri
 // key entirely for an empty prompt, before any fidelity rule applies), and
 // each trigger's config node, with triggers ordered by type then id (AC-8).
 func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Automation) (exportAutomation, []exportWarning, error) {
+	hasCredentialChoices, err := s.store.HasCredentialChoicesTx(ctx, tx, a.ID)
+	if err != nil {
+		return exportAutomation{}, nil, fmt.Errorf("check credential choices for automation %q: %w", a.ID, err)
+	}
 	resolved, warnings, err := s.resolveDescriptors(ctx, tx, a)
 	if err != nil {
 		return exportAutomation{}, nil, fmt.Errorf("resolve descriptors for automation %q: %w", a.ID, err)
@@ -137,6 +143,12 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 		return exportAutomation{}, nil, err
 	}
 	warnings = append(warnings, triggerWarnings...)
+	if hasCredentialChoices {
+		warnings = append(warnings, exportWarning{
+			AutomationName: a.Name, AutomationID: a.ID, DedupKey: a.ID,
+			Message: exportCredentialChoiceReviewWarning,
+		})
+	}
 	policy, err := NormalizeRetryPolicy(a.RetryPolicy)
 	if err != nil {
 		return exportAutomation{}, nil, fmt.Errorf("normalize retry policy for automation %q: %w", a.ID, err)
@@ -145,7 +157,7 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 	return exportAutomation{
 		Name:              a.Name,
 		Description:       a.Description,
-		Enabled:           a.Enabled,
+		Enabled:           a.Enabled && !hasCredentialChoices,
 		MaxConcurrentRuns: a.MaxConcurrentRuns,
 		ContinuationPolicy: func() ContinuationPolicy {
 			if a.ContinuationPolicy == "" {

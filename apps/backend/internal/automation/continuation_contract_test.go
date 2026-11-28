@@ -179,6 +179,9 @@ func TestRepositoryFreeTargetDoesNotSelectWorkspaceRepositoryForTrigger(t *testi
 
 func TestAutomationRunPersistsExactBindingAndThreadMetadata(t *testing.T) {
 	store := setupTestStore(t)
+	require.NoError(t, store.CreateAutomation(context.Background(), &Automation{
+		ID: "automation-1", WorkspaceID: "workspace-1", Name: "thread metadata",
+	}))
 	run := &AutomationRun{
 		AutomationID: "automation-1", TriggerID: "trigger-1", TriggerType: TriggerTypeScheduled,
 		Status: RunStatusTaskCreated, TaskID: "task-1", SessionID: "session-1", TurnID: "turn-1",

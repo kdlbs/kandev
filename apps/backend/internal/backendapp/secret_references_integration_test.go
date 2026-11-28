@@ -12,6 +12,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -32,11 +33,22 @@ func TestSecretReferenceDeletionWithRealRepositories(t *testing.T) {
 	store, closeSecrets, err := secrets.Provide(h.db, h.db, crypto)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, closeSecrets()) })
+	automationStore, err := automation.NewStore(h.db, h.db)
+	require.NoError(t, err)
 	svc := secrets.NewService(secrets.NewUserVisibleStore(store), log)
-	svc.SetReferenceChecker(secretReferenceChecker{agents: agents, tasks: h.taskRepo, authorizeWorkspace: h.taskSvc.AuthorizeWorkspaceAccess}.list)
+	svc.SetReferenceChecker(secretReferenceChecker{
+		agents: agents, tasks: h.taskRepo, automations: automationStore,
+		authorizeWorkspace: h.taskSvc.AuthorizeWorkspaceAccess,
+	}.list)
 	secret, err := svc.Create(ctx, &secrets.CreateSecretRequest{Name: "MY_TOKEN", Value: "private-value"})
 	require.NoError(t, err)
 	seedSecretReferences(t, h, agents, secret.ID)
+	require.NoError(t, automationStore.CreateAutomationWithCredentialChoices(ctx, &automation.Automation{
+		ID: "secret-reference-automation", WorkspaceID: "secret-workspace", Name: "Daily review", MaxConcurrentRuns: 1,
+	}, []automation.AutomationCredentialChoice{{
+		Kind: automation.CredentialChoicePersonal, ProfileID: "secret-agent-profile", Key: "AUTO_TOKEN",
+		SecretID: secret.ID, State: automation.CredentialChoiceSelected,
+	}}))
 	router := gin.New()
 	secrets.RegisterRoutes(router, ws.NewDispatcher(), svc, log)
 	rec := httptest.NewRecorder()
@@ -46,7 +58,10 @@ func TestSecretReferenceDeletionWithRealRepositories(t *testing.T) {
 		References []secrets.Reference `json:"references"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.Len(t, response.References, 3)
+	require.Len(t, response.References, 4)
+	require.Contains(t, response.References, secrets.Reference{
+		Kind: "automation", ID: "secret-reference-automation", Name: "Daily review", Key: "AUTO_TOKEN",
+	})
 	value, err := svc.Reveal(ctx, secret.ID)
 	require.NoError(t, err)
 	require.Equal(t, "private-value", value)
@@ -56,9 +71,12 @@ func TestSecretReferenceDeletionWithRealRepositories(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	_, err = svc.Get(ctx, secret.ID)
 	require.ErrorIs(t, err, secrets.ErrNotFound)
-	refs, err := (secretReferenceChecker{agents: agents, tasks: h.taskRepo, authorizeWorkspace: h.taskSvc.AuthorizeWorkspaceAccess}).list(ctx, secret.ID)
+	refs, err := (secretReferenceChecker{
+		agents: agents, tasks: h.taskRepo, automations: automationStore,
+		authorizeWorkspace: h.taskSvc.AuthorizeWorkspaceAccess,
+	}).list(ctx, secret.ID)
 	require.NoError(t, err)
-	require.Len(t, refs, 3, "forced deletion must retain bindings for repair")
+	require.Len(t, refs, 4, "forced deletion must retain bindings for repair")
 }
 
 func seedSecretReferences(t *testing.T, h bootStateTestHarness, agents settingsstore.Repository, secretID string) {

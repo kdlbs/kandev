@@ -21,10 +21,13 @@ Repository setup and agent work often need credentials that are specific to a pr
 
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.1:** Secrets can be created as **Global** or **Workspace**.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.2:** Global secrets are available across the current user's workspaces. Workspace secrets belong to exactly one workspace.
+  With authentication on, each user-managed secret belongs to an account in both scopes.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.3:** Existing secrets become Global during migration.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.4:** Agent and executor profiles can select Global secrets only.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.5:** A workspace-owned repository can bind environment variable names to Global secrets or secrets from that same workspace.
-- **AC-WORKSPACES-REPOSITORY-SECRETS-001.6:** Every task attaching the repository inherits its bindings. A multi-repository task inherits all attached repositories' bindings plus its selected executor profile environment.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.6:** Every task attaching a repository inherits its binding references.
+  A multi-repository task collects those references from all attached repositories and includes the selected executor profile's environment.
+  When a required reference is outside the launch actor's secret authority, Kandev shall report an unavailable secret before provisioning the environment.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.7:** Repository bindings contain secret references only, never literal values.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.8:** The effective repository environment is available to repository setup, the agent process, child shells, and terminal-panel terminals in every supported executor, including explicitly approved forwarding to SSH.
 
@@ -49,13 +52,14 @@ deterministic, fail-closed task environment. The Overview describes the motivati
 
 - Secrets can be created as **Global** or **Workspace**.
 - Global secrets are available across the current user's workspaces. Workspace secrets belong to
-  exactly one workspace.
+  exactly one workspace. With authentication on, both scopes retain account ownership.
 - Existing secrets become Global during migration.
 - Agent and executor profiles can select Global secrets only.
 - A workspace-owned repository can bind environment variable names to Global secrets or secrets
   from that same workspace.
-- Every task attaching the repository inherits its bindings. A multi-repository task inherits all
-  attached repositories' bindings plus its selected executor profile environment.
+- Every task attaching a repository inherits its binding references. A multi-repository task
+  collects them from all attached repositories and includes the selected executor profile's environment.
+  Launch checks the actor's authority before it resolves the values.
 - Repository bindings contain secret references only, never literal values.
 - The effective repository environment is available to repository setup, the agent process, child
   shells, and terminal-panel terminals in every supported executor, including explicitly approved
@@ -64,14 +68,14 @@ deterministic, fail-closed task environment. The Overview describes the motivati
 ## Scope and permissions
 
 Global means user-global when authentication is enabled and install-global when authentication is
-disabled. It does not make one authenticated user's secret visible to another user.
+disabled. Workspace adds a workspace restriction to the account's secret ownership.
+Setup assigns previously unowned secrets to the first administrator.
 
 A caller may:
 
 - manage their own Global secrets;
-- manage Workspace secrets only after Kandev authorizes that workspace;
-- bind a repository only to a visible Global secret or a secret whose `workspace_id` equals the
-  repository's `workspace_id`;
+- manage a Workspace secret they own after Kandev authorizes that workspace;
+- bind a repository to a visible Global secret or a visible Workspace secret in that repository's workspace;
 - view and edit bindings only through a repository they are authorized to access.
 
 Cross-user and cross-workspace IDs return not found or a generic invalid-binding response without
@@ -79,6 +83,10 @@ revealing that the target secret exists. Administrators do not bypass workspace 
 
 All instance-shared profile types, including agent and executor profiles, reject Workspace secret
 references both when saving and when resolving legacy or manually inserted data.
+
+See the [automation credentials requirements](automation-credentials.md) for the proposed grant of
+runtime use to one automation. Workspace access permits a caller to reach a repository under its
+role. The default secret lookup checks the authenticated launch actor's authority.
 
 ## Data model
 
@@ -155,7 +163,7 @@ Kandev resolves one task environment from named origins:
    - deduplicate exact references to the same secret ID;
    - reject different secret IDs;
    - reject literal-versus-secret or different-literal definitions.
-4. Reveal each unique repository secret using Global-or-same-workspace authorization.
+4. Reveal each unique repository secret using the launch actor's authority and Global-or-same-workspace scope.
 5. Reject any missing, deleted, unreadable, unauthorized, or wrong-workspace reference.
 6. Flatten the validated result and continue normal launch. Agent-profile values retain their
    existing fill-missing behavior and may not overwrite this task environment.

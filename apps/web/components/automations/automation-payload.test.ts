@@ -8,6 +8,7 @@ vi.mock("@/app/actions/workspaces", () => ({
 
 import {
   automationDraftRevision,
+  personalBindingsForUpdate,
   reconcileSavedMCPSelection,
   mcpSelectionForUpdate,
   buildCreatePayload,
@@ -50,6 +51,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
       history_mode: "attempts",
     },
     pluginTools: [],
+    personalCredentialBindings: [],
     ...overrides,
   };
 }
@@ -183,6 +185,11 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     ]);
   });
 
+  it("sends the enabled state when creating an automation", () => {
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: false }), [], []).enabled).toBe(false);
+    expect(buildCreatePayload("ws-1", baseForm({ enabled: true }), [], []).enabled).toBe(true);
+  });
+
   it("sends repository_ids in row order on update", () => {
     const payload = buildUpdatePayload(baseForm(), [
       { repository_id: "repo-b", base_branch: "develop" },
@@ -230,11 +237,13 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
         tool_names: ["list_findings"],
       },
     ];
-    expect(buildUpdatePayload(form, [], selection)).toMatchObject({ plugin_tools: selection });
-    expect(buildUpdatePayload(form, [], [])).toMatchObject({ plugin_tools: [] });
-    expect(buildUpdatePayload(baseForm({ taskMode: "normal_task" }), [], selection)).toMatchObject({
-      plugin_tools: [],
+    expect(buildUpdatePayload(form, [], { pluginTools: selection })).toMatchObject({
+      plugin_tools: selection,
     });
+    expect(buildUpdatePayload(form, [], { pluginTools: [] })).toMatchObject({ plugin_tools: [] });
+    expect(
+      buildUpdatePayload(baseForm({ taskMode: "normal_task" }), [], { pluginTools: selection }),
+    ).toMatchObject({ plugin_tools: [] });
   });
 
   it("compares plugin tool approvals without depending on tool order", () => {
@@ -402,7 +411,7 @@ describe("automation MCP selection", () => {
   it("preserves omission on unrelated updates and conditions changed selections", () => {
     const form = Object.assign(baseForm(), { mcpSelection: selection, mcpSelectionRevision: 3 });
     expect(buildUpdatePayload(form, [])).not.toHaveProperty("mcp_selection");
-    expect(buildUpdatePayload(form, [], undefined, selection)).toMatchObject({
+    expect(buildUpdatePayload(form, [], { mcpSelection: selection })).toMatchObject({
       mcp_selection: selection,
       expected_mcp_selection_revision: 3,
     });
@@ -458,11 +467,27 @@ it("omits MCP grants from managed conversation payloads", () => {
   });
   for (const payload of [
     buildCreatePayload("workspace", form, [], []),
-    buildUpdatePayload(form, [], undefined, form.mcpSelection!),
+    buildUpdatePayload(form, [], { mcpSelection: form.mcpSelection! }),
   ]) {
     expect(payload).not.toHaveProperty("mcp_selection");
     expect(payload).not.toHaveProperty("expected_mcp_selection_revision");
   }
+});
+
+it("persists personal credential choices on create and only sends changed bindings on update", () => {
+  const binding = { profile_id: "agent-1", key: "SERVICE_KEY", secret_id: "secret-1" };
+  const selected = baseForm({ personalCredentialBindings: [binding] });
+  expect(buildCreatePayload("workspace", selected, [], [])).toMatchObject({
+    personal_credential_bindings: [binding],
+  });
+
+  const saved = baseForm({ personalCredentialBindings: [binding] });
+  expect(personalBindingsForUpdate(selected, saved)).toBeUndefined();
+  expect(
+    buildUpdatePayload({ ...selected, personalCredentialBindings: [] }, [], {
+      personalCredentialBindings: [],
+    }),
+  ).toMatchObject({ personal_credential_bindings: [] });
 });
 
 it("resubmits the displayed selection when changing task mode", () => {
@@ -474,7 +499,7 @@ it("resubmits the displayed selection when changing task mode", () => {
 
 it("carries the editor revision when switching to a managed conversation", () => {
   const form = baseForm({ taskMode: "managed_conversation", mcpSelectionRevision: 3 });
-  const payload = buildUpdatePayload(form, [], undefined, undefined, true);
+  const payload = buildUpdatePayload(form, [], { modeChanged: true });
   expect(payload).not.toHaveProperty("mcp_selection");
   expect(payload.expected_mcp_selection_revision).toBe(3);
 });

@@ -5,6 +5,7 @@ import type {
   AutomationMCPSelection,
   AutomationRepository,
   AutomationPluginToolSelection,
+  PersonalCredentialBindingInput,
   ContinuationPolicy,
   PRContinuationSettings,
   PREndAction,
@@ -57,6 +58,7 @@ export type FormState = {
   prClosedAction: PREndAction;
   retryPolicy: RetryPolicy;
   pluginTools: AutomationPluginToolSelection[];
+  personalCredentialBindings: PersonalCredentialBindingInput[];
 };
 
 /** Canonical form for comparing two approvals without tool-order noise. */
@@ -242,23 +244,33 @@ export function buildCreatePayload(
     })),
     retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
     plugin_tools: form.taskMode === "automation_run" ? form.pluginTools : [],
+    ...(form.personalCredentialBindings.length > 0
+      ? {
+          personal_credential_bindings: canonicalPersonalCredentialBindings(
+            form.personalCredentialBindings,
+          ),
+        }
+      : {}),
     ...(form.taskMode !== "managed_conversation" && form.mcpSelection
       ? { mcp_selection: form.mcpSelection }
       : {}),
   };
 }
 
-/**
- * Build a partial update that preserves omitted grants and supplies the revision for selection
- * changes or mode changes.
- */
+export type BuildUpdatePayloadOptions = {
+  pluginTools?: AutomationPluginToolSelection[];
+  mcpSelection?: AutomationMCPSelection;
+  modeChanged?: boolean;
+  personalCredentialBindings?: PersonalCredentialBindingInput[];
+};
+
+/** Build an update without overwriting omitted grants or untouched bindings. */
 export function buildUpdatePayload(
   form: FormState,
   repositories: AutomationRepository[],
-  pluginTools?: AutomationPluginToolSelection[],
-  mcpSelection?: AutomationMCPSelection,
-  modeChanged = false,
+  options: BuildUpdatePayloadOptions = {},
 ): UpdateAutomationRequest {
+  const { pluginTools, mcpSelection, modeChanged = false, personalCredentialBindings } = options;
   return {
     ...(mcpSelection && form.taskMode !== "managed_conversation"
       ? {
@@ -290,6 +302,13 @@ export function buildUpdatePayload(
     ...(pluginTools !== undefined
       ? { plugin_tools: form.taskMode === "automation_run" ? pluginTools : [] }
       : {}),
+    ...(personalCredentialBindings !== undefined
+      ? {
+          personal_credential_bindings: canonicalPersonalCredentialBindings(
+            personalCredentialBindings,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -316,6 +335,20 @@ export function prContinuationPayload(form: FormState): PRContinuationSettings {
     pr_merged_action: perPR ? form.prMergedAction : "keep",
     pr_closed_action: perPR ? form.prClosedAction : "keep",
   };
+}
+
+function canonicalPersonalCredentialBindings(bindings: PersonalCredentialBindingInput[]) {
+  return [...bindings]
+    .map((binding) => ({ ...binding }))
+    .sort((left, right) =>
+      `${left.profile_id}\u0000${left.key}`.localeCompare(`${right.profile_id}\u0000${right.key}`),
+    );
+}
+
+export function personalBindingsForUpdate(form: FormState, saved: FormState) {
+  const current = canonicalPersonalCredentialBindings(form.personalCredentialBindings);
+  const previous = canonicalPersonalCredentialBindings(saved.personalCredentialBindings);
+  return JSON.stringify(current) === JSON.stringify(previous) ? undefined : current;
 }
 
 export function buildWebhookUrl(automationId: string): string {

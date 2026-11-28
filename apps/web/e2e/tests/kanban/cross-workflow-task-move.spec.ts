@@ -53,7 +53,9 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.sendTaskToWorkflow(task.id, targetWorkflow.id, targetStep.id);
 
     await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("Workflow changed.")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Workflow changed.", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
     expect(testPage.url()).toBe(beforeUrl);
 
     await testPage.goto(`/?workflowId=${targetWorkflow.id}`);
@@ -106,7 +108,9 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.sendTaskToWorkflowFromActions(task.id, targetWorkflow.id, targetStep.id);
 
     await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("Workflow changed.")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Workflow changed.", { exact: true }),
+    ).toBeVisible({ timeout: 10_000 });
 
     await testPage.goto(`/?workflowId=${targetWorkflow.id}`);
     await expect(kanban.taskCardInColumn("Cross Workflow Actions Task", targetStep.id)).toBeVisible(

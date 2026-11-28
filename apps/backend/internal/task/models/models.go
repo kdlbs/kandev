@@ -160,7 +160,9 @@ const (
 	// repository-free execution cannot silently reuse the old task.
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
-	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyAutomationRunID links a task to its run before the run stores task_id.
+	MetaKeyAutomationRunID = "automation_run_id"
+	MetaKeyDeferredLaunch  = "deferred_launch"
 	// MetaKeyAutomationStartOwned marks a task whose initial agent start is
 	// owned by the automation run that created it. It is stamped at create
 	// time, before the feeder pull can publish task.moved, so the workflow
@@ -2039,10 +2041,11 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	OwnerID     string `json:"owner_id"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	OwnerID           string `json:"owner_id"`
+	OwnershipRevision int64  `json:"ownership_revision"`
 	// OrgID is the owning tenant. Empty means organizations are off or the
 	// tenancy migration has not run.
 	OrgID string `json:"org_id,omitempty"`

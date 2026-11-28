@@ -23,6 +23,7 @@ export type SettingsPromptEditorProps = {
   height?: string | number;
   minLines?: number;
   readOnly?: boolean;
+  tabFocusMode?: boolean;
   ariaLabel?: string;
   testId?: string;
   isDirty?: boolean;
@@ -57,6 +58,7 @@ export function SettingsPromptEditor({
   height,
   minLines = 3,
   readOnly = false,
+  tabFocusMode,
   ariaLabel,
   testId,
   isDirty,
@@ -95,6 +97,7 @@ export function SettingsPromptEditor({
           placeholders={placeholders}
           mentionPrompts={promptReferences ? mentionPrompts : undefined}
           readOnly={readOnly}
+          tabFocusMode={tabFocusMode}
           ariaLabel={ariaLabel ?? t("settings:promptEditorAriaLabel")}
           testId={testId ? `${testId}-editor` : undefined}
         />

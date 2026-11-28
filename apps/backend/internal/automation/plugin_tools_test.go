@@ -245,18 +245,22 @@ func TestDecodePluginToolsRejectsMalformedStoredAuthority(t *testing.T) {
 func TestAutomationPluginToolsRejectNullUpdatePayload(t *testing.T) {
 	svc := newTestService(t)
 	logger := svc.logger
-	msg, err := ws.NewRequest("request-null", ws.ActionAutomationUpdate, map[string]any{
-		"id": "automation-1", "plugin_tools": nil,
-	})
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
-	response, err := wsUpdate(svc, logger)(context.Background(), msg)
-	if err != nil {
-		t.Fatalf("wsUpdate: %v", err)
-	}
-	if response.Type != ws.MessageTypeError || !strings.Contains(string(response.Payload), "cannot be null") {
-		t.Fatalf("response = %#v", response)
+	for _, field := range []string{"plugin_tools", "mcp_selection", "personal_credential_bindings"} {
+		t.Run(field, func(t *testing.T) {
+			msg, err := ws.NewRequest("request-null", ws.ActionAutomationUpdate, map[string]any{
+				"id": "automation-1", field: nil,
+			})
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			response, err := wsUpdate(svc, logger)(context.Background(), msg)
+			if err != nil {
+				t.Fatalf("wsUpdate: %v", err)
+			}
+			if response.Type != ws.MessageTypeError || !strings.Contains(string(response.Payload), "cannot be null") {
+				t.Fatalf("response = %#v", response)
+			}
+		})
 	}
 }
 

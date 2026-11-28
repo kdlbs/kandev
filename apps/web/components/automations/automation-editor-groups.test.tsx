@@ -57,6 +57,7 @@ function form(overrides: Partial<FormState> = {}): FormState {
       history_mode: "attempts",
     },
     pluginTools: [],
+    personalCredentialBindings: [],
     ...overrides,
   };
 }
@@ -98,6 +99,10 @@ describe("AgentSection", () => {
         savedForm={saved}
         workspaceId="ws-1"
         supportsMultiRepo
+        automation={null}
+        onAutomationChange={vi.fn()}
+        triggers={[]}
+        credentialError={null}
         updateField={vi.fn()}
         mcp={{ saveFailed: false, reload: vi.fn() }}
         pluginTools={{ groups: [], loading: false, error: false, reload: vi.fn() }}

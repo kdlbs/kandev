@@ -82,6 +82,35 @@ export async function disableAutomation(id: string): Promise<Automation> {
   return requireClient().request<Automation>("automation.disable", { id });
 }
 
+export type WorkspaceCredentialGrantRequest = {
+  repository_id: string;
+  key: string;
+  expected_automation_revision: number;
+  expected_credential_revision: number;
+  expected_binding_updated_at?: string;
+  expected_workspace_owner_revision?: number;
+};
+
+export async function grantWorkspaceCredential(
+  id: string,
+  request: WorkspaceCredentialGrantRequest,
+): Promise<Automation> {
+  return requireClient().request<Automation>("automation.credential.grant_workspace", {
+    id,
+    ...request,
+  });
+}
+
+export async function revokeWorkspaceCredential(
+  id: string,
+  request: WorkspaceCredentialGrantRequest,
+): Promise<Automation> {
+  return requireClient().request<Automation>("automation.credential.revoke_workspace", {
+    id,
+    ...request,
+  });
+}
+
 /**
  * Fire an automation by hand. A request can succeed without anything running —
  * the concurrency cap turns a trigger away while an earlier run is still in

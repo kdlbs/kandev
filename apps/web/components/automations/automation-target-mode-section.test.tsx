@@ -38,6 +38,7 @@ function form(overrides: Partial<FormState> = {}): FormState {
       history_mode: "attempts",
     },
     pluginTools: [],
+    personalCredentialBindings: [],
     ...overrides,
   };
 }

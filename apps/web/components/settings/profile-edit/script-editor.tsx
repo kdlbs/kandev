@@ -69,6 +69,7 @@ type ScriptEditorProps = {
   mentionPrompts?: PromptReference[];
   readOnly?: boolean;
   lineNumbers?: "on" | "off";
+  tabFocusMode?: boolean;
   ariaLabel?: string;
   testId?: string;
 };
@@ -163,6 +164,7 @@ export function ScriptEditor({
   mentionPrompts,
   readOnly = false,
   lineNumbers = "on",
+  tabFocusMode,
   ariaLabel,
   testId,
 }: ScriptEditorProps) {
@@ -196,6 +198,7 @@ export function ScriptEditor({
           fontSize: EDITOR_FONT_SIZE,
           scrollBeyondLastLine: false,
           readOnly,
+          tabFocusMode,
           bracketPairColorization: { enabled: true },
           padding: { top: 8, bottom: 8 },
           renderLineHighlight: "none",

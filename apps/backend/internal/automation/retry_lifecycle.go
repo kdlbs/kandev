@@ -97,6 +97,14 @@ type RetryFailure struct {
 
 // SanitizeAutomationFailure stores only an allowlisted phase message.
 func SanitizeAutomationFailure(raw error, phase string, _ map[string]string) RetryFailure {
+	if errors.Is(raw, ErrCredentialsUnavailable) {
+		message := "automation credentials are unavailable"
+		var credentialErr *CredentialValidationError
+		if errors.As(raw, &credentialErr) {
+			message = credentialErr.Error()
+		}
+		return RetryFailure{Message: message, FailureClass: "credentials_unavailable", FailurePhase: phase}
+	}
 	failureClass := "completion"
 	message := "automation attempt failed"
 	switch phase {
@@ -267,7 +275,8 @@ func (s *Store) finalizeRetryFailure(ctx context.Context, runID string, generati
 	}
 	nextNumber := parent.AttemptNumber + 1
 	maxRetries, _ := parseRetryDecimal(policy.MaxRetries)
-	if policy.Mode == RetryModeDisabled || (policy.Mode == RetryModeFinite && parent.AttemptNumber > maxRetries) {
+	if errors.Is(raw, ErrCredentialsUnavailable) || errors.Is(raw, ErrCredentialChoiceUnavailable) ||
+		policy.Mode == RetryModeDisabled || (policy.Mode == RetryModeFinite && parent.AttemptNumber > maxRetries) {
 		parentResult, execErr := tx.ExecContext(ctx, tx.Rebind(`UPDATE automation_runs SET status = ?, retry_state = ?, retry_failure_phase = ?, retry_failure_class = ?, error_message = ? WHERE id = ? AND retry_group_generation = ?`),
 			RunStatusFailed, RetryStateExhausted, failure.FailurePhase, failure.FailureClass, failure.Message, runID, generation)
 		if execErr != nil {
@@ -337,8 +346,8 @@ func (s *Store) finalizeRetryFailure(ctx context.Context, runID string, generati
 			retry_group_generation, retry_cancelled_at, retry_base_title, retry_failure_phase, retry_failure_class, retry_task_intent_id,
 			retry_policy_snapshot, retry_trigger_snapshot, retry_launch_config_snapshot, retry_launch_config_version,
 			retry_resolved_prompt, retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
-			automation_revision, trigger_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			credential_choices_snapshot, automation_revision, trigger_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		child.ID, child.AutomationID, child.TriggerID, child.TriggerType, child.TaskID, child.Status, child.DedupKey,
 		child.TriggerDataJSON, child.ErrorMessage, child.SessionID, child.TurnID, child.ThreadAction, child.ThreadReason,
 		child.DisplayTitle, child.RetryGroupID, child.RetryParentRunID, child.AttemptNumber, child.RetryState,
@@ -346,7 +355,8 @@ func (s *Store) finalizeRetryFailure(ctx context.Context, runID string, generati
 		child.RetryGroupGeneration, child.RetryCancelledAt, child.RetryBaseTitle, child.RetryFailurePhase,
 		child.RetryFailureClass, child.RetryTaskIntentID, child.RetryPolicySnapshot, child.RetryTriggerSnapshot,
 		child.RetryLaunchConfigSnapshot, child.RetryLaunchConfigVersion, child.RetryResolvedPrompt, child.RetryResolvedTitle,
-		child.RetryResolvedTriggerAt, child.RetryContinuationSnapshot, child.AutomationRevision, child.TriggerRevision, child.CreatedAt); err != nil {
+		child.RetryResolvedTriggerAt, child.RetryContinuationSnapshot, child.CredentialChoicesSnapshot,
+		child.AutomationRevision, child.TriggerRevision, child.CreatedAt); err != nil {
 		var existing AutomationRun
 		if !isUniqueConstraint(err) || tx.GetContext(ctx, &existing, tx.Rebind(`SELECT * FROM automation_runs WHERE retry_group_id = ? AND attempt_number = ?`), parent.RetryGroupID, nextNumber) != nil {
 			return nil, err
@@ -355,8 +365,15 @@ func (s *Store) finalizeRetryFailure(ctx context.Context, runID string, generati
 		if existing.RetryPolicySnapshot != parent.RetryPolicySnapshot ||
 			existing.RetryTriggerSnapshot != parent.RetryTriggerSnapshot ||
 			existing.RetryGroupGeneration != generation ||
-			existing.RetryParentRunID != parent.ID {
+			existing.RetryParentRunID != parent.ID ||
+			existing.ProtectedCreatorUserID != parent.ProtectedCreatorUserID ||
+			existing.CredentialChoicesSnapshot != parent.CredentialChoicesSnapshot {
 			return nil, errors.New("retry child consistency mismatch")
+		}
+	}
+	if child.ProtectedCreatorUserID != "" {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automation_runs SET protected_creator_user_id = ? WHERE id = ?`), child.ProtectedCreatorUserID, child.ID); err != nil {
+			return nil, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO automation_retry_launch_protocols (run_id, version) SELECT ?, version FROM automation_retry_launch_protocols WHERE run_id = ? ON CONFLICT(run_id) DO UPDATE SET version = excluded.version WHERE automation_retry_launch_protocols.version = 0`), child.ID, parent.ID); err != nil {

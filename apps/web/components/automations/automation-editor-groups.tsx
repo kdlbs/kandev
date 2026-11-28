@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
-import type { PlaceholderInfo } from "@/lib/types/automation";
+import type { Automation, AutomationTrigger, PlaceholderInfo } from "@/lib/types/automation";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import type { FormState } from "./automation-payload";
-import { ConfigSection, WorkflowField } from "./config-section";
+import { WorkflowField } from "./config-section";
+import { AutomationCredentialConfig } from "./automation-credential-config-section";
+import type { AutomationCredentialError } from "./automation-credential-error";
 import { PlaceholderList, PromptSection } from "./prompt-section";
 import { RetryPolicySection } from "./retry-policy-section";
 import { ContinuationPolicySection, FollowUpPromptField } from "./automation-continuation-section";
@@ -218,7 +220,14 @@ export function InstructionsSection({
 }
 
 /** Agent: who does the work, with which repositories, and with which tools. */
-export function AgentSection(props: AgentToolsDisclosureProps) {
+type AgentSectionProps = AgentToolsDisclosureProps & {
+  automation: Automation | null;
+  onAutomationChange: (automation: Automation) => void;
+  triggers: AutomationTrigger[];
+  credentialError: AutomationCredentialError | null;
+};
+
+export function AgentSection(props: AgentSectionProps) {
   const { form, savedForm, workspaceId, updateField } = props;
   const { t } = useTranslation();
   // A managed conversation runs in the plugin's own session.
@@ -228,27 +237,35 @@ export function AgentSection(props: AgentToolsDisclosureProps) {
       title={t("automations:agentTitle")}
       description={t("automations:agentDescription")}
       dirty={
-        isDirty(form, savedForm, ["agentProfileId", "executorProfileId", "repositorySelections"]) ||
+        isDirty(form, savedForm, [
+          "agentProfileId",
+          "executorProfileId",
+          "repositorySelections",
+          "personalCredentialBindings",
+        ]) ||
         isMCPSelectionDirty(form, savedForm) ||
         (form.taskMode === "automation_run" && isPluginToolsDirty(form, savedForm))
       }
       testId="automation-agent-section"
     >
-      <ConfigSection
+      <AutomationCredentialConfig
+        form={form}
+        triggers={props.triggers}
         workspaceId={workspaceId}
-        agentProfileId={form.agentProfileId}
-        executorProfileId={form.executorProfileId}
-        repositorySelections={form.repositorySelections}
+        automation={props.automation}
+        onAutomationChange={props.onAutomationChange}
+        updateField={updateField}
+        credentialError={props.credentialError}
         dirtyFields={{
-          agentProfileId: isDirty(form, savedForm, ["agentProfileId"]),
-          executorProfileId: isDirty(form, savedForm, ["executorProfileId"]),
+          agentProfileId: isDirty(form, savedForm, [
+            "agentProfileId",
+            "personalCredentialBindings",
+          ]),
+          executorProfileId: isDirty(form, savedForm, [
+            "executorProfileId",
+            "personalCredentialBindings",
+          ]),
           repositorySelections: isDirty(form, savedForm, ["repositorySelections"]),
-        }}
-        onAgentProfileChange={(value) => updateField("agentProfileId", value)}
-        onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-        onRepositoriesChange={(value) => {
-          updateField("repositorySelections", value);
-          updateField("repositoryMode", value.length > 0 ? "selected" : "none");
         }}
       />
       <Separator />
