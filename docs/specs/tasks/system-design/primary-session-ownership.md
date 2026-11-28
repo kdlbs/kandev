@@ -73,6 +73,42 @@ passes `false`; it now excludes terminal sessions, which it accepted before.
 Both promote through `SetPrimarySession`, which neither moves queued messages
 nor changes an explicit session selection (`001.4`).
 
+With `features.terminalPrimaryQueueHandoff` on (`001.5`), `SetPrimarySession`
+first reads the current primary. When that session is COMPLETED, FAILED or
+CANCELLED, after the promotion write it schedules `handOffTerminalSessionQueue`
+to run after the caller returns. Promotion runs inside the stopping session's
+queue admission while the transfer locks both sessions in ID order, so running
+it inline deadlocks when the receiver's ID sorts first; the scheduled hand-off
+uses a context that does not claim the caller's admission. The worker is
+derived from the service-owned worker context, so `Stop` cancels it and waits
+for it, and no hand-off starts after `Stop`. Hand-offs are serialized and each
+resolves the task's current primary when it runs, not when it was scheduled:
+if successive promotions fail one primary after another, an earlier hand-off
+delivers to the latest primary instead of a session that already handed its
+own queue on. It transfers the queue with
+`messagequeue.TransferRetiredSessionWithDurableAttachmentPreparation`
+(attachments and compensation included), which lifts the retired source's
+Auto-run pause inside the transfer's admission on both sessions, so the
+repository's combined setting is the receiver's own value at commit, including
+a pause the user set while the hand-off waited. Inside that admission the
+hand-off also confirms the receiver still holds the primary role, holding the
+read side of `primarySwitchMu` until the transfer returns; `SetPrimarySession`
+takes the write side only around its repository write. If the role moved
+first, the transfer rolls back and the hand-off resolves the primary again (up
+to five attempts). Immediately before attachment preparation, while both queue
+admissions and the primary-role read lock are held, it re-reads the source and
+receiver. A source that became nonterminal or owns a live unaccepted startup
+keeps its queue. An unreadable session or a receiver with an open recovery block
+or action-required route also refuses transfer. Accepted or cancelled startup
+attempts no longer own startup; an old source recovery block alone does not
+prevent retiring that source. These refusals preserve queue IDs, attachments
+and both Auto-run settings and do not schedule new retries. The predicates are
+shared with the primary selection follow-up without importing its selector
+changes or introducing a second flag. It then offers the new primary to
+`DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
+the queue on the terminal session. The flag is read once at startup into the
+orchestrator service config.
+
 ## Failure and recovery
 
 A failed task or step read during selection treats every session as matching,
@@ -91,3 +127,44 @@ No permission or trust boundary changes.
 ## Observability
 
 The existing `auto-promoted primary session` log keeps the old and new IDs.
+
+## Replaced session reclaim
+
+With `features.replacedSessionReclaim` on (`ServiceConfig.ReplacedSessionReclaim`),
+only the explicit user promotion (`session.set_primary`, which calls
+`PromotePrimarySession`) registers a replaced session. It reads the previous
+primary and captures its current `executors_running.agent_execution_id` before
+promoting, under a task-scoped lock in `primarySessionReclaimLocks`. After a
+successful promotion, it clears any claim on the promoted session and registers
+the captured execution in `replacedSessionReclaims` before publishing the
+primary update. A later execution cannot become that claim's target. Nothing is stopped inline:
+`reclaimReplacedSessionsOnce` evaluates registrations on each idle-reaper tick
+(`001.6`).
+
+`SetPrimarySession`, used by automatic promotion, session deletion, and
+workflow profile switches, never registers. Those paths only take
+the same task-scoped lock around the write and clear the promoted session's
+claim, so a later automatic demotion cannot revive an old claim. A stop decision
+cannot act on a session they have just promoted. A workflow switch therefore parks or completes
+its source with the runtime it expects, and its queue transfer registers
+nothing.
+
+A stop runs under the session's prompt admission and a non-blocking lifecycle
+lock, and again under the task-scoped promotion lock. It verifies that the
+captured registration is still current, so a stale sweep snapshot cannot
+revive a removed claim. An unrelated task can promote while this task's
+runtime stop is pending. It drops the registration when
+the session became primary again, left the task, or its execution rotated or
+stopped, and when the claim can never stop the session: it is parked, is in a
+terminal state (completed, failed, or cancelled), is an Office task, belongs to
+an archived or missing task, or is not eligible for automatic resume. It
+defers, keeping the registration, while the session is still starting or
+running, while a read fails, or while it has known idle work (an active turn,
+language-server lease, background work, open clarification, pending permission,
+or pending queued message). Otherwise it calls `StopExecution` for the exact
+execution with reason "session replaced". There is no session state write; the
+`agent.stopped` handler preserves `WAITING_FOR_INPUT` and `IDLE`, so the
+conversation resumes on the next prompt.
+
+With the flag off, `PromotePrimarySession` is `SetPrimarySession`, the tick
+returns immediately, and `SetPrimarySession` performs only the promotion.

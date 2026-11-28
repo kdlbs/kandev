@@ -24,6 +24,8 @@ export const defaultFeatureFlags = {
   coordinatorPhase3: false,
   coordinatorPhase31: false,
   codexAppServer: false,
+  terminalPrimaryQueueHandoff: false,
+  replacedSessionReclaim: false,
   acpV2: false,
   agentBackgroundWork: false,
   opencodePlugin: false,

@@ -316,13 +316,16 @@ func (s *Service) promoteWorkflowSessionRoute(
 			committed := *route
 			committed.DestinationID = destination.ID
 			committed.Phase = workflowSessionRouteCommitted
-			promoted, promoteErr = promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(admissionCtx, destination.ID, committed)
+			promoted, promoteErr = s.promotePrimaryWithoutReclaim(admissionCtx, taskID, destination.ID,
+				func(ctx context.Context, sessionID string) (bool, error) {
+					return promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(ctx, sessionID, committed)
+				})
 			return
 		}
 		// Legacy repository adapters do not expose the atomic route promoter.
 		// Keep the nonterminal promotion guard and persist a route only after
 		// the selected destination has been promoted.
-		promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, destination.ID)
+		promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, taskID, destination.ID)
 		if promoteErr != nil || !promoted || route == nil {
 			return
 		}
