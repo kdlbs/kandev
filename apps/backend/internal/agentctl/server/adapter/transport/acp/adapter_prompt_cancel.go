@@ -88,6 +88,7 @@ func (a *Adapter) tryTransferPromptTurn(
 	// A handed-off successor cannot establish exclusive foreground ownership.
 	turn.evidenceMu.Lock()
 	turn.continuationUnsafe = true
+	turn.quotaNoticeOwnerAmbiguous = true
 	turn.evidenceMu.Unlock()
 	turn.gateOwned = true
 	a.promptTurn = turn
@@ -116,6 +117,7 @@ func (a *Adapter) promptTurnWasHandedOff(turn *promptTurnState) bool {
 // finishPromptTurn releases whichever turn still owns the physical gate token.
 // Transferred predecessors are harmless no-ops.
 func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
+	turn.closeQuotaNotice()
 	a.promptTurnMu.Lock()
 	a.recordPromptFinishedForSuggestionLocked(turn)
 	if a.promptTurn == turn {
@@ -137,6 +139,7 @@ func (a *Adapter) invalidatePromptTurnOwnership(turn *promptTurnState) {
 	if turn == nil {
 		return
 	}
+	turn.closeQuotaNotice()
 	a.promptTurnMu.Lock()
 	if a.promptTurn != turn {
 		a.promptTurnMu.Unlock()
@@ -300,6 +303,7 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 			case <-turn.rpcDone:
 				return providerErr
 			case <-time.After(a.promptCancelTimeout()):
+				a.markQuotaNoticeSessionAmbiguous(sessionID)
 				return providerErr
 			}
 		case <-turn.abortCh:
@@ -307,6 +311,7 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 			case <-turn.rpcDone:
 				return nil
 			case <-time.After(a.promptCancelTimeout()):
+				a.markQuotaNoticeSessionAmbiguous(sessionID)
 				if turn.endTurn != nil {
 					turn.endTurn(ErrTurnCancelNotAcknowledged)
 				}

@@ -98,7 +98,7 @@ An omitted field in any projection or whole-document save can silently disable p
 
 ## Inputs
 
-- [Requirements](../../specs/agents/requirements/dynamic-agent-routing.md), `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002`.
+- [Requirements](../../specs/agents/requirements/dynamic-agent-routing-unclassified-fallback.md), `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002`.
 - [System design](../../specs/agents/system-design/dynamic-unclassified-fallback.md), all sections.
 - [Package evidence and test matrix](plan.md).
 - [Decision](../../decisions/2026-09-28-repeated-unclassified-fallback.md).

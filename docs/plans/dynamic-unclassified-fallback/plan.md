@@ -16,7 +16,7 @@ The user accepted the feature direction on 2026-09-28. The issue is assigned to 
 This package records the implemented extension and its verification.
 
 The agent system owns this work because it owns candidate selection and persisted route state.
-[Requirements](../../specs/agents/requirements/dynamic-agent-routing.md) and the [design](../../specs/agents/system-design/dynamic-unclassified-fallback.md) define the contract.
+[Requirements](../../specs/agents/requirements/dynamic-agent-routing-unclassified-fallback.md) and the [design](../../specs/agents/system-design/dynamic-unclassified-fallback.md) define the contract.
 The [ADR](../../decisions/2026-09-28-repeated-unclassified-fallback.md) narrows the previous unconditional stop rule.
 
 ## Evidence and cause

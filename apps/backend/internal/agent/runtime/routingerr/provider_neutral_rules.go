@@ -1,9 +1,30 @@
 package routingerr
 
+// ContextLengthExceededRuleID identifies the prompt-send context length rejection.
+const ContextLengthExceededRuleID = "provider.context_length_exceeded.v1"
+
+// RuleRelativeQuotaNotice identifies the anchored provider notice whose reset
+// is stated as a relative duration.
+const RuleRelativeQuotaNotice = "provider.quota_notice.v1"
+
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
-var providerNeutralRules = []rule{
+var providerNeutralRules = append(providerCatalogRules, []rule{
+	// A full provider notice can be the only signal when an ACP prompt never
+	// finishes. The complete opening wording is required for high confidence.
+	mustRule(
+		RuleRelativeQuotaNotice,
+		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d+\s*(?:days?|hours?|hrs?|minutes?|mins?|min)\b`,
+		CodeQuotaLimited,
+		ConfHigh,
+	),
+	mustRule(
+		"provider.quota_notice_prose.v1",
+		`(?i)\breached\s+your\s+current\s+quota\s+for\s+this\s+period\b`,
+		CodeQuotaLimited,
+		ConfMedium,
+	),
 	// A gateway that restricted an account rejects every request with 403 and
 	// an account-restriction code or message. The envelope must open the line,
 	// optionally inside a labeled JSON message, so an agent quoting the error
@@ -29,6 +50,14 @@ var providerNeutralRules = []rule{
 		CodeNetworkUnavailable,
 		ConfHigh,
 	),
+	// Context rejection is a prompt result; startup and later phases retain
+	// their existing classification rather than gaining a new recovery route.
+	mustRule(
+		ContextLengthExceededRuleID,
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
+		ConfHigh,
+	),
 	// An AI-SDK error envelope carries the provider's own classification in a
 	// structured "error_type" field. The underscore-joined "provider_unavailable"
 	// never matches the space-separated prose in provider.unavailable.v1. The
@@ -49,13 +78,16 @@ var providerNeutralRules = []rule{
 		CodeProviderUnavailable,
 		ConfMedium,
 	),
-}
+}...)
 
-func matchProviderNeutralRules(text string) (*Error, bool) {
+func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
+		if !providerNeutralRuleAllowed(r.id, phase) {
+			continue
+		}
 		if r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,
@@ -65,4 +97,13 @@ func matchProviderNeutralRules(text string) (*Error, bool) {
 		}
 	}
 	return nil, false
+}
+
+// providerNeutralRuleAllowed is the phase gate shared by classification and
+// the agent-notice leading-rule selection, so both consider the same rules.
+func providerNeutralRuleAllowed(ruleID string, phase Phase) bool {
+	if ruleID == ContextLengthExceededRuleID {
+		return phase == PhasePromptSend
+	}
+	return true
 }

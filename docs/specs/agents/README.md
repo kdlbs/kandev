@@ -54,6 +54,7 @@ Kandev host, which retain their own plugin-system ownership.
 - [Cursor Subagent Metadata](requirements/cursor-subagent-metadata.md)
 - [Dynamic Agent Routing Rollout Blockers](requirements/dynamic-agent-routing-rollout-blockers.md)
 - [Dynamic Agent Routing](requirements/dynamic-agent-routing.md)
+- [Dynamic Agent Routing Unclassified Failure Fallback](requirements/dynamic-agent-routing-unclassified-fallback.md)
 - [Dynamic Provider Model Options](requirements/dynamic-provider-options.md)
 - [Session configuration feedback](requirements/session-configuration-feedback.md)
 - [External Agent Permission Resolution](requirements/external-permission-resolution.md)

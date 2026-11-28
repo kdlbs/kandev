@@ -34,6 +34,11 @@ because its agent wrote about another one.
 **Intent:** A rate-limit, quota, or subscription classification must come from
 a provider error signature, not from a topic word in agent prose.
 
+The stream consumer shall select the rule table using the emitting agent type,
+not the execution identity or the model-provider prefix. Legacy payloads without
+an explicit type keep their existing fallback. This does not authorize routing
+after output, effects, or a stale prompt.
+
 **User story:** As an operator, I want a provider account suspended only when
 that provider reports a limit, so that an agent summarizing other sessions'
 errors does not take its own healthy account out of rotation.
@@ -64,6 +69,15 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** At prompt-send, a line that
+  opens with an optional error label and reports
+  `maximum context length is <n> tokens` shall classify at high confidence under
+  `provider.context_length_exceeded.v1`, retaining `agent_runtime_error`,
+  `FallbackAllowed: false` and `AutoRetryable: false`. The existing exact
+  terminal-provider consumer shall preserve its repeated-unclassified-failure
+  route only with complete diagnostic identity, known pre-result evidence and
+  no observed output or effect. Startup and later phases, ordinary manual
+  recovery, typed-limit precedence and existing routing policy remain unchanged.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** For `opencode-acp`, an
   opening `free usage limit reached` line without an error-envelope label shall
   classify as a quota limit. This criterion covers only the unlabelled
@@ -95,6 +109,16 @@ errors does not take its own healthy account out of rotation.
   Only integer delays from 1 through 60 seconds qualify.
   Missing, malformed, zero, negative, and larger delays shall provide no hint.
   Classification shall not establish runtime health or authorize another prompt.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.14:** For a classified OpenCode
+  period usage-limit line with a valid relative reset duration and known
+  diagnostic observation time, derive its reset from that observation. An
+  explicit or dated reset retains precedence. Missing observation time,
+  malformed duration, multiple period-limit lines, or a duration on an unrelated
+  line shall not supply a reset. Other classifications and routing policy remain
+  unchanged.
+
+Criterion 001.14's existing OpenCode period-reset behavior is also in scope;
+the exclusions below otherwise remain unchanged.
 
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.12:** For `opencode-acp`, an
   opening diagnostic line with one of the established `AI_APICallError:`,
@@ -135,11 +159,34 @@ Criterion 001.13 is described in the
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions in criteria 001.6, 001.8, 001.9, 001.10, 001.11, 001.12,
-  and 001.13.
-- Changing unrelated provider-neutral rules or any runtime-environment rules.
+  narrow additions in criteria 001.6, 001.7, 001.8, 001.9, 001.10, 001.11,
+  001.12, and 001.13.
+- Changing other or unrelated provider-neutral rules or any runtime-environment
+  rules. The named prompt-send context-length signature in criterion 001.7 is in
+  scope.
+
 - Changing how classified failures suspend candidates or select a successor.
 
+## Literal catalog follow-up
+
+Recognize bounded upstream error envelopes for timeout, transport, capacity,
+model/endpoint availability, subscription and usage exhaustion, request
+compatibility, and malformed or empty upstream responses. Preserve existing
+provider-specific signatures and their precedence. The error-labelled
+OpenCode Free usage notice is the OpenCode-scoped, single-line signature of
+criterion 001.12, not a shared catalogue rule. The unlabelled notice, the named
+daily/raw reasons and the general labelled error_type envelope are supplied by
+upstream main's bounded catalogue follow-up, which the current-main
+synchronization integrates alongside this catalogue; they are not duplicated
+here.
+Do not add another Go quota expression when its existing rule already matches.
+Keep the context-length rule restricted to prompt-send.
+
+The literal catalog must not infer account identity, invent a reset time or
+turn agent prose into an account failure. Request rejection may use only the
+existing exact pre-result repeated-failure policy, preserving no-output/effect
+and diagnostic-identity fences. Configuration and usage-account consumers
+remain responsible for quota-window and account-wide admission decisions.
 
 ## Codex retry-exhaustion signature
 
@@ -200,3 +247,32 @@ additional behavior.
   correlation and routing shall consume consistent evidence, explain ON/OFF
   differences and retain model order. No external catalog loader, inference
   service or periodic learner is introduced.
+
+### REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-003: Operator rule catalog
+
+**Intent:** Let an operator add provider-error rules from a local file without
+rebuilding Kandev, while built-in rules and existing recovery fences keep
+precedence.
+
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.1:** The optional startup setting
+  `providerErrors.catalogFile` (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`) shall
+  name a local JSON or YAML catalog. Unset shall perform no file I/O and keep
+  the built-in classification unchanged. The file shall be read once at
+  startup; no reload, watcher or remote source is introduced.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.2:** Catalog rules shall run after
+  every built-in typed, managed-runtime, provider, provider-neutral and
+  runtime-environment rule and before the requirement 002 fallback and phase
+  defaults. The first matching catalog rule in file order shall win.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.3:** A catalog shall produce only
+  existing provider recovery codes and confidences; codes held until owner
+  release and runtime remediation codes shall be rejected. Class,
+  retryability, fallback and recovery actions shall stay derived by Kandev.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.4:** Keyword terms and invocation
+  context predicates shall apply only when requirement 002 is enabled for a
+  provider diagnostic. A catalog shall not enable that feature. Requested
+  scope, backoff and reset shall apply only through the requirement 002
+  decision; widening shall require the account or model identity.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-003.5:** A missing, unreadable or
+  invalid catalog shall be rejected as a whole with one warning carrying a
+  stable reason, rule index, rule id and field. Startup shall continue with
+  built-in rules. Logs shall not contain catalog content or parser messages.

@@ -145,6 +145,35 @@ func TestDynamicLaunchKeywordFallbackPreservesAdmission(t *testing.T) {
 	}
 }
 
+// Provider rules are keyed by agent type, so startup classification must use
+// the agent type carried by the startup failure, not the execution profile id.
+func TestDynamicLaunchStartupClassifiesByStartupAgentType(t *testing.T) {
+	const usageLimit = "Error: 5 hour usage limit reached"
+	startup := routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, "opencode-acp", errors.New(usageLimit))
+	got := classifyDynamicLaunchFailure(startup, "profile-uuid-1")
+	var classified *routingerr.Error
+	if !errors.As(got, &classified) || classified.ClassifierRule != "opencode.stderr.usage_limit.v1" ||
+		classified.Code != routingerr.CodeQuotaLimited {
+		t.Fatalf("startup failure = %v, want the opencode-acp usage limit rule", got)
+	}
+}
+
+// Without an agent type on the startup failure the execution profile id is
+// the fallback attribution.
+func TestDynamicLaunchStartupFallsBackToExecutionProfileID(t *testing.T) {
+	const usageLimit = "Error: 5 hour usage limit reached"
+	startup := routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, "", errors.New(usageLimit))
+	var classified *routingerr.Error
+	if !errors.As(classifyDynamicLaunchFailure(startup, "opencode-acp"), &classified) ||
+		classified.ClassifierRule != "opencode.stderr.usage_limit.v1" {
+		t.Fatal("empty startup agent type did not fall back to the execution profile id")
+	}
+	if got := classifyDynamicLaunchFailure(startup, "profile-uuid-1"); errors.As(got, &classified) &&
+		classified.ClassifierRule == "opencode.stderr.usage_limit.v1" {
+		t.Fatalf("provider rule matched an unrelated fallback id: %v", got)
+	}
+}
+
 func launchDynamicDownstreamWithError(t *testing.T, launchErr error, keywordEnabled ...bool) error {
 	t.Helper()
 	ctx := context.Background()
