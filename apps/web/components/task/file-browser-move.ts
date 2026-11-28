@@ -80,7 +80,10 @@ export function executeMoveFiles(
       try {
         const ok = await onRenameFile(target.oldPath, target.newPath);
         if (ok && treeState.isCurrentTree()) {
-          treeState.invalidateChanges([{ path: target.oldPath }, { path: target.newPath }]);
+          treeState.invalidateChanges([
+            { path: target.oldPath },
+            { path: target.newPath, ...(target.node?.is_dir ? { isDirectory: true } : {}) },
+          ]);
           treeState.setTree((current) =>
             current && treeState.isCurrentTree() ? publishAcceptedMove(current, target) : current,
           );
@@ -93,7 +96,17 @@ export function executeMoveFiles(
   ).then((results) => {
     if (!treeState.isCurrentTree()) return;
     const paths = new Set(targets.flatMap(({ oldPath, newPath }) => [oldPath, newPath]));
-    treeState.refreshChanges(Array.from(paths, (path) => ({ path })));
+    const movedDirectories = new Set(
+      targets
+        .filter((target, index) => results[index].ok && target.node?.is_dir)
+        .map((target) => target.newPath),
+    );
+    treeState.refreshChanges(
+      Array.from(paths, (path) => ({
+        path,
+        ...(movedDirectories.has(path) ? { isDirectory: true as const } : {}),
+      })),
+    );
     if (results.some(({ ok }) => !ok)) {
       toast({
         title: t("task:moveFailed"),
