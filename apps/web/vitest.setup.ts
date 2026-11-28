@@ -1,9 +1,13 @@
 import type { Window as HappyDOMWindow } from "happy-dom";
 import * as React from "react";
+import { configure } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 
 import { initI18nForTests } from "./lib/i18n";
 import { NoopWebSocket } from "./lib/test-support/noop-websocket";
+
+// Generic text queries target visible toast copy; announcement tests inspect the status node directly.
+configure({ defaultIgnore: 'script, style, [data-testid="toast-announcer"]' });
 
 // Guards against `react` production build or duplicate copy — both make `act` unavailable;
 // vitest.config.ts pins NODE_ENV=test for the common case. Namespace import is deliberate.

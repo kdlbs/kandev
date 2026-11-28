@@ -196,7 +196,9 @@ test.describe("System temporary folders", () => {
     await testPage.goto("/settings/system/storage");
     await testPage.getByTestId("storage-temporary-artifacts-enabled").click();
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     await testPage.reload();
     await expect(testPage.getByTestId("storage-temporary-artifacts-enabled")).toHaveAttribute(
       "aria-checked",

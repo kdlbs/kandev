@@ -142,6 +142,8 @@ Executors support profiles for reusable runtime configuration: prepare scripts, 
 
 ## Quick Start
 
+Standalone Kandev listens on `127.0.0.1` by default. On v0.104.0 and earlier, set `KANDEV_SERVER_HOST` to `127.0.0.1` before starting Kandev. See [Security and trust](docs/public/security.md) for remote access.
+
 ### Homebrew (macOS, Linux)
 
 ```bash
@@ -151,7 +153,9 @@ kandev
 
 ### Scoop (Windows)
 
-```bash
+Install [Scoop](https://scoop.sh/) first.
+
+```powershell
 scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
 scoop install kandev
 kandev
@@ -182,7 +186,7 @@ Follow the [first-task guide](docs/public/use-kandev.md#add-a-local-repository) 
 
 - `brew upgrade kandev`
 - `scoop update kandev`
-- `npx kandev@latest` (always uses the latest published version)
+- `npx kandev@latest` (runs the latest stable version)
 - `npm install -g kandev@latest`
 
 To try the current prerelease from `main`, use npm's `nightly` tag:

@@ -132,7 +132,7 @@ func validateContinuationSettings(policy ContinuationPolicy, maxRuns int) error 
 	if policy == "" {
 		policy = ContinuationPolicyNewTask
 	}
-	if policy != ContinuationPolicyNewTask && policy != ContinuationPolicyReuseThread {
+	if policy != ContinuationPolicyNewTask && policy != ContinuationPolicyReuseThread && policy != ContinuationPolicyReusePerPR {
 		return fmt.Errorf("%w: %q", ErrInvalidContinuationPolicy, policy)
 	}
 	if policy == ContinuationPolicyReuseThread && maxRuns != 1 {
@@ -217,6 +217,7 @@ type Service struct {
 	taskDeleter              TaskDeleter // optional; nil-safe
 	runStopper               RunStopper  // optional; wired by the orchestrator composition
 	runLiveness              RunLivenessChecker
+	prTasks                  PRTaskController // optional; wired by the orchestrator composition
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
@@ -278,11 +279,15 @@ type Service struct {
 
 // NewService creates a new automation service.
 func NewService(store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
-	return &Service{
+	s := &Service{
 		store:    store,
 		eventBus: eventBus,
 		logger:   log,
 	}
+	if store != nil && eventBus != nil {
+		store.runRecorded = s.publishRunRecorded
+	}
+	return s
 }
 
 // Store returns the underlying store (for scheduler/poller access).
@@ -591,6 +596,9 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
+	if err := s.validatePRContinuation(ctx, req.WorkspaceID, req.WorkflowID, continuationPolicy, taskMode, req.PRContinuationSettings); err != nil {
+		return nil, err
+	}
 	for _, ts := range req.Triggers {
 		if err := validateTriggerConfig(ts.Type, ts.Config); err != nil {
 			return nil, err
@@ -621,6 +629,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		Enabled:                          true,
 		MaxConcurrentRuns:                maxRuns,
 		ContinuationPolicy:               continuationPolicy,
+		PRContinuationSettings:           req.PRContinuationSettings,
 	}
 	if req.Enabled != nil {
 		a.Enabled = *req.Enabled
@@ -848,6 +857,10 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		storeReq = &clone
 	}
 	if err := validateContinuationSettings(policy, maxRuns); err != nil {
+		return nil, err
+	}
+	if err := s.validatePRContinuation(ctx, existing.WorkspaceID, workflowID, policy, taskMode,
+		mergedPRContinuationSettings(existing, req)); err != nil {
 		return nil, err
 	}
 	if req.Repositories != nil || req.RepositoryIDs != nil || req.RepositoryMode != nil {
@@ -1414,6 +1427,9 @@ func validateTriggerConfig(triggerType TriggerType, raw json.RawMessage) error {
 	if err := validateScheduledConfig(triggerType, raw); err != nil {
 		return err
 	}
+	if triggerType == TriggerTypeGitHubPR {
+		return validateGitHubPRConfig(raw)
+	}
 	if triggerType != TriggerTypeWebhook || len(raw) == 0 {
 		return nil
 	}
@@ -1960,6 +1976,9 @@ type FireResult struct {
 	RunID string
 	// Reason is human-readable and set only when Skipped.
 	Reason string
+	// Deferred reports that admission postponed the firing without creating a
+	// run or consuming its dedup key; the caller retries on a later poll.
+	Deferred bool
 }
 
 // RenderRunDisplayTitle resolves the title snapshot stored with a firing. It
@@ -2146,6 +2165,9 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	admittedRun, capReason, duplicate, admissionErr := s.admitTrigger(
 		ctx, a, triggerID, triggerType, triggerData, dedup, now, matchedTriggerIDs,
 	)
+	if errors.Is(admissionErr, errAdmissionDeferred) {
+		return FireResult{Skipped: true, Deferred: true, Reason: "the pull request's task is busy"}, nil
+	}
 	if admissionErr != nil {
 		return FireResult{}, admissionErr
 	}
@@ -2244,6 +2266,9 @@ func (s *Service) admitTriggerLocked(
 		}
 	}
 
+	if err := s.deferBusyPRContinuation(ctx, a, triggerType, triggerData); err != nil {
+		return nil, "", false, err
+	}
 	capReason, active, full, err := s.automationCapacity(ctx, a)
 	if err != nil {
 		return nil, "", false, err

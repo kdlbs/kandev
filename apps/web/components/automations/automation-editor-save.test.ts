@@ -40,6 +40,10 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    followUpPrompt: "",
+    prContinuationStepId: "",
+    prMergedAction: "keep",
+    prClosedAction: "keep",
     retryPolicy: {
       mode: "disabled",
       max_retries: "0",

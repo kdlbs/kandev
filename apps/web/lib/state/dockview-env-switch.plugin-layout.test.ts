@@ -2,7 +2,13 @@ import { requireRootSplitview as getRootSplitview } from "./layout-manager/dockv
 /* eslint-disable max-lines -- One real-Dockview fixture shared by every environment-switch scenario. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { setEnvLayout, getManualRightWidth, setManualRightWidth } from "@/lib/local-storage";
+import {
+  setEnvLayout,
+  getEnvLayout,
+  getManualRightWidth,
+  setManualRightWidth,
+} from "@/lib/local-storage";
+import { getEnvMaximizeState, setEnvMaximizeState } from "@/lib/local-storage";
 import {
   CENTER_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -845,3 +851,213 @@ describe("generated right group policy controls", () => {
     },
   );
 });
+
+it.each(
+  [false, true].flatMap((tree) =>
+    [false, true].flatMap((legacy) =>
+      ["session:a", "session:b", "plan"].map((selected) => ({ tree, selected, legacy })),
+    ),
+  ),
+)(
+  "restores live overlay $selected with tree=$tree legacy=$legacy",
+  async ({ tree, selected, legacy }) => {
+    const layout = horizontalLayout({ bottom: [TERMINAL] });
+    const center = layout.columns[0].groups[0];
+    center.panels = [
+      { id: "session:a", component: "chat", title: "A" },
+      { id: "session:b", component: "chat", title: "B" },
+      { id: "plan", component: "plan", title: "Plan" },
+    ];
+    center.activePanel = "session:a";
+    if (tree) {
+      layout.columns[0].groups.push({
+        id: "center-lower",
+        panels: [NOTES],
+        activePanel: NOTES.id,
+      });
+    }
+    startIn("restore-selection", layout, layout);
+    const before = shape(api);
+    const bounds = api.groups.map((group) => ({
+      id: group.id,
+      width: group.width,
+      height: group.height,
+    }));
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+    await settle();
+    if (legacy) {
+      const overlay = fromDockviewApi(api);
+      for (const column of overlay.columns) {
+        for (const group of column.groups) if (group.id === CENTER_GROUP) group.id = "group-1";
+      }
+      applyLayout(api, overlay, new Map(), WIDTH, HEIGHT);
+    }
+    api.getPanel(selected)!.api.setActive();
+    useDockviewStore.getState().exitMaximizedLayout();
+    await settle();
+    expect(api.getPanel(selected)?.group.activePanel?.id).toBe(selected);
+    const restored = shape(api);
+    before.columns[0].groups[0].active = selected;
+    expect(restored).toEqual(before);
+    for (const group of bounds) {
+      expect(api.getGroup(group.id)?.width).toBeCloseTo(group.width, 0);
+      expect(api.getGroup(group.id)?.height).toBeCloseTo(group.height, 0);
+    }
+  },
+);
+
+it.each(["next-env", "same-env-layout", "return-to-env", "serialized-layout"])(
+  "fences an old exit frame across %s",
+  async (mode) => {
+    const x = horizontalLayout({ bottom: [NOTES] });
+    const y = horizontalLayout({ bottom: [PROMPTS], centerWidth: 800, rightWidth: 400 });
+    startIn("exit-x", x, y);
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+    await settle();
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    const returning = mode === "return-to-env";
+    try {
+      useDockviewStore.getState().exitMaximizedLayout();
+      const oldExit = frames.at(-1)!;
+      if (mode === "next-env" || returning) {
+        useDockviewStore.getState().switchEnvLayout("exit-x", "exit-y", null, []);
+        if (returning) useDockviewStore.getState().switchEnvLayout("exit-y", "exit-x", null, []);
+      }
+      if (mode === "same-env-layout" || returning) useDockviewStore.getState().toggleRightPanels();
+      if (mode === "serialized-layout") {
+        useDockviewStore.getState().applyCustomLayout({
+          id: "legacy-frame",
+          name: "Legacy frame",
+          isDefault: false,
+          createdAt: "2026-11-21T00:00:00Z",
+          layout: toSerializedDockview(y, WIDTH, HEIGHT, new Map()) as unknown as Record<
+            string,
+            unknown
+          >,
+        });
+        expect(api.getPanel(PROMPTS.id)).toBeDefined();
+        expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      }
+      const savedX = structuredClone(getEnvLayout("exit-x"));
+      const yShape = shape(api);
+      const restoring = useDockviewStore.getState().isRestoringLayout;
+      const layout = vi.spyOn(api, "layout");
+      oldExit(0);
+      expect(getEnvLayout("exit-x")).toEqual(savedX);
+      expect(shape(api)).toEqual(yShape);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(restoring);
+      expect(layout).not.toHaveBeenCalled();
+      layout.mockRestore();
+    } finally {
+      raf.mockRestore();
+    }
+  },
+);
+
+it("fences a Saved Layout completion behind a newer maximized environment", async () => {
+  const x = horizontalLayout({ bottom: [NOTES] });
+  const y = horizontalLayout({ bottom: [PROMPTS], centerWidth: 800, rightWidth: 400 });
+  startIn("saved-x", x, null);
+  saveEnvironment("saved-y", y);
+  useDockviewStore.getState().switchEnvLayout("saved-x", "saved-y", null, []);
+  await settle();
+  useDockviewStore.getState().maximizeGroup(RIGHT_BOTTOM_GROUP);
+  await settle();
+  useDockviewStore.getState().switchEnvLayout("saved-y", "saved-x", null, []);
+  await settle();
+  const frames: FrameRequestCallback[] = [];
+  const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
+    frames.push(frame);
+    return frames.length;
+  });
+  try {
+    useDockviewStore.getState().applyCustomLayout({
+      id: "held-saved-layout",
+      name: "Held saved layout",
+      isDefault: false,
+      createdAt: "2026-11-21T00:00:00Z",
+      layout: toSerializedDockview(x, WIDTH, HEIGHT, new Map()) as unknown as Record<
+        string,
+        unknown
+      >,
+    });
+    const oldApply = frames.at(-1)!;
+    useDockviewStore.getState().switchEnvLayout("saved-x", "saved-y", null, []);
+    api.layout(900, 600);
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    const geometry = api.groups.map((group) => ({
+      id: group.id,
+      width: group.width,
+      height: group.height,
+    }));
+    const widths = new Map(useDockviewStore.getState().pinnedWidths);
+    const savedX = structuredClone(getEnvLayout("saved-x"));
+    const savedY = structuredClone(getEnvLayout("saved-y"));
+    const layout = vi.spyOn(api, "layout");
+    oldApply(0);
+    expect(layout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(widths);
+    expect(
+      api.groups.map((group) => ({ id: group.id, width: group.width, height: group.height })),
+    ).toEqual(geometry);
+    expect(getEnvLayout("saved-x")).toEqual(savedX);
+    expect(getEnvLayout("saved-y")).toEqual(savedY);
+    layout.mockRestore();
+  } finally {
+    raf.mockRestore();
+  }
+});
+
+it.each(["overlay", "fallback"])(
+  "fences an older %s restore completion behind Saved Layout",
+  async (mode) => {
+    const x = horizontalLayout({ bottom: [NOTES] });
+    const y = horizontalLayout({ bottom: [PROMPTS] });
+    startIn("restore-x", x, null);
+    useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+    await settle();
+    if (mode === "fallback") {
+      const saved = getEnvMaximizeState("restore-x")!;
+      setEnvMaximizeState("restore-x", { ...saved, maximizedDockviewJson: {} });
+    }
+    useDockviewStore.getState().switchEnvLayout("restore-x", "restore-y", null, []);
+    await settle();
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((frame) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    try {
+      useDockviewStore.getState().switchEnvLayout("restore-y", "restore-x", null, []);
+      const oldFrames = frames.splice(0);
+      useDockviewStore.getState().switchEnvLayout("restore-x", "restore-y", null, []);
+      useDockviewStore.getState().applyCustomLayout({
+        id: "new-saved",
+        name: "New saved",
+        isDefault: false,
+        createdAt: "2026-11-21T00:00:00Z",
+        layout: toSerializedDockview(y, WIDTH, HEIGHT, new Map()) as unknown as Record<
+          string,
+          unknown
+        >,
+      });
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      const layout = vi.spyOn(api, "layout");
+      const before = api.toJSON();
+      for (const frame of oldFrames) frame(0);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+      expect(api.toJSON()).toEqual(before);
+      expect(layout).not.toHaveBeenCalled();
+      frames.at(-1)!(0);
+      expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+      layout.mockRestore();
+    } finally {
+      raf.mockRestore();
+    }
+  },
+);

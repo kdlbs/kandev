@@ -11,6 +11,7 @@ const REMOTE_HELPER_NAMES = [
   "agentctl-linux-arm64",
   "agentctl-darwin-amd64",
   "agentctl-darwin-arm64",
+  "agentctl-windows-amd64.exe",
 ];
 
 export type CompactRuntimeIdentity = {

@@ -7,6 +7,9 @@ import type {
   TaskSessionHydrationEpoch,
 } from "@/lib/state/slices/session/types";
 import { useAppStoreApi } from "@/components/state-provider";
+import type { HydrationOptions } from "@/lib/state/hydration/hydrator";
+import { getProvenRemovalPredecessor } from "@/lib/state/session-removal-handoff";
+import { useTaskRouteSelection } from "@/hooks/domains/session/use-task-route-selection";
 
 type StateHydratorProps = {
   initialState: Partial<AppState>;
@@ -15,6 +18,8 @@ type StateHydratorProps = {
   /** Session generations captured when the request for this snapshot started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
   turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
+  taskSelectionAtRequestStart?: HydrationOptions["taskSelectionAtRequestStart"];
+  requestedSessionId?: string;
   onHydrated?: () => void;
 };
 
@@ -23,9 +28,15 @@ export function StateHydrator({
   sessionId,
   taskSessionHydrationEpochsAtRequestStart,
   turnWindowObservationsAtRequestStart,
+  taskSelectionAtRequestStart,
+  requestedSessionId,
   onHydrated,
 }: StateHydratorProps) {
   const store = useAppStoreApi();
+  const admitRouteSelection = useTaskRouteSelection(
+    requestedSessionId,
+    taskSelectionAtRequestStart,
+  );
   const onHydratedRef = useRef(onHydrated);
   onHydratedRef.current = onHydrated;
 
@@ -34,10 +45,20 @@ export function StateHydrator({
   // decide whether to fetch data.
   useLayoutEffect(() => {
     if (Object.keys(initialState).length) {
+      admitRouteSelection(initialState);
+      const taskId = initialState.tasks?.activeTaskId;
+      const preserveTaskSelection =
+        !!taskSelectionAtRequestStart &&
+        (!!requestedSessionId ||
+          (!!taskId &&
+            getProvenRemovalPredecessor(store, taskId, store.getState().tasks.activeSessionId) !==
+              null));
       store.getState().hydrate(initialState, {
         forceMergeSessionId: sessionId,
         taskSessionHydrationEpochsAtRequestStart,
         turnWindowObservationsAtRequestStart,
+        taskSelectionAtRequestStart,
+        preserveTaskSelection,
       });
     }
     onHydratedRef.current?.();
@@ -47,6 +68,9 @@ export function StateHydrator({
     store,
     taskSessionHydrationEpochsAtRequestStart,
     turnWindowObservationsAtRequestStart,
+    taskSelectionAtRequestStart,
+    requestedSessionId,
+    admitRouteSelection,
   ]);
 
   return null;

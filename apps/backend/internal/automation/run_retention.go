@@ -134,6 +134,10 @@ func (s *Store) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, 
 				WHERE a.id = tt.automation_id AND a.continuation_task_id = tt.task_id
 			)
 			AND NOT EXISTS (
+				SELECT 1 FROM automation_pr_continuations pc
+				WHERE pc.automation_id = tt.automation_id AND pc.task_id = tt.task_id
+			)
+			AND NOT EXISTS (
 				SELECT 1 FROM task_sessions ts
 				WHERE ts.task_id = tt.task_id AND ts.state IN (?, ?)
 			)
@@ -171,7 +175,9 @@ func (s *Store) RunWorkspaceInUse(ctx context.Context, taskID string) (bool, err
 		SELECT EXISTS (
 			SELECT 1 FROM task_sessions ts
 			WHERE ts.task_id = ? AND ts.state IN (?, ?)
-		)`), args...)
+		) OR EXISTS (
+			SELECT 1 FROM automation_pr_continuations pc WHERE pc.task_id = ?
+		)`), append(args, taskID)...)
 	return inUse, err
 }
 

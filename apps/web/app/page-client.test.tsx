@@ -15,6 +15,7 @@ const searchMock = vi.hoisted(() => ({ value: "" }));
 const preferredViewMock = vi.hoisted(() => ({ value: "list" }));
 const breakpointMock = vi.hoisted(() => ({ isMobile: false }));
 
+const ONBOARDING_DIALOG_NAME = "First-run onboarding";
 const ONBOARDING_COMPLETED_KEY = "kandev.onboarding.completed";
 const CHANGED_PROFILE_MODEL = "changed-model";
 
@@ -26,7 +27,7 @@ vi.mock("@/components/onboarding-dialog", () => ({
     const [profileModel, setProfileModel] = useState("default-model");
     if (!open) return null;
     return (
-      <div role="dialog" aria-label="First-run onboarding">
+      <div role="dialog" aria-label={ONBOARDING_DIALOG_NAME}>
         <button onClick={() => setProfileModel(CHANGED_PROFILE_MODEL)}>Make profile dirty</button>
         <output data-testid="onboarding-profile-model">{profileModel}</output>
         <button onClick={() => saveProfileMock(profileModel)}>Next</button>
@@ -130,6 +131,21 @@ describe("PageClient", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  // @covers AC-UI-FIRST-RUN-DIALOG-001.6
+  it("defers onboarding while the board Graph view focuses a task", () => {
+    searchMock.value = "home=overview&workflowId=wf-1&graphFocus=task-1";
+    const { rerender } = render(<PageClient />);
+
+    expect(screen.queryByRole("dialog", { name: ONBOARDING_DIALOG_NAME })).toBeNull();
+    expect(window.localStorage.getItem(ONBOARDING_COMPLETED_KEY)).toBeNull();
+
+    searchMock.value = "home=overview&workflowId=wf-1";
+    rerender(<PageClient />);
+
+    expect(screen.getByRole("dialog", { name: ONBOARDING_DIALOG_NAME })).toBeTruthy();
+    expect(window.localStorage.getItem(ONBOARDING_COMPLETED_KEY)).toBeNull();
+  });
+
   // @covers AC-UI-FIRST-RUN-DIALOG-001.1, 001.2
   it.each([
     ["unfinished", null],
@@ -148,7 +164,7 @@ describe("PageClient", () => {
   it("preserves an edited profile without completing the tour across phone resizes", () => {
     const page = render(<PageClient />);
 
-    expect(screen.getByRole("dialog", { name: "First-run onboarding" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: ONBOARDING_DIALOG_NAME })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Make profile dirty" }));
     expect(screen.getByTestId("onboarding-profile-model").textContent).toBe(CHANGED_PROFILE_MODEL);
 
@@ -161,7 +177,7 @@ describe("PageClient", () => {
     breakpointMock.isMobile = false;
     page.rerender(<PageClient />);
 
-    expect(screen.getByRole("dialog", { name: "First-run onboarding" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: ONBOARDING_DIALOG_NAME })).toBeTruthy();
     expect(screen.getByTestId("onboarding-profile-model").textContent).toBe(CHANGED_PROFILE_MODEL);
     expect(saveProfileMock).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(ONBOARDING_COMPLETED_KEY)).toBeNull();

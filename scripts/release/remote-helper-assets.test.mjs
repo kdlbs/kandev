@@ -19,6 +19,7 @@ const HELPERS = [
   "agentctl-linux-arm64",
   "agentctl-darwin-amd64",
   "agentctl-darwin-arm64",
+  "agentctl-windows-amd64.exe",
 ];
 
 function tempRoot(t) {
@@ -87,6 +88,7 @@ test("builds canonical compressed assets, checksums, and both manifest variants"
       ["linux/arm64", "agentctl-linux-arm64.gz"],
       ["darwin/amd64", "agentctl-darwin-amd64.gz"],
       ["darwin/arm64", "agentctl-darwin-arm64.gz"],
+      ["windows/amd64", "agentctl-windows-amd64.exe.gz"],
     ],
   );
   assert.deepEqual(standard.helpers, full.helpers);

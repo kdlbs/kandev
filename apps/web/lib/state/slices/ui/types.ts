@@ -342,6 +342,7 @@ export type UISliceState = {
   connection: ConnectionState;
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
+  tabletSession: { activeTabBySessionId: Record<string, string> };
   chatInput: ChatInputState;
   transcriptAutoScroll: TranscriptAutoScrollState;
   reviewPRSelection: ReviewPRSelectionState;
@@ -407,6 +408,7 @@ export type UISliceActions = {
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
+  setTabletSessionTab: (sessionId: string, tab: string) => void;
   setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;

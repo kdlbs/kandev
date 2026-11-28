@@ -35,7 +35,9 @@ test.describe("User namespace support on mobile", () => {
         .getByTestId("settings-floating-save")
         .getByRole("button", { name: "Save changes" })
         .tap();
-      await expect(testPage.getByText("Profile saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Profile saved", { exact: true }),
+      ).toBeVisible();
       await expect
         .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
         .toMatchObject({ allow_user_namespaces: "true" });

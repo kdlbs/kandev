@@ -35,6 +35,8 @@ Provider startup can take longer when network requests time out. Native startup 
 
 The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
 
+If the session you are viewing fails to start or resume, its transcript and recovery actions stay on screen on desktop and phone. Kandev does not switch to a sibling just because that sibling becomes primary. Reading the failed session does not mark other sessions read.
+
 If an older crash left journal acknowledgments ahead of saved output, Kandev
 can restore a verified conversation on a new delivery generation while keeping
 the missing history explicit. **Resume** uses the same guarded recovery. A

@@ -389,3 +389,63 @@ export async function seedRichOutputSuccessMessage(
     },
   });
 }
+
+export async function checkRichDiffPreview(page: Page, apiClient: ApiClient, seedData: SeedData) {
+  const filename = "comparison.patch";
+  const context = Array.from({ length: 727 }, (_, n) =>
+    n === 25 ? " " + "x".repeat(500) : " line " + n,
+  );
+  fs.writeFileSync(
+    path.join(seedData.repositoryPath, filename),
+    ["--- a", "+++ b", "@@ -1,729 +1,728 @@", "-old", "-extra", "+new", ...context].join("\n"),
+  );
+  const session = await seedRichOutputTask({
+    page,
+    apiClient,
+    seedData,
+    title: "Diff preview",
+    payload: {
+      version: 2,
+      catalog_version: 1,
+      title: "Comparison",
+      spec: {
+        root: "file",
+        elements: {
+          file: {
+            type: "FilePreview",
+            props: { path: filename },
+            children: [],
+          },
+        },
+      },
+    },
+  });
+  const card = session.activeChat().getByTestId("rich-output-file");
+  await expect(card.getByTestId("rich-output-file-preview-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  const side = card.getByRole("button", { name: "Side by side" });
+  await expect(side).toHaveAttribute("aria-pressed", "true");
+  await expect(card.getByRole("row").filter({ hasText: "-old" })).toContainText("+new");
+  await expect(card.getByRole("columnheader", { name: "Before" })).toBeVisible();
+  await expect(
+    card.getByRole("row").filter({ hasText: "-extra" }).getByRole("cell").nth(1),
+  ).toBeEmpty();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await card.getByRole("button", { name: "Next", exact: true }).click();
+  await card.getByRole("button", { name: "Unified", exact: true }).press("Enter");
+  await expect(card.getByText("line 119", { exact: true })).toHaveCount(1);
+  await side.click();
+  await expect(card.getByText("line 119", { exact: true })).toHaveCount(2);
+  const next = card.getByRole("button", { name: "Next", exact: true });
+  for (let pageNumber = 2; pageNumber <= 7; pageNumber++) await next.click();
+  await expect(card.getByText("line 726", { exact: true })).toHaveCount(2);
+  await expect(next).toBeDisabled();
+  const toggle = card.getByTestId("rich-output-file-preview-toggle");
+  await toggle.click();
+  await toggle.click();
+  await expect(side).toHaveAttribute("aria-pressed", "true");
+  await expect(card.getByText("-old", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}

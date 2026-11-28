@@ -213,6 +213,7 @@ func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 		[]MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
 		map[string]interface{}{
 			MetadataEntityReferences: entityRefs("1", "2"),
+			"admission_reason":       "session_capacity",
 		})
 	sqliteRepo := repo.(*sqliteRepository)
 	for id, queuedAt := range map[string]time.Time{target.ID: targetAt, source.ID: sourceAt} {
@@ -253,6 +254,9 @@ func TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser(t *testing.T) {
 	}
 	if len(entries) != 1 || !entries[0].QueuedAt.Equal(sourceAt) {
 		t.Fatalf("persisted merged queued_at = %#v, want %s", entries, sourceAt)
+	}
+	if entries[0].Metadata["admission_reason"] != "session_capacity" {
+		t.Fatalf("merged entry lost capacity admission reason: %#v", entries[0].Metadata)
 	}
 	count, _ := repo.CountBySession(ctx, "s1")
 	if count != 1 {

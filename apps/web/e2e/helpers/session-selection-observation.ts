@@ -55,15 +55,22 @@ export function unexpectedSelectionRequests(
 
 export type SelectionToast = { title: string; description: string; icons: string[] };
 
-/** The background update hook emits this default informational notice. */
+const UPDATE_INFO_ICON = "tabler-icon tabler-icon-info-circle h-5 w-5";
+const TOAST_DISMISS_ICON = /^tabler-icon tabler-icon-x\s*$/;
+
+/**
+ * The background update hook emits this default informational notice. The toast
+ * renders its dismiss control as an extra icon after the info icon.
+ */
 export function isBackgroundUpdateNotice(toast: SelectionToast) {
+  const [info, ...controls] = toast.icons;
   return (
     toast.title === "Kandev update available" &&
     /^Kandev \S+ is available\. Open Settings > System > Updates to review it\.$/.test(
       toast.description,
     ) &&
-    toast.icons.length === 1 &&
-    toast.icons[0] === "tabler-icon tabler-icon-info-circle h-5 w-5"
+    info === UPDATE_INFO_ICON &&
+    controls.every((icon) => TOAST_DISMISS_ICON.test(icon))
   );
 }
 

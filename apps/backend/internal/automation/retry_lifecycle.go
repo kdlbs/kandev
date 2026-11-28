@@ -174,10 +174,18 @@ func (s *Store) GetRetryGroup(ctx context.Context, id string) (*RetryGroup, erro
 	return &group, nil
 }
 
-// FinalizeRetryFailure settles an attempt and inserts its unique child.
-//
-//nolint:gocognit,cyclop,funlen,nestif,maintidx // One transaction owns all parent, child, and outbox CAS.
+// FinalizeRetryFailure settles an attempt and inserts its unique child,
+// reporting the child once the transaction commits.
 func (s *Store) FinalizeRetryFailure(ctx context.Context, runID string, generation int64, raw error, phase string) (*AutomationRun, error) {
+	child, err := s.finalizeRetryFailure(ctx, runID, generation, raw, phase)
+	if err == nil && child != nil {
+		s.notifyRunRecorded(ctx, child.AutomationID, child.ID, child.Status)
+	}
+	return child, err
+}
+
+//nolint:gocognit,cyclop,funlen,nestif,maintidx // One transaction owns all parent, child, and outbox CAS.
+func (s *Store) finalizeRetryFailure(ctx context.Context, runID string, generation int64, raw error, phase string) (*AutomationRun, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err

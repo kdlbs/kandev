@@ -11,6 +11,8 @@ import {
   selectMermaidSource,
   type MermaidSourceSelection,
 } from "./mermaid-utils";
+import { bindMermaidFrameResize } from "./mermaid-frame-resize";
+import { bindMermaidPinch } from "./mermaid-pinch";
 import { useMermaidScale, useMermaidViewportWidth } from "./mermaid-block-hooks";
 import { useToast } from "@/components/toast-provider";
 import { showMermaidErrorToast } from "./mermaid-error-toast";
@@ -152,6 +154,45 @@ function useMermaidRender(
   };
 }
 
+function diagramStyles(svgSize: { w: number; h: number } | null, scale: number) {
+  // Wrapper clips to scaled dimensions; container keeps intrinsic size so transform works
+  const wrapperStyle: React.CSSProperties = svgSize
+    ? { width: svgSize.w * scale, height: svgSize.h * scale, overflow: "hidden" }
+    : {};
+  const containerStyle: React.CSSProperties = {
+    transformOrigin: "top left",
+    transform: `scale(${scale})`,
+    ...(svgSize ? { width: svgSize.w, height: svgSize.h } : {}),
+  };
+
+  return { wrapperStyle, containerStyle };
+}
+
+function MermaidFrameGrip({ viewport }: { viewport: HTMLElement }) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  const resetRef = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (ref.current && resetRef.current)
+      return bindMermaidFrameResize(ref.current, viewport, resetRef.current);
+  }, [viewport]);
+  return (
+    <>
+      <div
+        ref={ref}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label={t("editors:diagramHeight")}
+        tabIndex={0}
+        className="mermaid-frame-grip"
+      />
+      <button ref={resetRef} type="button" className="mermaid-frame-reset" hidden>
+        {t("common:reset")}
+      </button>
+    </>
+  );
+}
+
 export function MermaidBlock({ code, taskId, renderFollowingMarkdown }: MermaidBlockProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -172,10 +213,15 @@ export function MermaidBlock({ code, taskId, renderFollowingMarkdown }: MermaidB
     },
   );
   const viewportWidth = useMermaidViewportWidth(scrollRegionElement);
-  const { scale, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
+  const { scale, fitScale, zoomBy, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
     svgSize,
     viewportWidth,
   );
+
+  useLayoutEffect(() => {
+    if (scrollRegionElement && svg && !showCode)
+      return bindMermaidPinch(scrollRegionElement, zoomBy);
+  }, [scrollRegionElement, svg, showCode, zoomBy]);
 
   // Read intrinsic SVG dimensions once the rendered markup is in the DOM so
   // the zoom transform scales the correct box. Runs after every successful
@@ -214,23 +260,20 @@ export function MermaidBlock({ code, taskId, renderFollowingMarkdown }: MermaidB
     );
   }
 
-  // Wrapper clips to scaled dimensions; container keeps intrinsic size so transform works
-  const wrapperStyle: React.CSSProperties = svgSize
-    ? { width: svgSize.w * scale, height: svgSize.h * scale, overflow: "hidden" }
-    : {};
-  const containerStyle: React.CSSProperties = {
-    transformOrigin: "top left",
-    transform: `scale(${scale})`,
-    ...(svgSize ? { width: svgSize.w, height: svgSize.h } : {}),
-  };
+  const { wrapperStyle, containerStyle } = diagramStyles(svgSize, scale);
 
   return (
     <>
       <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
         <div
           ref={setScrollRegionElement}
-          className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
-          style={{ display: showCode ? "none" : undefined }}
+          className="mermaid-scroll-region w-full overflow-auto p-3"
+          style={{
+            display: showCode ? "none" : undefined,
+            height: svgSize
+              ? `var(--mermaid-frame-height, min(calc(${svgSize.h * fitScale}px + 1.5rem), 50dvh))`
+              : undefined,
+          }}
         >
           <div style={wrapperStyle}>
             <div
@@ -240,6 +283,9 @@ export function MermaidBlock({ code, taskId, renderFollowingMarkdown }: MermaidB
             />
           </div>
         </div>
+        {svg && !showCode && scrollRegionElement && (
+          <MermaidFrameGrip viewport={scrollRegionElement} />
+        )}
         {showCode && (
           <pre className="m-0 p-3 text-xs leading-relaxed whitespace-pre-wrap font-mono text-muted-foreground bg-transparent">
             <code>{diagramSource}</code>
@@ -293,7 +339,7 @@ function MermaidToolbar({
           <button
             type="button"
             onClick={onReset}
-            className="text-[10px] text-muted-foreground hover:text-foreground tabular-nums min-w-[3ch] text-center cursor-pointer"
+            className="text-[10px] text-muted-foreground hover:text-foreground tabular-nums w-[4.5ch] text-center cursor-pointer"
           >
             {Math.round(scale * 100)}%
           </button>

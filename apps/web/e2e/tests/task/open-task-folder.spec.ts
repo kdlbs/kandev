@@ -55,7 +55,9 @@ test("editor dropdown opens the folder without configured editors and recovers f
     animations: "disabled",
   });
   await folder.click();
-  await expect(testPage.getByText("Failed to open folder", { exact: true })).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("Failed to open folder", { exact: true }),
+  ).toBeVisible();
   await trigger.click();
   await folder.click();
   await expect.poll(() => attempts).toBe(2);

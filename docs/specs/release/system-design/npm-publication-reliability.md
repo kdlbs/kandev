@@ -5,6 +5,7 @@ requirements:
   - REQ-RELEASE-NPM-PUBLICATION-001
   - REQ-RELEASE-NPM-PUBLICATION-002
   - REQ-RELEASE-NPM-PUBLICATION-003
+  - REQ-RELEASE-NPM-PUBLICATION-004
 ---
 
 # npm Publication Reliability System Design
@@ -17,7 +18,7 @@ The [SDK design](../../plugins/system-design/sdk-distribution.md) remains author
 
 Apply the existing [evidence decision](../../../decisions/2026-11-05-sdk-release-evidence.md).
 Signing, retained receipts, public consumers, and first-package bootstrap keep their existing authority.
-No new ADR is required for these local delivery changes.
+[The upload attempt decision](../../../decisions/2026-11-26-sdk-npm-upload-attempts.md) defines the retry evidence boundary.
 
 ## Requirement mapping
 
@@ -26,6 +27,7 @@ No new ADR is required for these local delivery changes.
 | `REQ-RELEASE-NPM-PUBLICATION-001` | Registry observation; Recovery and verification |
 | `REQ-RELEASE-NPM-PUBLICATION-002` | Diagnostics and summaries; Credential handling |
 | `REQ-RELEASE-NPM-PUBLICATION-003` | Early authentication gate; Workflow modes; Credential handling |
+| `REQ-RELEASE-NPM-PUBLICATION-004` | Recovery and verification |
 
 ## Existing components
 
@@ -40,57 +42,108 @@ No new ADR is required for these local delivery changes.
 
 ## Registry observation
 
-Add a registry-specific observer in `sdk-publication-state.mjs`.
-Keep the existing GitHub tag observer and consumer retry policy separate.
-Use the new observer for version visibility and `ensureLatest`.
+Use `observeRegistry` in `sdk-publication-state.mjs` for version visibility and `ensureLatest`.
 
-Each registry observation starts after its one write settles.
-Its deadline is 300,000 milliseconds after that point.
+Start observation after the write settles or after a retry resolves the prior attempt.
+Set a separate 600,000 millisecond deadline for each registry phase.
 Probe immediately, then wait 10, 20, and at most 30 seconds between probes.
-Cap each wait at the remaining time.
-Start no new probe after the deadline.
-An active probe retains the registry adapter's bounded request timeouts.
-This deadline governs observation admission, rather than cancelling artifact validation already in progress.
+If the next wait reaches the deadline, perform one final probe when that wait returns.
+A probe that finishes at or after the deadline serves as the final probe.
+Keep the bounded request timeouts for metadata and archive reads in that probe.
+Set `publish-plugin-sdk` to 30 minutes for both registry windows, setup, and consumer checks.
 
-Inject a monotonic clock and registry sleep through `ReleaseIO`.
-Tests supply virtual time.
-Keep production defaults local to the SDK adapter.
-Do not add an operator setting or a general retry framework.
+Use the monotonic clock and registry sleep on `ReleaseIO` so tests can advance virtual time.
+The registry adapter identifies transient errors from transport timeouts, connection failures, HTTP 429, and HTTP 5xx before parsing the response.
+The observer retries those reads on the same schedule and records the failed probe.
+When the final probe fails, return the registry read error.
+When the final probe confirms absence or a stale channel, return the visibility timeout.
+Stop on malformed responses, identity conflicts, and definitive authentication errors.
 
-The observer accepts only confirmed absence or a stale channel as pending state.
-Registry transport errors, malformed responses, and identity conflicts keep their existing error behavior.
-Never convert these errors into a missing version.
-
-An accepted write and an uncertain write both lead to observation.
-Capture that distinction before polling.
-A definite npm authentication rejection can fail after one reconciliation read.
-Do not spend the visibility window retrying a known credential error.
+An uncertain SDK upload or dist-tag update starts the same observation process as an accepted write.
+A definite authentication rejection can still perform one immediate reconciliation read.
 
 ## Recovery and verification
 
-Retain the ordering in `publishPublication`:
+### Choose the publication path
 
-1. Resolve signed source and finalized candidate evidence.
-2. Read and verify an existing version.
-3. Attempt one upload only when that version is absent.
-4. Observe and verify its immutable identity.
-5. Promote or preserve a verified newer `latest`.
-6. Run both public consumer checks.
+The protected `publish-plugin-sdk` job owns the decision, upload, and completion.
+The release-wide concurrency group serializes the decision across normal Stable runs and backfills.
+Resolve signed source and finalized candidate evidence before selecting a path.
+If the version is public, verify its archive integrity, record digest, and provenance, then finish publication.
+If first-package bootstrap applies, use the existing bootstrap result.
+For a confirmed absent version, consult the attempt records.
 
-The observer never owns a write callback.
-This prevents a retry from issuing a second upload or channel mutation.
-An uncertain write that later appears completes the same flow.
-A timeout preserves the retained candidate and leaves completion unsuccessful.
+| Trusted evidence for the signed candidate | Action |
+| --- | --- |
+| Accepted or uncertain upload, or prior confirmation that the version was public | Observe the registry for the same version |
+| Intent with outcome and execution unresolved | Observe the registry as an uncertain upload |
+| Complete history with no intent | Retain a new intent, then attempt the upload |
+| All previous intents have proven rejection or lack of execution | Allow one new intent in a new backfill run for the same signed release |
+| History is unknown, expired, or conflicting | Report the evidence problem and leave upload authorization unresolved |
 
-Five-minute windows apply separately to npm version visibility and dist-tag visibility.
-The existing 20-minute SDK job timeout remains sufficient for both windows and consumer checks.
-Use source checks and simulated-time tests to preserve that budget.
+The current registry read must succeed before the decision can grant an upload.
+An absent version on a later retry carries the same unresolved outcome until a registry read verifies the archive or trusted evidence proves the earlier command did not write.
+
+### Retain attempt evidence
+
+Use two immutable GitHub Actions artifacts per SDK version and workflow run.
+Use the names `sdk-npm-upload-intent-v<version>` and `sdk-npm-upload-result-v<version>`.
+The intent contains a small JSON record with the schema version, package, SDK version and tag, signed source commit, archive SHA-512 integrity, workflow SHA, run ID, and run attempt.
+The result repeats this identity, identifies its intent artifact ID, and records a fixed outcome.
+Use accepted, uncertain, rejected, never started, or already public.
+Only a proven refusal of the publish request qualifies as a rejection.
+Use uncertain for ambiguous npm responses, including an error that says the version already exists.
+Treat npm `E403` as ambiguous even when its diagnostic category is authentication; it does not prove that the publish request was refused.
+Set `--fetch-retries=0` on npm publication and dist-tag mutations so the CLI cannot repeat a write after a transient response; the release state machine owns observation and registry-read retries.
+For a definitive authentication error, end the job promptly and record uncertainty if the command might have submitted the archive.
+
+1. Decide whether a fresh upload is eligible and write the intent file.
+2. Retain it using the pinned upload action in the `retain_sdk_upload_intent` step. Require the artifact ID and minimum retention before running npm.
+   Check that the repository artifact lookup returns that ID.
+3. Permit an upload only in the run and attempt that retained the intent. Recheck the exact public version before the command. Record a matching existing version as already public.
+4. Save the sanitized result promptly in its own artifact before observation can time out. If cancellation prevents that write, use the retained intent as uncertain. A skipped publish step in the authenticated producer attempt can prove that the command never started.
+5. Call the same completion logic for the new write and for recovery. That logic observes when needed, verifies the archive, promotes or preserves a verified newer `latest`, and runs the public Go and npm consumers.
+
+Keep the upload and observation at distinct workflow steps so GitHub can retain evidence after a stopped job.
+The completion phase receives the identity and outcome through validated records.
+An authorization or integrity failure stops the job while successful Stable completion requires both consumer checks.
+
+### Trust and retention
+
+Use the GitHub Actions repository artifact API with an exact name filter to find records across runs.
+Use the authenticated workflow-run and job-attempt APIs as an independent index of SDK publisher attempts.
+The publisher job name includes the exact host tag so a recovery run can distinguish attempts for this SDK from other Stable releases.
+Require the canonical API workflow path `.github/workflows/release.yml`, the expected repository, `workflow_dispatch` event, `main` branch, and matching workflow SHA.
+Use a small read-only helper within `scripts/release` to resolve records.
+Validate the artifact ID and digest, bounded JSON payload, and its producer metadata.
+Only accept records that bind to the expected repository and protected `main` release workflow.
+Resolve the producer run and exact attempt and reconcile the artifact identity against the finalized SDK receipt.
+Ignore artifacts whose metadata proves that they belong to other workflows or branches.
+Treat malformed or contradictory evidence from the trusted workflow as unresolved history.
+If authenticated job metadata shows that intent retention succeeded but the intent artifact is missing, leave upload authorization unresolved even when the registry reports absence.
+A completed publisher job skipped before any steps proves that no upload attempt started.
+Do not infer that history is empty from an artifact lookup alone.
+
+Request 90-day artifact retention and confirm at least 30 days of retention on the intent before starting npm.
+Keep the attempt artifacts and producer runs throughout the evidence window.
+An absence check can grant authorization only when the signed receipt's producer run falls within the 30-day evidence window and its trusted workflow revision contains the intent gate.
+Use the receipt's existing run ID and workflow SHA to establish that boundary.
+If the origin or any prior attempt retained an intent, require its record.
+Missing or expired known evidence, incomplete API responses, and legacy producer workflows require reconciliation before any fresh upload.
+A matching public archive can complete an older release directly when authenticated attempt history is complete; retain discovered accepted or uncertain attempts for the provenance check.
+An unreadable history response must not turn a visible first package into a manual bootstrap.
+The operating guide directs maintainers to retain unresolved evidence and use the same release tag for recovery.
+
+Use `actions: read` for artifact reads and the standard Actions upload step for writes.
+The publisher also needs its existing `contents: read` and `id-token: write`.
+Retain only fixed state and public identifiers in artifacts.
+Keep credentials and signed download URLs in memory.
 
 ## Diagnostics and summaries
 
-Add `scripts/release/sdk-diagnostics.mjs` as a small SDK reporter.
-Its inputs are structured phase events and sanitized command results.
-Do not create a persistent journal or a new metrics service.
+Use `scripts/release/sdk-diagnostics.mjs` for structured phase events and sanitized command results.
+Report the prior upload result, its Actions run and attempt, and whether the job is observing an earlier write.
+When the history is incomplete, identify the signed version and missing evidence.
 
 Record these phases: source verification, candidate verification, npm upload, version visibility, channel promotion, and public consumers.
 Track each phase as pending, passed, failed, or skipped.
@@ -118,8 +171,9 @@ Use these failure categories:
 | Category | Maintainer action |
 | --- | --- |
 | Authentication or authorization | Inspect this package's publisher, workflow, environment, expiration, and allowed actions |
-| Accepted upload awaiting visibility | Check the public version, then rerun failed jobs in the same release |
-| Uncertain upload | Check registry identity before any recovery write |
+| Accepted or uncertain upload awaiting visibility | Rerun the failed job to observe the same version |
+| Upload rejected | Repair the SDK publisher and backfill the same signed release |
+| Upload history unresolved | Verify the exact version and examine the recorded attempt before authorizing an upload |
 | Registry read error | Restore readable public registry access, then retry the same release |
 | Identity or provenance conflict | Stop recovery and investigate the existing immutable evidence |
 | Consumer verification | Inspect the named consumer check and rerun verification after correction |
@@ -228,9 +282,8 @@ Trace this dependency through every build and publication job.
 | Manual or scheduled Nightly | Skips | Existing Nightly path |
 | Cancellation | Stops | No bypass through a permissive dependency condition |
 
-Backfill deliberately retains its current repair path.
-Requiring healthy credentials for channels that already need no writes can obstruct recovery.
-The new early gate covers normal releases, where application/runtime versions need publication.
+Stable backfill enters the protected SDK recovery path after host publication.
+The early gate covers normal Stable releases, where application and runtime versions need publication.
 
 ## Credential handling
 
@@ -254,13 +307,16 @@ Record every attempted write in the fixtures.
 Extend the raw workflow contracts for every mode in the table.
 Exercise a healthy package alongside a rejected package to prove the universal gate.
 Keep the SDK bootstrap, immutable evidence, no-downgrade, and public-consumer regressions.
-No browser scenario applies to this infrastructure change.
+Use a fake clock to reproduce the 309-second visibility delay, a version visible only at the deadline, and a terminal transient read error.
+Exercise the protected publication entry point through a first attempt and recovery with retained artifacts and a still-absent version.
+Prove the upload count stays at one after an accepted result, an uncertain result, and an interruption after retaining the intent.
 
 ## Related delivery records
 
 - [Original SDK publication](../../../plans/plugin-sdk-publishing/task-04-stable-publication.md).
 - [Immutable SDK recovery](../../../plans/immutable-release-sdk-recovery/plan.md).
 - [Implementation plan](../../../plans/npm-publication-reliability/plan.md).
+- [SDK registry resilience](../../../plans/sdk-registry-resilience/plan.md).
 - [Preflight response diagnostics repair](../../../plans/npm-preflight-response-diagnostics/plan.md).
 - [Creation metadata compatibility repair](../../../plans/npm-preflight-created-metadata/plan.md).
 - [Exchange response contract repair](../../../plans/npm-preflight-exchange-contract/plan.md).

@@ -128,7 +128,7 @@ test.describe("Mobile sidebar task actions", () => {
 
     await row.getByRole("button", { name: "Task actions" }).tap();
     const priorityMenu = testPage.getByTestId("task-context-priority");
-    await expect(priorityMenu.locator(".tabler-icon-flag")).toBeVisible();
+    await expect(priorityMenu.locator(".tabler-icon-list-numbers")).toBeVisible();
     await priorityMenu.tap();
     const lowOption = testPage.getByTestId("task-context-priority-low");
     await expect(lowOption).toBeVisible();
@@ -604,6 +604,7 @@ test.describe("Mobile sidebar task actions", () => {
       "Priority",
       "Edit",
       "Rename",
+      "Add flag",
       "Duplicate",
       "Create Subtask",
       "Nest under",
@@ -629,6 +630,7 @@ test.describe("Mobile sidebar task actions", () => {
       "Pin",
       "Edit",
       "Rename",
+      "Add flag",
       "Duplicate",
       "Archive",
       "Create Subtask",

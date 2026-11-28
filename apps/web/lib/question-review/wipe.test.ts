@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WIPE_DRAG_MARGIN, wipeFromPointer } from "./wipe";
+import { WIPE_DRAG_MARGIN, wipeFromDrag, wipeFromPointer } from "./wipe";
 
 const stage = { left: 12, width: 366 };
 
@@ -15,5 +15,16 @@ describe("wipeFromPointer", () => {
 
   it("falls back to the full width when the stage is too small for margins", () => {
     expect(wipeFromPointer(30, { left: 0, width: 40 })).toBeCloseTo(0.75);
+  });
+});
+
+describe("wipeFromDrag", () => {
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-004.4
+  it("moves the split by the horizontal travel only, wherever the grip was grabbed", () => {
+    const wide = { left: 100, width: 600 };
+    expect(wipeFromDrag(0.5, 0, wide)).toBe(0.5);
+    expect(wipeFromDrag(0.5, 55.2, wide)).toBeCloseTo(0.6);
+    expect(wipeFromDrag(0.9, 200, wide)).toBe(1);
+    expect(wipeFromDrag(0.3, 0, { left: 0, width: 0 })).toBe(0.3);
   });
 });

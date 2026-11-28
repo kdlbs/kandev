@@ -4,7 +4,7 @@ import {
   lastAgentErrorStamp,
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
-import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
+import { isTerminalSessionState } from "@/lib/ws/handlers/session-selection";
 
 export type AgentErrorOptions = {
   /** Most recently dismissed `last_agent_error` stamp per sessionId. */

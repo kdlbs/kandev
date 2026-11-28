@@ -10,6 +10,40 @@ import (
 
 const copilotInterruptedWarning = "Warning: 1 tool call(s) had no recorded result at resume. Files or other state may be partially changed. Completed tool results were retained; unresolved operations were not automatically retried. Verify the current state before continuing."
 
+const copilotReadyNotice = "Info: Plugins required by your organization admin are ready."
+
+func TestCopilotOrgPluginNotices(t *testing.T) {
+	a := newTestAdapterForAgent(copilotAgentID)
+	t.Cleanup(func() { _ = a.Close() })
+	if events := replayCopilotFixture(t, a, "copilot-org-plugin-notices.jsonl"); len(events) != 0 {
+		t.Errorf("routine notices emitted %d events, want zero", len(events))
+	}
+	for _, tc := range []struct{ text, id string }{
+		{copilotReadyNotice, "reply-1"},
+		{"Info: Updating plugins required by your organization admin: example@marketplace...", "reply-2"},
+		{copilotReadyNotice + " More details.", ""},
+		{"Info: Plugin configuration changed.", ""},
+		{"Warning: Plugin update failed.", ""},
+		{"Error: Required plugin unavailable.", ""},
+	} {
+		update := warningChunkText(tc.text)
+		if tc.id != "" {
+			update.AgentMessageChunk.MessageId = acpsdk.Ptr(acpsdk.MessageId(tc.id))
+		}
+		a.handleACPUpdate(makeNotification("session-1", update), 1)
+		events := drainEvents(a)
+		if len(events) != 1 || events[0].Type != streams.EventTypeMessageChunk || events[0].Text != tc.text || events[0].ProtocolMessageID != tc.id {
+			t.Errorf("text %q with ID %q: unexpected events %+v", tc.text, tc.id, events)
+		}
+	}
+	other := newTestAdapterForAgent("custom-acp")
+	t.Cleanup(func() { _ = other.Close() })
+	other.handleACPUpdate(makeNotification("session-1", warningChunkText(copilotReadyNotice)), 0)
+	if events := drainEvents(other); len(events) != 1 || events[0].Text != copilotReadyNotice {
+		t.Errorf("other agent emitted %+v, want original ready text", events)
+	}
+}
+
 func TestCopilotInterruptedToolRecoveryNotice(t *testing.T) {
 	a := newTestAdapterForAgent(copilotAgentID)
 	t.Cleanup(func() { _ = a.Close() })
@@ -45,6 +79,7 @@ func TestCopilotInterruptedToolRecoveryNotice(t *testing.T) {
 			RawOutput:  map[string]any{"code": "interrupted"},
 		},
 	}), 7)
+	a.handleACPUpdate(makeNotification("session-1", warningChunkText(copilotReadyNotice)), 7)
 	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{
 		AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{Content: acpsdk.TextBlock(copilotInterruptedWarning)},
 	}), 7)

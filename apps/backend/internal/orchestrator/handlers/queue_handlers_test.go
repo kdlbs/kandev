@@ -311,10 +311,12 @@ func TestWsQueueMessage(t *testing.T) {
 		ctx := context.Background()
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
-			"session_id": "session-1",
-			"task_id":    "task-1",
-			"content":    "test message",
-			"user_id":    "user-1",
+			"session_id":       "session-1",
+			"task_id":          "task-1",
+			"content":          "test message",
+			"user_id":          "user-1",
+			"admission_reason": "session_capacity",
+			"metadata":         map[string]interface{}{"admission_reason": "session_capacity"},
 			"context_files": []map[string]interface{}{
 				{"path": "src/components", "name": "components", "is_directory": true},
 			},
@@ -325,6 +327,7 @@ func TestWsQueueMessage(t *testing.T) {
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 		entries := svc.GetStatus(ctx, "session-1").Entries
 		require.Len(t, entries, 1)
+		require.NotContains(t, entries[0].Metadata, "admission_reason")
 		files, ok := entries[0].Metadata[messagequeue.MetadataContextFiles].([]v1.ContextFileMeta)
 		require.True(t, ok)
 		require.Len(t, files, 1)

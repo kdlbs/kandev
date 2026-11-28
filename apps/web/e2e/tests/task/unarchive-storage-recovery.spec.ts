@@ -72,5 +72,7 @@ test("unarchive restores a quarantined workspace before branch recovery", async 
   expect(body.workspace_recovery).toEqual([expect.objectContaining({ status: "restored" })]);
   expect(body).toHaveProperty("recovery");
   await expect.poll(() => fs.existsSync(artifact)).toBe(true);
-  await expect(testPage.getByText("Task unarchived")).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("Task unarchived", { exact: true }),
+  ).toBeVisible();
 });

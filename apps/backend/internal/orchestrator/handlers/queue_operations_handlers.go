@@ -790,7 +790,7 @@ func (h *QueueHandlers) publishStatusSnapshot(ctx context.Context, sessionID str
 	status := h.queueService.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
 		fieldSessionID:  sessionID,
-		"entries":       status.Entries,
+		"entries":       status.ProjectedEntries(),
 		"count":         status.Count,
 		fieldMax:        status.Max,
 		fieldAutoRun:    status.AutoRun,
@@ -852,7 +852,7 @@ func (h *QueueHandlers) publishIdentityStatus(
 		fieldSessionIncarnation: status.SessionIncarnationID,
 		"status_epoch":          status.StatusEpoch,
 		"status_generation":     status.StatusGeneration,
-		"entries":               status.Entries,
+		"entries":               status.ProjectedEntries(),
 		"count":                 status.Count,
 		fieldMax:                status.Max,
 		fieldAutoRun:            status.AutoRun,

@@ -191,15 +191,16 @@ func TestCompactionFoldMatchesSingleAutoMerge(t *testing.T) {
 		return map[string]interface{}{"type": "task", "id": id, "ref": "task:" + id}
 	}
 	cases := map[string][2]*QueuedMessage{
-		"text":           {{Content: "one"}, {Content: "two"}},
-		"empty target":   {{Content: ""}, {Content: "two"}},
-		"empty source":   {{Content: "one"}, {Content: ""}},
-		"attachments":    {{Content: "one", Attachments: []MessageAttachment{inline}}, {Content: "two", Attachments: []MessageAttachment{inline}}},
-		"admission ids":  {{Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"a", "b"}}}, {Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"b", "c", "c"}}}},
-		"context files":  {{Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}}}}, {Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}, map[string]interface{}{"path": "b.go"}}}}},
-		"entity refs":    {{Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1")}}}, {Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1"), ref("2")}}}},
-		"bad admission":  {{Content: "one"}, {Content: "two", Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{""}}}},
-		"different text": {{Content: "one", Model: "a"}, {Content: "two", Model: "b"}},
+		"text":            {{Content: "one"}, {Content: "two"}},
+		"capacity reason": {{Content: "one"}, {Content: "two", Metadata: map[string]interface{}{"admission_reason": "session_capacity"}}},
+		"empty target":    {{Content: ""}, {Content: "two"}},
+		"empty source":    {{Content: "one"}, {Content: ""}},
+		"attachments":     {{Content: "one", Attachments: []MessageAttachment{inline}}, {Content: "two", Attachments: []MessageAttachment{inline}}},
+		"admission ids":   {{Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"a", "b"}}}, {Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"b", "c", "c"}}}},
+		"context files":   {{Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}}}}, {Metadata: map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "a.go"}, map[string]interface{}{"path": "b.go"}}}}},
+		"entity refs":     {{Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1")}}}, {Metadata: map[string]interface{}{MetadataEntityReferences: []interface{}{ref("1"), ref("2")}}}},
+		"bad admission":   {{Content: "one"}, {Content: "two", Metadata: map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{""}}}},
+		"different text":  {{Content: "one", Model: "a"}, {Content: "two", Model: "b"}},
 	}
 	for name, pair := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -222,6 +223,9 @@ func TestCompactionFoldMatchesSingleAutoMerge(t *testing.T) {
 			require.Equal(t, values.content, survivor.Content)
 			require.Equal(t, values.attachments, survivor.Attachments)
 			require.Equal(t, values.metadata, survivor.Metadata)
+			if name == "capacity reason" {
+				require.Equal(t, "session_capacity", survivor.Metadata["admission_reason"])
+			}
 			require.Equal(t, values.queuedAt, survivor.QueuedAt)
 		})
 	}

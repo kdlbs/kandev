@@ -60,6 +60,7 @@ func writeRemoteHelperManifest(t *testing.T, dir, variant string) {
 			{Platform: "linux/arm64", Asset: "agentctl-linux-arm64.gz", SHA256: strings.Repeat("b", 64), SizeBytes: 10},
 			{Platform: "darwin/amd64", Asset: "agentctl-darwin-amd64.gz", SHA256: strings.Repeat("c", 64), SizeBytes: 10},
 			{Platform: "darwin/arm64", Asset: "agentctl-darwin-arm64.gz", SHA256: strings.Repeat("d", 64), SizeBytes: 10},
+			{Platform: "windows/amd64", Asset: "agentctl-windows-amd64.exe.gz", SHA256: strings.Repeat("e", 64), SizeBytes: 10},
 		},
 	}
 	data, err := json.Marshal(manifest)
@@ -158,6 +159,7 @@ func TestValidateRuntimeBundleAcceptsSignedDarwinArm64(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-windows-amd64.exe"))
 	writeMachO(t, filepath.Join(dir, "bin", "agentctl-darwin-arm64"), true)
 
 	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
@@ -222,6 +224,7 @@ func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
 		"agentctl-linux-arm64",
 		"agentctl-darwin-arm64",
 		"agentctl-darwin-amd64",
+		"agentctl-windows-amd64.exe",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("helpers = %v, want %v", got, want)

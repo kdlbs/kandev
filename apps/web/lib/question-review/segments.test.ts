@@ -3,8 +3,10 @@ import type { ClarificationQuestion } from "@/lib/types/http";
 import {
   buildReviewSegments,
   buildSegmentImages,
+  buildSegmentItems,
   hasReviewImages,
   imageShortName,
+  itemIndexForImage,
   segmentImageIndex,
 } from "./segments";
 
@@ -124,5 +126,79 @@ describe("imageShortName", () => {
       }),
     );
     expect(images.map((image) => image.label)).toEqual([undefined, undefined]);
+  });
+});
+
+describe("buildSegmentItems", () => {
+  const spacing = { id: "spacing", path: "spacing.png", alt: "Spacing" };
+  const billing = { id: "billing", path: "billing.png", alt: "Billing" };
+  const images = buildSegmentImages(question({ images: [before, after, spacing, billing] }));
+  const [b, a, s, bill] = images;
+
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.1
+  it("shows an ungrouped segment as one gallery item per image", () => {
+    expect(buildSegmentItems(images, undefined)).toEqual([
+      { kind: "gallery", image: b },
+      { kind: "gallery", image: a },
+      { kind: "gallery", image: s },
+      { kind: "gallery", image: bill },
+    ]);
+    expect(buildSegmentItems(images, [])).toHaveLength(4);
+  });
+
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-003.1
+  // @covers AC-TASKS-QUESTION-IMAGE-ITEMS-002.3
+  it("orders declared groups first, then ungrouped images as singles", () => {
+    const items = buildSegmentItems(images, [
+      { kind: "single", image_ids: ["billing"] },
+      { kind: "pair", image_ids: ["after", "before"] },
+    ]);
+    expect(items).toEqual([
+      { kind: "single", image: bill },
+      { kind: "pair", images: [a, b] },
+      { kind: "single", image: s },
+    ]);
+  });
+
+  it("falls back to the gallery when any group is malformed", () => {
+    for (const groups of [
+      [{ kind: "pair", image_ids: ["before"] }],
+      [{ kind: "pair", image_ids: ["before", "before"] }],
+      [{ kind: "single", image_ids: ["before", "after"] }],
+      [{ kind: "trio", image_ids: ["before"] }],
+      [{ kind: "single", image_ids: ["missing"] }],
+      [
+        { kind: "single", image_ids: ["before"] },
+        { kind: "pair", image_ids: ["before", "after"] },
+      ],
+      "not a list",
+    ]) {
+      const items = buildSegmentItems(images, groups as never);
+      expect(items.every((item) => item.kind === "gallery")).toBe(true);
+    }
+  });
+
+  it("finds the item that shows an image", () => {
+    const items = buildSegmentItems(images, [{ kind: "pair", image_ids: ["before", "after"] }]);
+    expect(itemIndexForImage(items, "after")).toBe(0);
+    expect(itemIndexForImage(items, "billing")).toBe(2);
+    expect(itemIndexForImage(items, "missing")).toBe(-1);
+  });
+
+  it("marks segments grouped only when their groups are valid", () => {
+    const [grouped, ungrouped] = buildReviewSegments([
+      {
+        questionId: "q1",
+        question: question({
+          images: [before, after],
+          image_groups: [{ kind: "pair", image_ids: ["before", "after"] }],
+        }),
+      },
+      { questionId: "q2", question: question({ images: [before, after] }) },
+    ]);
+    expect(grouped.grouped).toBe(true);
+    expect(grouped.items).toHaveLength(1);
+    expect(ungrouped.grouped).toBe(false);
+    expect(ungrouped.items).toHaveLength(2);
   });
 });

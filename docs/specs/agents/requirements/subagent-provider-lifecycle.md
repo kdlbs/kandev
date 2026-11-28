@@ -105,9 +105,20 @@ final report, using only evidence available on the existing tool-call frames.
 - **AC-AGENTS-SUBAGENT-LIFECYCLE-004.3:** Control operations shall remain visible as tool rows
   with their status on desktop and phone.
 
+### REQ-AGENTS-SUBAGENT-LIFECYCLE-005: Cursor background children
+
+Users can follow a Cursor background child from dispatch through completion.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SUBAGENT-LIFECYCLE-005.1:** With a compatible Cursor CLI, one user prompt can launch a background child and receive the parent's completion report within the same turn.
+- **AC-AGENTS-SUBAGENT-LIFECYCLE-005.2:** With Background Work enabled, a confirmed background child appears once in active jobs. Its reported completion moves that job to History, including after reload.
+- **AC-AGENTS-SUBAGENT-LIFECYCLE-005.3:** Each child retains its own identity and status. Launch-tool completion alone cannot settle a child. Child messages cannot appear as the parent's replies.
+- **AC-AGENTS-SUBAGENT-LIFECYCLE-005.4:** Cursor versions that omit the negotiated capability retain existing task cards. Kandev never infers child completion from silence.
+
 ## Out of scope
 
-- ACP native child sessions and Claude's non-schema `subagent_spawned` frames. Enabling them
+- General ACP native child-session support and Claude's non-schema `subagent_spawned` frames. Enabling them
   drops the parent card, and a live resumed child lost its tool calls.
 - Separating Copilot child replies from assistant text. The chunks carry no child identity.
 - A per-child finish signal for Claude's parallel background subagents. The provider does not

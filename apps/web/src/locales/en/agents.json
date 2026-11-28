@@ -165,6 +165,7 @@
   "create": "Create",
   "createAgentProfileTitle": "Create {{name}} Profile",
   "installAgents": "Install agents",
+  "reinstallOpenCode": "Reinstall",
   "profileCount_one": "{{count}} profile",
   "profileCount_other": "{{count}} profiles",
   "createProfileIntro": "Create a new profile for this agent.",

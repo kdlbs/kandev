@@ -166,7 +166,9 @@ test.describe("System storage maintenance", () => {
     try {
       await scheduling.click();
       await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await expect(
+        testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+      ).toBeVisible();
       await expect(analyzedTime).toHaveAttribute("datetime", initialAnalyzedAt!);
 
       await testPage.getByTestId("storage-analyze").click();
@@ -311,7 +313,9 @@ test.describe("System storage maintenance", () => {
       "true",
     );
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+    await expect(
+      testPage.getByTestId("toast-message").getByText("Storage policy saved", { exact: true }),
+    ).toBeVisible();
     await testPage.reload();
     await expect(scheduling).toHaveAttribute("data-state", "checked");
     await expect(testPage.getByTestId("storage-idle-period")).toHaveValue("11");

@@ -150,7 +150,7 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 )
 
-replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261123142417-27925bf88fae
+replace github.com/coder/acp-go-sdk => github.com/kdlbs/acp-go-sdk v0.13.6-0.20261127160411-e577f3eb8764
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0

@@ -1,11 +1,13 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "@/lib/routing/client-router";
 import { Separator } from "@kandev/ui/separator";
 import { AgentInstallCatalog } from "@/components/settings/agents/agent-install-catalog";
 
 export default function AgentsBrowsePage() {
   const { t } = useTranslation();
+  const agentHint = useSearchParams().get("agent") ?? undefined;
   return (
     <div className="space-y-8">
       <div>
@@ -15,7 +17,7 @@ export default function AgentsBrowsePage() {
         </p>
       </div>
       <Separator />
-      <AgentInstallCatalog />
+      <AgentInstallCatalog agentHint={agentHint} />
     </div>
   );
 }

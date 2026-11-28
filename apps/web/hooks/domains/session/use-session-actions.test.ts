@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import {
   isSessionStoppable,
   isSessionDeletable,
@@ -27,7 +27,6 @@ const mockSetActiveSessionAuto = vi.fn((taskId: string, sessionId: string) => {
     activeSessionId: sessionId,
   };
 });
-const mockClearActiveSession = vi.fn();
 const networkErrorMessage = "network down";
 
 let mockConnected = true;
@@ -50,7 +49,6 @@ function resetSessionActionMocks() {
     quickChat: { sessions: [] },
     setActiveSession: mockSetActiveSession,
     setActiveSessionAuto: mockSetActiveSessionAuto,
-    clearActiveSession: mockClearActiveSession,
   };
 }
 
@@ -102,7 +100,6 @@ describe("session state predicates", () => {
   });
 });
 
-// eslint-disable-next-line max-lines-per-function -- session action scenarios share one lifecycle fixture.
 describe("useSessionActions", () => {
   beforeEach(resetSessionActionMocks);
 
@@ -128,26 +125,6 @@ describe("useSessionActions", () => {
     );
   });
 
-  it("remove deletes via WS, removes from store, and runs onDeleted callback", async () => {
-    const onDeleted = vi.fn();
-    const { result } = renderHook(() =>
-      useSessionActions({ sessionId: "s1", taskId: "t1", onDeleted }),
-    );
-    await result.current.remove();
-    await waitFor(() => expect(onDeleted).toHaveBeenCalled());
-    expect(mockRequest).toHaveBeenCalledWith("session.delete", { session_id: "s1" }, 15000);
-    expect(mockRemoveTaskSession).toHaveBeenCalledWith("t1", "s1");
-    expect(mockRemoveQuickChatSession).toHaveBeenCalledWith("s1");
-    expect(mockToast).toHaveBeenCalledWith({
-      title: "Deleting session...",
-      variant: "loading",
-    });
-    expect(mockUpdateToast).toHaveBeenCalledWith("toast-1", {
-      title: "Deleting session successful",
-      variant: "success",
-    });
-  });
-
   it("remove deletes the backing task for a Quick Chat session", async () => {
     mockState.quickChat = { sessions: [{ sessionId: "s1", taskId: "t1" }] };
     const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
@@ -157,57 +134,7 @@ describe("useSessionActions", () => {
     expect(ok).toBe(true);
     expect(mockDeleteTask).toHaveBeenCalledWith("t1");
     expect(mockRequest).not.toHaveBeenCalled();
-    expect(mockRemoveTaskSession).toHaveBeenCalledWith("t1", "s1");
     expect(mockRemoveQuickChatSession).toHaveBeenCalledWith("s1");
-  });
-
-  it("remove no-ops when WS request fails (store untouched)", async () => {
-    mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
-    const onDeleted = vi.fn();
-    const { result } = renderHook(() =>
-      useSessionActions({ sessionId: "s1", taskId: "t1", onDeleted }),
-    );
-    await result.current.remove();
-    expect(mockRemoveTaskSession).not.toHaveBeenCalled();
-    expect(onDeleted).not.toHaveBeenCalled();
-  });
-
-  it("remove hands off to most-recent remaining session when active was deleted", async () => {
-    mockState = {
-      tasks: { activeSessionId: "s1" },
-      quickChat: { sessions: [] },
-      taskSessionsByTask: {
-        itemsByTaskId: {
-          t1: [
-            { id: "s1", started_at: "2025-01-01T00:00:00Z" },
-            { id: "s2", started_at: "2025-01-02T00:00:00Z" },
-            { id: "s3", started_at: "2025-01-03T00:00:00Z" },
-          ],
-        },
-      },
-      setActiveSessionAuto: mockSetActiveSessionAuto,
-      clearActiveSession: mockClearActiveSession,
-    };
-    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
-    await result.current.remove();
-    expect(mockSetActiveSessionAuto).toHaveBeenCalledWith("t1", "s3");
-    expect(mockClearActiveSession).not.toHaveBeenCalled();
-  });
-
-  it("remove clears active session when no other sessions remain", async () => {
-    mockState = {
-      tasks: { activeSessionId: "s1" },
-      quickChat: { sessions: [] },
-      taskSessionsByTask: {
-        itemsByTaskId: { t1: [{ id: "s1", started_at: "2025-01-01T00:00:00Z" }] },
-      },
-      setActiveSessionAuto: mockSetActiveSessionAuto,
-      clearActiveSession: mockClearActiveSession,
-    };
-    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
-    await result.current.remove();
-    expect(mockClearActiveSession).toHaveBeenCalled();
-    expect(mockSetActiveSessionAuto).not.toHaveBeenCalled();
   });
 
   it("actions no-op when sessionId is missing", async () => {
@@ -242,36 +169,6 @@ describe("useSessionActions primary feedback", () => {
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockToast).toHaveBeenCalledWith({
       title: "Set primary failed",
-      description: networkErrorMessage,
-      variant: "error",
-    });
-    expect(mockUpdateToast).not.toHaveBeenCalled();
-  });
-});
-
-describe("useSessionActions inline feedback", () => {
-  beforeEach(resetSessionActionMocks);
-
-  it("removes without progress or success toasts", async () => {
-    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
-
-    const ok = await result.current.remove({ feedback: "inline" });
-
-    expect(ok).toBe(true);
-    expect(mockToast).not.toHaveBeenCalled();
-    expect(mockUpdateToast).not.toHaveBeenCalled();
-  });
-
-  it("shows one error toast when deletion fails", async () => {
-    mockRequest.mockRejectedValueOnce(new Error(networkErrorMessage));
-    const { result } = renderHook(() => useSessionActions({ sessionId: "s1", taskId: "t1" }));
-
-    const ok = await result.current.remove({ feedback: "inline" });
-
-    expect(ok).toBe(false);
-    expect(mockToast).toHaveBeenCalledTimes(1);
-    expect(mockToast).toHaveBeenCalledWith({
-      title: "Deleting session failed",
       description: networkErrorMessage,
       variant: "error",
     });

@@ -58,14 +58,10 @@ npx -y kandev@latest
 
 The npm shim selects the exact `@kdlbs/runtime-win32-x64` optional dependency and starts `kandev.exe`. Do not install with `--omit=optional`, copy only the executable, or mix shim/runtime versions.
 
-The CLI prints a localhost URL and opens it through `cmd.exe`. It otherwise behaves like the macOS/Linux CLI, including automatic port fallback, foreground supervision, and `Ctrl+C` shutdown. To keep it local-only, override the backend's cross-platform default listen host:
-
-```powershell
-$env:KANDEV_SERVER_HOST = '127.0.0.1'
-kandev
-```
-
-Without that override, the backend default is `0.0.0.0`; Windows Firewall may prompt for network access. Do not allow public/private-network exposure unless you deliberately built an authenticated network boundary. The core `agentctl` service does not listen on all interfaces by default: it listens on `agent.standaloneHost`, which is `127.0.0.1` by default, so it should not need an inbound firewall rule. See [Configuration](configuration.md).
+The CLI listens on `127.0.0.1` by default and opens its localhost URL through
+`cmd.exe`. It supports automatic port fallback, foreground supervision, and
+`Ctrl+C` shutdown. For remote access, set the listener and protect the whole
+origin as described in [Security and trust](security.md).
 
 ## Windows paths and command discovery
 

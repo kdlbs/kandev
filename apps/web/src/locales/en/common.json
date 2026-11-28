@@ -160,6 +160,7 @@
   "discardLocalChangesAtPathDescription": "Starting this task will permanently discard the uncommitted changes in your local clone at {{repoPath}}. Back up anything you want to keep before continuing.",
   "discardLocalChangesDescription": "Starting this task will permanently discard the uncommitted changes in your local clone. Back up anything you want to keep before continuing.",
   "discoveringAgents": "Discovering agents...",
+  "dismissNotification": "Dismiss notification",
   "doNotShowThisAgain": "Do not show this again",
   "edit": "Edit",
   "editTask": "Edit task",

@@ -35,7 +35,6 @@ import { limitSessionName, useSessionRenameCommitter } from "./use-session-renam
 import {
   buildAgentLabelsById,
   isSessionActive,
-  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
@@ -51,6 +50,7 @@ type PreviewSessionTabsProps = {
   sessionId: string | null;
   isArchived?: boolean;
   ensureSession?: UseEnsureTaskSessionResult;
+  sessionlessChatContent?: React.ReactNode;
   workspaceId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
 };
@@ -131,7 +131,6 @@ function useBuildPreviewTabs({
   taskId,
   isPrimarySession,
   dialogs,
-  handleSessionRemoved,
 }: {
   sortedSessions: TaskSession[];
   profilesById: Record<string, AgentProfileOption>;
@@ -139,7 +138,6 @@ function useBuildPreviewTabs({
   taskId: string;
   isPrimarySession: (session: TaskSession) => boolean;
   dialogs: PreviewDialogsState;
-  handleSessionRemoved: (sessionId: string) => void;
 }): SessionTab[] {
   return useMemo(
     () =>
@@ -166,7 +164,6 @@ function useBuildPreviewTabs({
               isPrimary={isPrimarySession(session)}
               onRename={dialogs.setRenamingSessionId}
               onRequestDelete={dialogs.handleRequestDelete}
-              onSessionRemoved={handleSessionRemoved}
               onShareRequested={dialogs.setShareSessionId}
               onHandoff={dialogs.handleHandoffProfile}
             />
@@ -184,15 +181,7 @@ function useBuildPreviewTabs({
             ) : undefined,
         };
       }),
-    [
-      sortedSessions,
-      agentLabelsById,
-      profilesById,
-      taskId,
-      isPrimarySession,
-      dialogs,
-      handleSessionRemoved,
-    ],
+    [sortedSessions, agentLabelsById, profilesById, taskId, isPrimarySession, dialogs],
   );
 }
 
@@ -265,6 +254,7 @@ export function PreviewSessionTabs({
   sessionId,
   isArchived,
   ensureSession,
+  sessionlessChatContent,
   workspaceId,
   onSessionChange,
 }: PreviewSessionTabsProps) {
@@ -291,10 +281,7 @@ export function PreviewSessionTabs({
     [primarySessionId],
   );
 
-  const activeSessionId = useMemo(
-    () => pickActiveSessionId(sortedSessions, sessionId),
-    [sortedSessions, sessionId],
-  );
+  const activeSessionId = sessionId;
   const activeSession = useMemo(
     () => sortedSessions.find((s) => s.id === activeSessionId) ?? null,
     [sortedSessions, activeSessionId],
@@ -320,24 +307,6 @@ export function PreviewSessionTabs({
     disabled: Boolean(isArchived),
   });
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
-  // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
-  // closure at the moment delete is confirmed, and `session.delete` can take
-  // a WS round-trip to settle. Reading these off refs (updated every render)
-  // instead of closing over `activeSessionId`/`sortedSessions` means the
-  // eventual `onDeleted` call sees which tab is active *now*, not which one
-  // was active when the delete was requested.
-  const activeSessionIdRef = useRef(activeSessionId);
-  activeSessionIdRef.current = activeSessionId;
-  const sortedSessionsRef = useRef(sortedSessions);
-  sortedSessionsRef.current = sortedSessions;
-  const handleSessionRemoved = useCallback(
-    (removedSessionId: string) => {
-      if (removedSessionId !== activeSessionIdRef.current) return;
-      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
-      onSessionChange?.(remaining[0]?.id ?? null);
-    },
-    [onSessionChange],
-  );
 
   // Do not force the Plan view while the session list is still loading. The
   // first render can have zero sessions before the list arrives, and treating
@@ -353,7 +322,6 @@ export function PreviewSessionTabs({
     taskId,
     isPrimarySession,
     dialogs,
-    handleSessionRemoved,
   });
 
   const tabs = useMemo<SessionTab[]>(() => [...sessionTabs, planTab], [sessionTabs, planTab]);
@@ -381,6 +349,7 @@ export function PreviewSessionTabs({
       >
         <PreviewNoSessionsState
           ensureSession={ensureSession}
+          sessionlessChatContent={sessionlessChatContent}
           resumption={resumption}
           workspaceId={workspaceId}
         />
@@ -407,6 +376,7 @@ export function PreviewSessionTabs({
             listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           />
         </div>
+        {hasNoSessions && sessionlessChatContent}
         <div className="flex-1 min-h-0">
           <PreviewTabBody
             viewMode={viewMode}
@@ -600,7 +570,9 @@ export function PreviewSessionBody({
   resumption?: SessionRecoveryOwner;
 }) {
   if (session.is_passthrough) {
-    return <PassthroughToolbar sessionId={session.id} taskId={taskId} />;
+    return (
+      <PassthroughToolbar sessionId={session.id} taskId={taskId} isVisible={false} detailActive />
+    );
   }
 
   return (
@@ -652,15 +624,18 @@ function PreviewEmptyState() {
 /** Sessionless state: preparing/error/empty, per `ensureSession`. */
 function PreviewNoSessionsState({
   ensureSession,
+  sessionlessChatContent,
   resumption,
   workspaceId,
 }: {
   ensureSession?: UseEnsureTaskSessionResult;
+  sessionlessChatContent?: React.ReactNode;
   resumption: ReturnType<typeof useSessionResumption>;
   workspaceId?: string | null;
 }) {
   const { t } = useTranslation();
 
+  if (ensureSession?.status === "manual_start_required") return sessionlessChatContent;
   if (ensureSession?.status === "preparing") {
     return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
   }

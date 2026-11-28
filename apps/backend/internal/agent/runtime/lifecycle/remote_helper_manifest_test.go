@@ -16,7 +16,7 @@ func TestReadRemoteHelperManifestValidatesIdentityAndVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRemoteHelperManifest: %v", err)
 	}
-	if !exists || manifest.Variant != RemoteHelperVariantStandard || len(manifest.Helpers) != 4 {
+	if !exists || manifest.Variant != RemoteHelperVariantStandard || len(manifest.Helpers) != 5 {
 		t.Fatalf("manifest = %#v, exists=%v", manifest, exists)
 	}
 }
@@ -81,6 +81,7 @@ func testRemoteHelperManifest(variant string) RemoteHelperManifest {
 			{Platform: "linux/arm64", Asset: "agentctl-linux-arm64.gz", SHA256: strings.Repeat("b", 64), SizeBytes: 10},
 			{Platform: "darwin/amd64", Asset: "agentctl-darwin-amd64.gz", SHA256: strings.Repeat("c", 64), SizeBytes: 10},
 			{Platform: "darwin/arm64", Asset: "agentctl-darwin-arm64.gz", SHA256: strings.Repeat("d", 64), SizeBytes: 10},
+			{Platform: "windows/amd64", Asset: "agentctl-windows-amd64.exe.gz", SHA256: strings.Repeat("e", 64), SizeBytes: 10},
 		},
 	}
 }

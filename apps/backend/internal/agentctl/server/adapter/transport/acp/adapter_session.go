@@ -312,6 +312,7 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.availableModels = nil
 	a.retainAvailableCommandsForSessionLocked(sessionID)
 	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
+	a.modelCatalog = modelCatalogEvidence{}
 	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
@@ -811,6 +812,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.availableModels = nil
 	a.retainAvailableCommandsForSessionLocked(sessionID)
 	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
+	a.modelCatalog = modelCatalogEvidence{}
 	a.resetSessionModeLocked()
 	if initialModels != nil {
 		a.availableModels = initialModels.AvailableModels
@@ -1201,27 +1203,29 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 		currentModelID = currentModelFromConfig(configOptions)
 	}
 
-	// Cache config options so emitSetModelEvent can include them in the
-	// convergence event emitted after a successful SetModel call.
-	a.mu.Lock()
-	a.availableConfigOptions = configOptions
-	a.mu.Unlock()
-
 	a.logger.Info("emitting session_models event",
 		zap.String("session_id", sessionID),
 		zap.String("current_model_id", currentModelID),
 		zap.Int("available_models", len(models.AvailableModels)),
 	)
-	a.sendUpdate(AgentEvent{
-		Type:                      streams.EventTypeSessionModels,
-		SessionID:                 sessionID,
-		CurrentModelID:            currentModelID,
-		SessionModels:             convertSessionModels(models.AvailableModels),
-		ConfigOptions:             configOptions,
-		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicies...),
-		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
-		Data:                      map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceSessionSetup},
-	})
+	event := AgentEvent{
+		Type:                  streams.EventTypeSessionModels,
+		SessionID:             sessionID,
+		CurrentModelID:        currentModelID,
+		SessionModels:         convertSessionModels(models.AvailableModels),
+		ConfigOptions:         configOptions,
+		SessionSettingsPolicy: providerRestoredPolicy(settingsPolicies...),
+		Data:                  map[string]any{streams.ConfigOptionsSourceKey: streams.ConfigOptionsSourceSessionSetup},
+	}
+	a.mu.Lock()
+	a.availableConfigOptions = configOptions
+	if a.sessionID == sessionID && !a.closed {
+		a.sessionSettingsGeneration++
+		event.SessionSettingsGeneration = a.sessionSettingsGeneration
+	}
+	a.stampModelCatalogLocked(&event, acpConfigOptions, models.CurrentModelId)
+	a.mu.Unlock()
+	a.sendUpdate(event)
 }
 
 func (a *Adapter) emitSessionConfigOptionsState(sessionID string, configOptions []streams.ConfigOption, settingsPolicies ...streams.SessionSettingsPolicy) {
@@ -1275,7 +1279,7 @@ func (a *Adapter) emitSetModelEvent(
 			}
 		}
 	}
-	outConfig = a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
+	outConfig, verified := a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
 	a.mu.Lock()
 	if a.sessionID != sessionID || a.closed ||
 		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
@@ -1294,6 +1298,7 @@ func (a *Adapter) emitSetModelEvent(
 		// just-applied model in the convergence event.
 		a.availableConfigOptions = outConfig
 	}
+	a.modelCatalog = modelCatalogEvidence{displayOnly: true}
 	if tracker := a.usageBySession[sessionID]; tracker != nil {
 		tracker.maxSize = 0
 	}
@@ -1306,7 +1311,9 @@ func (a *Adapter) emitSetModelEvent(
 		SessionModels:             convertSessionModels(cachedModels),
 		ConfigOptions:             outConfig,
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		Data:                      map[string]any{streams.ConfigOptionsDisplayOnlyKey: true},
 	}
+	a.recordModelCatalogLocked(&event, verified, false)
 	a.mu.Unlock()
 
 	a.logger.Info("emitting session_models convergence event after SetModel",
@@ -1523,8 +1530,8 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	return err
 }
 
-// SetModelWithResult returns only the model value in the correlated ACP
-// response. A convergence event is not request-specific evidence.
+// SetModelWithResult reports the model and any complete catalog from the
+// correlated ACP response.
 func (a *Adapter) SetModelWithResult(ctx context.Context, modelID string) (streams.ConfigurationResult, error) {
 	// Bind the request to this session. Read its config after acquiring the
 	// shared config gate so earlier changes have finished.
@@ -1629,8 +1636,8 @@ func (a *Adapter) setModelWithConnResult(
 	if err != nil {
 		return result, fmt.Errorf("set session model failed via %s: %w", method, err)
 	}
-	a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig, configID, responseConfig, generation)
 	result = configurationResultFromOptions(convertACPConfigOptions(responseConfig), configID, modelID)
+	result.ModelState = a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig, configID, responseConfig, generation)
 	return result, nil
 }
 
@@ -1663,16 +1670,16 @@ func (a *Adapter) finalizeSetModel(
 	configID string,
 	responseConfig []acp.SessionConfigOption,
 	expectedGeneration ...uint64,
-) {
+) *streams.SessionModelState {
 	if method == sessionmodel.MethodNone {
-		return
+		return nil
 	}
 	a.resetContextWindowMaxSize(sessionID)
 	if len(responseConfig) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, false, expectedGeneration...)
-		return
+		return a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, false, expectedGeneration...)
 	}
 	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig, expectedGeneration...)
+	return nil
 }
 
 func (a *Adapter) beginConfigChange() uint64 {
@@ -2011,8 +2018,8 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 	cachedModels []modelInfo,
 	correlatedModeResponse bool,
 	expectedGeneration ...uint64,
-) {
-	a.emitAuthoritativeConfigOptionsWithPolicy(
+) *streams.SessionModelState {
+	return a.emitAuthoritativeConfigOptionsWithPolicy(
 		sessionID, configID, options, cachedModels, correlatedModeResponse, streams.SessionSettingsPolicyStrict, expectedGeneration...,
 	)
 }
@@ -2025,7 +2032,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	correlatedModeResponse bool,
 	settingsPolicy streams.SessionSettingsPolicy,
 	expectedGeneration ...uint64,
-) {
+) *streams.SessionModelState {
 	configOptions := convertACPConfigOptions(options)
 	event := AgentEvent{
 		Type:                  streams.EventTypeSessionModels,
@@ -2035,18 +2042,18 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 		SessionModels:         convertSessionModels(cachedModels),
 		ConfigOptions:         configOptions,
 		Data: map[string]any{
-			"config_options_source":    "provider_response",
-			"config_options_config_id": configID,
+			streams.ConfigOptionsSourceKey:   streams.ConfigOptionsSourceProviderResponse,
+			streams.ConfigOptionsConfigIDKey: configID,
 		},
 	}
 	a.mu.Lock()
 	if len(expectedGeneration) > 0 && !a.configChangeIsCurrentLocked(sessionID, expectedGeneration[0]) {
 		a.mu.Unlock()
-		return
+		return nil
 	}
 	if a.sessionID != sessionID || a.closed {
 		a.mu.Unlock()
-		return
+		return nil
 	}
 	a.availableConfigOptions = configOptions
 	a.clearUnknownThinkingModeLocked(configOptions)
@@ -2056,6 +2063,7 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	a.noteConfigModeSnapshotLocked(sessionID, a.currentModeFromConfig(configOptions), correlatedModeResponse)
 	a.sessionSettingsGeneration++
 	event.SessionSettingsGeneration = a.sessionSettingsGeneration
+	a.stampModelCatalogLocked(&event, options, "")
 	if isModelConfigID(configID, configOptions) {
 		if tracker := a.usageBySession[sessionID]; tracker != nil {
 			tracker.maxSize = 0
@@ -2071,7 +2079,9 @@ func (a *Adapter) emitAuthoritativeConfigOptionsWithPolicy(
 	// COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): sendUpdate blocks rather
 	// than drops on a full updatesCh and must run without a.mu held -- see
 	// emitDialectContextWindow's doc comment for the deadlock this avoids.
+	modelState := verifiedModelStateFromEvent(event)
 	a.sendUpdate(event)
+	return modelState
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
@@ -2144,6 +2154,7 @@ func (a *Adapter) emitSetConfigOptionEventWithPolicy(
 		return
 	}
 	a.availableConfigOptions = outConfig
+	a.modelCatalog = modelCatalogEvidence{displayOnly: true}
 	a.sessionSettingsGeneration++
 	event := AgentEvent{
 		Type:                      streams.EventTypeSessionModels,
@@ -2153,6 +2164,10 @@ func (a *Adapter) emitSetConfigOptionEventWithPolicy(
 		ConfigOptions:             outConfig,
 		SessionSettingsPolicy:     providerRestoredPolicy(settingsPolicy),
 		SessionSettingsGeneration: a.sessionSettingsGeneration,
+		Data:                      map[string]any{streams.ConfigOptionsDisplayOnlyKey: true},
+	}
+	if found {
+		event.Data[streams.ConfigOptionsConfigIDKey] = configID
 	}
 	a.mu.Unlock()
 

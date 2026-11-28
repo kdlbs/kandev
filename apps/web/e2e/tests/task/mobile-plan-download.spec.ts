@@ -24,7 +24,7 @@ test("keeps the download control touch-sized on a coarse-pointer workbench", asy
 }) => {
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 1280, height: 900 });
-  const panel = await openDownloadPlan(testPage, apiClient, seedData, false);
+  const { panel } = await openDownloadPlan(testPage, apiClient, seedData, false);
   await checkGeometry(testPage, true);
   expect(await resizeColumnViaSplitview(testPage, "right", 180)).toBe(180);
   await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(180);

@@ -161,6 +161,9 @@ type ContinuationPolicy string
 const (
 	ContinuationPolicyNewTask     ContinuationPolicy = "new_task"
 	ContinuationPolicyReuseThread ContinuationPolicy = "reuse_thread"
+	// ContinuationPolicyReusePerPR keeps one task per pull request: github_pr
+	// firings for the same PR continue that PR's task.
+	ContinuationPolicyReusePerPR ContinuationPolicy = "reuse_per_pr"
 )
 
 // TaskMode controls the destination selected by an automation firing.
@@ -246,6 +249,9 @@ type Automation struct {
 	LastTriggeredAt    *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
 	CreatedAt          time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at" db:"updated_at"`
+
+	// PRContinuationSettings holds the reuse_per_pr options.
+	PRContinuationSettings
 
 	// LegacyBoardCard reports that this automation was created while the
 	// withdrawn execution_mode still decided where a firing landed, and that
@@ -476,12 +482,21 @@ type ScheduledTriggerConfig struct {
 
 // GitHubPRTriggerConfig filters PR events.
 type GitHubPRTriggerConfig struct {
-	Events       []string            `json:"events"`             // opened, commented, merged, review_requested, closed
-	Repos        []github.RepoFilter `json:"repos"`              // empty = all repos
+	Events       []string            `json:"events"`             // opened, new_commits, review_requested
+	Repos        []github.RepoFilter `json:"repos"`              // explicit repositories to poll
 	Branches     []string            `json:"branches,omitempty"` // base branch filter
 	Authors      []string            `json:"authors,omitempty"`  // PR author filter
-	Labels       []string            `json:"labels,omitempty"`   // label filter
+	Labels       []string            `json:"labels,omitempty"`   // any-of label filter
 	ExcludeDraft bool                `json:"exclude_draft,omitempty"`
+	// QuietPeriodMinutes delays new_commits until a new head stays unchanged
+	// for this many minutes. 0 fires on the first poll that sees the head.
+	QuietPeriodMinutes int `json:"quiet_period_minutes,omitempty"`
+	// Reviewers filters review_requested by user login or org/team-slug,
+	// compared without case. Empty matches any requested reviewer.
+	Reviewers []string `json:"reviewers,omitempty"`
+	// IncludeExistingPRs lets opened fire for pull requests created before
+	// the trigger. Without it, opened fires only for newer pull requests.
+	IncludeExistingPRs bool `json:"include_existing_prs,omitempty"`
 }
 
 // GitHubPushTriggerConfig filters push-to-branch events.
@@ -638,6 +653,9 @@ type CreateAutomationRequest struct {
 	PluginTools        []plugintools.Selection         `json:"plugin_tools,omitempty"`
 	Triggers           []CreateTriggerSpec             `json:"triggers"`
 	Enabled            *bool                           `json:"enabled,omitempty"`
+
+	// PRContinuationSettings holds the reuse_per_pr options.
+	PRContinuationSettings
 }
 
 // CreateTriggerSpec defines a trigger to add during automation creation.
@@ -669,6 +687,10 @@ type UpdateAutomationRequest struct {
 	Enabled                          *bool                           `json:"enabled,omitempty"`
 	MaxConcurrentRuns                *int                            `json:"max_concurrent_runs,omitempty"`
 	ContinuationPolicy               *ContinuationPolicy             `json:"continuation_policy,omitempty"`
+	FollowUpPrompt                   *string                         `json:"follow_up_prompt,omitempty"`
+	PRContinuationStepID             *string                         `json:"pr_continuation_step_id,omitempty"`
+	PRMergedAction                   *PREndAction                    `json:"pr_merged_action,omitempty"`
+	PRClosedAction                   *PREndAction                    `json:"pr_closed_action,omitempty"`
 	TaskMode                         *TaskMode                       `json:"task_mode,omitempty"`
 	ManagedDestination               *ManagedConversationDestination `json:"managed_destination,omitempty"`
 	ManagedDestinationInstallationID string                          `json:"-"`

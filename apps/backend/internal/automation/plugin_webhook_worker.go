@@ -165,6 +165,7 @@ func (s *Service) admitWebhookReceipt(ctx context.Context, a *Automation, t *Aut
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	s.store.notifyRunRecorded(ctx, a.ID, runID, RunStatusTriggered)
 	r.RunID = runID
 	r.State = "dispatch"
 	return nil

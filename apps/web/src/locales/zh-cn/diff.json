@@ -1,4 +1,6 @@
 {
+  "before": "更改前",
+  "after": "更改后",
   "add": "添加",
   "addAComment": "添加评论…",
   "addComment": "添加评论",
