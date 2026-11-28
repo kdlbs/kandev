@@ -13,7 +13,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` during migration.
+Design for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`.
 
 ## Requirement mapping
 
@@ -27,8 +27,8 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 Agents owns profile values and their shared picker projection. Platform's
 [editor reconciliation contract](../../platform/system-design/agent-settings-parity.md#editor-reconciliation)
 owns the existing draft, acknowledgement, conflict, and settings-save interface
-behavior. This section covers collection publication after one standalone
-dynamic-profile save; it adds no server concurrency or owner-lifetime policy.
+behavior. This section covers standalone dynamic-profile save publication; server
+concurrency and owner lifetime are unchanged.
 
 `AgentProfilePage` renders `DynamicAgentProfileEditor`, whose
 `useDynamicAgentProfileEditorState` registers the standalone save with
@@ -36,8 +36,8 @@ dynamic-profile save; it adds no server concurrency or owner-lifetime policy.
 PATCH and returns the canonical `normalizeAgentProfile` result. While that
 request is pending, registered `agent.profile.created`, `agent.profile.updated`,
 and `agent.profile.deleted` handlers can change `settingsAgents.items` and
-`agentProfiles.items` in the same app store. An option can be present even when
-its Settings owner is absent.
+`agentProfiles.items` in the same app store. Options can outlive their
+Settings owner.
 
 After the awaited response, obtain the current store through `useAppStoreApi`.
 Build the next agent list from that current `settingsAgents.items`, replacing
@@ -60,9 +60,8 @@ Publish the next list and reconcile flattened options against the current
 `useSyncAgentsToStore` helper. Its `mergeOptionsByNewest` preserves all IDs not
 represented by the rebuild and selects the newer timestamp per represented ID;
 equal or missing timestamps retain the established rebuilt-option tie behavior.
-The map uses the latest agent list, so a deleted unrelated profile contributes
-no rebuilt option and cannot reappear from a captured list. Preserve newer
-flattened options even when their represented Settings snapshot is older.
+Map the latest agents: unrelated deletions cannot reappear from a captured
+list. Preserve newer flattened options even if their Settings snapshot is older.
 Keep this response-publication sequence synchronous after the current-state
 read, without another awaited step or a new synchronization framework.
 
@@ -143,9 +142,10 @@ its work through complete existing agent profiles.
   `set_session_mode` is restored. Same-candidate retries keep their settings.
   Mode and model events whose execution profile differs from the session's
   current concrete profile are stale. A changed session revision rejects the
-  switch instead of overwriting newer state.
-- A dynamic profile's candidate list can reference only concrete, launchable
-  profiles. It cannot reference itself, another dynamic profile, or a rich
+  switch instead of overwriting newer state. A same-candidate launch retry also resets after the current execution
+  proves no prompt was sent through a typed permission-mode application failure,
+  including older builds. Its late settings are stale; other failures do not reset.
+- Dynamic candidates must be concrete, launchable profiles. It cannot reference itself, another dynamic profile, or a rich
   Office identity in the first version. An Office identity's separate
   `execution_agent_profile_id` binding can reference a concrete or dynamic
   profile.

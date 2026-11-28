@@ -41,6 +41,18 @@ features:
     prod: "false"
     dev: "false"
     e2e: "false"
+  KANDEV_FEATURES_AUTO_START_PENDING_WORK:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+  KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
+  KANDEV_FEATURES_AUTO_RETRY_UNSENT_REQUESTS:
+    prod: "false"
+    dev: "false"
+    e2e: "false"
   KANDEV_FEATURES_WORKSPACE_COLLABORATION:
     prod: "false"
     dev:  "false"
@@ -48,6 +60,19 @@ features:
 
   # Integrated navigation across existing authorized workspace conversations.
   KANDEV_FEATURES_INTEGRATED_CONTROL:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Provider usage snapshots, configured allowances, and classified limit
+  # observations. Off in every shipped profile until an installation opts in.
+  KANDEV_FEATURES_PROVIDER_USAGE_LIMITS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Ordered adjacent candidate tiers and durable no-revisit fallback chains.
+  KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS:
     prod: "false"
     dev:  "false"
     e2e:  "false"
@@ -88,6 +113,13 @@ features:
   # Dynamic agent profiles and provider-error routing. Off in every shipped
   # profile until the complete guarded implementation is ready.
   KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Moving queued messages off a terminal primary session is opt-in; by default
+  # every queued message keeps its explicit session target.
+  KANDEV_FEATURES_TERMINAL_PRIMARY_QUEUE_HANDOFF:
     prod: "false"
     dev:  "false"
     e2e:  "false"

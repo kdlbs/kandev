@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync/atomic"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -48,9 +49,13 @@ func (s *Service) dispatchPreparedPrompt(
 	attachments []v1.MessageAttachment, dispatchOnly bool, options promptTaskOptions, submissionID string,
 	validateAdmission func() error, onDispatched func(),
 	guard *lockedCancelInFlightGuard,
+	admissionObserved ...*atomic.Bool,
 ) (*executor.PromptResult, *agentDeliverySubmissionRuntime, error) {
 	var delivery *agentDeliverySubmissionRuntime
 	beforeAdmission := func(admissionCtx context.Context, finalPrompt string, finalAttachments []v1.MessageAttachment) error {
+		if len(admissionObserved) > 0 && admissionObserved[0] != nil {
+			admissionObserved[0].Store(true)
+		}
 		if validateAdmission != nil {
 			if err := validateAdmission(); err != nil {
 				return err
@@ -68,7 +73,7 @@ func (s *Service) dispatchPreparedPrompt(
 		}
 		return nil
 	}
-	if options.deliveryProtocol == messagequeue.DeliveryProtocolLegacy && validateAdmission == nil && options.deliveryClaimUpdater == nil {
+	if options.deliveryProtocol == messagequeue.DeliveryProtocolLegacy && validateAdmission == nil && options.deliveryClaimUpdater == nil && len(admissionObserved) == 0 {
 		beforeAdmission = nil
 	}
 	result, execErr := s.executor.PromptWithAdmissionCallbackAndSubmissionID(

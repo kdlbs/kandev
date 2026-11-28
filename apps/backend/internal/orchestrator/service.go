@@ -69,10 +69,19 @@ type ServiceConfig struct {
 	Scheduler              scheduler.SchedulerConfig
 	QueueSize              int
 	QueueGroup             string
+
+	AutoStartPendingWork    bool
+	AutoContinueFromHistory bool
+	AutoRetryUnsentRequests bool
+
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -761,6 +770,14 @@ type passthroughDispatchToken struct {
 }
 
 // Service is the main orchestrator service
+// dynamicRecoveryTimer is the single per-session dynamic recovery timer and
+// the route generation it was armed for. A timer armed for a stale generation
+// never replaces a newer one.
+type dynamicRecoveryTimer struct {
+	timer      *time.Timer
+	generation int64
+}
+
 type Service struct {
 	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
 	config                    ServiceConfig
@@ -927,6 +944,19 @@ type Service struct {
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
 
+	// terminalQueueHandOffMu serializes terminal primary queue hand-offs so
+	// each one resolves the current primary after earlier hand-offs finish.
+	terminalQueueHandOffMu sync.Mutex
+	// primarySwitchMu orders SetPrimarySession's role change against a
+	// terminal queue hand-off's commit. The hand-off holds the read side from
+	// its in-admission receiver check until the transfer returns, so the role
+	// cannot move between that check and the commit. Only the repository write
+	// runs under the write side, so no admission is ever awaited while it is held.
+	primarySwitchMu sync.RWMutex
+	// beforeTerminalQueueTransfer is a test hook that runs after a hand-off
+	// resolves its receiver and before it transfers the queue. Nil in production.
+	beforeTerminalQueueTransfer func(toSessionID string)
+
 	// silentRestore workers are bounded to the startup inventory and joined
 	// during shutdown before the repositories and runtime are torn down.
 	silentRestoreMu           sync.Mutex
@@ -936,6 +966,7 @@ type Service struct {
 	silentRestoreStopped      bool
 	silentRestoreQueue        *restartRestoreQueue
 	silentRestoreOwnerContext silentRestoreOwnerContextResolver
+	automaticHistoryRetries   automaticHistoryBackoff
 
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
@@ -969,6 +1000,10 @@ type Service struct {
 	routeActionLocksMu sync.Mutex
 	routeActionLocks   map[string]*routeActionOperationLock
 
+	// midTurnFailovers tracks the opt-in automatic Try next handoffs per
+	// session so each failed generation hands off at most once.
+	midTurnFailovers midTurnFailoverState
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -984,7 +1019,11 @@ type Service struct {
 	dynamicRecoveryMu     sync.Mutex
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
-	dynamicRecoveryTimers map[string]*time.Timer
+	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
+	// failedRouteRetryDeferrals records the generation whose automatic retry
+	// deferral was already logged at Info, so a turn that keeps the retry
+	// waiting does not repeat that line every minute.
+	failedRouteRetryDeferrals map[string]int64
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -1718,6 +1757,9 @@ type RouteActionRequest struct {
 	SessionID          string
 	Action             RouteAction
 	ExpectedGeneration int64
+	// Automatic marks an unattended action the orchestrator submits itself.
+	// Client requests never set it.
+	Automatic bool
 }
 
 type RouteActionResult struct {
@@ -1790,6 +1832,9 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	releaseRouteAction := s.acquireRouteActionOperationLock(request.SessionID)
 	defer releaseRouteAction()
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
+		return nil, err
+	}
+	if err := s.prepareFailedDynamicRouteRetry(ctx, request); err != nil {
 		return nil, err
 	}
 	return s.routeActionHandler(ctx, request)
@@ -1927,7 +1972,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		dynamicRecoveryTimers:        make(map[string]*dynamicRecoveryTimer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
@@ -1950,6 +1995,7 @@ func NewService(
 		backgroundWorkSettleCancel:   backgroundWorkSettleCancel,
 		backgroundWorkSettleWorkers:  &sync.WaitGroup{},
 	}
+	s.wireQueuedTaskCapacityPriority()
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))
 	}); ok {
@@ -4241,6 +4287,13 @@ func isTaskSessionNotFound(err error) bool {
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport, scope interface{}) bool {
 	sessionID := session.ID
+	if running.Runtime == runtimekind.RuntimeStandalone && previousState == models.TaskSessionStateCancelled {
+		// Keep the inventory visible to startup correlation and its recovery
+		// guards. The reaper will check this owner, pending work and recovery
+		// evidence before stopping it after startup.
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return true
+	}
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		s.logger.Info("session in terminal state; stopping runtime before cleaning up executor record",
@@ -4289,8 +4342,14 @@ func (s *Service) preserveRemoteWorkspaceOnStartup(running *models.ExecutorRunni
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
-	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	}
 	s.ensureFailedTaskReviewOnStartup(ctx, session)
+	if running.Runtime == runtimekind.RuntimeStandalone {
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return
+	}
 	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",
 			zap.String("session_id", sessionID),

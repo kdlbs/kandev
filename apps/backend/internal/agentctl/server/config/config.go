@@ -370,6 +370,10 @@ type InstanceConfig struct {
 	// SessionID is the session ID for this agent instance (used in MCP tool calls)
 	SessionID string
 
+	// InferenceOwnerFresh is set only when the instance manager mints a new ID.
+	InferenceOwnerFresh         bool   `json:"-"`
+	InferenceClosureOperationID string `json:"inference_closure_operation_id,omitempty"`
+
 	// TaskID is the task ID for this agent instance (used in MCP plan tool calls)
 	TaskID string
 
@@ -904,6 +908,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryIncarnationID != "" {
 		cfg.DeliveryIncarnationID = overrides.DeliveryIncarnationID
 	}
+	cfg.InferenceClosureOperationID = overrides.InferenceClosureOperationID
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
@@ -931,6 +936,7 @@ func applyApprovalOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 
 // InstanceOverrides allows overriding default values when creating an instance
 type InstanceOverrides struct {
+	InferenceClosureOperationID  string
 	InstanceID                   string
 	ScopedMCPRoutes              bool
 	Protocol                     agent.Protocol

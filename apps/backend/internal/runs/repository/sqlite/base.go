@@ -6,6 +6,8 @@
 package sqlite
 
 import (
+	"context"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -22,6 +24,8 @@ type Repository struct {
 	// claimLimits backs REQ-OFFICE-LAUNCH-SAFETY-001/005's claim-time
 	// ceilings and budgets. See ClaimSafetyLimits and SetClaimSafetyLimits.
 	claimLimits ClaimSafetyLimits
+	// Bootstrap-only common capacity snapshot, called before the writer transaction.
+	capacityClaimCandidates func(context.Context) ([]string, error)
 
 	// gateFailureThreshold backs REQ-OFFICE-BACKPRESSURE-003's durable
 	// escalation record. See RecordGateOutcome and SetGateFailureThreshold.

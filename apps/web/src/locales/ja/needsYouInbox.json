@@ -35,5 +35,14 @@
   "tabLabel": "必要事項",
   "failedClauseSome_one": "この一覧は失敗した task を数えない。{{count}}件の task も失敗済み。Failed タブを見ろ。",
   "failedClauseSome_other": "この一覧は失敗した task を数えない。{{count}}件の task も失敗済み。Failed タブを見ろ。",
-  "failedClauseNone": "この一覧には失敗タスクは含まれない。今このワークスペースで失敗はない。Failed タブをいつでも確認して。"
+  "failedClauseNone": "この一覧には失敗タスクは含まれない。今このワークスペースで失敗はない。Failed タブをいつでも確認して。",
+  "unansweredTitle": "未回答 (エージェントは待機していません)",
+  "unansweredDescription": "誰かが回答する前にエージェントが先へ進んだ質問です。回答するとタスクに新しいメッセージとして送信されます。エージェントはこれらの質問で停止していません。ワークスペースの保持期間を過ぎると自動的に閉じられます。",
+  "unansweredLoadFailed": "未回答の質問を読み込めませんでした。もう一度お試しください。",
+  "unansweredClose": "閉じる",
+  "unansweredCloseFailed": "この質問を閉じられませんでした。もう一度お試しください。",
+  "unansweredSendTo": "回答の送信先",
+  "unansweredTargetOriginal": "元のセッション",
+  "unansweredTargetTask": "タスクの現在のセッション",
+  "unansweredSessionEnded": "この質問をしたセッションは終了しています。"
 }

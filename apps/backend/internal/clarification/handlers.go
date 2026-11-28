@@ -203,6 +203,9 @@ type Handlers struct {
 	// never read them.
 	inboxTasks   inboxTaskService
 	inboxBundles inboxBundleStore
+	// unanswered backs the Needs-you Inbox's unanswered section. Nil when
+	// inboxBundles does not implement it; the section then reads as disabled.
+	unanswered unansweredInboxStore
 	// now always returns a UTC instant. The sidecar's snooze_until is
 	// persisted and compared as SQLite TEXT (mattn/go-sqlite3 formats a
 	// time.Time with whatever offset it carries), so a non-UTC value here
@@ -224,7 +227,9 @@ func NewHandlers(
 	inboxTasks inboxTaskService,
 	inboxBundles inboxBundleStore,
 ) *Handlers {
+	unanswered, _ := inboxBundles.(unansweredInboxStore)
 	return &Handlers{
+		unanswered:     unanswered,
 		store:          store,
 		hub:            hub,
 		messageCreator: messageCreator,
@@ -273,8 +278,12 @@ func RegisterRoutes(
 		inbox.GET("", h.httpListInbox)
 		inbox.GET("/hidden", h.httpListInboxHidden)
 		inbox.GET("/history", h.httpListInboxHistory)
+		inbox.GET("/recovery-blocks", h.httpListInboxRecoveryBlocks)
 		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
 		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
+		inbox.GET("/unanswered", h.httpListInboxUnanswered)
+		inbox.POST("/unanswered/:pendingID/close", h.httpCloseInboxUnanswered)
+		inbox.POST("/unanswered/:pendingID/late-answer", h.httpLateAnswerInboxUnanswered)
 	}
 }
 

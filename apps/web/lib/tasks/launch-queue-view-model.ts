@@ -1,8 +1,24 @@
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 
+export const LAUNCH_QUEUE_CAPACITY_REASON_LABELS = {
+  ceiling_total_limit: "task:launchQueueRefusalTotal",
+  ceiling_grade_limit: "task:launchQueueRefusalGrade",
+  ceiling_both_limits: "task:launchQueueRefusalBoth",
+  ceiling_needs_configuration: "task:launchQueueRefusalConfiguration",
+  ceiling_unknown_population: "task:launchQueueRefusalUnknown",
+} as const;
+type CapacityReason = keyof typeof LAUNCH_QUEUE_CAPACITY_REASON_LABELS;
+
+function recordedCapacityReason(reason?: string): CapacityReason | null {
+  return reason && Object.hasOwn(LAUNCH_QUEUE_CAPACITY_REASON_LABELS, reason)
+    ? (reason as CapacityReason)
+    : null;
+}
+
 export type LaunchQueueCapacityFreshness = "current" | "stale" | "unavailable";
 
 export type LaunchQueueViewModel = {
+  capacityReason?: CapacityReason;
   destinationId: string | null;
   queuedAt: string;
   reason: TaskStatusSummaryLaunchQueue["reason"];
@@ -81,6 +97,7 @@ export function buildLaunchQueueViewModel(
 ): LaunchQueueViewModel | null {
   if (!queue || !queue.queued_at || !LAUNCH_QUEUE_REASONS.has(queue.reason)) return null;
   const capacity = validCapacity(queue.capacity);
+  const capacityReason = recordedCapacityReason(queue.capacity_reason);
   const now = options.now ?? Date.now();
   const isConnected = options.isConnected ?? true;
   let capacityFreshness: LaunchQueueCapacityFreshness = "unavailable";
@@ -95,10 +112,62 @@ export function buildLaunchQueueViewModel(
     // missing profile projection must fall back to the translated generic
     // label instead of exposing an opaque UUID.
     destinationId: queue.agent_profile_id?.trim() || null,
+    ...(capacityReason ? { capacityReason } : {}),
     queuedAt: queue.queued_at,
     reason: queue.reason,
     retrying: queue.retrying,
     capacityFreshness,
     capacity,
   };
+}
+
+export type LaunchQueueCapacityCause = {
+  key:
+    | "task:launchQueueCauseGrade"
+    | "task:launchQueueCauseGradeUnmeasured"
+    | "task:launchQueueCauseTotal";
+  values?: Record<string, string | number>;
+};
+
+/**
+ * The one limit that holds the launch, from the recorded refusal reason and
+ * the capacity sample the payload already carries. A grade refusal names the
+ * full grade and its usage when exactly one grade is full; otherwise it says
+ * the grade limit without numbers. When both limits refused, the narrower
+ * grade limit is the one named, or the overall limit when the sample shows it
+ * reached and no single grade can be named.
+ */
+export function launchQueueCapacityCause(
+  view: LaunchQueueViewModel,
+): LaunchQueueCapacityCause | null {
+  const reason = view.capacityReason;
+  if (reason === "ceiling_grade_limit" || reason === "ceiling_both_limits") {
+    const full = (view.capacity?.grades ?? []).filter(
+      (row) => row.inUse !== null && row.limit !== null && row.inUse >= row.limit,
+    );
+    if (full.length === 1) {
+      const [row] = full;
+      return {
+        key: "task:launchQueueCauseGrade",
+        values: { grade: row.grade, inUse: row.inUse!, limit: row.limit! },
+      };
+    }
+    if (reason === "ceiling_both_limits" && capacityAtLimit(view.capacity))
+      return {
+        key: "task:launchQueueCauseTotal",
+        values: { inUse: view.capacity!.inUse, limit: view.capacity!.limit },
+      };
+    return { key: "task:launchQueueCauseGradeUnmeasured" };
+  }
+  if (reason === "ceiling_total_limit" && view.capacity)
+    return {
+      key: "task:launchQueueCauseTotal",
+      values: { inUse: view.capacity.inUse, limit: view.capacity.limit },
+    };
+  return null;
+}
+
+/** A recorded overall limit is full; a limit of zero is not a denominator. */
+function capacityAtLimit(capacity: LaunchQueueViewModel["capacity"]): boolean {
+  return Boolean(capacity && capacity.limit > 0 && capacity.inUse >= capacity.limit);
 }

@@ -202,6 +202,10 @@ operational tool response from a user choosing to continue the conversation.
   the original tool request, restore its workflow barrier, or resolve another
   pending question. The interface shall distinguish sent from queued admission.
 
+A workspace that enables the unanswered inbox extends these criteria with
+[REQ-TASKS-CLARIFICATION-UNANSWERED-001](clarification-unanswered-inbox.md). That requirement adds
+a non-blocking view of superseded questions and does not change the active rules above.
+
 ## Out of scope
 
 

@@ -25,6 +25,16 @@ type PendingQueueDispatch struct {
 	PayloadHash  string
 }
 
+func (r *sqliteRepository) HasPendingDispatchForSession(ctx context.Context, sessionID string) (bool, error) {
+	var found bool
+	err := r.ro.GetContext(ctx, &found, r.ro.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM queue_dispatch_claims WHERE session_id = ?
+		UNION ALL
+		SELECT 1 FROM queue_send_now_claims WHERE session_id = ?
+	)`), sessionID, sessionID)
+	return found, err
+}
+
 const queueDispatchRecoverySchema = `
 	CREATE TABLE IF NOT EXISTS queue_dispatch_claims (
 		entry_id     TEXT PRIMARY KEY,

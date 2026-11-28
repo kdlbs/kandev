@@ -10,6 +10,8 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import {
   buildLaunchQueueViewModel,
+  LAUNCH_QUEUE_CAPACITY_REASON_LABELS,
+  launchQueueCapacityCause,
   type LaunchQueueViewModel,
 } from "@/lib/tasks/launch-queue-view-model";
 
@@ -18,7 +20,10 @@ function reasonLabel(
   retrying: boolean,
   t: (key: string) => string,
   all = false,
+  capacityReason?: LaunchQueueViewModel["capacityReason"],
 ): string {
+  if (reason === "session_capacity" && capacityReason)
+    return t(LAUNCH_QUEUE_CAPACITY_REASON_LABELS[capacityReason]);
   switch (reason) {
     case "session_capacity":
       return t(
@@ -139,9 +144,7 @@ function LaunchQueueStatusContent({
           <p className="min-w-0 break-words text-foreground">
             {t("task:launchQueueDestination", { destination })}
           </p>
-          <p className="min-w-0 break-words text-muted-foreground">
-            {reasonLabel(view.reason, view.retrying, t, view.capacity?.policy === "all")}
-          </p>
+          <LaunchQueueReason view={view} t={t} />
           {view.reason === "session_capacity" && (
             <>
               <p className="min-w-0 break-words text-muted-foreground">
@@ -180,6 +183,37 @@ function LaunchQueueStatusContent({
         </div>
       </div>
     </section>
+  );
+}
+
+/** The holding limit in one line when the payload names it, else the recorded reason. */
+function LaunchQueueReason({
+  view,
+  t,
+}: {
+  view: LaunchQueueViewModel;
+  t: (key: string, values?: Record<string, unknown>) => string;
+}) {
+  const cause = view.reason === "session_capacity" ? launchQueueCapacityCause(view) : null;
+  if (cause)
+    return (
+      <p
+        className="min-w-0 break-words font-medium tabular-nums text-foreground"
+        data-testid="launch-queue-capacity-cause"
+      >
+        {t(cause.key, cause.values)}
+      </p>
+    );
+  return (
+    <p className="min-w-0 break-words text-muted-foreground">
+      {reasonLabel(
+        view.reason,
+        view.retrying,
+        t,
+        view.capacity?.policy === "all",
+        view.capacityReason,
+      )}
+    </p>
   );
 }
 
