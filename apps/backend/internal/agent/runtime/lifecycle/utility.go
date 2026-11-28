@@ -103,7 +103,7 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		},
 	}
 
-	return client.InferencePrompt(ctx, req)
+	return m.executeOwnedInference(ctx, execution, client, req, "")
 }
 
 // ExecuteInferenceProfilePrompt resolves a profile once at dispatch time and
@@ -185,7 +185,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		return nil, fmt.Errorf("resolve inference command: %w", err)
 	}
 	autoApprove := profile.AutoApprove
-	return client.InferencePrompt(ctx, &utility.PromptRequest{
+	return m.executeOwnedInference(ctx, execution, client, &utility.PromptRequest{
 		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
@@ -194,7 +194,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix),
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
-	})
+	}, profileID)
 }
 
 // ListInferenceAgents returns agents that support inference with their models.
