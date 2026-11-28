@@ -461,6 +461,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           workspaceId={props.workspaceId}
           uncertainDelivery={props.uncertainDelivery}
           deliveryRecoveryPhase={props.deliveryRecoveryPhase}
+          workspaceRestorable={composerRecovery?.model?.metadata?.workspace_restorable}
           recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />

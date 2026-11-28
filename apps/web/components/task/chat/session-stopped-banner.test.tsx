@@ -6,6 +6,7 @@ import type { SessionStoppedBannerProps } from "./session-stopped-banner";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/client";
+import { guardRecoveryActions } from "./session-stopped-banner.test-helpers";
 
 const MORE_OPTIONS = "More options";
 const FAILED_TO_RESUME_MESSAGE = "Failed to resume session";
@@ -87,7 +88,9 @@ vi.mock("react-i18next", () => ({
         "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
         "task:failedToResumeSession": FAILED_TO_RESUME_MESSAGE,
+        "task:failedToStartFreshSession": "Failed to start fresh session",
         "task:failedToRestoreWorkspace": "Failed to restore workspace",
+        "task:workspaceRestoreUnavailable": "Workspace restore is unavailable right now.",
         "task:managedCloneRelocationTitle": "Workspace needs repair",
         "task:managedCloneRelocationBody": "Move files to the current clone to resume.",
         "task:managedCloneRelocateResume": "Move files and resume",
@@ -583,6 +586,27 @@ describe("SessionStoppedBanner recovery failures", () => {
   });
 });
 
+describe("SessionStoppedBanner workspace availability", () => {
+  it("explains unavailable restore when no task is available for recovery", () => {
+    const recoveryActions = {
+      ...guardRecoveryActions("Provider is unavailable", "fresh_start"),
+      guardDetails: null,
+    };
+
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={recoveryActions}
+        workspaceRestorable={false}
+        taskId={null}
+      />,
+    );
+
+    expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByText("Workspace restore is unavailable right now.")).toBeTruthy();
+  });
+});
+
 it("does not claim a deleted profile when there is no session", () => {
   render(<BannerHarness mode="completed" sessionId={null} />);
   expect(screen.queryByText("The agent profile no longer exists.")).toBeNull();
@@ -605,6 +629,7 @@ const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
 
 it.each([
   ["resume", FAILED_TO_RESUME_MESSAGE],
+  ["fresh_start", "Failed to start fresh session"],
   ["restore_workspace", "Failed to restore workspace"],
 ] as const)(
   "keeps an operation-specific explanation for empty %s diagnostics",
@@ -637,37 +662,3 @@ it("redacts the stopped-session primary message", () => {
   render(<BannerHarness mode="recoverable" message="Failure: token=primary-secret-fixture" />);
   expect(document.body.textContent).not.toContain("primary-secret-fixture");
 });
-
-function guardRecoveryActions(
-  message: string,
-  operation: "resume" | "restore_workspace",
-): NonNullable<SessionStoppedBannerProps["recoveryActions"]> {
-  return {
-    busyAction: null,
-    workspaceRecovery: null,
-    workspaceRecoveryRepositoryName: null,
-    workspaceRecoveryStatusCheck: "idle",
-    checkWorkspaceRecoveryStatus: vi.fn().mockResolvedValue({ resolved: true, projection: null }),
-    recoveryError: new Error(message),
-    branchDetails: null,
-    providerRestoredResumeEligible: false,
-    continuationDetails: null,
-    guardDetails: { kind: "session_recovery_in_progress", retryable: true },
-    recoveryNotice: null,
-    managedCloneRecoveryStamp: null,
-    lastFailedAction: null,
-    manualRecoveryFailure: {
-      operation,
-      sessionId: "session-1",
-      errorStamp: "failure-1",
-      requestKey: "task-1\u0000session-1\u0000failure-1",
-      operationId: 1,
-    },
-    handleRecover: vi.fn().mockResolvedValue(false),
-    handleRestore: vi.fn().mockResolvedValue(undefined),
-    handleRetry: vi.fn().mockResolvedValue(false),
-    handleNewBranch: vi.fn().mockResolvedValue(false),
-    handleManagedCloneRelocation: vi.fn().mockResolvedValue(false),
-    handleContinueFromHistory: vi.fn().mockResolvedValue(false),
-  };
-}

@@ -347,6 +347,25 @@ describe("useSessionRecoveryActions", () => {
     expect(result.current.busyAction).toBeNull();
   });
 
+  it.each(["fresh_start", "runtime_retry"] as const)(
+    "records %s failure as a fresh-start operation",
+    async (action) => {
+      mocks.requestSessionRecover.mockRejectedValueOnce(new Error(PROVIDER_UNAVAILABLE));
+      const { result } = renderHook(() =>
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+      );
+
+      await act(async () => {
+        await result.current.handleRecover(action);
+      });
+
+      expect(result.current.manualRecoveryFailure).toMatchObject({
+        operation: "fresh_start",
+        sessionId: SESSION_ID,
+      });
+    },
+  );
+
   it("keeps restore failure state safe across repeated retries", async () => {
     const rawError = `backend secret ${"x".repeat(600)}`;
     mocks.restoreSessionWorkspace

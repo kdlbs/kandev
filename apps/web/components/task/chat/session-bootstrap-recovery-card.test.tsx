@@ -8,7 +8,7 @@ const recoveryActionState = vi.hoisted(() => ({
   busyAction: null as string | null,
   recoveryError: null as Error | null,
   manualRecoveryFailure: null as {
-    operation: "resume" | "restore_workspace";
+    operation: "resume" | "fresh_start" | "restore_workspace";
     sessionId: string;
     errorStamp: string | null;
     requestKey: string;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
+import type { ManualSessionRecoveryFailure } from "@/hooks/domains/session/use-session-recovery-actions";
 import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
 
 const translate = ((key: string) => key) as unknown as TFunction;
@@ -23,6 +24,29 @@ it("shows cleanup guidance from durable evidence after reload", () => {
     titleKey: "task:sessionRuntimeCleanupFailedTitle",
     summary: "task:sessionRuntimeCleanupFailedBody",
     noPromptSent: true,
+  });
+});
+
+it("keeps the fresh-start operation in a synthesized recovery cause", () => {
+  const manualFailure: ManualSessionRecoveryFailure = {
+    operation: "fresh_start",
+    sessionId: "session-1",
+    errorStamp: "failure-1",
+    requestKey: "task-1\u0000session-1\u0000failure-1",
+    operationId: 1,
+  };
+  const model = buildRecoveryCardModel({
+    error: error([]),
+    manualFailure,
+    manualError: null,
+    recoveryNotice: null,
+    translate,
+  });
+
+  expect(model.causes).toContainEqual({
+    operation: "start",
+    code: "unknown",
+    detail: "task:failedToStartFreshSession",
   });
 });
 

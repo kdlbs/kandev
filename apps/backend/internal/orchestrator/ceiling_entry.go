@@ -924,8 +924,9 @@ func (s *Service) validateUnroutedWorkflowEntry(
 	if step == nil {
 		return ceilingEntrySuperseded, "workflow destination step no longer exists", nil
 	}
-	if step.SessionTarget != nil {
-		return ceilingEntryPermanentlyUnavailable, "workflow entry route is unavailable", nil
+	if disposition, detail, handled := unroutedInitialTargetDisposition(task, deferral, binding, step); handled &&
+		disposition != ceilingEntryValid {
+		return disposition, detail, nil
 	}
 	if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
 		return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
@@ -954,6 +955,32 @@ func (s *Service) validateUnroutedWorkflowEntry(
 		return ceilingEntrySuperseded, "workflow entry operation changed", nil
 	}
 	return s.validateCeilingDestination(ctx, task, deferral, binding, checkDestinationState), "", nil
+}
+
+func unroutedInitialTargetDisposition(
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	binding models.CeilingWorkflowEntryBinding,
+	step *wfmodels.WorkflowStep,
+) (ceilingEntryDisposition, string, bool) {
+	if step.SessionTarget == nil {
+		return ceilingEntryValid, "", false
+	}
+	if step.SessionTarget.Kind != wfmodels.WorkflowSessionTargetInitial {
+		return ceilingEntryPermanentlyUnavailable, "workflow entry route is unavailable", true
+	}
+	snapshot, available := models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	if !available || snapshot.SessionID == "" {
+		return ceilingEntryPermanentlyUnavailable, "workflow entry route is unavailable", true
+	}
+	destinationID := binding.DestinationSessionID
+	if destinationID == "" {
+		destinationID = sessionIDFromCeilingPayload(deferral)
+	}
+	if destinationID != "" && destinationID != snapshot.SessionID {
+		return ceilingEntrySuperseded, "workflow destination session changed", true
+	}
+	return ceilingEntryValid, "", true
 }
 
 func (s *Service) validateCeilingDestination(
@@ -1020,16 +1047,19 @@ func (s *Service) validateClaimedCeilingBinding(
 	if task == nil {
 		return ErrCeilingLaunchSuperseded
 	}
+	_, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !routePresent {
+		if _, metadataRoutePresent := task.Metadata[models.MetaKeyWorkflowSessionRoute]; metadataRoutePresent {
+			return fmt.Errorf("deferred workflow entry ownership is unavailable")
+		}
+	}
 	kind := ceilingEntryKindFromContext(ctx)
 	if kind == "" {
 		// A normal on_enter callback can carry an in-memory binding before the
 		// route commit has been materialized. It is safe only when the task still
 		// names the same workflow step and latest entry; durable replay callers
 		// always set kind and take the strict committed-route path below.
-		if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); !routePresent {
-			if _, metadataRoutePresent := task.Metadata[models.MetaKeyWorkflowSessionRoute]; metadataRoutePresent {
-				return fmt.Errorf("deferred workflow entry ownership is unavailable")
-			}
+		if !routePresent {
 			if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
 				return fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, ceilingEntryDetailWorkflowChanged)
 			}

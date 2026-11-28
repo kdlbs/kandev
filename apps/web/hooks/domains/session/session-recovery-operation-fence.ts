@@ -169,7 +169,7 @@ export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null
 export type WorkspaceRecoveryStatusCheck = "idle" | "checking" | "unresolved";
 
 export type ManualSessionRecoveryFailure = {
-  operation: "resume" | "restore_workspace";
+  operation: "resume" | "fresh_start" | "restore_workspace";
   sessionId: string;
   errorStamp: string | null;
   requestKey: string;

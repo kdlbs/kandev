@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SessionRecoveryNotice } from "@/components/task/ensure-session-error";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
+import type { ManualSessionRecoveryFailure } from "@/hooks/domains/session/use-session-recovery-actions";
 import type {
   ContextContinuationDetails,
   SessionRecoveryAction,
@@ -13,6 +14,7 @@ import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { SessionErrorDetails } from "@/components/task/session-error-details";
 import { ManagedCloneRelocationConfirmation } from "@/components/task/chat/managed-clone-relocation-confirmation";
+import { sessionRecoveryFailureLabel } from "@/components/task/chat/session-recovery-failure-label";
 import { ActionButton } from "./action-message-actions";
 
 export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAction | null {
@@ -111,6 +113,7 @@ function buildRecoveryChoices({
   managedCloneRecoveryStamp,
   providerRestoredResumeEligible,
   recoveryError,
+  workspaceRestorable,
   branchDetails,
   continuationDetails,
   onRecoveryAction,
@@ -124,6 +127,7 @@ function buildRecoveryChoices({
   managedCloneRecoveryStamp: string | null;
   providerRestoredResumeEligible: boolean;
   recoveryError: Error | null;
+  workspaceRestorable: boolean | undefined;
   branchDetails: unknown;
   continuationDetails: ContextContinuationDetails | null;
   onRecoveryAction: (action: SessionRecoveryAction) => void;
@@ -142,7 +146,7 @@ function buildRecoveryChoices({
         },
       ]
     : choicesFromMessageActions(actions, t, providerRestoredResumeEligible, onRecoveryAction);
-  if (recoveryError && !managedCloneRecoveryStamp)
+  if (workspaceRestorable !== false && recoveryError && !managedCloneRecoveryStamp)
     choices.push({
       kind: "restore",
       label: t("task:restoreReadOnlyWorkspace"),
@@ -169,17 +173,44 @@ function buildRecoveryChoices({
   return choices;
 }
 
-function SessionRecoveryFailure({ error, guarded }: { error: Error; guarded: boolean }) {
+function SessionRecoveryFailure({
+  error,
+  guarded,
+  operation,
+}: {
+  error: Error;
+  guarded: boolean;
+  operation?: ManualSessionRecoveryFailure["operation"];
+}) {
   const { t } = useTranslation();
+  const failure = sessionRecoveryFailureLabel(operation, t);
   return (
     <div data-testid="session-recovery-error" className="mt-2 min-w-0 text-xs">
-      <p role="status">
-        {guarded
-          ? sanitizeSessionErrorDetails(error.message, 240)
-          : t("task:failedToResumeSession")}
-      </p>
+      <p role="status">{guarded ? sanitizeSessionErrorDetails(error.message, 240) : failure}</p>
       <SessionErrorDetails>{error.message}</SessionErrorDetails>
     </div>
+  );
+}
+
+function SessionRecoveryFeedback({
+  actions,
+}: {
+  actions: Pick<
+    ReturnType<typeof useSessionRecoveryActions>,
+    "recoveryError" | "recoveryNotice" | "guardDetails" | "manualRecoveryFailure"
+  >;
+}) {
+  return (
+    <>
+      {actions.recoveryError && (
+        <SessionRecoveryFailure
+          error={actions.recoveryError}
+          guarded={Boolean(actions.guardDetails)}
+          operation={actions.manualRecoveryFailure?.operation}
+        />
+      )}
+      {actions.recoveryNotice && <SessionRecoveryNotice message={actions.recoveryNotice} />}
+    </>
   );
 }
 
@@ -188,22 +219,24 @@ export function SessionRecoveryActionButtons({
   taskId,
   sessionId,
   errorStamp,
+  workspaceRestorable,
   onRecoveryRequested,
 }: {
   actions: MessageAction[];
   taskId: string;
   sessionId: string;
   errorStamp?: string;
+  workspaceRestorable?: boolean;
   onRecoveryRequested: () => void;
 }) {
   const { t } = useTranslation();
+  const recoveryActions = useSessionRecoveryActions({ taskId, sessionId, errorStamp });
   const {
     busyAction,
     recoveryError,
     branchDetails,
     guardDetails,
     continuationDetails,
-    recoveryNotice,
     managedCloneRecoveryStamp,
     workspaceRecovery,
     workspaceRecoveryRepositoryName,
@@ -215,7 +248,7 @@ export function SessionRecoveryActionButtons({
     handleNewBranch,
     handleContinueFromHistory,
     handleManagedCloneRelocation,
-  } = useSessionRecoveryActions({ taskId, sessionId, errorStamp });
+  } = recoveryActions;
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
 
   const onRecoveryAction = useCallback(
@@ -230,6 +263,7 @@ export function SessionRecoveryActionButtons({
     managedCloneRecoveryStamp,
     providerRestoredResumeEligible,
     recoveryError,
+    workspaceRestorable,
     branchDetails,
     continuationDetails,
     onRecoveryAction: (action) => void onRecoveryAction(action),
@@ -246,10 +280,7 @@ export function SessionRecoveryActionButtons({
   });
   return (
     <>
-      {recoveryError && (
-        <SessionRecoveryFailure error={recoveryError} guarded={Boolean(guardDetails)} />
-      )}
-      {recoveryNotice && <SessionRecoveryNotice message={recoveryNotice} />}
+      <SessionRecoveryFeedback actions={recoveryActions} />
       <RecoveryActions
         actions={choices}
         preferred={

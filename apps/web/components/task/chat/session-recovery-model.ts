@@ -3,6 +3,11 @@ import type { ActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import type { RecoveryChoice } from "../recovery-actions";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import {
+  isManagedRuntimeFailure,
+  isManagedRuntimeRecovery,
+  sessionRecoveryFailureCopy,
+} from "./session-recovery-model-helpers";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { TaskLaunchErrorContextValue } from "../task-launch-error-context";
 import {
@@ -260,6 +265,7 @@ function appendReadOnlyRestoreChoice(
   managedCloneRelocation: boolean,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  if (model.metadata?.workspace_restorable === false) return;
   const restoreAllowed =
     !managedCloneRelocation &&
     !isManagedRuntimeFailure(model.kind) &&
@@ -374,6 +380,10 @@ export function useRecoveryPresentation(
     managedCloneRelocation,
   });
   const copy = recoveryPresentationCopy(model, bootstrap, managedCloneRelocation, t);
+  const workspaceCopy =
+    model.metadata?.workspace_restorable === false
+      ? { ...copy, prerequisite: t("task:workspaceRestoreUnavailable") }
+      : copy;
   const { busy, busyAction } = recoveryPresentationBusy(model, automatic, actions);
   const causes = recoveryPresentationCauses(model, bootstrap, automatic, t);
   const details = recoveryPresentationDetails(model, bootstrap, causes, actions, t);
@@ -381,9 +391,16 @@ export function useRecoveryPresentation(
     ...(bootstrap?.detailFields ?? []),
     ...storageRecoveryDetailFields(storageCauseFromError(model.error), t),
   ];
-  const failure = recoveryFailureCopy(actions, t);
+  const failure = sessionRecoveryFailureCopy(
+    {
+      operation: actions.manualRecoveryFailure?.operation,
+      branchUnavailable: Boolean(actions.branchDetails),
+      guardedError: actions.guardDetails ? actions.recoveryError?.message : null,
+    },
+    t,
+  );
   return {
-    copy: withAutomaticNotice(copy, automatic, actions),
+    copy: withAutomaticNotice(workspaceCopy, automatic, actions),
     agentDisplayName,
     busy,
     busyAction,
@@ -593,40 +610,11 @@ function recoveryPresentationDetails(
     .join("\n\n");
 }
 
-function recoveryFailureCopy(
-  actions: SessionRecoveryActions,
-  t: ReturnType<typeof useTranslation>["t"],
-) {
-  let failure =
-    actions.manualRecoveryFailure?.operation === "restore_workspace"
-      ? t("task:failedToRestoreWorkspace")
-      : t("task:failedToResumeSession");
-  if (actions.branchDetails) failure = t("task:branchIsNoLongerAvailable");
-  if (actions.guardDetails && actions.recoveryError)
-    failure = sanitizeSessionErrorDetails(actions.recoveryError.message, 240) || failure;
-  return failure;
-}
-
 function isBootstrapRecovery(model: ActiveSessionRecovery) {
   return (
     model.error?.phase === "bootstrap" &&
     model.kind !== "provider_quota_limited" &&
     model.kind !== "managed_clone_relocation_required" &&
     (!isManagedRuntimeFailure(model.kind) || Boolean(model.error?.causes?.some(isProcessExitCause)))
-  );
-}
-
-function isManagedRuntimeFailure(kind: string) {
-  return (
-    kind === "managed_runtime_npm_resolution" ||
-    kind === "managed_runtime_npm_policy" ||
-    kind === "managed_runtime_startup"
-  );
-}
-
-function isManagedRuntimeRecovery(model: ActiveSessionRecovery) {
-  if (isManagedRuntimeFailure(model.kind)) return true;
-  return Boolean(
-    model.metadata?.actions?.some((action) => sessionRecoveryAction(action) === "runtime_retry"),
   );
 }
