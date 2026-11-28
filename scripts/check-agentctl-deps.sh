@@ -5,7 +5,7 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
 
-# Match the native bundle matrix (CGO enabled) and all four remote helper
+# Match the native bundle matrix (CGO enabled) and all five remote helper
 # targets (CGO disabled). Platform build constraints can hide imports from a
 # host-only `go list` check.
 release_targets=(
@@ -13,6 +13,7 @@ release_targets=(
   "linux/arm64/0"
   "darwin/amd64/0"
   "darwin/arm64/0"
+  "windows/amd64/0"
   "linux/amd64/1"
   "linux/arm64/1"
   "darwin/amd64/1"

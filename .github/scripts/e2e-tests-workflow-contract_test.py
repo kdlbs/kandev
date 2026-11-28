@@ -156,7 +156,7 @@ class E2EWorkflowContractTest(unittest.TestCase):
         )
         self.assertNotIn("uses: actions/cache@", block)
         self.assertIn(
-            "make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg build-codexdbg build-winjob",
+            "make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-agentctl-windows-amd64 build-acpdbg build-codexdbg build-winjob",
             block,
         )
 
@@ -232,7 +232,8 @@ fi
         self.assertNotIn("helper_compile", job_block(workflow, "e2e", "playwright_image"))
         host = ["build-kandev", "build-agentctl", "build-agentctl-linux", "build-mock-agent"]
         other = ["build-agentctl-linux-arm64", "build-agentctl-darwin-arm64",
-                 "build-agentctl-darwin-amd64", "build-acpdbg", "build-codexdbg", "build-winjob"]
+                 "build-agentctl-darwin-amd64", "build-agentctl-windows-amd64",
+                 "build-acpdbg", "build-codexdbg", "build-winjob"]
         self.assertIn("make -C apps/backend " + " ".join(host) + " &", build)
         self.assertIn("make -C apps/backend " + " ".join(other), helpers)
         self.assertIn("run: make -C apps/backend build-mock-agent-linux", build)

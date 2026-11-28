@@ -46,6 +46,29 @@ It contains at least three backticks. The complete diagram must be invalid, and 
 - **AC-UI-MERMAID-RENDERING-002.6:** Superseded or cancelled recovery work shall not publish an earlier diagram or prose. Successful recovery shall not show a transient diagram-error notification from the failed full-source probe.
 - **AC-UI-MERMAID-RENDERING-002.7:** Recovered prose shall use the same Markdown formatting, document reference definitions, and task/file-link context as adjacent chat prose. Existing HTML and URL restrictions shall remain effective.
 
+### REQ-UI-MERMAID-RENDERING-003: Trackpad pinch zoom
+
+**Intent:** Readers can magnify one diagram while keeping nearby text at its current size.
+
+#### Acceptance criteria
+
+- **AC-UI-MERMAID-RENDERING-003.1:** A trackpad pinch over a rendered Mermaid diagram in agent output or a task plan changes only that diagram's scale. Both directions work in read-only and editable plans. Page zoom stays fixed, including at either diagram zoom limit.
+- **AC-UI-MERMAID-RENDERING-003.2:** The zoom percentage follows the gesture. The existing zoom buttons and reset operate on the resulting scale.
+- **AC-UI-MERMAID-RENDERING-003.3:** Ordinary scrolling works over diagrams. Pinching over prose or diagram source retains normal browser behavior.
+- **AC-UI-MERMAID-RENDERING-003.4:** Zoom preserves the diagram frame dimensions and toolbar position. Scrolling inside the frame reveals enlarged content on both axes.
+
+See the [gesture design](../system-design/mermaid-pinch-zoom.md).
+
+### REQ-UI-MERMAID-RENDERING-004: Adjust diagram frame height
+
+**Intent:** A reader can reveal more of a zoomed diagram without changing its scale.
+
+#### Acceptance criteria
+
+- **AC-UI-MERMAID-RENDERING-004.1:** In chat and in editable or read-only plans, dragging the lower border changes the height of that diagram. Its top edge, width, zoom percentage, and toolbar position stay fixed relative to the frame.
+- **AC-UI-MERMAID-RENDERING-004.2:** A visible grip identifies the lower border. Keyboard and touch users can adjust the height and restore the automatic height.
+- **AC-UI-MERMAID-RENDERING-004.3:** Zoom and pan preserve the chosen height. Resizing leaves plan text, revision history, and other diagrams untouched.
+
 ## Migrated source detail
 
 ## Why

@@ -17,9 +17,9 @@ func (s *Server) handleExecutionUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, s.procMgr.ReadExecutionUsage(c.Request.Context(), c.Query("model")))
 }
 
-func (s *Server) promptWithUsageSelection(ctx context.Context, agentAdapter adapter.AgentAdapter, request PromptRequest) error {
+func (s *Server) promptWithUsageSelection(ctx context.Context, agentAdapter adapter.AgentAdapter, request PromptRequest, pendingCanvas *string) error {
 	if err := s.procMgr.ConsumeUsageSelectionModel(); err != nil {
 		return err
 	}
-	return promptOrSteer(ctx, agentAdapter, request)
+	return s.promptWithCanvasGuidance(ctx, agentAdapter, request, pendingCanvas)
 }

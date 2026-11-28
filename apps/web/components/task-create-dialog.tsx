@@ -44,6 +44,8 @@ import {
   buildDialogFormBodyProps,
 } from "@/components/task-create-dialog-prop-builders";
 import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
+import { ForkReviewStartWarning } from "@/components/task/fork-review-start-warning";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import {
@@ -386,6 +388,7 @@ function TaskCreateFooterSlot({
   return (
     <>
       {recoveryActive ? <TaskCreateDialogRecoveryPanel recovery={setup.recovery} /> : null}
+      {props.editingTask?.manualStartRequired && <ForkReviewStartWarning />}
       <DialogFooter
         className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
         data-testid="task-create-dialog-footer"
@@ -402,7 +405,49 @@ function TaskCreateFooterSlot({
   );
 }
 
-function TaskCreateDialogContent(props: TaskCreateDialogProps) {
+function resolveForkReviewRunner(
+  editingTask: NonNullable<TaskCreateDialogProps["editingTask"]>,
+  boardTask: ReturnType<typeof findTaskInSnapshots>,
+) {
+  return {
+    primaryExecutorProfileId:
+      editingTask.primaryExecutorProfileId ?? boardTask?.primaryExecutorProfileId ?? undefined,
+    runnerEditable: editingTask.runnerEditable ?? boardTask?.runnerEditable,
+    runnerIneligibleReason: editingTask.runnerIneligibleReason ?? boardTask?.runnerIneligibleReason,
+  };
+}
+
+function useEditPropsWithManualStart(props: TaskCreateDialogProps): TaskCreateDialogProps {
+  const { editingTask } = props;
+  const taskId = editingTask?.id;
+  const boardTask = useAppStore((state) =>
+    taskId
+      ? findTaskInSnapshots(taskId, state.kanbanMulti?.snapshots ?? {}, state.kanban?.tasks)
+      : null,
+  );
+  const hasSessions = useAppStore((state) =>
+    Boolean(taskId && state.taskSessionsByTask?.itemsByTaskId[taskId]?.length),
+  );
+  if (!editingTask) return props;
+  const manualStartRequired =
+    !hasSessions &&
+    !boardTask?.primarySessionId &&
+    !boardTask?.sessionCount &&
+    (editingTask.manualStartRequired === true ||
+      boardTask?.metadata?.fork_pr_requires_manual_start === true);
+  if (!manualStartRequired && !editingTask.manualStartRequired) return props;
+  return {
+    ...props,
+    editingTask: {
+      ...editingTask,
+      manualStartRequired,
+      ...resolveForkReviewRunner(editingTask, boardTask),
+    },
+  };
+}
+
+function TaskCreateDialogContent(inputProps: TaskCreateDialogProps) {
+  const props = useEditPropsWithManualStart(inputProps);
   const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const preserveQueuedLastUsedOnCloseRef = useRef<{

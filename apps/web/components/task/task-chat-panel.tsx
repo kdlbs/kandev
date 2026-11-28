@@ -2,6 +2,7 @@
 
 /* eslint-disable max-lines -- this component composes the complete transcript surface. */
 
+import { SessionlessChatContentContext } from "./sessionless-chat-content";
 import { SelectionActionSlotProvider } from "@/components/shared/selection-action-slot";
 import {
   useCallback,
@@ -10,6 +11,7 @@ import {
   useRef,
   useState,
   memo,
+  useContext,
   type MutableRefObject,
   type RefObject,
 } from "react";
@@ -1226,8 +1228,23 @@ function usePanelLaunchStatusSummary(statusTaskId: string | null, taskIdHint: st
   return { summaryTaskId, launchStatusSummary };
 }
 
+export const TaskChatPanel = memo(function TaskChatPanel(props: TaskChatPanelProps) {
+  const sessionlessContent = useContext(SessionlessChatContentContext);
+  const taskId = props.statusTaskId ?? props.taskId ?? sessionlessContent?.taskId;
+  if (sessionlessContent && !props.sessionId && sessionlessContent.taskId === taskId) {
+    return (
+      <PanelRoot data-testid="session-chat">
+        <PanelBody className="flex" padding={false}>
+          {sessionlessContent.content}
+        </PanelBody>
+      </PanelRoot>
+    );
+  }
+  return <SessionChatPanel {...props} />;
+});
+
 // eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
-export const TaskChatPanel = memo(function TaskChatPanel({
+function SessionChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
@@ -1709,7 +1726,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       </SelectionActionSlotProvider>
     </SessionRecoveryProvider>
   );
-});
+}
 
 type ChatFooterProps = {
   isArchived: boolean;

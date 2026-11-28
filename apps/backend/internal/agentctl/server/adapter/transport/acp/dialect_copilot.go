@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -15,11 +16,22 @@ var copilotBackgroundAgentID = regexp.MustCompile(
 
 func newCopilotACPDialect() acpDialect {
 	return acpDialect{
+		suppressNotification: isCopilotOrgPluginNotice,
 		subagentFrame:        parseCopilotSubagentFrame,
 		subagentResult:       copilotSubagentResult,
 		subagentControl:      copilotSubagentControl,
 		configurationCommand: copilotConfigurationCommand,
 	}
+}
+
+func isCopilotOrgPluginNotice(n acp.SessionNotification) bool {
+	chunk := n.Update.AgentMessageChunk
+	if chunk == nil || chunk.MessageId != nil || chunk.Content.Text == nil {
+		return false
+	}
+	text := chunk.Content.Text.Text
+	return text == "Info: Plugins required by your organization admin are ready." ||
+		strings.HasPrefix(text, "Info: Updating plugins required by your organization admin:")
 }
 
 func copilotConfigurationCommand(

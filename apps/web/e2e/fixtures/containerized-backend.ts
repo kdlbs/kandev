@@ -191,6 +191,8 @@ export async function startContainerizedBackend(): Promise<ContainerizedBackend>
       `HOME=${homeDir}`,
       `KANDEV_HOME_DIR=${homeDir}`,
       `KANDEV_SERVER_PORT=${backendPort}`,
+      // The outer daemon forwards its host loopback port to this namespace.
+      "KANDEV_SERVER_HOST=0.0.0.0",
       `KANDEV_WEB_DIST_DIR=${WEB_DIST}`,
       `KANDEV_DATABASE_PATH=${path.join(homeDir, "kandev.db")}`,
       "KANDEV_E2E_MOCK=true",

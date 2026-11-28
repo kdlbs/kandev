@@ -8,6 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
+import { ForkReviewStartWarning } from "./task/fork-review-start-warning";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
 import { TaskMoveErrorBanner } from "./task/task-move-error-banner";
 import {
@@ -242,6 +243,29 @@ function PreviewPanelHeader({
   );
 }
 
+function PreviewForkReviewStart({
+  ensureSession,
+  menu,
+  boardRow,
+}: {
+  ensureSession?: UseEnsureTaskSessionResult;
+  menu: ReturnType<typeof useTaskActionsMenu>;
+  boardRow: TaskActionsMenuBoardRow | null;
+}) {
+  if (ensureSession?.status !== "manual_start_required") return null;
+  return (
+    <div
+      className="@container mx-auto mt-auto w-full max-w-2xl overflow-auto px-3 py-3"
+      data-testid="preview-sessionless-chat"
+    >
+      <ForkReviewStartWarning
+        inChat
+        onStart={boardRow ? () => menu.setShowEditDialog(true) : undefined}
+      />
+    </div>
+  );
+}
+
 export function TaskPreviewPanel({
   task,
   sessionId = null,
@@ -312,6 +336,13 @@ export function TaskPreviewPanel({
             sessionId={sessionId}
             isArchived={isArchived}
             ensureSession={ensureSession}
+            sessionlessChatContent={
+              <PreviewForkReviewStart
+                ensureSession={ensureSession}
+                menu={menu}
+                boardRow={boardRow}
+              />
+            }
             workspaceId={workspaceId}
             onSessionChange={onSessionChange}
           />

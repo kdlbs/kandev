@@ -71,6 +71,7 @@ make_complete_bundle() {
   printf 'linux amd64 helper\n' > "$bundle_dir/bin/agentctl-linux-amd64"
   printf 'linux arm64 helper\n' > "$bundle_dir/bin/agentctl-linux-arm64"
   printf 'darwin amd64 helper\n' > "$bundle_dir/bin/agentctl-darwin-amd64"
+  printf 'windows amd64 helper\n' > "$bundle_dir/bin/agentctl-windows-amd64.exe"
   chmod +x "$bundle_dir/bin/"*
   write_macho "$bundle_dir/bin/agentctl-darwin-arm64" signed
 }
@@ -90,6 +91,7 @@ const helpers = [
   ["agentctl-linux-arm64", "linux/arm64"],
   ["agentctl-darwin-amd64", "darwin/amd64"],
   ["agentctl-darwin-arm64", "darwin/arm64"],
+  ["agentctl-windows-amd64.exe", "windows/amd64"],
 ].map(([name, platform]) => {
   const bytes = fs.readFileSync(path.join(bundle, "bin", name));
   return {
@@ -129,7 +131,7 @@ fi
 standard_bundle="$TMP_DIR/standard bundle"
 make_complete_bundle "$standard_bundle"
 write_remote_helper_manifest "$standard_bundle" standard "$TMP_DIR/standard-manifest.json"
-for helper in agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-arm64 agentctl-darwin-amd64; do
+for helper in agentctl-linux-amd64 agentctl-linux-arm64 agentctl-darwin-arm64 agentctl-darwin-amd64 agentctl-windows-amd64.exe; do
   rm "$standard_bundle/bin/$helper"
 done
 cp "$TMP_DIR/standard-manifest.json" "$standard_bundle/remote-helpers.json"
@@ -239,6 +241,7 @@ expected_runtime_binaries="$(printf '%s\n' \
   bin/agentctl-darwin-arm64 \
   bin/agentctl-linux-amd64 \
   bin/agentctl-linux-arm64 \
+  bin/agentctl-windows-amd64.exe \
   bin/kandev)"
 actual_runtime_binaries="$(grep -oE 'bin/[[:alnum:]_.-]+' "$TMP_DIR/backend-dry-run" | sort -u)"
 [ "$actual_runtime_binaries" = "$expected_runtime_binaries" ] ||
@@ -289,7 +292,8 @@ for binary in \
   agentctl-linux-amd64 \
   agentctl-linux-arm64 \
   agentctl-darwin-arm64 \
-  agentctl-darwin-amd64; do
+  agentctl-darwin-amd64 \
+  agentctl-windows-amd64.exe; do
   grep -Fq "apps/backend/bin/$binary" "$TMP_DIR/runtime-dry-run" ||
     fail "runtime target did not package $binary"
 done
@@ -306,7 +310,8 @@ for binary in \
   agentctl-linux-amd64 \
   agentctl-linux-arm64 \
   agentctl-darwin-arm64 \
-  agentctl-darwin-amd64; do
+  agentctl-darwin-amd64 \
+  agentctl-windows-amd64.exe; do
   printf 'new %s\n' "$binary" > "$runtime_backend/bin/$binary"
   chmod +x "$runtime_backend/bin/$binary"
 done

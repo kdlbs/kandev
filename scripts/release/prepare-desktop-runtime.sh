@@ -20,6 +20,7 @@ or, for a legacy complete bundle:
   bin/agentctl-linux-arm64
   bin/agentctl-darwin-arm64
   bin/agentctl-darwin-amd64
+  bin/agentctl-windows-amd64.exe
 
 Options:
   --bundle-dir DIR  Source runtime bundle. Defaults to dist/kandev.
@@ -40,6 +41,7 @@ REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-arm64
   agentctl-darwin-arm64
   agentctl-darwin-amd64
+  agentctl-windows-amd64.exe
 )
 
 while [ "$#" -gt 0 ]; do

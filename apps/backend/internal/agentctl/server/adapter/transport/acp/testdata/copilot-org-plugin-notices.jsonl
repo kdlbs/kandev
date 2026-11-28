@@ -1,0 +1,2 @@
+{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Info: Plugins required by your organization admin are ready."}}}
+{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Info: Updating plugins required by your organization admin: example@marketplace..."}}}

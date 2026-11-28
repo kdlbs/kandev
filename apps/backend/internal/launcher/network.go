@@ -37,10 +37,11 @@ func resolveBackendEndpoints(cfg *config.Config, port int) (backendEndpointSet, 
 	nonLoopbackTargets := make([]string, 0, len(binds))
 	nonLoopbackAccessURLs := make([]string, 0, len(binds))
 	seen := make(map[string]struct{}, len(binds))
+	defaultBind := server.UsesDefaultBind()
 	for _, bind := range binds {
 		host := endpointHost(bind)
 		healthURL := backendURLForHost(host, port) + "/health"
-		accessURL := backendURLForHost(browserEndpointHost(bind, host), port)
+		accessURL := backendURLForHost(browserEndpointHost(bind, host, defaultBind), port)
 		if _, ok := seen[healthURL]; ok {
 			continue
 		}
@@ -68,9 +69,9 @@ func resolveBackendEndpoints(cfg *config.Config, port int) (backendEndpointSet, 
 	}, nil
 }
 
-func browserEndpointHost(bind, probeHost string) string {
+func browserEndpointHost(bind, probeHost string, defaultBind bool) string {
 	ip := net.ParseIP(strings.TrimSuffix(strings.TrimSpace(bind), "."))
-	if ip != nil && ip.IsUnspecified() && ip.To4() != nil {
+	if defaultBind || (ip != nil && ip.IsUnspecified() && ip.To4() != nil) {
 		return "localhost"
 	}
 	return probeHost

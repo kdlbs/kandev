@@ -1,3 +1,4 @@
+import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import {
   expectMermaidMessageUnchanged,
@@ -23,6 +24,33 @@ test.describe("Mobile Mermaid diagram fit", () => {
     );
 
     await expectMermaidDiagramFitsViewport(session);
+    const frame = session.activeChat().locator(".mermaid-block").last();
+    const grip = frame.getByRole("separator");
+    await grip.scrollIntoViewIfNeeded();
+    const box = await grip.boundingBox();
+    if (!box) throw new Error("Missing touch resize grip");
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const initial = await frame.evaluate((el) => el.clientHeight);
+    const cdp = await testPage.context().newCDPSession(testPage);
+    try {
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y: y + 64 }],
+      });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await expect.poll(() => frame.evaluate((el) => el.clientHeight)).toBe(initial + 64);
+      await grip.tap();
+      const reset = frame.locator(".mermaid-frame-reset");
+      await expect(reset).toBeVisible();
+      expect((await reset.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await reset.tap();
+      await expect.poll(() => frame.evaluate((el) => el.clientHeight)).toBe(initial);
+    } finally {
+      await cdp.detach();
+    }
   });
 
   // @covers AC-UI-MERMAID-RENDERING-002.4, AC-UI-MERMAID-RENDERING-002.5

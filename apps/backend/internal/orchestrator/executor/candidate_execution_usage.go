@@ -56,7 +56,7 @@ func (e *Executor) candidateUsageLaunchRequest(ctx context.Context, session *mod
 
 func candidateUsageLocalExecutor(kind string) bool {
 	switch kind {
-	case "local", "local_pc", "worktree", "standalone":
+	case string(models.ExecutorTypeLocal), "local_pc", string(models.ExecutorTypeWorktree), "standalone":
 		return true
 	default:
 		return false

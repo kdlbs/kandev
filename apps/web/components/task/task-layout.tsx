@@ -1,7 +1,7 @@
 "use client";
 
 import { TaskGraphPanelRequest } from "@/components/task-graph/task-graph-panel-request";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { ClarificationDraftProvider } from "./chat/clarification-draft-context";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -17,6 +17,7 @@ import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import type { TaskTopbarRepository } from "./task-page-content-helpers";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { SessionlessChatContentContext } from "./sessionless-chat-content";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 
 // Re-export for backwards compatibility
@@ -56,6 +57,7 @@ type TaskLayoutProps = {
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
   hasPageLevelFeedback?: boolean;
+  sessionlessChatContent?: ReactNode;
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
@@ -64,10 +66,19 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
     setPickerWorkspaceId(props.workspaceId);
   }
+  const chatContent = useMemo(
+    () =>
+      props.taskId && props.sessionlessChatContent
+        ? { taskId: props.taskId, content: props.sessionlessChatContent }
+        : null,
+    [props.taskId, props.sessionlessChatContent],
+  );
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
       <ClarificationDraftProvider taskId={props.taskId ?? null}>
-        <ResponsiveTaskLayout {...props} />
+        <SessionlessChatContentContext.Provider value={chatContent}>
+          <ResponsiveTaskLayout {...props} />
+        </SessionlessChatContentContext.Provider>
       </ClarificationDraftProvider>
       {props.taskId && (
         <TaskGraphPanelRequest taskId={props.taskId} usesDockview={usesDesktopWorkbench} />

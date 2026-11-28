@@ -1988,6 +1988,8 @@
   "stopDevServerPreview": "Stop dev server preview",
   "startFreshSession": "Start fresh session",
   "startPlanMode": "Start Plan Mode",
+  "forkReviewManualStartTitle": "Manual start required",
+  "forkReviewManualStartDetail": "Kandev could not verify that this PR comes from the target repository. Starting the review can run setup scripts from the PR. Those scripts may have access to executor credentials.",
   "startTask": "Start task",
   "startTaskInPlanMode": "Start task in plan mode",
   "startTunnel": "Start tunnel",

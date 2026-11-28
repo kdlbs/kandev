@@ -25,11 +25,16 @@ Kandev is a developer workbench that runs agents with access to repositories, to
 | A trusted team | Dedicated host or service account, identity-aware proxy, private network, scoped credentials, and separate deployments for different trust groups | Treating the Kandev UI as a tenant or role boundary |
 | Unattended automation | Dedicated agent and executor profiles, narrow repository credentials, workflow limits, and provider-side branch protection | Reusing a developer's broad personal token or enabling unrestricted approval bypasses |
 
-The default backend host is `0.0.0.0`. Plain `kandev`, `kandev run`, and `npx kandev@latest` commands inherit that all-interface bind unless you override it. For local-only access, set `KANDEV_SERVER_HOST=127.0.0.1` before launch; configure an equivalent protected bind for a managed service. Browser origin and CORS checks reduce accidental cross-site access, but they do not identify or authorize a user. `auth.jwtSecret` is compatibility configuration and does not enable product login.
+Standalone CLI launches listen only on `127.0.0.1` by default. The official
+container and Kandev-managed services default to `0.0.0.0`. Every launch
+honors explicit bind settings. For a host service that serves only local
+clients, set `server.host: "127.0.0.1"` in its configuration.
 
-```bash
-KANDEV_SERVER_HOST=127.0.0.1 kandev
-```
+If you used remote access through a standalone instance with no explicit bind,
+configure its listener before upgrading. Prefer a specific private address, or
+keep the loopback bind and use a protected tunnel. Browser origin and CORS
+checks do not authorize users. The `auth.jwtSecret` setting does not enable
+product login.
 
 For remote access, protect the whole origin, including:
 

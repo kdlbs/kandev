@@ -15,6 +15,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   buildRemoteHelperArtifact,
+  PRE_WINDOWS_REMOTE_HELPERS,
   REMOTE_HELPERS,
 } from "./remote-helper-assets.mjs";
 import {
@@ -266,9 +267,11 @@ async function runtimeFixture(
     full = false,
     missing = [],
     wrongVersion = false,
+    helpers = REMOTE_HELPERS,
   } = {},
 ) {
   const f = await fixture(t);
+  const shipped = new Set(helpers.map(({ asset }) => asset));
   const run = promisify(execFile);
   const binDir = join(f.root, "helpers");
   await mkdir(binDir);
@@ -283,6 +286,7 @@ async function runtimeFixture(
     stable: true,
   });
   for (const name of await readdir(join(artifact, "assets"))) {
+    if (!shipped.has(name.replace(/\.sha256$/, ""))) continue;
     await f.add(name, await readFile(join(artifact, "assets", name)));
   }
   const bundle = join(f.root, "kandev");
@@ -301,13 +305,16 @@ async function runtimeFixture(
       ),
     );
     if (wrongVersion) manifest.version = "v0.98.0";
+    manifest.helpers = manifest.helpers.filter(({ asset }) =>
+      shipped.has(asset),
+    );
     await writeFile(
       join(bundle, "remote-helpers.json"),
       JSON.stringify(manifest),
     );
   }
   if (full || !compact) {
-    for (const helper of REMOTE_HELPERS)
+    for (const helper of helpers)
       await writeFile(join(bundle, "bin", helper.name), helper.name, {
         mode: 0o755,
       });
@@ -390,6 +397,29 @@ test("Windows ZIP verification requires runtime binaries for legacy and compact 
       await assert.rejects(verifyPublishedAssets(bad), /missing|runtime/);
     }
   }
+});
+test("a release cut before the Windows helper verifies against its own helper set", async (t) => {
+  for (const options of [
+    { compact: false },
+    { compact: true },
+    { compact: true, full: true },
+  ]) {
+    const legacy = () =>
+      runtimeFixture(t, { ...options, helpers: PRE_WINDOWS_REMOTE_HELPERS });
+    await verifyPublishedAssets({
+      ...(await legacy()),
+      helpers: PRE_WINDOWS_REMOTE_HELPERS,
+    });
+    await assert.rejects(
+      verifyPublishedAssets(await legacy()),
+      /agentctl-windows-amd64\.exe|platform records/,
+    );
+  }
+  const current = await runtimeFixture(t, { compact: true, full: true });
+  await assert.rejects(
+    verifyPublishedAssets({ ...current, helpers: PRE_WINDOWS_REMOTE_HELPERS }),
+    /platform records|Unexpected runtime artifact/,
+  );
 });
 test("compact Windows ZIP must carry the selected release identity", async (t) => {
   const f = await runtimeFixture(t, { zip: true, wrongVersion: true });
