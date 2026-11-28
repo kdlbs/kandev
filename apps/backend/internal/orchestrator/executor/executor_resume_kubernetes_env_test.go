@@ -55,6 +55,7 @@ func TestKubernetesResumeRestoresRecordedProfileEnvironment(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-RESUME-REMOTE-AUTH-001.4
 func TestKubernetesResumeProfileEnvironmentFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -71,7 +72,10 @@ func TestKubernetesResumeProfileEnvironmentFailures(t *testing.T) {
 			repo := &resumeProfileRepository{mockRepository: newMockRepository(), profile: tc.profile, err: tc.lookupErr}
 			exec := newTestExecutor(t, &mockAgentManager{}, repo.mockRepository)
 			exec.repo = repo
-			config := executorConfig{ExecutorID: "recorded"}
+			config := executorConfig{
+				ExecutorID: "recorded",
+				Metadata:   map[string]interface{}{profileKeyRemoteAuthSecrets: `{"gh_cli_env":"old-secret"}`},
+			}
 			err := exec.restoreKubernetesProfileEnvironment(context.Background(), &config, map[string]interface{}{lifecycle.MetadataKeyExecutorProfileID: "profile"})
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error = %v, want error %v", err, tc.wantError)
@@ -79,21 +83,31 @@ func TestKubernetesResumeProfileEnvironmentFailures(t *testing.T) {
 			if len(config.ProfileEnvVars) != 0 {
 				t.Fatal("loaded environment from unavailable or foreign profile")
 			}
+			if got := config.Metadata[profileKeyRemoteAuthSecrets]; got != "" {
+				t.Fatalf("remote authentication selection = %#v, want empty", got)
+			}
 		})
 	}
 }
 
+// @covers AC-EXECUTORS-RESUME-REMOTE-AUTH-001.4
 func TestKubernetesResumeWithoutRecordedProfileSkipsLookup(t *testing.T) {
 	for _, recorded := range []map[string]interface{}{nil, {}, {lifecycle.MetadataKeyExecutorProfileID: ""}} {
 		repo := &resumeProfileRepository{mockRepository: newMockRepository(), err: errors.New("unexpected profile lookup")}
 		exec := newTestExecutor(t, &mockAgentManager{}, repo.mockRepository)
 		exec.repo = repo
-		config := executorConfig{ExecutorID: "recorded"}
+		config := executorConfig{
+			ExecutorID: "recorded",
+			Metadata:   map[string]interface{}{profileKeyRemoteAuthSecrets: `{"gh_cli_env":"old-secret"}`},
+		}
 		if err := exec.restoreKubernetesProfileEnvironment(context.Background(), &config, recorded); err != nil {
 			t.Fatalf("resume without a recorded profile: %v", err)
 		}
 		if len(config.ProfileEnvVars) != 0 {
 			t.Fatal("loaded environment without a recorded profile")
+		}
+		if got := config.Metadata[profileKeyRemoteAuthSecrets]; got != "" {
+			t.Fatalf("remote authentication selection = %#v, want empty", got)
 		}
 	}
 }

@@ -359,6 +359,12 @@ Current connection configuration and recorded workload configuration serve diffe
 
 On resume, Kandev reloads environment definitions from the recorded executor profile and resolves secret references at the launch checkpoint. Changes to that profile's environment can therefore affect a resumed process; they do not rewrite the Pod or storage snapshot. If the profile has been deleted, its environment definitions are unavailable. Profile lookup failures and executor ownership mismatches block resume.
 
+Resume also resolves selected remote authentication methods, including the GitHub CLI token, with the same rules as a fresh launch. These selections are separate from profile and repository environment secret references.
+
+On Kubernetes resume, Kandev reads these selections from the current configuration of the recorded profile. Replacing or clearing a selection affects the next resumed process; a deleted profile supplies no previous selection. An old runtime binding is not reused after it is cleared.
+
+If a selected remote authentication secret is unavailable, that method's value is omitted. Profile and repository environment secret references still block launch when unavailable. If authentication fails after resume, check that the selected secret still exists and is accessible to the user resuming the session.
+
 Stop, including force-stop, terminates only the selected session’s agentctl instance and closes its local clients and forwards. Sibling sessions, the Pod, and the workspace remain available. Backend shutdown closes local connections and preserves the remote resources. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
 
 A recoverable agent error also preserves the established Pod, workspace, and

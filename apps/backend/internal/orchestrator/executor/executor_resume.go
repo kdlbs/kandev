@@ -2158,6 +2158,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
+	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
+		e.applyContainerCredentials(ctx, req, metadata)
+	}
 	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(
 		ctx, req.AgentProfileID, execConfig.ProfileEnvVars,
 	)
