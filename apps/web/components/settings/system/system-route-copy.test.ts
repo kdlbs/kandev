@@ -52,6 +52,7 @@ vi.mock("./database-stats-card", async () => {
 vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
 vi.mock("./retention-settings-card", () => ({ RetentionSettingsCard: () => null }));
 vi.mock("./tool-payload-retention-card", () => ({ ToolPayloadRetentionCard: () => null }));
+vi.mock("./archived-data-retention-card", () => ({ ArchivedDataRetentionCard: () => null }));
 afterEach(() => {
   cleanup();
   databaseState.value = null;

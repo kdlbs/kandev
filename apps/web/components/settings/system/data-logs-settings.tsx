@@ -19,11 +19,13 @@ import { useRouter } from "@/lib/routing/client-router";
 import { settingsTargetFromHash } from "@/lib/settings-discovery/target";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
+import { ArchivedDataRetentionCard } from "./archived-data-retention-card";
 import { BACKUP_SQL_COMMAND, SystemRouteShell } from "./system-route-shell";
 
 const DATA_LOGS_TARGET_TO_TAB = {
   [SYSTEM_SETTINGS_TARGETS.database]: "database",
   [SYSTEM_SETTINGS_TARGETS.toolPayloadRetention]: "database",
+  [SYSTEM_SETTINGS_TARGETS.archivedDataRetention]: "database",
   [SYSTEM_SETTINGS_TARGETS.backups]: "database",
   [SYSTEM_SETTINGS_TARGETS.logs]: "logs",
 } as const;
@@ -50,6 +52,15 @@ function DatabasePanel() {
         contentClassName="divide-y-0"
       >
         <ToolPayloadRetentionCard />
+      </SettingsGroup>
+      <Separator />
+      <SettingsGroup
+        title={t("system:archivedData.title")}
+        description={t("system:archivedData.description")}
+        discoveryTargetId={SYSTEM_SETTINGS_TARGETS.archivedDataRetention}
+        contentClassName="divide-y-0"
+      >
+        <ArchivedDataRetentionCard />
       </SettingsGroup>
       <Separator />
       <SettingsGroup
