@@ -485,6 +485,21 @@ func provideGateway(
 			log.Error("Failed to subscribe to clarification notifications", zap.Error(err))
 		}
 
+		_, err = eventBus.Subscribe(events.TaskChildStallUndeliverable, func(ctx context.Context, event *bus.Event) error {
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			taskID, _ := data["task_id"].(string)
+			sessionID, _ := data["session_id"].(string)
+			occurrenceID, _ := data["occurrence_id"].(string)
+			notificationSvc.HandleChildStallUndeliverable(ctx, taskID, sessionID, occurrenceID)
+			return nil
+		})
+		if err != nil {
+			log.Error("Failed to subscribe to child stall notifications", zap.Error(err))
+		}
+
 		_, err = eventBus.Subscribe(events.OfficeInboxItem, func(ctx context.Context, event *bus.Event) error {
 			data, ok := event.Data.(map[string]interface{})
 			if !ok {

@@ -4,5 +4,7 @@ export const NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED = "session.permissi
 export const NOTIFICATION_EVENT_SESSION_FAILED = "session.failed";
 export const NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE = "system.update_available";
 export const NOTIFICATION_EVENT_OFFICE_INBOX_ITEM = "office.inbox_item";
+export const NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE =
+  "session.child_stall_undeliverable";
 
 export const DEFAULT_NOTIFICATION_EVENTS = [NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED];

@@ -26,6 +26,7 @@ export const defaultFeatureFlags = {
   codexAppServer: false,
   acpV2: false,
   agentBackgroundWork: false,
+  childStallAlerts: false,
   opencodePlugin: false,
 } as const;
 

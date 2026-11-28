@@ -1519,6 +1519,9 @@ func startGatewayAndServe(
 		return false
 	}
 	log.Info("Orchestrator initialized")
+	if cfg.Features.ChildStallAlerts {
+		startChildStallProducer(ctx, orchestratorSvc, repos.Task, log, addCleanup)
+	}
 
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING

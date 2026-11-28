@@ -34,6 +34,11 @@ const (
 	// synthesized decision, or a queued run. Payload:
 	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
 	TaskStalled = "task.stalled"
+
+	// TaskChildStallUndeliverable fires once per child-turn stalled candidate
+	// whose parent has no promptable primary session. Notification providers
+	// relay it to the operator; the payload names the stalled child task.
+	TaskChildStallUndeliverable = "task.child_stall_undeliverable"
 )
 
 // Event types for plugin-backed canvas lifecycle changes. Payloads contain

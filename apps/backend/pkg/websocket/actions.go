@@ -161,6 +161,8 @@ const (
 	ActionOrchestratorStop   = "orchestrator.stop"
 
 	// Message Queue actions
+	// ActionTaskChildStallRetry retries a failed child-turn stalled alert.
+	ActionTaskChildStallRetry       = "task.child_stall.retry"
 	ActionMessageQueueAdd           = "message.queue.add"
 	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"

@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
+  NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_FAILED,
   NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED,
@@ -43,6 +44,7 @@ function isSemanticSessionNotification(eventType: string): boolean {
   return (
     eventType === NOTIFICATION_EVENT_SESSION_TURN_FINISHED ||
     eventType === NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED ||
+    eventType === NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE ||
     eventType === NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED ||
     eventType === NOTIFICATION_EVENT_SESSION_FAILED
   );
@@ -140,6 +142,14 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
       {
         titleKey: "common:notificationClarificationTitle",
         bodyKey: "common:notificationClarificationBody",
+      },
+    ),
+    [NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE]: registerNotificationHandler(
+      store,
+      NOTIFICATION_EVENT_SESSION_CHILD_STALL_UNDELIVERABLE,
+      {
+        titleKey: "common:notificationChildStallTitle",
+        bodyKey: "common:notificationChildStallBody",
       },
     ),
     [NOTIFICATION_EVENT_SESSION_PERMISSION_REQUESTED]: registerNotificationHandler(
