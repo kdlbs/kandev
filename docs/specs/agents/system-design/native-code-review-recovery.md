@@ -72,9 +72,13 @@ unmergeable ref returns `review_workspace_unavailable`; it does not fall back
 to a same-named origin branch or a stored base. Without an explicit target, the
 reader keeps the live target branch (`origin/<branch>` first, then the local
 branch), with the stored session base as its fallback. This excludes changes
-already merged from an ordinary target. A single repository keeps the legacy
-bare-path scope key. A multi-repository task uses its workspace-relative
-repository path, matching the Review panel.
+already merged from an ordinary target. A workspace-root single repository
+keeps the legacy bare-path scope key. When agentctl reports a named non-root
+scope, `ReviewChangeSource` copies that scope onto each uncommitted file before
+`CollectChanges` builds review keys. This keeps review annotations aligned with
+the corresponding repository-scoped Changes diff, including when the named
+scope is the only registered repository. Multi-repository tasks use their
+workspace-relative repository paths as well.
 
 `CollectChanges` propagates a committed-source `review_workspace_unavailable`
 error. It does not start a partial review when an explicit comparison target

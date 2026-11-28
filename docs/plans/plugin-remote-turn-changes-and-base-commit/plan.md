@@ -5,10 +5,12 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-002
   - REQ-TASKS-TURN-CHANGES-002
   - REQ-PLATFORM-GIT-CAPTURE-RECOVERY-001
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-001
 system_design:
   - ../../specs/executors/system-design/remote-executor-plugins.md
   - ../../specs/tasks/system-design/turn-changed-files.md
   - ../../specs/platform/system-design/workspace-git-capture-recovery.md
+  - ../../specs/agents/system-design/native-code-review-recovery.md
 legacy_specs: []
 ---
 
@@ -23,7 +25,7 @@ Issue #5554 is assigned to `carlosflorencio`.
 Deliver the two independent backend fixes sequentially in two small work orders:
 
 1. Project `plugin_remote` turn-change checkout subpaths through `launchRepositoryProjectionKey` so checkout scopes match the `<repo>-<branch>` directories materialized by `agentctl`.
-2. Add a single-non-root-scope fallback in `agentctl.Client.GetGitStatusWithDetails` when the root tracker returns `repository_unavailable`, restoring base-commit capture and the `session.cumulative_diff` fallback without extra requests on root-repository layouts.
+2. Add a single-non-root-scope fallback in `agentctl.Client.GetGitStatusWithDetails` when the root tracker returns `repository_unavailable`, restoring base-commit capture and the `session.cumulative_diff` fallback without extra requests on root-repository layouts. Preserve that scope on uncommitted review files so findings use the matching repository-scoped diff key.
 
 Both work orders touch disjoint packages (`internal/agent/runtime/lifecycle` vs `internal/agent/runtime/agentctl` + `internal/agent/handlers`) and have no ordering dependency between them. Execute 01 then 02 sequentially by default.
 
@@ -58,8 +60,9 @@ Smallest reproduction: point `agentctl.Client` at an HTTP test server where `GET
 | --- | --- | --- | --- |
 | `plugin_remote` turn-change checkouts | 1: implementation violates active criteria | `AC-EXECUTORS-PLUGIN-002.4` (normal Git flows on plugin remote sessions), `AC-TASKS-TURN-CHANGES-002.1` (fresh start/end endpoints for each eligible attached Git checkout) | [Turn changed files](../../specs/tasks/system-design/turn-changed-files.md): note `launchRepositoryProjectionKey` projection for `plugin_remote` checkout subpaths |
 | Single non-root scope detailed Git status fallback | 1: implementation violates active criteria | `AC-EXECUTORS-PLUGIN-002.4`, `AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5` (enriched launch baseline capture retains observed comparison baseline and rejects unavailable enrichment) | [Workspace Git capture recovery](../../specs/platform/system-design/workspace-git-capture-recovery.md): document the single-non-root-scope fallback on `repository_unavailable` in `Client.GetGitStatusWithDetails` |
+| Scoped status files used by native review | 1: implementation loses repository identity | `AC-AGENTS-NATIVE-CODE-REVIEW-001.7` (named scopes use the same repository identity as the Changes diff) | [Native Code Review recovery](../../specs/agents/system-design/native-code-review-recovery.md): retain the named status scope on each uncommitted review file |
 
-No requirement text, ADR, SQL schema, wire protocol, runtime flag, UI, or public documentation change is needed. `docs/specs/executors/system-design/remote-executor-plugins.md` already declares that core owns `agentctl.Client` and Git materialization and requires no edit.
+The native review requirement and design clarify identity for named non-root scopes. No ADR, SQL schema, wire protocol, runtime flag, UI code, or public documentation change is needed. `docs/specs/executors/system-design/remote-executor-plugins.md` already declares that core owns `agentctl.Client` and Git materialization and requires no edit.
 
 ## Scope
 
@@ -68,6 +71,7 @@ No requirement text, ADR, SQL schema, wire protocol, runtime flag, UI, or public
 - Pass `executorType` into `turnChangeCheckoutsFromWorkspaceRepositories` from both lifecycle call sites (`initializeCreatedExecution` and `populateLaunchTurnChangeCheckouts`, falling back to `execution.ExecutorType` when `info.ExecutorType` is empty).
 - For `plugin_remote`, resolve each checkout's `RepositorySubpath` via `launchRepositoryProjectionKey` (matching `remoteWorkspaceProjectionFromLaunch(req, true)`), preserving recorded `RepositorySubpath`/`RepositorySubpathKnown` on other executor types or when no safe branch-scoped directory exists.
 - In `agentctl.Client.GetGitStatusWithDetails`, when the root `fresh=true&details=wait` read returns `error_code == "repository_unavailable"`, query `/api/v1/git/turn-changes/scopes` and, only when agentctl registers exactly one non-empty scope (`len(scopes) == 1 && scopes[0] != ""`), re-read `/api/v1/git/status?fresh=true&details=wait&repo=<scope>`.
+- In `ReviewChangeSource`, preserve a non-empty scoped status `RepositoryName` on each uncommitted file before review collection, so review keys match the repository-scoped Changes diff.
 - Unit and handler-boundary regression tests covering both fixes across single-repo, multi-repo, root-repo, repo-less, and error layouts.
 
 ### Out of scope
@@ -95,13 +99,13 @@ Why this is the simplest sufficient solution: it reuses the exact `launchReposit
   - Extract `soleNonRootRepositoryScope(ctx context.Context) (string, bool)` using `c.fetchJSONResult(ctx, "/api/v1/git/turn-changes/scopes", &resp)` (reusing `c.httpClient` timeout and lease transport rather than the 5-minute `longRunningHTTPClient`). Return `(resp.Scopes[0], true)` only when `err == nil`, `status >= 200 && status < 300`, `len(resp.Scopes) == 1`, and `resp.Scopes[0] != ""`.
   - In `GetGitStatusWithDetails(ctx)`: call `c.getGitStatusWithDetails(ctx, "")`; return immediately on `err == nil`. Only when `result != nil && result.ErrorCode == gitStatusErrorNoRepository`, check `c.soleNonRootRepositoryScope(ctx)` and, if found, return `c.getGitStatusWithDetails(ctx, scope)`. Otherwise return the original `(result, err)`.
 
-Why this is the simplest sufficient solution: every backend consumer of `Client.GetGitStatusWithDetails` (`Executor.captureBaseCommit` via `lifecycleAdapter`, `GitHandlers.computeCumulativeDiff`, `GitHandlers.computeGitCommits`, `ReviewChangeSource`, and archive/snapshot capture) wants the session's single repository detailed status when no root repository exists. Placing the bounded fallback in `Client.GetGitStatusWithDetails` avoids duplicating a second method across adapters and handlers while preserving identical single-request behavior for all root-repository layouts and identical error behavior for repo-less and multi-repo layouts.
+Why this is the simplest sufficient solution: every backend consumer of `Client.GetGitStatusWithDetails` (`Executor.captureBaseCommit` via `lifecycleAdapter`, `GitHandlers.computeCumulativeDiff`, `GitHandlers.computeGitCommits`, `ReviewChangeSource`, and archive/snapshot capture) wants the session's single repository detailed status when no root repository exists. Placing the bounded fallback in `Client.GetGitStatusWithDetails` avoids duplicating a second method across adapters and handlers while preserving identical single-request behavior for all root-repository layouts and identical error behavior for repo-less and multi-repo layouts. The review adapter also carries the selected scope onto per-file values, which `CollectChanges` uses to build the same keys as the Changes panel.
 
 ### Compatibility matrix
 
 | Layout / executor | Root status response | Scopes response | `GetGitStatusWithDetails` requests & result | Turn-change checkout subpath |
 | --- | --- | --- | --- | --- |
-| `plugin_remote` single-repo | `repository_unavailable` | `["<repo>-<branch>"]` | 3 requests (root -> scopes -> `?repo=<scope>`); returns scoped enriched status | `<repo>-<branch>` via `launchRepositoryProjectionKey` |
+| `plugin_remote` single-repo | `repository_unavailable` | `["<repo>-<branch>"]` | 3 requests (root -> scopes -> `?repo=<scope>`); returns scoped enriched status and preserves that scope on native review files | `<repo>-<branch>` via `launchRepositoryProjectionKey` |
 | `plugin_remote` multi-repo | `repository_unavailable` | `["<r1>-<b1>", "<r2>-<b2>"]` | 2 requests (root -> scopes); preserves root `repository_unavailable` | `<r1>-<b1>`, `<r2>-<b2>` via `launchRepositoryProjectionKey` |
 | Local / Worktree / k8s / Docker / Sprites / SSH single-repo | `ready` (`Success: true`) | Not called | 1 request; unchanged | Recorded `RepositorySubpath` (unchanged; coordinator resolves `""` when root scope exists) |
 | Repo-less task | `repository_unavailable` | `[]` | 2 requests (root -> scopes); preserves root `repository_unavailable` | Empty manifest |
@@ -118,6 +122,7 @@ Backend-only fix; no rendered UI or browser E2E changes are required.
 | `AC-EXECUTORS-PLUGIN-002.4`, `AC-TASKS-TURN-CHANGES-002.1` | `TestPopulateLaunchTurnChangeCheckoutsResolvesPluginRemoteScope` in `apps/backend/internal/agent/runtime/lifecycle/turn_changes_plugin_remote_test.go` — exercises `populateLaunchTurnChangeCheckouts` (and `initializeCreatedExecution` / `admitTurnChangeCapture`) and verifies checkout subpaths match registered `<repo>-<branch>` scopes |
 | `AC-EXECUTORS-PLUGIN-002.4`, `AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5` | `TestGetGitStatusWithDetailsSingleNonRootScopeFallback` in `apps/backend/internal/agent/runtime/agentctl/git_status_single_scope_test.go` — covers root-repo (1 request), bare-root single non-root scope (fallback succeeds with `BaseCommit` and `RepositoryName`), scoped `details_unavailable` (not masked), 0 scopes, 2+ scopes, scopes HTTP 404, and non-`repository_unavailable` errors |
 | `AC-EXECUTORS-PLUGIN-002.4`, `AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5` | `TestWsCumulativeDiffSingleNonRootScopeFallback` in `apps/backend/internal/agent/handlers/git_handlers_single_scope_test.go` — fake agentctl HTTP server verifying `wsCumulativeDiff` resolves `base_commit` and returns non-null `cumulative_diff` in both root-repo and bare-root single-scope layouts, and keeps `cumulative_diff: null` for multi-scope and zero-scope bare roots |
+| `AC-AGENTS-NATIVE-CODE-REVIEW-001.7`, `AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5` | `TestReviewChangeSourceCollectsScopedFilesWithRepositoryIdentity` in `apps/backend/internal/agent/handlers/review_change_source_test.go` — routes a single-scope fallback through `ReviewChangeSource` and `review.CollectChanges`, then checks the composite repository/path key |
 
 ## Work orders
 
@@ -137,6 +142,17 @@ Task 02 completed on 2026-11-28:
 - Agentctl, handler, and executor focused race tests passed after expected pre-fix failures for the client and handler regressions.
 - Changed-file Go lint passed with 0 issues.
 - Specification validation, specification lint, and `git diff --check` passed.
+- `make -C apps/backend build` passed.
+
+PR review remediation on 2026-11-28:
+
+- Red: `(cd apps/backend && go test -trimpath ./internal/agent/handlers -run '^TestReviewChangeSourceCollectsScopedFilesWithRepositoryIdentity$' -count=1)` failed because the collected file used a bare-path key.
+- Regression: `(cd apps/backend && go test -trimpath -race ./internal/agent/handlers -run '^TestReviewChangeSourceCollectsScopedFilesWithRepositoryIdentity$' -count=1)` passed after `ReviewChangeSource` stamped the scoped status identity onto each uncommitted file.
+- Handler: `(cd apps/backend && go test -trimpath -race ./internal/agent/handlers -run 'TestWsCumulativeDiff|TestReviewChangeSource' -count=1)` passed.
+- Agentctl: `(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/agentctl -run 'TestGetGitStatusWithDetails|TestGitStatus' -count=1)` passed.
+- Executor: `(cd apps/backend && go test -trimpath -race ./internal/orchestrator/executor -run 'TestExecutorBaseCaptureRecovery' -count=1)` passed.
+- `bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/turn_changes.go apps/backend/internal/agent/runtime/lifecycle/manager_execution.go apps/backend/internal/agent/runtime/lifecycle/manager_turn_changes.go apps/backend/internal/agent/runtime/lifecycle/turn_changes_plugin_remote_test.go apps/backend/internal/agent/runtime/agentctl/git.go apps/backend/internal/agent/runtime/agentctl/git_status_single_scope_test.go apps/backend/internal/agent/handlers/git_handlers_single_scope_test.go apps/backend/internal/agent/handlers/review_change_source.go apps/backend/internal/agent/handlers/review_change_source_test.go` passed with 0 issues.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check -- docs/specs docs/decisions` passed.
 - `make -C apps/backend build` passed.
 
 Design-phase validation on 2026-11-27:
