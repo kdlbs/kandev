@@ -75,6 +75,8 @@ const (
 	AgentErrorCauseCodeRuntimeCleanupFailed      = "runtime_cleanup_failed"
 	AgentErrorCauseCodeTimeout                   = "timeout"
 	AgentErrorCauseCodeUnknown                   = "unknown"
+	AgentErrorCauseCodeNativeStateMissing        = "native_state_missing"
+	AgentErrorCauseCodeNativeResumeUnsupported   = "native_resume_unsupported"
 	AgentErrorCauseCodeModelUnavailable          = "model_unavailable"
 	AgentErrorCauseCodeModelSelectionFailed      = "model_selection_failed"
 	AgentErrorCauseCodeThinkingLevelFailed       = "thinking_level_failed"
@@ -295,7 +297,7 @@ func normalizeAgentErrorCauseEvidence(cause *AgentErrorCause) {
 		cause.AttemptedModel = ""
 		cause.RuntimeVersion = ""
 		cause.ExitCode = nil
-	case AgentErrorCauseCodeRuntimeCleanupFailed:
+	case AgentErrorCauseCodeRuntimeCleanupFailed, AgentErrorCauseCodeNativeStateMissing, AgentErrorCauseCodeNativeResumeUnsupported:
 		promptNotSent := cause.PromptNotSent
 		clearAgentErrorCauseEvidence(cause)
 		cause.PromptNotSent = promptNotSent
@@ -515,6 +517,8 @@ func isKnownAgentErrorCauseCode(code string) bool {
 		AgentErrorCauseCodeRuntimeCleanupFailed,
 		AgentErrorCauseCodeTimeout,
 		AgentErrorCauseCodeUnknown,
+		AgentErrorCauseCodeNativeStateMissing,
+		AgentErrorCauseCodeNativeResumeUnsupported,
 		AgentErrorCauseCodeModelUnavailable,
 		AgentErrorCauseCodeModelSelectionFailed,
 		AgentErrorCauseCodePermissionModeFailed,
