@@ -8474,7 +8474,7 @@ func (s *Service) rollbackPromptDispatchOnGuardFailure(
 	failureCtx, cancel := options.failureContext(ctx)
 	defer cancel()
 	s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
-	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback, false)
 }
 
 // loadNonterminalWorkflowAutoStartSession reloads a session under the shared
@@ -9194,8 +9194,14 @@ func (s *Service) acknowledgePromptClaim(
 		return nil
 	}
 	if err := afterClaim(); err != nil {
-		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
-		if errors.Is(err, errLifecyclePromptReservationSuperseded) {
+		var turnStartRestart *queuedTurnStartRestartError
+		restart := errors.As(err, &turnStartRestart)
+		// A same-session re-dispatch keeps the admitted turn running: restoring the
+		// transient pre-claim state must not publish a client-visible settlement.
+		sameSessionRedispatch := restart && turnStartRestart.redrainSessionID != "" &&
+			turnStartRestart.redrainSessionID == turnStartRestart.sourceSessionID
+		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback, sameSessionRedispatch)
+		if errors.Is(err, errLifecyclePromptReservationSuperseded) || restart {
 			return err
 		}
 		return fmt.Errorf("%w: %v", errLifecyclePromptMessagePersistence, err)
@@ -9210,14 +9216,16 @@ func (s *Service) rollbackPromptClaimAfterAdmissionFailure(
 ) {
 	failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
 	defer cancel()
-	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback, false)
 }
 
 func (s *Service) rollbackPromptClaim(
 	ctx context.Context,
 	taskID, sessionID string,
 	rollback promptClaimRollback,
+	sameSessionRedispatch ...bool,
 ) {
+	quietRestore := len(sameSessionRedispatch) > 0 && sameSessionRedispatch[0]
 	guard := rollback.dispatchGuard
 	if guard != nil {
 		if err := guard.relockWithContext(ctx); err != nil {
@@ -9243,9 +9251,12 @@ func (s *Service) rollbackPromptClaim(
 			return
 		}
 	}
-	if rollback.sessionIdentity.SessionIncarnationID != "" {
+	switch {
+	case quietRestore:
+		s.restoreLifecycleClaimForRedispatch(ctx, taskID, sessionID, rollback)
+	case rollback.sessionIdentity.SessionIncarnationID != "":
 		s.restoreLifecycleClaimForIdentity(ctx, rollback.sessionIdentity, rollback.previousSessionState)
-	} else {
+	default:
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, rollback.previousSessionState)
 	}
 	if rollback.taskStateClaimed {
@@ -10106,6 +10117,39 @@ func (s *Service) restoreLifecycleClaim(
 	previousState models.TaskSessionState,
 ) {
 	s.updateTaskSessionState(ctx, taskID, sessionID, previousState, "", false)
+}
+
+// restoreLifecycleClaimForRedispatch restores the pre-claim session state for a
+// claim whose queue entry is re-dispatched to the same session. The claim is
+// not a client-visible settlement: publishing the transient pre-claim state
+// would move a running task out of IN_PROGRESS and clear the activity aggregate
+// before the re-dispatch re-claims it (AC-TASKS-RUNTIME-STATE-PUBLICATION-ORDER-001.5).
+func (s *Service) restoreLifecycleClaimForRedispatch(
+	ctx context.Context,
+	taskID, sessionID string,
+	rollback promptClaimRollback,
+) {
+	if identity := rollback.sessionIdentity; identity.SessionIncarnationID != "" {
+		if _, _, err := s.repo.UpdateTaskSessionStateIfCurrentIdentity(
+			ctx, identity.TaskID, identity.SessionID, identity.SessionIncarnationID,
+			models.TaskSessionStateRunning, rollback.previousSessionState, "",
+		); err != nil {
+			s.logger.Error("failed to restore re-dispatched lifecycle prompt session state",
+				zap.String("task_id", identity.TaskID),
+				zap.String("session_id", identity.SessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session for re-dispatched claim restore",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	s.persistTaskSessionState(ctx, sessionID, session, rollback.previousSessionState, "")
 }
 
 func (s *Service) recheckPromptableWithForegroundClaim(
