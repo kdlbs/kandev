@@ -43,26 +43,33 @@ func TestReconcileRetainedRemoteWorkspaceOnStartup(t *testing.T) {
 		assertRetainedRemoteStartupOwner(t, agentruntime.RuntimeRemoteDocker, models.TaskSessionStateCompleted, true, false, "")
 	})
 
-	t.Run("tokenless local failure is cleaned up", func(t *testing.T) {
+	t.Run("confirmed dead tokenless local failure is settled", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		ctx := context.Background()
 		seedTaskAndSession(t, repo, "task-local", "session-local", models.TaskSessionStateFailed)
 		row := &models.ExecutorRunning{
 			ID: "session-local", SessionID: "session-local", TaskID: "task-local",
 			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
-			AgentExecutionID: "execution-local", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+			AgentExecutionID: "execution-local", LocalPID: 3131, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		}
 		if err := repo.UpsertExecutorRunning(ctx, row); err != nil {
 			t.Fatalf("upsert local executor row: %v", err)
 		}
-		manager := &mockAgentManager{}
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-		svc.reconcileSessionsOnStartup(ctx)
-		if _, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID); err == nil {
-			t.Fatal("tokenless local failed row should be pruned after its runtime stops")
+		manager := &mockAgentManager{
+			rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+				return models.ProcessLivenessDead
+			},
 		}
-		if len(manager.stopAgentWithReasonArgs) != 1 {
-			t.Fatalf("local cleanup stop calls = %d, want 1", len(manager.stopAgentWithReasonArgs))
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+		svc.turnService = &repoTurnService{repo: repo}
+		svc.messageQueue = newSQLiteQueueForTaskRepo(t, repo)
+		svc.reconcileSessionsOnStartup(ctx)
+		got, err := repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+		if err != nil || got == nil || got.ID != row.ID || got.Status != models.ExecutorRunningStatusStopped || got.LocalPID != 0 {
+			t.Fatalf("confirmed dead local row must be settled in place: row=%+v err=%v", got, err)
+		}
+		if len(manager.stopAgentWithReasonArgs) != 0 {
+			t.Fatalf("already absent runtime must not receive a stop, got %d calls", len(manager.stopAgentWithReasonArgs))
 		}
 	})
 }
@@ -614,7 +621,19 @@ func TestReconcileSessionsOnStartup_TerminalDeadRowPrunedOnNotFound(t *testing.T
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 			svc.reconcileSessionsOnStartup(ctx)
 
-			if _, err := repo.GetExecutorRunningBySessionID(ctx, "sT"); err == nil {
+			_, readErr := repo.GetExecutorRunningBySessionID(ctx, "sT")
+			if state == models.TaskSessionStateCancelled {
+				// A cancelled standalone runtime keeps its inventory row visible to
+				// startup correlation and the terminal reaper, which proves the owner,
+				// pending work, and recovery evidence absent before reclaiming it
+				// (reconcileAbsentTerminalRuntime). Startup reconciliation may repair
+				// the row but never prunes it.
+				if readErr != nil {
+					t.Errorf("cancelled terminal row must be retained for the reaper, got %v", readErr)
+				}
+				return
+			}
+			if readErr == nil {
 				t.Error("confirmed-dead terminal row with a not-found stop must be pruned, not preserved")
 			}
 		})
@@ -692,12 +711,9 @@ func TestReconcileSessionsOnStartup_TerminalUnknownRowPreservedOnNotFound(t *tes
 	}
 }
 
-// TestReconcileSessionsOnStartup_FailedNonResumableDeadRowPrunedOnNotFound
-// extends the classification to the non-resumable FAILED startup path: a failed
-// session with no resume handle whose dead-local runtime returns not-found must
-// have its row pruned rather than preserved with the "failed to stop failed
-// session runtime; preserving executor record" warning.
-func TestReconcileSessionsOnStartup_FailedNonResumableDeadRowPrunedOnNotFound(t *testing.T) {
+// Failed standalone rows remain in inventory for owner correlation. Confirmed
+// absence settles the current row without requesting a second runtime stop.
+func TestReconcileSessionsOnStartup_FailedDeadStandaloneRowSettledInPlace(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -718,10 +734,16 @@ func TestReconcileSessionsOnStartup_FailedNonResumableDeadRowPrunedOnNotFound(t 
 		},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageQueue = newSQLiteQueueForTaskRepo(t, repo)
 	svc.reconcileSessionsOnStartup(ctx)
 
-	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sFail"); err == nil {
-		t.Error("confirmed-dead non-resumable failed row with a not-found stop must be pruned, not preserved")
+	got, err := repo.GetExecutorRunningBySessionID(ctx, "sFail")
+	if err != nil || got == nil || got.ID != "sFail" || got.Status != models.ExecutorRunningStatusStopped || got.LocalPID != 0 {
+		t.Fatalf("confirmed dead standalone row must be settled in place: row=%+v err=%v", got, err)
+	}
+	if len(agentMgr.stopAgentWithReasonArgs) != 0 {
+		t.Fatal("already absent standalone runtime must not receive a stop")
 	}
 }
 

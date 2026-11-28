@@ -5,8 +5,10 @@ package dynamic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -43,21 +45,39 @@ var (
 type Candidate struct {
 	KeywordContextEnabled bool
 	KeywordAccountID      string
-	ModelID               string
+	UsagePolicy           *usage.ExecutionUsagePolicy `json:"-"`
+	// RequireExecutionUsage distinguishes an unknown execution source from
+	// the legacy path where execution-owned usage is disabled.
+	RequireExecutionUsage bool `json:"-"`
 	ID                    string
 	Enabled               bool
 	BindingKey            string
-	Rules                 map[string]Action
-	Policies              routingpolicy.Document
+	// ModelID is the concrete provider model this candidate launches.
+	ModelID string
+	// SuspendedUntil is an operator-entered provider block.
+	SuspendedUntil time.Time
+	// RemoteExecution marks a candidate that authenticates against a different
+	// account than the backend host.
+	RemoteExecution bool
+	// CatalogFree records that the provider publishes the model at zero cost.
+	CatalogFree   bool
+	Rules         map[string]Action
+	Policies      routingpolicy.Document
+	Usage         CandidateUsage `json:"-"`
+	SelectionJSON json.RawMessage
 }
 
 type Profile struct {
 	ID         string
 	Version    int64
 	Candidates []Candidate
+	// KeepModelWhileRunning is the profile-wide continuity preference. It binds
+	// a healthy selection across turns and is not a selection mode.
+	KeepModelWhileRunning bool
 }
 
 type RouteState struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	SessionID          string
 	LogicalProfileID   string
 	ExecutionProfileID string
@@ -83,6 +103,10 @@ type PolicyState struct {
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+	SelectionChain   *SelectionChain           `json:"selection_chain,omitempty"`
+	// FailedRouteRetry is the opt-in automatic retry chain; see
+	// failed_route_retry.go. It is carried to every new route generation.
+	FailedRouteRetry *FailedRouteRetryChain `json:"failed_route_retry,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of
@@ -111,6 +135,7 @@ func (s *UnclassifiedStreak) valid() bool {
 }
 
 type RouteDecision struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	SessionID          string
 	LogicalProfileID   string
 	ExecutionProfileID string
@@ -134,6 +159,13 @@ type RouteAttempt struct {
 	ProfileVersion     int64
 	Reason             string
 	CreatedAt          time.Time
+	SelectionOrdinal   *int64
+}
+
+// RouteSelectionHistoryReader returns committed positive ordinals by concrete
+// candidate. Legacy attempts without a causal ordinal do not initialize RR.
+type RouteSelectionHistoryReader interface {
+	LastRouteSelectionOrdinals(context.Context, string) (map[string]int64, error)
 }
 
 // UnclassifiedFailureOrigin names one trusted producer boundary that can

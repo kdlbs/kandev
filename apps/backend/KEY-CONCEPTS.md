@@ -50,6 +50,8 @@ replace state verification, installation association, or HMAC verification.
 - `ExecutorBackend` interface (`executor_backend.go`) - abstracts execution environment (Docker, Standalone, Sprites, SSH, Kubernetes, Remote Docker)
 - `ExecutionStore` (`execution_store.go`) - thread-safe in-memory execution tracking
 - `session.go` - ACP session initialization and resume
+- Ordered dynamic tiers use RulesJSON and a durable chain. Only verified current success ends it. Counter and startup resets remain separate.
+- `features.providerUsageLimits` gates on-demand profile snapshots through the shared Office cache and optional shared Kandev-turn allowances for task and Office prompts. Unknown bindings remain explicit. Disabling admission retains settlement of existing claims. Provider-request, token/USD, and inference-child budgets remain separate.
 - `streams.go` - WebSocket stream connections to agentctl
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings

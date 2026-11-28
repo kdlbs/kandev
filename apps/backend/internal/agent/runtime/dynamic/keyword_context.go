@@ -8,10 +8,7 @@ import (
 )
 
 func (e *Engine) acquireCandidateProbes(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
-	keys := append([]string{candidate.BindingKey}, keywordCircuitKeys(candidate)...)
-	if candidate.KeywordContextEnabled && candidate.KeywordAccountID != "" {
-		keys = append(keys, keywordAccountCircuitKey(candidate.KeywordAccountID))
-	}
+	keys := candidateBindingCircuitKeys(candidate)
 	var leases []ProbeLease
 	for _, key := range keys {
 		if key == "" || !e.circuits.IsOpen(key, now) {
@@ -30,6 +27,14 @@ func (e *Engine) acquireCandidateProbes(candidate Candidate, sessionID string, g
 		e.probes[probeKey(sessionID, generation, candidate.ID)] = leases
 	}
 	return true
+}
+
+func candidateBindingCircuitKeys(candidate Candidate) []string {
+	keys := append([]string{candidate.BindingKey}, keywordCircuitKeys(candidate)...)
+	if candidate.KeywordContextEnabled && candidate.KeywordAccountID != "" {
+		keys = append(keys, keywordAccountCircuitKey(candidate.KeywordAccountID))
+	}
+	return keys
 }
 
 func keywordCircuitKeys(candidate Candidate) []string {

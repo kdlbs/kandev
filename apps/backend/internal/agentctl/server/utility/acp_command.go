@@ -83,6 +83,9 @@ func cleanupACPCommand(ctx context.Context, cmd *exec.Cmd, lifecycle acpCommandL
 		2*acpCommandTerminateGrace+2*acpCommandForceKillGrace,
 	)
 	defer cancel()
+	defer func() {
+		finishInferenceCommand(ctx, confirmInferenceTermination(cleanupCtx, lifecycle, pid))
+	}()
 	log.Debug("ACP command cleanup requested",
 		zap.Int("pid", pid))
 	log.Debug("ACP command process group SIGTERM requested",

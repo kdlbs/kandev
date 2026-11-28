@@ -92,6 +92,7 @@ test.describe("Dynamic Agents settings card on mobile", () => {
       await expect(testPage.getByTestId("dynamic-profile-candidates").locator("li")).toContainText(
         candidate.name,
       );
+      await testPage.getByTestId("dynamic-candidate-policy-summary").tap();
       await expect(testPage.getByTestId("dynamic-policy-transient")).toBeVisible();
       await expect(testPage.getByTestId("dynamic-policy-hard")).toBeVisible();
       await testPage
