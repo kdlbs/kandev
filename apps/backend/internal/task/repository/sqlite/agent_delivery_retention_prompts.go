@@ -197,7 +197,8 @@ const agentDeliveryPromptRetentionCandidateSQL = `
 				  AND blk.expected_generation = source.harness_generation
 				  AND blk.consumer_reference = 'agent_delivery' AND blk.delivery_submission_id = source.id
 				  AND (source.terminal_stream_id = '' OR blk.delivery_stream_id = '' OR blk.delivery_stream_id = source.terminal_stream_id)
-				  AND blk.state = 'open'
+				  AND (blk.state = 'open' OR blk.authorized_action = 'task_archived')
+
 			  ) THEN 1 ELSE 0 END AS proven
 		FROM source
 	), budgeted AS (
@@ -356,5 +357,6 @@ const agentDeliveryPromptRetentionUpdateSQL = `
 				  AND block.consumer_reference = 'agent_delivery'
 				  AND block.delivery_submission_id = agent_delivery_submissions.id
 				  AND (agent_delivery_submissions.terminal_stream_id = '' OR block.delivery_stream_id = '' OR block.delivery_stream_id = agent_delivery_submissions.terminal_stream_id)
-				  AND block.state = 'open'
+				  AND (block.state = 'open' OR block.authorized_action = 'task_archived')
+
 			  )`
