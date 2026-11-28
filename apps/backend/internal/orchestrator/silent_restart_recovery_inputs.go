@@ -248,6 +248,7 @@ func (s *Service) restoreSilentRestartCandidate(
 	store taskrepo.SilentRestoreRepository,
 	candidate models.SilentRestoreCandidate,
 ) error {
+	defer s.drainQueuedDispatchIfPending(context.WithoutCancel(ctx), candidate.SessionID)
 	if err := s.publishPendingRecoveryNoticeForCandidate(ctx, candidate); err != nil {
 		s.warnPendingRecoveryNoticeFailure(candidate.SessionID, err)
 	}

@@ -45,7 +45,8 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 		}
 		defer cancellationReservation.releaseIfNotConsumed()
 	}
-	if err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID); err != nil {
+	resumeQueue, err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID, block.ID)
+	if err != nil {
 		return false, err
 	}
 	if source.terminalSequence > 0 {
@@ -62,10 +63,18 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 		if err != nil || !settled {
 			return false, err
 		}
-		return s.resumeLegacyNativeCancellation(ctx, session, source, cancellationReservation)
+		recovered, err := s.resumeLegacyNativeCancellation(ctx, session, source, cancellationReservation)
+		if recovered {
+			resumeQueue()
+		}
+		return recovered, err
 	}
 	response, err := s.RecoverSession(ctx, session.TaskID, session.ID, "resume")
-	return err == nil && response != nil && response.Success, err
+	recovered := err == nil && response != nil && response.Success
+	if recovered {
+		resumeQueue()
+	}
+	return recovered, err
 }
 
 func legacyNativeRestartEvidenceMatches(evidence *agentruntime.DeliveryRecordEvidence, row *models.AgentDeliverySubmission, block *models.SessionRecoveryBlock) bool {

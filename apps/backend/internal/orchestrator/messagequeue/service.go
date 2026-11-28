@@ -31,13 +31,14 @@ type globalAutoMergePolicyLoader struct {
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo          Repository
-	maxPerSession atomic.Int64
-	mergeEnabled  atomic.Bool
-	globalPolicy  atomic.Pointer[AutoMergePolicy]
-	globalLoader  atomic.Pointer[globalAutoMergePolicyLoader]
-	statusEpoch   string
-	logger        *logger.Logger
+	repo           Repository
+	maxPerSession  atomic.Int64
+	mergeEnabled   atomic.Bool
+	globalPolicy   atomic.Pointer[AutoMergePolicy]
+	globalLoader   atomic.Pointer[globalAutoMergePolicyLoader]
+	statusEpoch    string
+	logger         *logger.Logger
+	recoveryPauses sync.Map // session ID -> recoveryQueuePause; admission guarded.
 	// lifecycleMu fences task-wide purges against every session-scoped queue
 	// admission. A task purge cannot enumerate every possibly empty session,
 	// so the barrier must cover admissions before they reach the repository.
@@ -2231,14 +2232,22 @@ func (s *Service) ReserveQueuedForDeliveryWithAutoRunForSession(
 // SetAutoRun persists automatic-drain policy through the queue admission gate.
 func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
 	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
-		return s.repo.SetAutoRun(admittedCtx, sessionID, enabled)
+		if err := s.repo.SetAutoRun(admittedCtx, sessionID, enabled); err != nil {
+			return err
+		}
+		s.revokeRecoveryPause(sessionID)
+		return nil
 	})
 }
 
 // SetAutoRunForSession persists automatic-drain policy only for the exact session incarnation.
 func (s *Service) SetAutoRunForSession(ctx context.Context, identity QueueSessionIdentity, enabled bool) error {
 	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
-		return s.repo.SetAutoRunForSession(admittedCtx, identity, enabled)
+		if err := s.repo.SetAutoRunForSession(admittedCtx, identity, enabled); err != nil {
+			return err
+		}
+		s.revokeRecoveryPause(identity.SessionID)
+		return nil
 	})
 }
 
@@ -2248,6 +2257,9 @@ func (s *Service) PauseAutoRunIfPending(ctx context.Context, sessionID string) (
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
 		paused, err = s.repo.PauseAutoRunIfPending(admittedCtx, sessionID)
+		if err == nil && paused {
+			s.revokeRecoveryPause(sessionID)
+		}
 		return err
 	})
 	return paused, err
@@ -2260,6 +2272,9 @@ func (s *Service) PauseAutoRunIfPendingForSession(
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		var err error
 		paused, err = s.repo.PauseAutoRunIfPendingForSession(admittedCtx, identity)
+		if err == nil && paused {
+			s.revokeRecoveryPause(identity.SessionID)
+		}
 		return err
 	})
 	return paused, err
