@@ -422,6 +422,9 @@ var (
 	ErrUnsupportedWorkspaceSource  = errors.New("unsupported workspace source")
 	ErrWorkspaceSourceMaterialize  = errors.New("workspace source materialization failed")
 	ErrWorkspaceIdleTimeoutInvalid = errors.New("workspace ACP idle timeout must be a positive number of minutes")
+	// ErrWorkspaceWIPReleaseGraceInvalid rejects a sessionless WIP release
+	// grace outside 1..models.MaxWIPSessionlessReleaseGraceMinutes.
+	ErrWorkspaceWIPReleaseGraceInvalid = errors.New("workspace WIP sessionless release grace must be a positive number of minutes up to one year")
 )
 
 func validateExecutorConfig(config map[string]string) error {

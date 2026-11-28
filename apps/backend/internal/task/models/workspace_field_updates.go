@@ -12,5 +12,9 @@ type WorkspaceFieldUpdate struct {
 	DefaultConfigAgentProfileID **string
 	ACPIdleSuspensionEnabled    *bool
 	ACPIdleTimeoutMinutes       *int
-	UnitID                      *string
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes
+	// carry the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool
+	WIPSessionlessReleaseGraceMinutes *int
+	UnitID                            *string
 }
