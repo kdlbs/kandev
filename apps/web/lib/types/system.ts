@@ -253,7 +253,21 @@ export interface SessionCapacityEffectiveSettings {
   locked: boolean;
 }
 
+export interface SessionCapacityObservation {
+  policy: SessionCapacityPolicy;
+  enabled: boolean;
+  known: boolean;
+  in_use: number | null;
+  limit: number;
+  grade_in_use?: Record<string, number>;
+  grade_limits?: Record<string, number>;
+  needs_configuration?: boolean;
+  observed_at: string;
+  waiting: { known: boolean; counts?: Record<string, number> };
+}
+
 export interface SessionCapacitySettingsResponse {
+  observation?: SessionCapacityObservation;
   settings: SessionCapacitySettingsValue;
   effective: SessionCapacityEffectiveSettings;
 }

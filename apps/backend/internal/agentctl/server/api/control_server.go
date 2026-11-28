@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -136,11 +137,13 @@ func (m *ControlServer) setupRoutes() {
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
+	api.POST("/inference/inventory", m.handleInferenceInventory)
 	api.POST("/delivery/retained", m.handleRetainedDelivery)
 	api.POST("/delivery/retained/evidence", m.handleRetainedReconstructionEvidence)
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/reclaim", m.handleReclaimIdleInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
@@ -252,6 +255,22 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+func (m *ControlServer) handleInferenceInventory(c *gin.Context) {
+	var request struct {
+		Required *bool `json:"required"`
+	}
+	if c.ShouldBindJSON(&request) != nil || request.Required == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "capacity mode is required"})
+		return
+	}
+	instances, err := m.instMgr.InferenceInventory(*request.Required)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "inference inventory unavailable"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"version": 1, "required": *request.Required, "instances": instances})
+}
+
 func (m *ControlServer) handleListInstances(c *gin.Context) {
 	instances := m.instMgr.ListInstances()
 	c.JSON(http.StatusOK, gin.H{"instances": instances})
@@ -271,11 +290,31 @@ func (m *ControlServer) handleGetInstance(c *gin.Context) {
 	c.JSON(http.StatusOK, inst.Info())
 }
 
+func (m *ControlServer) handleReclaimIdleInstance(c *gin.Context) {
+	inst, found := m.instMgr.GetInstance(c.Param("id"))
+	if !found {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 15*time.Second)
+	defer cancel()
+	if err := m.instMgr.ReclaimIdleInstance(ctx, inst); err != nil {
+		if errors.Is(err, instance.ErrInstanceBusy) {
+			c.JSON(http.StatusConflict, gin.H{"error": "instance has workspace work"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reclaim idle instance"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	id := c.Param("id")
 
 	// First check if instance exists
-	if _, found := m.instMgr.GetInstance(id); !found {
+	inst, found := m.instMgr.GetInstance(id)
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "instance not found",
 		})
@@ -298,6 +337,8 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "instance stopped successfully",
+		"message":              "instance stopped successfully",
+		"inference_attempts":   inst.FinalInferenceSnapshot(),
+		"managed_process_stop": inst.FinalManagedStopReceipt(),
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/retention"
 )
@@ -36,7 +37,7 @@ func (m *Manager) stopWorkspaceRuntime(ctx context.Context, backend ExecutorBack
 		}
 	}
 
-	return backend.StopInstance(ctx, instance, force)
+	return backend.StopInstance(agentctl.WithInferenceStopObserver(ctx, m.inferenceConsumer), instance, force)
 }
 
 func (m *Manager) stopWorkspaceRuntimeAndRelease(ctx context.Context, backend ExecutorBackend, instance *ExecutorInstance, force bool) error {

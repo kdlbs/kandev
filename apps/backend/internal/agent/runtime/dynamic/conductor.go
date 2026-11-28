@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"sync"
 	"time"
@@ -151,6 +152,9 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if err != nil {
 		return ConductorResult{}, err
 	}
+	if request.Decision.UsagePolicy == nil {
+		request.Decision.UsagePolicy = selectionUsagePolicy(profile, request.Decision.ExecutionProfileID)
+	}
 	var continuation Continuation
 	if request.PrebuiltContinuation != nil {
 		continuation = sanitizeContinuation(*request.PrebuiltContinuation)
@@ -271,7 +275,7 @@ func (c *Conductor) launchWithFallback(
 			c.engine.ReleaseProbe(current, false)
 			return DownstreamExecution{}, current, ErrExecutionProfileHeld
 		}
-		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
+		execution, err := c.downstream.Launch(usage.WithSelectedUsagePolicy(ctx, current.UsagePolicy), DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
 			AttemptID:          uuid.NewString(),
 			Decision:           current,
@@ -807,11 +811,22 @@ func boundedTailN(value string, limit int) string {
 	return strings.ToValidUTF8(value, "")
 }
 
+// Optional scoped loader preserves older embeddings and supplies original
+// identity only at real conductor selection/recovery boundaries.
 func (c *Conductor) loadProfile(ctx context.Context, sessionID, profileID string) (Profile, error) {
-	if loader, ok := c.profiles.(interface {
+	if scoped, ok := c.profiles.(interface {
 		LoadDynamicProfileForSession(context.Context, string, string) (Profile, error)
 	}); ok {
-		return loader.LoadDynamicProfileForSession(ctx, sessionID, profileID)
+		return scoped.LoadDynamicProfileForSession(ctx, sessionID, profileID)
 	}
 	return c.profiles.LoadDynamicProfile(ctx, profileID)
+}
+
+func selectionUsagePolicy(profile Profile, candidateID string) *usage.ExecutionUsagePolicy {
+	for _, candidate := range profile.Candidates {
+		if candidate.ID == candidateID {
+			return usage.CloneExecutionUsagePolicy(candidate.UsagePolicy)
+		}
+	}
+	return nil
 }
