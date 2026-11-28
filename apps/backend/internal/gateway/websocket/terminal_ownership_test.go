@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 )
@@ -204,5 +206,31 @@ func TestOrdinaryTerminalLaunchRejectsForeignSharedEnvironmentMetadata(t *testin
 				t.Fatalf("rejected launch leaked metadata: (%q, %q, %v)", label, command, once)
 			}
 		})
+	}
+}
+
+// An environment removed after the owner lookup keeps the missing-target
+// result so the browser stops reconnecting; other owner denials stay a
+// non-disclosing terminal mismatch.
+func TestEnvironmentTerminalOwnerKeepsMissingEnvironment(t *testing.T) {
+	ctx := context.Background()
+	terminals, manager := newSharedEnvironmentTerminalService(t)
+	const sharedEnv = "env-shared"
+	term, err := terminals.Create(ctx, "task-a", sharedEnv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewTerminalHandler(manager, nil, nil, testTerminalLogger(t))
+	handler.SetTerminalService(terminals)
+
+	accessErr := fmt.Errorf("authorize: %w", repoerrors.ErrTaskEnvironmentNotFound)
+	manager.SetTaskEnvironmentAccessChecker(func(context.Context, string, string) error { return accessErr })
+	if _, err := handler.resolveEnvironmentTerminalExecution(ctx, sharedEnv, term.ID); !errors.Is(err, repoerrors.ErrTaskEnvironmentNotFound) {
+		t.Fatalf("removed environment error = %v, want ErrTaskEnvironmentNotFound", err)
+	}
+
+	accessErr = repoerrors.ErrTaskNotFound
+	if _, err := handler.resolveEnvironmentTerminalExecution(ctx, sharedEnv, term.ID); !errors.Is(err, terminalservice.ErrTaskMismatch) {
+		t.Fatalf("denied owner error = %v, want ErrTaskMismatch", err)
 	}
 }
