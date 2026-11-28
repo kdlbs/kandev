@@ -73,17 +73,21 @@ the worker context, so a stop finishing during shutdown cannot start Resume.
 Criteria .6-.8 use the authoritative `executors_running` profile identity.
 `applyRecordedKubernetesExecutorConfigToResumeRequest` restores current executor
 connection settings and immutable recorded workload metadata, then calls
-`restoreKubernetesProfileEnvironment` to load only `ProfileEnvVars` from that
-recorded profile. The mutable session profile selection and current profile
-workload configuration cannot replace the recorded runtime snapshot. Resume also
-restores the session's `ExecutorProfileID` before the existing guarded full-row
-persistence, so `configureExistingWorkspace` and the lifecycle
+`restoreKubernetesProfileEnvironment` to load `ProfileEnvVars` and the current
+`remote_auth_secrets` selection from that recorded profile. The mutable session
+profile selection and current profile workload configuration cannot replace the
+recorded runtime snapshot. The remote-auth selection is set before persisted
+running metadata is merged, so an empty current selection cannot restore an old
+binding. See [remote credential resume](resume-remote-auth.md#current-kubernetes-profile-selection).
+Resume also restores the session's `ExecutorProfileID` before the existing
+guarded full-row persistence, so `configureExistingWorkspace` and the lifecycle
 `ExecutorProfileEnvForSession` reader use the same profile on later starts.
 
 The environment definitions flow through `resolveLaunchEnvironment` to the
 existing lifecycle launch checkpoint. Literal and secret-reference definitions
-remain distinct; this helper does not resolve secrets or change precedence.
-Current profile environment edits therefore apply to resumed processes.
+remain distinct; this helper copies remote-auth selection IDs but does not
+resolve secret values or change environment-definition precedence. Current
+profile environment edits therefore apply to resumed processes.
 `ErrExecutorProfileNotFound` or an absent profile returns no definitions;
 other repository failures and executor ownership mismatches return an error.
 No missing profile is replaced with a different profile.

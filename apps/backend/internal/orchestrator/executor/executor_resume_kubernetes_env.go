@@ -14,6 +14,9 @@ import (
 func (e *Executor) restoreKubernetesProfileEnvironment(
 	ctx context.Context, config *executorConfig, recorded map[string]interface{},
 ) error {
+	if config.Metadata != nil {
+		config.Metadata[profileKeyRemoteAuthSecrets] = ""
+	}
 	profileID, _ := recorded["executor_profile_id"].(string)
 	if profileID == "" {
 		return nil
@@ -32,5 +35,8 @@ func (e *Executor) restoreKubernetesProfileEnvironment(
 		return errors.New("resume Kubernetes executor: recorded profile belongs to a different executor")
 	}
 	config.ProfileEnvVars = append([]models.ProfileEnvVar(nil), profile.EnvVars...)
+	if config.Metadata != nil {
+		config.Metadata[profileKeyRemoteAuthSecrets] = profile.Config[profileKeyRemoteAuthSecrets]
+	}
 	return nil
 }

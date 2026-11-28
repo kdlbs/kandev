@@ -30,13 +30,16 @@ func TestKubernetesResumeResolvesSelectedRemoteCredentials(t *testing.T) {
 			session := repo.sessions["sess-1"]
 			session.ExecutorID = "repointed-executor"
 			session.ExecutorProfileID = "repointed-profile"
-			session.Metadata = map[string]interface{}{
-				profileKeyRemoteAuthSecrets: `{"gh_cli_env":"secret-gh","agent:test:env:CUSTOM_KEY":"secret-agent"}`,
-			}
+			session.Metadata = map[string]interface{}{}
+			currentSelection := `{"gh_cli_env":"secret-gh","agent:test:env:CUSTOM_KEY":"secret-agent"}`
 			recorded := recordedKubernetesResumeMetadata()
 			repo.executors["recorded-kubernetes-executor"] = &models.Executor{
 				ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes,
 				Config: map[string]string{"auth_mode": "kubeconfig", "kubeconfig_path": "/tmp/test-config", "namespace": "kandev-agents"},
+			}
+			repo.executorProfiles["recorded-profile"] = &models.ExecutorProfile{
+				ID: "recorded-profile", ExecutorID: "recorded-kubernetes-executor",
+				Config: map[string]string{profileKeyRemoteAuthSecrets: currentSelection},
 			}
 			repo.executorsRunning[session.ID] = &models.ExecutorRunning{
 				ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
@@ -66,10 +69,81 @@ func TestKubernetesResumeResolvesSelectedRemoteCredentials(t *testing.T) {
 			require.Equal(t, string(models.ExecutorTypeKubernetes), req.ExecutorType)
 			require.Equal(t, "recorded-kubernetes-executor", session.ExecutorID)
 			require.Equal(t, "recorded-profile", session.ExecutorProfileID)
+			require.Equal(t, currentSelection, req.Metadata[profileKeyRemoteAuthSecrets])
 			for key, value := range recorded {
 				require.Equal(t, value, req.Metadata[key], "recorded metadata %s", key)
 			}
-			require.Equal(t, session.Metadata[profileKeyRemoteAuthSecrets], req.Metadata[profileKeyRemoteAuthSecrets])
+		})
+	}
+}
+
+// @covers AC-EXECUTORS-RESUME-REMOTE-AUTH-001.4
+func TestKubernetesResumeUsesCurrentProfileRemoteCredentials(t *testing.T) {
+	oldSelection := `{"gh_cli_env":"old-github","agent:test:env:CUSTOM_KEY":"old-agent"}`
+	currentSelection := `{"gh_cli_env":"current-github","agent:test:env:CUSTOM_KEY":"current-agent"}`
+	for _, tc := range []struct {
+		name                string
+		profileConfig       map[string]string
+		wantSelection       string
+		wantGitHubToken     string
+		wantAgentToken      string
+		wantLease           string
+		wantLeaseIssueCount int
+	}{
+		{
+			name:            "replacement uses current profile selection",
+			profileConfig:   map[string]string{profileKeyRemoteAuthSecrets: currentSelection},
+			wantSelection:   currentSelection,
+			wantGitHubToken: "current-github-token",
+			wantAgentToken:  "current-agent-token",
+		},
+		{
+			name:                "deselection falls back to managed broker",
+			profileConfig:       map[string]string{},
+			wantSelection:       "",
+			wantLease:           "fallback-lease",
+			wantLeaseIssueCount: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			attachManagedGitHubRepositoryForResume(t, repo)
+			session := repo.sessions["sess-1"]
+			session.ExecutorID = "repointed-executor"
+			session.ExecutorProfileID = "repointed-profile"
+			session.Metadata = map[string]interface{}{}
+			recorded := recordedKubernetesResumeMetadata()
+			recorded[profileKeyRemoteAuthSecrets] = oldSelection
+			repo.executors["recorded-kubernetes-executor"] = &models.Executor{
+				ID: "recorded-kubernetes-executor", Type: models.ExecutorTypeKubernetes,
+				Config: map[string]string{"auth_mode": "kubeconfig", "kubeconfig_path": "/tmp/test-config", "namespace": "kandev-agents"},
+			}
+			repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+				ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
+				ExecutorID: "recorded-kubernetes-executor", Runtime: agentruntime.RuntimeKubernetes, Metadata: recorded,
+			}
+			repo.executorProfiles["recorded-profile"] = &models.ExecutorProfile{
+				ID: "recorded-profile", ExecutorID: "recorded-kubernetes-executor", Config: tc.profileConfig,
+			}
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.secretStore = &mockSecretStore{secrets: map[string]string{
+				"old-github": "old-github-token", "old-agent": "old-agent-token",
+				"current-github": "current-github-token", "current-agent": "current-agent-token",
+			}}
+			exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+				policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged},
+			})
+			issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "fallback-lease"}}
+			exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/v1/git/credentials/resolve")
+
+			req := buildRemoteCredentialResumeRequest(t, t.Context(), exec, session)
+			require.Equal(t, tc.wantGitHubToken, req.Env[envGitHubToken])
+			require.Equal(t, tc.wantGitHubToken, req.Env[envGHToken])
+			require.Equal(t, tc.wantAgentToken, req.Env["CUSTOM_KEY"])
+			require.Equal(t, tc.wantSelection, req.Metadata[profileKeyRemoteAuthSecrets])
+			require.Equal(t, tc.wantLease, req.Env[githubauth.CredentialLeaseEnv])
+			require.Equal(t, tc.wantLeaseIssueCount, issuer.calls)
 		})
 	}
 }
@@ -95,6 +169,9 @@ func TestResumeRemoteCredentialEligibility(t *testing.T) {
 			req := buildRemoteCredentialResumeRequest(t, t.Context(), exec, session)
 			if executorType == models.ExecutorTypeLocal || executorType == models.ExecutorTypeWorktree {
 				require.Empty(t, req.Env["CUSTOM_KEY"])
+				require.Equal(t, map[string]interface{}{
+					profileKeyRemoteAuthSecrets: `{"agent:test:env:CUSTOM_KEY":"secret-agent"}`,
+				}, session.Metadata)
 				return
 			}
 			require.Equal(t, "selected-agent-token", req.Env["CUSTOM_KEY"])

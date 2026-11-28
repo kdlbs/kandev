@@ -15,12 +15,17 @@ The orchestrator executor builds resume requests. Lifecycle consumes their envir
 | --- | --- |
 | AC-EXECUTORS-RESUME-REMOTE-AUTH-001.1, .2 | Request construction |
 | AC-EXECUTORS-RESUME-REMOTE-AUTH-001.3 | Identity and failures |
+| AC-EXECUTORS-RESUME-REMOTE-AUTH-001.4 | Current Kubernetes profile selection |
 
 ## Request construction
 
-After restoring executor and runtime metadata, `buildResumeRequestAtCredentialBoundaryWithOptions` uses `executorNeedsResolvedCredentials` and `applyContainerCredentials`, as fresh launch does. This resolves selected `remote_auth_secrets` before host GitHub bridge selection, GitHub policy routing, and `resolveLaunchEnvironment`.
+After restoring recorded executor identity and the current Kubernetes profile selection, `buildResumeRequestAtCredentialBoundaryWithOptions` uses `executorNeedsResolvedCredentials` and `applyContainerCredentials`, as fresh launch does. This resolves selected `remote_auth_secrets` before host GitHub bridge selection, GitHub policy routing, and `resolveLaunchEnvironment`.
 
 The existing resolver maps method IDs to environment keys and supplies both GitHub token aliases. Environment construction carries the resolved values into lifecycle definitions. This path does not copy ambient control-plane credentials or rerun preparation scripts.
+
+## Current Kubernetes profile selection
+
+The recorded Kubernetes profile ID selects the current profile row. Resume reloads its `remote_auth_secrets` with its environment definitions before the persisted running metadata is merged into the launch request. The current value replaces an older binding; an empty value remains present so the merge cannot restore the old selection. A missing profile or selection leaves remote authentication unselected. Credential values are still resolved later through the existing scoped secret store and managed GitHub policy.
 
 ## Identity and failures
 
