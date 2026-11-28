@@ -21,6 +21,7 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 | --- | --- |
 | `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership), [Settings notification test](#settings-notification-test) |
 | AC `.18`–`.20` | [macOS agent PATH](#macos-agent-path) |
+| AC `.21` | [Windows cooperative backend stop](windows-cooperative-shutdown.md) |
 
 ## Desktop architecture
 
@@ -522,6 +523,7 @@ remain the authority. The local wait implementation needs no new ADR.
 
 ## Implementation plans and decisions
 
+- [Windows cooperative shutdown fix](../../../plans/windows-cooperative-shutdown/plan.md)
 - [Desktop settings notification test fix](../../../plans/desktop-notification-test/plan.md)
 - [Desktop child reaping fix](../../../plans/desktop-child-reaping/plan.md)
 - [Initial Desktop Tauri App plan](../../../plans/desktop-tauri-app/plan.md)

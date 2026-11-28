@@ -77,7 +77,14 @@ Kandev's installed desktop app should behave like a native application without d
   common desktop PATH entries shall take precedence over the nvm fallback.
 - **AC-DESKTOP-DESKTOP-TAURI-APP-001.20:** When the nvm selection is absent,
   invalid, or incomplete, Kandev shall start with its ordinary desktop PATH.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.21:** On Windows, when the desktop app
+  stops its owned backend for quit, startup failure, or update restart, the
+  console-less launcher and backend shall receive the stop as their normal
+  first shutdown signal and run their ordered teardown before any forced
+  process-tree cleanup. A child that cannot receive this request shall keep
+  the existing tree-wide request, grace deadline, and forced fallback.
 
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/desktop-tauri-app.md).
+Windows cooperative shutdown is described in [its own design](../system-design/windows-cooperative-shutdown.md).
