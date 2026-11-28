@@ -145,7 +145,7 @@ func isDeterministicCommittedRetryTaskError(err error) bool {
 const retryAutomationRunIDMetadataKey = "automation_run_id"
 
 type automationContinuationState interface {
-	SetContinuationTaskID(ctx context.Context, automationID, taskID string) error
+	SetContinuationTaskID(ctx context.Context, automationID, taskID string, binding ...automation.ContinuationBinding) error
 }
 
 // StopAutomationRun cancels only the currently active turn identified by the
@@ -508,6 +508,7 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 			evt.DedupKey = snapshot.DedupKey
 			evt.RetryGroupGeneration = retryRun.RetryGroupGeneration
 			a = automationFromRetrySnapshot(snapshot)
+			a.AutomationRevision = retryRun.AutomationRevision
 		}
 	}
 	retryInitialTriggerData := retryRun != nil && evt.RetryClaimToken == "" && len(evt.TriggerData) > 0
@@ -746,6 +747,22 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		s.acknowledgeRetryEventAfterBinding(ctx, evt)
 	}
 }
+
+type automationParentValidator interface {
+	ValidateParentTask(context.Context, string, string) error
+}
+
+func (s *Service) validateAutomationParent(ctx context.Context, item *automation.Automation) error {
+	if item.ParentTaskID == "" {
+		return nil
+	}
+	validator, ok := s.automationService.(automationParentValidator)
+	if !ok {
+		return errors.New("automation parent task validation is unavailable")
+	}
+	return validator.ValidateParentTask(ctx, item.WorkspaceID, item.ParentTaskID)
+}
+
 func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) *automation.Automation {
 	repositoryIDs := make([]string, 0, len(snapshot.Repositories))
 	for _, repository := range snapshot.Repositories {
@@ -757,6 +774,7 @@ func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) 
 		Name:               snapshot.Name,
 		WorkflowID:         snapshot.WorkflowID,
 		WorkflowStepID:     snapshot.WorkflowStepID,
+		ParentTaskID:       snapshot.ParentTaskID,
 		AgentProfileID:     snapshot.AgentProfileID,
 		ExecutorProfileID:  snapshot.ExecutorProfileID,
 		Prompt:             snapshot.Prompt,
@@ -989,6 +1007,10 @@ func (s *Service) prepareAutomationTask(
 		return task, continuationSession, action, reasons, nil
 	}
 
+	if err := s.validateAutomationParent(ctx, a); err != nil {
+		return nil, nil, action, reasons, err
+	}
+
 	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)
 	reasons.Repository = repoReason
 	// The automation dispatch owns this task's initial start. The marker is
@@ -1013,6 +1035,7 @@ func (s *Service) prepareAutomationTask(
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
 		WorkflowStepID: a.WorkflowStepID,
+		ParentID:       a.ParentTaskID,
 		Title:          title,
 		Description:    prompt,
 		Repositories:   repositories,
@@ -1046,7 +1069,10 @@ func (s *Service) prepareAutomationTask(
 		s.deleteAbandonedTask(ctx, a.ID, task.ID)
 		return nil, nil, action, reasons, fmt.Errorf("automation continuation state is unavailable")
 	}
-	if err := state.SetContinuationTaskID(ctx, a.ID, task.ID); err != nil {
+	if err := state.SetContinuationTaskID(ctx, a.ID, task.ID, automation.ContinuationBinding{
+		ParentTaskID: a.ParentTaskID, AutomationRevision: a.AutomationRevision,
+		ContinuationTaskID: a.ContinuationTaskID,
+	}); err != nil {
 		s.deleteAbandonedTask(ctx, a.ID, task.ID)
 		return nil, nil, action, reasons, err
 	}
@@ -1201,6 +1227,9 @@ func (s *Service) findAutomationContinuation(ctx context.Context, a *automation.
 func (s *Service) continuationTaskIncompatibility(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) string {
 	if task.WorkspaceID != a.WorkspaceID || task.Origin != automationTaskOrigin(a) || task.ArchivedAt != nil {
 		return "previous continuation task is not compatible"
+	}
+	if task.ParentID != a.ParentTaskID {
+		return "previous continuation task uses a different parent"
 	}
 	if !continuationWorkflowMatches(a, task) {
 		return "previous continuation task uses a different workflow"
@@ -2130,7 +2159,10 @@ func (s *Service) clearAbandonedContinuation(ctx context.Context, automationID, 
 	if err != nil || current == nil || current.ContinuationTaskID != taskID {
 		return
 	}
-	if err := state.SetContinuationTaskID(ctx, automationID, ""); err != nil {
+	if err := state.SetContinuationTaskID(ctx, automationID, "", automation.ContinuationBinding{
+		ParentTaskID: current.ParentTaskID, AutomationRevision: current.AutomationRevision,
+		ContinuationTaskID: taskID,
+	}); err != nil {
 		s.logger.Error("failed to clear abandoned automation continuation",
 			zap.String("automation_id", automationID),
 			zap.String("task_id", taskID),

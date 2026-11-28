@@ -27,6 +27,7 @@ function form(overrides: Partial<FormState> = {}): FormState {
     name: "PR review",
     description: "",
     workflowId: "wf-1",
+    parentTaskId: "",
     workflowStepId: "",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",

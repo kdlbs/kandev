@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FormState } from "./automation-payload";
 import { AgentSection, DestinationSection, InstructionsSection } from "./automation-editor-groups";
 
+vi.mock("./automation-parent-picker", () => ({ AutomationParentPicker: () => null }));
 vi.mock("./automation-target-mode-section", () => ({ TargetModeSection: () => null }));
 vi.mock("./config-section", () => ({
   ConfigSection: () => null,
@@ -34,6 +35,7 @@ function form(overrides: Partial<FormState> = {}): FormState {
     name: "Nightly",
     description: "",
     workflowId: "wf-1",
+    parentTaskId: "",
     workflowStepId: "step-1",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",

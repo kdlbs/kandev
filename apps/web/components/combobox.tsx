@@ -57,6 +57,9 @@ interface ComboboxProps {
   drawerTitle?: string;
   placeholder?: string;
   searchPlaceholder?: string;
+  /** Optional controlled query for consumers backed by server search. */
+  searchValue?: string;
+  onSearchValueChange?: (value: string) => void;
   emptyMessage?: string;
   disabled?: boolean;
   className?: string;
@@ -254,23 +257,18 @@ function handleComboboxOpenChange(
   onOpenChange?.(next);
 }
 
-function selectComboboxOption({
-  selectedValue,
-  currentValue,
-  onValueChange,
-  setOpen,
-  onOpenChange,
-}: {
-  selectedValue: string;
-  currentValue: string;
-  onValueChange: (value: string) => void;
-  setOpen: (open: boolean) => void;
-  onOpenChange?: (open: boolean) => void;
-}) {
-  const nextValue = selectedValue === currentValue ? "" : selectedValue;
-  onValueChange(nextValue);
-  setOpen(false);
-  onOpenChange?.(false);
+function createComboboxSelectHandler(
+  currentValue: string,
+  onValueChange: (value: string) => void,
+  setOpen: (open: boolean) => void,
+  onOpenChange?: (open: boolean) => void,
+) {
+  return (selectedValue: string) => {
+    const nextValue = selectedValue === currentValue ? "" : selectedValue;
+    onValueChange(nextValue);
+    setOpen(false);
+    onOpenChange?.(false);
+  };
 }
 
 function ComboboxHeader({
@@ -381,6 +379,8 @@ export const Combobox = memo(function Combobox({
   triggerId,
   triggerRef,
   onOpenChange,
+  searchValue,
+  onSearchValueChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   // Keep the selected value highlighted when the popover opens, not the first item.
@@ -422,11 +422,14 @@ export const Combobox = memo(function Combobox({
         value={highlighted}
         onValueChange={setHighlighted}
         filter={filter}
+        shouldFilter={!onSearchValueChange}
         data-testid={dropdownTestId}
       >
         <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
         {showSearch && (
           <CommandInput
+            value={searchValue}
+            onValueChange={onSearchValueChange}
             placeholder={searchPlaceholder}
             className={controlSizingClassName("standard")}
           />
@@ -440,15 +443,7 @@ export const Combobox = memo(function Combobox({
             options={options}
             value={value}
             touchTarget={touchTarget}
-            onSelect={(v) =>
-              selectComboboxOption({
-                selectedValue: v,
-                currentValue: value,
-                onValueChange,
-                setOpen,
-                onOpenChange,
-              })
-            }
+            onSelect={createComboboxSelectHandler(value, onValueChange, setOpen, onOpenChange)}
           />
         </CommandList>
       </Command>

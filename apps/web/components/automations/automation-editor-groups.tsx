@@ -8,6 +8,8 @@ import type { PlaceholderInfo } from "@/lib/types/automation";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 import type { FormState } from "./automation-payload";
 import { ConfigSection, WorkflowField } from "./config-section";
+import { AutomationParentPicker } from "./automation-parent-picker";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { PlaceholderList, PromptSection } from "./prompt-section";
 import { RetryPolicySection } from "./retry-policy-section";
 import { ContinuationPolicySection, FollowUpPromptField } from "./automation-continuation-section";
@@ -45,7 +47,12 @@ export function DestinationSection({
     <EditorSection
       title={t("automations:destinationTitle")}
       description={t("automations:destinationDescription")}
-      dirty={isDirty(form, savedForm, ["taskMode", "managedDestination", "workflowId"])}
+      dirty={isDirty(form, savedForm, [
+        "taskMode",
+        "managedDestination",
+        "workflowId",
+        "parentTaskId",
+      ])}
       testId="automation-destination-section"
     >
       <TargetModeSection
@@ -55,18 +62,32 @@ export function DestinationSection({
         updateField={updateField}
       />
       {form.taskMode === "managed_conversation" ? null : (
-        <WorkflowField
-          workspaceId={workspaceId}
-          workflowId={form.workflowId}
-          taskMode={form.taskMode}
-          isDirty={isDirty(form, savedForm, ["workflowId"])}
-          onWorkflowChange={(value) => {
-            if (value === form.workflowId) return;
-            updateField("workflowId", value);
-            updateField("workflowStepId", "");
-            updateField("prContinuationStepId", "");
-          }}
-        />
+        <>
+          <WorkflowField
+            workspaceId={workspaceId}
+            workflowId={form.workflowId}
+            taskMode={form.taskMode}
+            isDirty={isDirty(form, savedForm, ["workflowId"])}
+            onWorkflowChange={(value) => {
+              if (value === form.workflowId) return;
+              updateField("workflowId", value);
+              updateField("workflowStepId", "");
+              updateField("prContinuationStepId", "");
+            }}
+          />
+          <div
+            className="space-y-1.5"
+            data-settings-dirty={isDirty(form, savedForm, ["parentTaskId"])}
+          >
+            <SettingsFieldLabel>{t("automations:parentTaskLabel")}</SettingsFieldLabel>
+            <AutomationParentPicker
+              workspaceId={workspaceId}
+              value={form.parentTaskId}
+              onChange={(value) => updateField("parentTaskId", value)}
+            />
+            <p className="text-xs text-muted-foreground">{t("automations:parentTaskHelp")}</p>
+          </div>
+        </>
       )}
     </EditorSection>
   );
