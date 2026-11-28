@@ -170,6 +170,10 @@ function parseStatusMetadata(comment: Message) {
   };
 }
 
+function isWorkflowReviewNoChangesNotice(metadata: ErrorMetadata | undefined): boolean {
+  return metadata?.kind === "workflow_review_skipped" && metadata.reason === "review_no_changes";
+}
+
 function detachedEpisodeNotice(kind: string | undefined): string | null {
   if (kind === "turn_ended_detached") return t("task:turnEndedDetached");
   if (kind === "paused_offline_budget") return t("task:pausedOfflineBudget");
@@ -181,22 +185,27 @@ function getStatusMessage(
   metadata: ErrorMetadata | undefined,
   statusLine: string | undefined,
 ): string {
+  if (isWorkflowReviewNoChangesNotice(metadata)) {
+    return t("review:noChangesToReviewYet");
+  }
   if (metadata?.variant === "resume_settings_provider_restored") {
-    const confirmedModelId =
-      metadata.effective_model_known === true
-        ? safeProviderModelId(metadata.effective_model_id)
-        : "";
-    const model = confirmedModelId
-      ? safeProviderModelLabel(metadata.effective_model_name) || confirmedModelId
-      : "";
-    return model
-      ? t("task:providerRestoredResumeSuccessWithModel", { model })
-      : t("task:providerRestoredResumeSuccess");
+    return providerRestoredStatusMessage(metadata);
   }
   if (metadata?.kind === "model_selection_warning") return t("task:modelSelectionWarning");
   const episodeNotice = detachedEpisodeNotice(metadata?.kind);
   if (episodeNotice) return episodeNotice;
   return metadata?.message || comment.content || statusLine || t("task:statusUpdate");
+}
+
+function providerRestoredStatusMessage(metadata: ErrorMetadata): string {
+  const confirmedModelId =
+    metadata.effective_model_known === true ? safeProviderModelId(metadata.effective_model_id) : "";
+  const model = confirmedModelId
+    ? safeProviderModelLabel(metadata.effective_model_name) || confirmedModelId
+    : "";
+  return model
+    ? t("task:providerRestoredResumeSuccessWithModel", { model })
+    : t("task:providerRestoredResumeSuccess");
 }
 
 function safeProviderModelLabel(value: unknown): string {

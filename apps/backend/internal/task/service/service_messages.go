@@ -336,6 +336,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	snapshots, err := s.persistMessage(ctx, message, req)
 	if err != nil {
+		s.rollbackRejectedLifecycleTurn(ctx, message, req)
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
@@ -742,6 +743,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		ctx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
 	)
 	if err != nil {
+		s.rollbackRejectedLifecycleTurn(ctx, message, req)
 		return nil, err
 	}
 
