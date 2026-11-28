@@ -13,6 +13,7 @@ export type ActionMeta = {
   action_visibility?: "running";
   variant?: string;
   recovery_actions?: boolean;
+  workspace_restorable?: boolean;
   scope?: "session" | "task";
   has_resume_token?: boolean;
   error_stamp?: string;

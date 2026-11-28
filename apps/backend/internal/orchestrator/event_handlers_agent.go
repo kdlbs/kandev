@@ -4258,6 +4258,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
+	if restorable, available := recoveryWorkspaceRestorable(ctx, s.repo, data); available {
+		meta["workspace_restorable"] = restorable
+	}
 	if causes := models.NormalizeAgentErrorCauses(data.Causes); len(causes) > 0 {
 		meta["causes"] = causes
 	}
@@ -4338,6 +4341,37 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 
 	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta, turnID)
+}
+
+func recoveryWorkspaceRestorable(
+	ctx context.Context,
+	repo interface {
+		GetTaskSession(context.Context, string) (*models.TaskSession, error)
+		GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error)
+	},
+	data watcher.AgentEventData,
+) (bool, bool) {
+	session, err := repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || session == nil || session.TaskID != data.TaskID || session.TaskEnvironmentID == "" {
+		return false, false
+	}
+	environment, err := repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil || environment == nil || environment.TaskID != data.TaskID {
+		return false, false
+	}
+	return taskEnvironmentWorkspaceRestorable(environment), true
+}
+
+func taskEnvironmentWorkspaceRestorable(environment *models.TaskEnvironment) bool {
+	if environment == nil || environment.WorkspacePath == "" {
+		return false
+	}
+	switch environment.Status {
+	case "", models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) recoveryAuthMethods(ctx context.Context, data watcher.AgentEventData) []streams.AuthMethodInfo {

@@ -399,6 +399,8 @@ it.
 
 ### Configure and use the workspace
 
+When a Review Watch finds a fork PR or cannot verify the source repository, Kandev creates the task and waits for you to select **Start Task**. The empty chat and Edit dialog warn that starting the review can run setup scripts from the PR with access to executor credentials.
+
 <details>
 <summary>Workspace GitHub details</summary>
 

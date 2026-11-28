@@ -26,7 +26,9 @@ test("unarchiving from the detail top bar clears the archived UI in place", asyn
   await unarchiveButton.click();
   await responsePromise;
 
-  await expect(testPage.getByText("Task unarchived")).toBeVisible();
+  await expect(
+    testPage.getByTestId("toast-message").getByText("Task unarchived", { exact: true }),
+  ).toBeVisible();
   // The Unarchive button only renders while isArchived is true, so its removal
   // proves the detail view observed the unarchive without a navigation/refetch.
   await expect(unarchiveButton).toHaveCount(0);

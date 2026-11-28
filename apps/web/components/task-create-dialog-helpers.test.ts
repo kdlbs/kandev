@@ -4,6 +4,7 @@ import {
   autoSelectBranch,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  computeIsTaskStarted,
   computeRunnerEditable,
   computeRunnerIneligibleReason,
   findUnresolvedProviderRemote,
@@ -116,6 +117,13 @@ describe("autoSelectBranch", () => {
     autoSelectBranch([], setBranch, { lastUsedBranch: "main", userSettingsLoaded: true });
 
     expect(setBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("computeIsTaskStarted", () => {
+  it("keeps the Start action for a watched review waiting in an active workflow step", () => {
+    expect(computeIsTaskStarted(true, { state: "REVIEW", manualStartRequired: true })).toBe(false);
+    expect(computeIsTaskStarted(true, { state: "REVIEW" })).toBe(true);
   });
 });
 

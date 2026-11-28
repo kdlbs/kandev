@@ -219,27 +219,29 @@ func (c *Config) ResolvedDataDir() string {
 	return filepath.Join(c.ResolvedHomeDir(), "data")
 }
 
-// defaultServerHost is the wildcard host the server binds to when no host is
-// configured — every interface.
-const defaultServerHost = "0.0.0.0"
+const (
+	defaultServerHost  = "127.0.0.1"
+	wildcardServerHost = "0.0.0.0"
+)
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
 	// Host is the bind address. A single value (e.g. "127.0.0.1") behaves as
 	// it always has; a comma-separated list (e.g. "127.0.0.1,100.64.0.1")
-	// binds one listener per address. Empty means the wildcard default.
+	// binds one listener per address. Empty allows Hosts or the deployment default.
 	//
 	// Host carries the KANDEV_SERVER_HOST env override, so when it is set it
 	// wins over Hosts to preserve env-over-file precedence (see ResolvedBinds).
 	Host string `mapstructure:"host"`
 	// Hosts is the YAML-array form of Host, for config files that prefer an
 	// array to a comma-separated string. It is used only when Host is unset.
-	Hosts          []string `mapstructure:"hosts"`
-	TrustedProxies []string `mapstructure:"trustedProxies"`
-	Port           int      `mapstructure:"port"`
-	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
-	WriteTimeout   int      `mapstructure:"writeTimeout"` // in seconds
-	WebInternalURL string   `mapstructure:"webInternalUrl"`
+	Hosts           []string `mapstructure:"hosts"`
+	wildcardDefault bool
+	TrustedProxies  []string `mapstructure:"trustedProxies"`
+	Port            int      `mapstructure:"port"`
+	ReadTimeout     int      `mapstructure:"readTimeout"`  // in seconds
+	WriteTimeout    int      `mapstructure:"writeTimeout"` // in seconds
+	WebInternalURL  string   `mapstructure:"webInternalUrl"`
 	// WebTitlePrefix prefixes the browser tab title as "<prefix> Kandev" (for
 	// example "TEST") so several Kandev instances are distinguishable in
 	// adjacent browser tabs. Empty keeps the plain "Kandev" title.
@@ -339,14 +341,9 @@ func IsLoopbackHost(h string) bool {
 // host is rejected regardless of its position relative to a wildcard. If any
 // entry is a wildcard (empty/0.0.0.0/:: or an unspecified IP) the whole set
 // collapses to that single wildcard, since it already binds every interface. An
-// empty result falls back to the wildcard default.
+// empty result falls back to the deployment default.
 func (c *ServerConfig) ResolvedBinds() ([]string, error) {
-	raw := splitHosts(c.Host)
-	if len(raw) == 0 {
-		for _, h := range c.Hosts {
-			raw = append(raw, splitHosts(h)...)
-		}
-	}
+	raw := c.configuredHosts()
 
 	seen := make(map[string]struct{}, len(raw))
 	out := make([]string, 0, len(raw))
@@ -372,9 +369,27 @@ func (c *ServerConfig) ResolvedBinds() ([]string, error) {
 		return []string{wildcard}, nil
 	}
 	if len(out) == 0 {
+		if c.wildcardDefault {
+			return []string{wildcardServerHost}, nil
+		}
 		return []string{defaultServerHost}, nil
 	}
 	return out, nil
+}
+
+// UsesDefaultBind reports whether neither host setting supplies a bind address.
+func (c *ServerConfig) UsesDefaultBind() bool {
+	return len(c.configuredHosts()) == 0
+}
+
+func (c *ServerConfig) configuredHosts() []string {
+	hosts := splitHosts(c.Host)
+	if len(hosts) == 0 {
+		for _, host := range c.Hosts {
+			hosts = append(hosts, splitHosts(host)...)
+		}
+	}
+	return hosts
 }
 
 // NonLoopbackBinds returns the resolved bind hosts that are not loopback-only.
@@ -724,8 +739,8 @@ func detectDefaultLogFormat() string {
 func setDefaults(v *viper.Viper) {
 	// Server defaults. Host defaults to empty (not the wildcard) so an unset
 	// host is distinguishable from an explicit one: ResolvedBinds falls back to
-	// server.hosts only when host is unset, and empty resolves to the wildcard
-	// default. This keeps KANDEV_SERVER_HOST winning over a config-file
+	// server.hosts only when host is unset, then uses the deployment default.
+	// This keeps KANDEV_SERVER_HOST winning over a config-file
 	// server.hosts.
 	v.SetDefault("server.host", "")
 	v.SetDefault("server.port", ports.Backend)
@@ -928,6 +943,8 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	cfg.Server.wildcardDefault = os.Getenv("KANDEV_RUNNING_AS_SERVICE") == "true" ||
+		os.Getenv("KANDEV_INTERNAL_CONTAINER_RUNTIME") == "1"
 	fromYAML, err := applySQLiteReaderConns(&cfg, yamlConfig, yamlKeys, envSnapshot, sources)
 	if err != nil {
 		if fromYAML && found {

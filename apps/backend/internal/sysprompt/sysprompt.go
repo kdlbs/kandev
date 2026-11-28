@@ -239,6 +239,14 @@ const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
 `
 
+// WithCanvasGuidance supplies the current attachment's instructions on its first prompt.
+func WithCanvasGuidance(prompt string) string {
+	if strings.Contains(prompt, canvasGuidanceSection) {
+		return prompt
+	}
+	return "<kandev-system>" + canvasGuidanceSection + "</kandev-system>\n\n" + prompt
+}
+
 const worktreeAdoptionSection = `WORKTREE ADOPTION:
 If you create a Git worktree, create it inside the task workspace, then call add_branch_to_task_kandev with worktree_path so Kandev tracks it. Or call add_branch_to_task_kandev without worktree_path and Kandev creates the worktree.
 `

@@ -95,6 +95,16 @@ Compute the workflow projection once for both recorded and dispatched text.
 Retain the existing Office and passthrough branches. Configuration and
 automation profiles do not acquire canvas guidance from a global flag alone.
 
+### Canvas guidance on later user prompts
+
+After a successful structured session attachment, agentctl checks the local MCP server's profile and the attached server list.
+A kanban attachment with the core server and canvas capability needs the authoring section on its first ordinary prompt.
+A silent load or resume waits for that prompt. A full launch prompt can already contain the section.
+
+Agentctl retains the pending attachment ID in the instance. A successful provider prompt clears only its own attachment.
+A failed dispatch leaves the instructions pending. A subsequent load, resume, or reset refreshes the decision from its own binding.
+This execution-specific supplement travels with the provider request. The transcript and delivery journal retain the submitted message.
+
 ## Failure and recovery
 
 A profile resolution error retains existing launch error behavior. The prompt

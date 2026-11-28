@@ -240,6 +240,14 @@ func (s *Service) initialRecoveryWorkflowBinding(
 	if task == nil || step == nil || step.ID == "" {
 		return nil, nil
 	}
+	if step.SessionTarget != nil && step.SessionTarget.Kind == wfmodels.WorkflowSessionTargetInitial {
+		if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); !routePresent {
+			snapshot, available := models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+			if !available || snapshot.SessionID != sessionID {
+				return nil, fmt.Errorf("%w: workflow destination session changed", ErrCeilingLaunchSuperseded)
+			}
+		}
+	}
 	if route, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok &&
 		route.DestinationStepID != "" && route.DestinationStepID != step.ID {
 		return nil, fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, ceilingEntryDetailStepChanged)

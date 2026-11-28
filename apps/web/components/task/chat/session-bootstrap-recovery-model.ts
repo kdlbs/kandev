@@ -13,6 +13,7 @@ import {
   processExitTitleKey,
 } from "./session-process-exit-recovery";
 import { causeLabel, operationLabel } from "./session-bootstrap-cause-labels";
+import { sessionRecoveryFailureLabel } from "./session-recovery-failure-label";
 import type {
   AgentErrorCause,
   TaskStatusSummaryActiveError,
@@ -119,14 +120,12 @@ function manualRecoveryCauses(
     return [];
   }
   if (failure.causes?.length) return normalizeAgentErrorCauses(failure.causes);
-  const restore = failure.operation === "restore_workspace";
+  const operation = failure.operation === "fresh_start" ? "start" : failure.operation;
   return [
     {
-      operation: restore ? "restore_workspace" : "resume",
+      operation,
       code: "unknown",
-      detail:
-        manualError?.message ??
-        translate(restore ? "task:failedToRestoreWorkspace" : "task:failedToResumeSession"),
+      detail: manualError?.message ?? sessionRecoveryFailureLabel(failure.operation, translate),
     },
   ];
 }

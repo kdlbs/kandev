@@ -1,13 +1,80 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 import { renderHook } from "@testing-library/react";
-import { recoveryCopy, useRecoveryPresentation } from "./session-recovery-model";
+import {
+  recoveryCopy,
+  useRecoveryChoices,
+  useRecoveryPresentation,
+} from "./session-recovery-model";
 import { selectActiveSessionRecovery } from "@/lib/active-session-recovery";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 
-vi.mock("./messages/action-message-recovery", () => ({ sessionRecoveryAction: vi.fn() }));
+vi.mock("./messages/action-message-recovery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./messages/action-message-recovery")>()),
+  sessionRecoveryAction: vi.fn(),
+}));
 
 const translate = ((key: string) => `localized:${key}`) as TFunction;
+
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.18
+describe("recovery choices without a restorable workspace", () => {
+  const actions = {
+    busyAction: null,
+    recoveryError: new Error("Worktree setup failed"),
+    handleRecover: vi.fn(),
+    handleRestore: vi.fn(),
+  } as unknown as SessionRecoveryActions;
+  const model = (workspaceRestorable?: boolean) => ({
+    sessionId: "session",
+    kind: "generic",
+    error: { message: "Worktree setup failed", phase: "bootstrap" },
+    ...(workspaceRestorable === undefined
+      ? {}
+      : { metadata: { workspace_restorable: workspaceRestorable } }),
+  });
+  const choices = (workspaceRestorable?: boolean) =>
+    renderHook(() =>
+      useRecoveryChoices({
+        model: model(workspaceRestorable),
+        actions,
+        profileExists: true,
+        onNewSession: vi.fn(),
+        onRelocateRequested: vi.fn(),
+      }),
+    ).result.current;
+
+  it("hides workspace restore and explains why when the workspace is unavailable", () => {
+    const { result } = renderHook(() => useRecoveryPresentation(model(false), actions, null));
+
+    expect(choices(false).map((choice) => choice.kind)).not.toContain("restore");
+    expect(result.current.copy.prerequisite).toBe("Workspace restore is unavailable right now.");
+  });
+
+  it("keeps the existing restore choice when availability is unknown", () => {
+    expect(choices().map((choice) => choice.kind)).toContain("restore");
+  });
+
+  it("uses the fresh-start label after a fresh-start request fails", () => {
+    const { result } = renderHook(() =>
+      useRecoveryPresentation(
+        model(false),
+        {
+          ...actions,
+          manualRecoveryFailure: {
+            operation: "fresh_start",
+            sessionId: "session",
+            errorStamp: null,
+            requestKey: "request",
+            operationId: 1,
+          },
+        } as SessionRecoveryActions,
+        null,
+      ),
+    );
+
+    expect(result.current.failure).toBe("Failed to start fresh session");
+  });
+});
 
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.12
 it.each([

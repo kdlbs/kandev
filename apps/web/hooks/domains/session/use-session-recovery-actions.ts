@@ -298,7 +298,8 @@ export function useSessionRecoveryActions({
       setRecoveryNotice(null);
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
-        operation: "resume",
+        operation:
+          action === "fresh_start" || action === "runtime_retry" ? "fresh_start" : "resume",
         causes: recoveryFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
