@@ -27,6 +27,7 @@ export const defaultFeatureFlags = {
   acpV2: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
+  officeAgentErrorSessionVerdict: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;
