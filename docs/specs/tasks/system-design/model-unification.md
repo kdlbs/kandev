@@ -84,6 +84,13 @@ Built-in workflow templates ship with kandev:
     `Work`.
   - `Done` (`stage_type='custom'`): terminal.
 
+The portable workflow step carries its persisted `stage_type` alongside the
+step behavior. Export preserves `work`, `review`, `approval`, and `custom`;
+older documents that omit the field default newly imported steps to `custom`.
+During workflow sync, an explicit source value applies and participates in
+drift comparison. If the source omits the field, a matched step keeps its
+current `stage_type`, while a newly created step defaults to `custom`.
+
 Note: there is no `Ship` step. Shipping work (opening a PR, deploying)
 happens inside `Work` directly — the assignee opens the PR as part of
 its turn — or in a delegated child task with the Kanban Default
