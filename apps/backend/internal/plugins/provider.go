@@ -118,6 +118,13 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 	if userStateStore != nil {
 		svc.SetUserState(userStateStore)
 	}
+	changeRequestStore, err := state.NewChangeRequestStore(dbPool)
+	if err != nil {
+		recordStoreError(storeErrors, "plugin-task-change-requests", fmt.Errorf("change request ledger: %w", err))
+	} else if changeRequestStore != nil {
+		svc.SetChangeRequestStore(changeRequestStore)
+	}
+	svc.subscribeWorkspaceDeletedEvents()
 
 	configureWebAppStorage(cfg, svc, instanceStore, instanceState, log)
 	svc.SetSecrets(secrets)

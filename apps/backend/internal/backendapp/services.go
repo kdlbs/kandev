@@ -1794,8 +1794,15 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-instance-state",
 		"plugin-user-state",
 		"plugin-command-receipts",
+		"plugin-task-change-requests",
 	} {
-		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
+		initErr := initErrors[id]
+		if id == "plugin-state" {
+			// The command receipt tables are owned by the plugin-state store
+			// descriptor, so their init failure fails that admission too.
+			initErr = errors.Join(initErr, initErrors["plugin-command-receipts"])
+		}
+		if err := recordRequiredStore(ctx, tracker, id, initErr); err != nil {
 			failures = append(failures, err)
 		}
 	}

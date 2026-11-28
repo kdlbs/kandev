@@ -450,6 +450,7 @@
     "plugin-instance-state",
     "plugin-user-state",
     "plugin-command-receipts",
+    "plugin-task-change-requests",
     "canvas",
     "github",
     "gitlab",
