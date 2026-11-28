@@ -4241,6 +4241,13 @@ func isTaskSessionNotFound(err error) bool {
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport, scope interface{}) bool {
 	sessionID := session.ID
+	if running.Runtime == runtimekind.RuntimeStandalone && previousState == models.TaskSessionStateCancelled {
+		// Keep the inventory visible to startup correlation and its recovery
+		// guards. The reaper will check this owner, pending work and recovery
+		// evidence before stopping it after startup.
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return true
+	}
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
 		s.logger.Info("session in terminal state; stopping runtime before cleaning up executor record",
@@ -4289,8 +4296,14 @@ func (s *Service) preserveRemoteWorkspaceOnStartup(running *models.ExecutorRunni
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
-	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	if running.Runtime != runtimekind.RuntimeStandalone {
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
+	}
 	s.ensureFailedTaskReviewOnStartup(ctx, session)
+	if running.Runtime == runtimekind.RuntimeStandalone {
+		s.reconcileAbsentTerminalRuntime(ctx, running, scope)
+		return
+	}
 	if canResumeRunning(running) {
 		s.logger.Info("preserving executor record for resumable failed session",
 			zap.String("session_id", sessionID),
