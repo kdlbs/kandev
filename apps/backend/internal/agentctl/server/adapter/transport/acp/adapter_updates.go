@@ -598,6 +598,7 @@ func (a *Adapter) convertACPContentNotification(
 			u.AgentMessageChunk.Content,
 			acpAssistantRole,
 			derefStr(u.AgentMessageChunk.MessageId),
+			promptGeneration,
 		), true
 
 	case u.UserMessageChunk != nil:
@@ -606,6 +607,7 @@ func (a *Adapter) convertACPContentNotification(
 			u.UserMessageChunk.Content,
 			acpUserRole,
 			derefStr(u.UserMessageChunk.MessageId),
+			promptGeneration,
 		), true
 
 	case u.AgentThoughtChunk != nil:
@@ -887,7 +889,7 @@ func usageLifecycleEvent(sessionID string, meta map[string]any, promptGeneration
 //
 //nolint:nestif // pre-existing complexity preserved from adapter.go file split
 func (a *Adapter) convertMessageChunk(sessionID string, content acp.ContentBlock, role string) *AgentEvent {
-	return a.convertMessageChunkWithProtocolID(sessionID, content, role, "")
+	return a.convertMessageChunkWithProtocolID(sessionID, content, role, "", a.currentPromptGeneration())
 }
 
 func (a *Adapter) convertMessageChunkWithProtocolID(
@@ -895,6 +897,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 	content acp.ContentBlock,
 	role string,
 	protocolMessageID string,
+	promptGeneration uint64,
 ) *AgentEvent {
 	event := &AgentEvent{
 		Type:              streams.EventTypeMessageChunk,
@@ -928,13 +931,22 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
-		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// The gate keeps the classifier off ordinary prose chunks; uncovered
+		// rules and structured inputs retain full classification.
+		var classified *routingerr.Error
+		if diagnostic := (routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text}); routingerr.MayClassify(diagnostic) {
+			classified = routingerr.Classify(diagnostic)
+		}
+		// A usage-limit notice can arrive in fragments; a fragment that
+		// continues the recognized notice is part of the diagnostic, not output.
+		noticeFragment := role == acpAssistantRole && a.observeUsageLimitNotice(sessionID, promptGeneration, text)
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
 		event.ProviderDiagnosticCandidate = role == acpAssistantRole &&
-			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
+			(noticeFragment || (classified != nil && classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed &&
+				!relativeQuotaNoticeContainsOutput(classified, text)))
 		return event
 	}
 

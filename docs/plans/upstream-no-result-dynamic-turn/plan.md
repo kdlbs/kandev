@@ -25,7 +25,7 @@ Candidate identity, attempt ownership, workflow fences, and current execution gu
 
 ## Retained contract
 
-Only a normal `end_turn` with trusted no-output/no-effect evidence receives the fixed, text-free empty-turn identity.
+Only a normal `end_turn` with trusted no-answer/no-plan/no-effect evidence receives the fixed, text-free empty-turn identity. Reasoning-only normal completions qualify without weakening the output fence for other failure origins.
 The policy must be explicitly enabled, its threshold valid, and the workflow step known without a veto.
 Below the threshold recovery stays manual; at the threshold the existing fenced successor path owns the turn.
 The counted turn's own completion must preserve its count. Current successful output clears a previous count, including text or plan content delivered only in the complete frame.

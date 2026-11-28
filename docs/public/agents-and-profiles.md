@@ -858,7 +858,8 @@ Kandev counts only a current task-session failure that has complete trusted
 evidence and no output or tool activity. Eligible errors are a terminal
 `unknown_provider_error` before output, or a typed agent process-start or
 session-initialization `agent_runtime_error`. A turn that ends normally
-(`end_turn`) with no assistant text, reasoning, or tool activity also counts;
+(`end_turn`) with no assistant answer text, plan content, or tool activity also counts,
+including a turn that contains only reasoning;
 consecutive empty turns match each other. For provider errors, each counted
 failure must have the same code, origin, phase, provider, and complete
 diagnostic. Kandev normalizes whitespace only; case and punctuation remain
@@ -989,6 +990,18 @@ correlation accepts it; this toggle does not authorize replay after effects.
 Explicit reset hints control suspension expiry. Model-scoped failures do not
 suspend unrelated models. Account-wide limits require a proven current launch
 credential binding; unknown bindings retain narrower scope.
+
+Operators can add provider-error rules from a local JSON or YAML file with the
+`providerErrors.catalogFile` startup setting (`KANDEV_PROVIDER_ERRORS_CATALOG_FILE`).
+A relative path resolves against the directory of the selected `config.yaml`,
+or against the process working directory when no config file is selected.
+Kandev reads the file once at startup; restart to apply changes. Built-in rules
+always run first, and catalog rules run in file order before the keyword and
+context classification. Rules that use keyword terms or invocation context, and
+any requested scope, backoff or reset, take effect only while this classifier
+is enabled. An invalid file is ignored as a whole and logged with its reason; Kandev
+keeps the built-in rules. See the
+[catalog format reference](../../apps/backend/internal/agent/runtime/routingerr/externalcatalog/README.md).
 
 ### Host probes and executor model catalogs
 
@@ -1603,3 +1616,17 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Automation cannot select a profile:** passthrough agent profiles and Local executor profiles are intentionally omitted from the automation selectors.
 
 Related: [Executors](executors.md), [Automation and MCP](automation-and-mcp.md), and the contributor guide [Adding a new agent CLI](add-agent-cli.md).
+
+### Provider error signatures
+
+Kandev recognizes provider diagnostic envelopes for exhausted usage, missing
+models or endpoints, host capacity, connection failures and upstream timeouts.
+OpenCode Free and Go usage-limit notices use the existing quota action of the
+selected candidate. Quoted errors in an agent's explanation do not activate the
+new catalog signatures. A classified quota notice does not itself establish
+an account's remaining allowance or reset time.
+
+Request compatibility failures keep their normal recovery behavior. Only a
+complete provider diagnostic received before any answer or tool effect can
+enter the existing repeated-failure policy; an incomplete diagnostic or a turn
+that already produced work cannot authorize automatic replay.

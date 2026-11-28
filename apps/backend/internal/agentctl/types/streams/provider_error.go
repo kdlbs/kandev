@@ -78,6 +78,7 @@ func IsCompleteProviderDiagnostic(raw string) bool {
 }
 
 const (
+	ProviderErrorSourceAgentMessage   = "agent_message"
 	ProviderErrorSourceOpenCodeStderr = "opencode_stderr"
 	// ProviderErrorSourceOpenCodeACP marks a provider diagnostic projected
 	// from a structured ACP service-failure response.
@@ -110,6 +111,9 @@ type ProviderError struct {
 	// DiagnosticIdentityComplete is set only when the adapter extracted the
 	// complete raw diagnostic and sanitization made no change to it.
 	DiagnosticIdentityComplete bool `json:"diagnostic_identity_complete,omitempty"`
+	// DiagnosticSingleLine is set only when an adapter can establish that the
+	// original diagnostic has no line separators before whitespace sanitization.
+	DiagnosticSingleLine bool `json:"diagnostic_single_line,omitempty"`
 	// RPCCode is the JSON-RPC error code from a terminal ACP prompt error,
 	// carried verbatim. JSON-RPC forbids code 0, so 0 means absent.
 	RPCCode int `json:"rpc_code,omitempty"`
