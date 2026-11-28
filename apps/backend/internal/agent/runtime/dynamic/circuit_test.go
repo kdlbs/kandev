@@ -421,7 +421,7 @@ func TestKeywordCircuitScopeAndDeadline(t *testing.T) {
 		engine := NewEngine(WithClock(func() time.Time { return now }))
 		reset := now.Add(2 * time.Minute)
 		failure.ResetHint = &reset
-		engine.openCircuitForFailure(Profile{Candidates: []Candidate{a}}, a.ID, failure)
+		engine.openCircuitForFailure(Profile{Candidates: []Candidate{a}}, a.ID, failure, SuspensionBinding)
 		if !engine.Circuits().IsOpen(key, now) {
 			t.Fatalf("%s circuit was not opened", tc.scope)
 		}

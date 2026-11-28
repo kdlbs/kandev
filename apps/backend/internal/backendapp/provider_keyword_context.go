@@ -36,7 +36,7 @@ func keywordCredentialBindingResolver(manager keywordExecutionLookup, agents *re
 		if err != nil {
 			return dynamic.CredentialBindingDescriptor{}
 		}
-		for _, key := range []string{"HOME", "USERPROFILE"} {
+		for _, key := range []string{credentialHomeEnvKey, credentialProfileEnvKey} {
 			if value, exists := os.LookupEnv(key); exists && !sameKeywordCredentialHome(value, home) {
 				return dynamic.CredentialBindingDescriptor{}
 			}
@@ -69,10 +69,10 @@ func keywordBindingFromLaunch(executorType string, env map[string]string, profil
 }
 
 func keywordLaunchUsesHostCredentials(executorType string, env map[string]string, home string) bool {
-	if (executorType != hostSourceLocal && executorType != "worktree" && executorType != legacyLocalPCExecutor) || env == nil || !filepath.IsAbs(home) {
+	if (executorType != hostSourceLocal && executorType != worktreeExecutor && executorType != legacyLocalPCExecutor) || env == nil || !filepath.IsAbs(home) {
 		return false
 	}
-	for _, key := range []string{"HOME", "USERPROFILE"} {
+	for _, key := range []string{credentialHomeEnvKey, credentialProfileEnvKey} {
 		if value, exists := env[key]; exists && !sameKeywordCredentialHome(value, home) {
 			return false
 		}

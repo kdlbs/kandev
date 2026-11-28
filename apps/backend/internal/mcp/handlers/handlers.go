@@ -650,6 +650,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPReorderChildTasks, h.handleReorderChildTasks)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
@@ -2065,6 +2066,8 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 
+		// The calling agent, not a user, starts this task, so the session
+		// ceiling admits it as automatic rather than as a manual override.
 		launchReq := &orchestrator.LaunchSessionRequest{
 			TaskID:            task.ID,
 			Intent:            orchestrator.IntentStart,
@@ -2073,6 +2076,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
+			Automatic:         true,
 		}
 		if config.InitialCreatePrompt {
 			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
@@ -2084,6 +2088,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:       task.WorkflowStepID,
 				InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(task.Description), nil),
 				DeferredStart:        true,
+				Automatic:            true,
 			})
 			if prepErr != nil {
 				h.logger.Error("failed to prepare initial MCP creation prompt",
@@ -2106,6 +2111,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				Prompt:                  task.Description,
 				PromptIsTaskDescription: true,
 				InitialCreatePrompt:     true,
+				Automatic:               true,
 			}
 		}
 
@@ -3144,6 +3150,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
 		return response, nil
 	}
+	if req.OperationID != "" && sendOperationReplayOnly(ctx) {
+		return wsError(msg.ID, msg.Action, SendOperationNotRetainedCode,
+			"no retained operation record exists for this sender and operation_id; nothing was delivered"), nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -3170,11 +3180,18 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	if parentReply != nil && parentReply.alreadyAnswered {
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		// The question claim is the durable record here: repeating this request
+		// returns already_answered again and delivers nothing, so the identity is
+		// echoed rather than claimed for a send that never dispatches.
+		payload := map[string]interface{}{
 			"task_id":              req.TaskID,
 			"reply_to_question_id": req.ReplyToQuestionID,
 			stopTaskStatusKey:      "already_answered",
-		})
+		}
+		if req.OperationID != "" {
+			payload[sendOperationIDKey] = req.OperationID
+		}
+		return ws.NewResponse(msg.ID, msg.Action, payload)
 	}
 
 	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)

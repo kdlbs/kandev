@@ -10,6 +10,18 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+// ReadExecutorType returns the authorized stored type without refreshing the plugin catalog.
+func (s *Service) ReadExecutorType(ctx context.Context, id string) (models.ExecutorType, error) {
+	executor, err := s.executors.GetExecutor(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if executor == nil || s.authorizeExecutorOwners(ctx, executor.OwnerUserID) != nil {
+		return "", models.ErrExecutorNotFound
+	}
+	return executor.Type, nil
+}
+
 const executorActiveUserStatus = "active"
 
 // authorizeExecutorOwners composes parent and profile ownership without treating

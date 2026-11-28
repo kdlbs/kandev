@@ -109,7 +109,25 @@ Provider process-internal work beyond ACP visibility is a limitation of the opt-
 ## Always-on idle reclaim
 
 The orchestrator's idle reclaim is separate from the workspace policy. The periodic reaper and the synchronous settle points share one primitive.
-`classifyIdleReclaim` releases a runtime only for a settled session with no live agent and no active turn.
+`classifyIdleReclaim` permits reclaim for a settled session with no live agent and no active turn.
+For a failed or cancelled session with a live agent, reclaim also requires a current execution
+identity, identity-checked cleanup and row repair, and no known or unreadable queued messages,
+clarifications, permissions, background work, or active turn. Live resumable sessions remain excluded.
+The failed/cancelled cleanup requires a tracked standalone instance and a
+confirmed lifecycle stop. It keeps the exact inventory row and its resume token.
+An unavailable or changed owner, open recovery block, or durable dispatch leaves
+the row intact. Startup retains the inventory and its recovery guards and defers
+this standalone cleanup to the existing reaper.
+Deleting that instance also stops the workspace processes it hosts, so a
+non-terminal process on the instance, an unavailable agentctl client, or an
+unreadable process list blocks the stop until a later reconcile. Process start
+from the backend HTTP route holds the same session lifecycle fence from runtime
+preparation through the start request.
+The control server rechecks workspace process admission under its instance stop
+lock before reclaiming. User input to the default shell, active terminals,
+code-server and workspace previews prevent reclaim. A passive workspace output
+subscription does not indicate that the default shell is in use. Older peers
+without this operation leave the runtime available for a later retry.
 When agentctl status fails, lifecycle may consult an optional runtime capability for positive agentctl process-absence evidence. SSH uses only the remote PID and existing connection of the tracked execution instance. A completed remote probe must confirm absence, and the instance and answering transport must remain current after the probe. Missing PID, missing instance/client, a live process, permission/probe errors, cancellation, transport loss, and unsupported runtimes retain the original status error and skip reclaim. This path never redials SSH and never treats UI remote-status values as process-absence evidence. Existing lifecycle cleanup, execution-identity checks, active-turn guards, and resume-record preservation still apply.
 For `WAITING_FOR_INPUT` and `IDLE` it also requires a stored resume token or row status `running`.
 

@@ -311,6 +311,23 @@ func (c circuit) blocksFixedDispatchAt(now time.Time) bool {
 	return now.Before(c.until)
 }
 
+// OpenUntil reports the timed circuit or its in-flight probe lease expiry.
+func (r *CircuitRegistry) OpenUntil(key string) (time.Time, bool) {
+	if key == "" {
+		return time.Time{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed || entry.held() {
+		return time.Time{}, false
+	}
+	if entry.state == CircuitHalfOpen {
+		return entry.probeUntil, true
+	}
+	return entry.until, !entry.until.IsZero()
+}
+
 type ProbeLease struct {
 	Key       string
 	ExpiresAt time.Time

@@ -1097,6 +1097,17 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
+`reorder_child_tasks_kandev` is available only in task mode. It accepts required
+`ordered_task_ids` (full IDs of same-workspace direct children in one workflow
+step and band) and optional `placement`: `in_place` (default) permutes their
+current slots, while `front` puts them ahead of remaining tasks without changing
+the remaining relative order. The response identifies `workflow_step_id`,
+`band`, `placement`, `revision`, and the resulting `tasks` IDs and positions.
+The board and normal queued admission use this order. A membership conflict is
+retried once; a second conflict returns an error. Use this tool for scheduling
+preference and `blocked_by` only for real input dependencies. See
+[child processing order](coordination.md#choose-child-processing-order).
+
 `add_workspace_sources_kandev` accepts the same mixed source batches as the Files panel. It adds sources to an idle task and defaults `task_id` to the current task.
 
 - It can target a same-workspace direct child. Kandev checks the caller's task and session on the backend; the agent cannot set them.
@@ -1266,6 +1277,22 @@ The command supports repeatable `--status` and `--priority` filters, plus
 together to continue a page walk. The workspace comes from the short-lived
 runtime token, so `KANDEV_WORKSPACE_ID` is not required for this command.
 Taskless launch and session creation remain separate Office scheduler work.
+
+A task-bound Office run can use the workspace collaboration grants of its
+actual task and session to discover reachable workspaces and communicate with
+tasks in them. `workspaces list`, `workspaces coordinator --id <workspace>`,
+and `workspaces tasks --id <workspace>` read the directory and task list.
+`tasks sessions|transcript|plan --id <task>` read a task, and
+`tasks send --id <task> --prompt <text> [--operation-id <id>]` sends an
+ordinary task message. Read and prompt grants are independent. The signed run
+must still be active and hold the corresponding live Office capability. These
+commands do not give taskless runs foreign workspace access or enable a grant.
+An operation ID follows the existing task-message receipt and retry rules.
+Repeating `tasks send` with the same operation ID and prompt returns the
+retained receipt while the signed run is live, even if the target was deleted
+or its prompt grant was revoked; an `operation_id_conflict` returns HTTP 409.
+With `--workspace`, `tasks list` accepts only `--workflow` and rejects other
+filters. A run whose source session has ended cannot use these commands.
 
 </details>
 

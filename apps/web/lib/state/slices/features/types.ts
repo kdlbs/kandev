@@ -15,6 +15,8 @@ export const defaultFeatureFlags = {
   canvases: false,
   multiTenancy: false,
   dynamicAgentRouting: false,
+  providerUsageLimits: false,
+  dynamicProfileTiers: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   needsYouInbox: false,
@@ -25,6 +27,7 @@ export const defaultFeatureFlags = {
   coordinatorPhase31: false,
   codexAppServer: false,
   acpV2: false,
+  terminalPrimaryQueueHandoff: false,
   agentBackgroundWork: false,
   opencodePlugin: false,
 } as const;

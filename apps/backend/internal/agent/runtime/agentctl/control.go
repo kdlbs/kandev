@@ -59,28 +59,29 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
-	ID                         string              `json:"id,omitempty"`
-	ScopedMCPRoutes            bool                `json:"scoped_mcp_routes,omitempty"`
-	WorkspacePath              string              `json:"workspace_path"`
-	AgentCommand               string              `json:"agent_command,omitempty"`
-	Protocol                   string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
-	CodexAppServerEnabled      bool                `json:"codex_app_server_enabled,omitempty"`
-	AgentType                  string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
-	WorkspaceFlag              string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
-	Env                        map[string]string   `json:"env,omitempty"`
-	AutoStart                  bool                `json:"auto_start,omitempty"`
-	AutoApprovePermissions     *bool               `json:"auto_approve_permissions,omitempty"`
-	McpServers                 []McpServerConfig   `json:"mcp_servers,omitempty"`
-	SessionID                  string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
-	TaskID                     string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion         bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
-	PromptSuggestions          bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
-	CopilotNativeSessionEvents bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
-	AssumeMcpSse               bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
-	AssumeMcpHttp              bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
-	McpMode                    string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
-	McpProviders               []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
-	McpProfile                 *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
+	ScopedMCPRoutes             bool                `json:"scoped_mcp_routes,omitempty"`
+	InferenceClosureOperationID string              `json:"inference_closure_operation_id,omitempty"`
+	ID                          string              `json:"id,omitempty"`
+	WorkspacePath               string              `json:"workspace_path"`
+	AgentCommand                string              `json:"agent_command,omitempty"`
+	Protocol                    string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled       bool                `json:"codex_app_server_enabled,omitempty"`
+	AgentType                   string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
+	WorkspaceFlag               string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
+	Env                         map[string]string   `json:"env,omitempty"`
+	AutoStart                   bool                `json:"auto_start,omitempty"`
+	AutoApprovePermissions      *bool               `json:"auto_approve_permissions,omitempty"`
+	McpServers                  []McpServerConfig   `json:"mcp_servers,omitempty"`
+	SessionID                   string              `json:"session_id,omitempty"`                    // Task session ID for MCP tool calls
+	TaskID                      string              `json:"task_id,omitempty"`                       // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion          bool                `json:"disable_ask_question,omitempty"`          // Disable ask_user_question MCP tool (TUI agents)
+	PromptSuggestions           bool                `json:"prompt_suggestions,omitempty"`            // Ask native-suggestion agents to emit next-prompt suggestions
+	CopilotNativeSessionEvents  bool                `json:"copilot_native_session_events,omitempty"` // Enable Copilot native compaction and attributed usage
+	AssumeMcpSse                bool                `json:"assume_mcp_sse,omitempty"`                // Assume agent supports SSE MCP servers
+	AssumeMcpHttp               bool                `json:"assume_mcp_http,omitempty"`               // Assume agent supports HTTP MCP servers
+	McpMode                     string              `json:"mcp_mode,omitempty"`                      // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	McpProviders                []string            `json:"mcp_providers,omitempty"`                 // Supported review-automation providers
+	McpProfile                  *mcpprofile.Context `json:"mcp_profile,omitempty"`                   // Backend-owned typed MCP tool profile
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
@@ -395,7 +396,20 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 
 // DeleteInstance stops and removes an agent instance.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
+	return c.stopInstance(ctx, instanceID, false)
+}
+
+// ReclaimIdleInstance requires the peer to refuse when instance work is active.
+func (c *ControlClient) ReclaimIdleInstance(ctx context.Context, instanceID string) error {
+	return c.stopInstance(ctx, instanceID, true)
+}
+
+func (c *ControlClient) stopInstance(ctx context.Context, instanceID string, idleOnly bool) error {
+	method, path := http.MethodDelete, "/api/v1/instances/"+instanceID
+	if idleOnly {
+		method, path = http.MethodPost, path+"/reclaim"
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
@@ -412,7 +426,7 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	// response was lost. The desired postcondition is already satisfied.
 	if resp.StatusCode != http.StatusOK &&
 		resp.StatusCode != http.StatusNoContent &&
-		resp.StatusCode != http.StatusNotFound {
+		(resp.StatusCode != http.StatusNotFound || idleOnly) {
 		var errResp struct {
 			Error string `json:"error"`
 		}
@@ -422,6 +436,11 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
+	if resp.StatusCode == http.StatusOK {
+		if err := observeDeletedInference(ctx, instanceID, resp.Body); err != nil {
+			return fmt.Errorf("%w: %w", ErrInferenceStopSettlement, err)
+		}
+	}
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))
 	return nil
 }

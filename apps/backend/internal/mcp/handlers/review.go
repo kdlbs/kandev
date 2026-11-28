@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/kandev/kandev/internal/authz"
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/review"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -46,6 +49,10 @@ func (h *Handlers) registerReviewHandlers(d mcpActionRegistrar) int {
 	d.RegisterFunc(ws.ActionTaskReviewClear, h.handleClearTaskReview)
 	d.RegisterFunc(ws.ActionTaskReviewCancel, h.handleCancelTaskReview)
 	registered := 5
+	if h.taskSvc != nil {
+		d.RegisterFunc(ws.ActionTaskReviewSourceSet, h.handleSetReviewSource)
+		registered++
+	}
 	if h.reviewRunner != nil {
 		d.RegisterFunc(ws.ActionTaskReviewRun, h.handleRunTaskReview)
 		registered++
@@ -148,6 +155,9 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 		SessionID      string `json:"session_id"`
 		RepositoryID   string `json:"repository_id"`
 		AgentProfileID string `json:"agent_profile_id"`
+		WorktreePath   string `json:"worktree_path"`
+		BaseRef        string `json:"base_ref"`
+		HeadRef        string `json:"head_ref"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -155,14 +165,49 @@ func (h *Handlers) handleRunTaskReview(ctx context.Context, msg *ws.Message) (*w
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	// Every launch, including a plain manual one, starts inference and records
+	// a run on the task, so the caller must reach the task first.
+	if h.taskSvc != nil {
+		if err := h.taskSvc.AuthorizeTaskAccess(ctx, req.TaskID); err != nil {
+			return reviewLaunchError(msg, err)
+		}
+	}
 
-	run, err := h.reviewRunner.Launch(ctx, review.RunRequest{
+	launch := review.RunRequest{
 		TaskID:         req.TaskID,
 		SessionID:      req.SessionID,
 		RepositoryID:   req.RepositoryID,
 		AgentProfileID: req.AgentProfileID,
 		Trigger:        models.ReviewTriggerManual,
-	})
+		WorktreePath:   req.WorktreePath,
+		BaseRef:        req.BaseRef,
+		HeadRef:        req.HeadRef,
+	}
+	principal, inSession := mcpscope.PrincipalFromContext(ctx)
+	external := mcporigin.IsTrustedExternalTransport(ctx)
+	explicitSource := req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != ""
+	if inSession || external || explicitSource {
+		if h.taskSvc == nil || h.taskSvc.AuthorizeTaskScope(ctx, req.TaskID, authz.ScopeTaskWrite) != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is not writable", nil)
+		}
+	}
+	if denied := h.admitAgentReviewSource(ctx, msg, req.TaskID, req.WorktreePath); denied != nil {
+		return denied, nil
+	}
+	if external && !inSession {
+		launch.SessionID = ""
+	}
+	if inSession {
+		launch.SessionID = ""
+		if req.TaskID == principal.CallerTaskID {
+			launch.SessionID = principal.CallerSessionID
+		}
+		launch.OriginRequired = true
+		launch.Origin = h.mcpReviewOrigin(ctx, req.TaskID, principal)
+	} else {
+		launch.Origin, launch.OriginRequired = h.manualReviewOrigin(ctx, req.TaskID, launch.SessionID)
+	}
+	run, err := h.reviewRunner.Launch(ctx, launch)
 	if err != nil {
 		return reviewLaunchError(msg, err)
 	}

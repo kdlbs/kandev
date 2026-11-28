@@ -22,6 +22,46 @@ func DynamicCandidateRuntimeResetRequired(previousProfileID, nextProfileID strin
 	return previousProfileID != "" && nextProfileID != "" && previousProfileID != nextProfileID
 }
 
+// rejectedRuntimeSettingsExecution records the execution whose late mode and
+// model events must not restore the provider observations discarded for it.
+const rejectedRuntimeSettingsExecution = "rejected_runtime_settings_execution"
+
+// DynamicCandidateSelectionResetRequired extends DynamicCandidateRuntimeResetRequired
+// for a selected session whose route projection is already applied. A launch
+// retry of the same candidate also resets the runtime settings when the current
+// execution failed with a typed permission-mode application error before any
+// prompt was sent, which covers sessions already failed by older builds.
+func DynamicCandidateSelectionResetRequired(selected *models.TaskSession, previousProfileID string) bool {
+	if selected == nil {
+		return false
+	}
+	if DynamicCandidateRuntimeResetRequired(previousProfileID, selected.ExecutionProfileID) {
+		return true
+	}
+	launching := selected.RouteState == "starting" || selected.RouteState == dynamicRouteStatusRetrying
+	return launching && previousProfileID != "" && selected.ExecutionProfileID != "" &&
+		rejectedDynamicRuntimeExecution(selected) != ""
+}
+
+// rejectedDynamicRuntimeExecution returns the session's current execution when
+// its last failure is a bootstrap permission-mode application failure bound to
+// that execution and proving no prompt was sent. Other failures return "".
+func rejectedDynamicRuntimeExecution(session *models.TaskSession) string {
+	failure, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || failure.Phase != models.LaunchErrorPhaseBootstrap || session.AgentExecutionID == "" ||
+		failure.ExecutionID != session.AgentExecutionID {
+		return ""
+	}
+	for _, cause := range failure.Causes {
+		if cause.Code == models.AgentErrorCauseCodePermissionModeFailed &&
+			cause.Reason == models.AgentErrorCauseReasonApplicationFailed &&
+			cause.PromptNotSent != nil && *cause.PromptNotSent {
+			return session.AgentExecutionID
+		}
+	}
+	return ""
+}
+
 // PersistDynamicCandidateSwitch persists a route projection that selected a new
 // concrete candidate, together with the candidate runtime reset. It reports
 // false when the session changed since expectedState/expectedUpdatedAt.
@@ -36,12 +76,13 @@ func (s *Service) PersistDynamicCandidateSwitch(
 }
 
 // persistDynamicRouteProjection writes a route projection applied to session.
-// A candidate switch also drops the previous provider's runtime settings.
+// A candidate switch, or a retry of a permission-mode rejected execution, also
+// drops the previous provider's runtime settings.
 func (s *Service) persistDynamicRouteProjection(
 	ctx context.Context, session *models.TaskSession, previousProfileID string,
 	expectedState models.TaskSessionState, expectedUpdatedAt time.Time,
 ) error {
-	if !DynamicCandidateRuntimeResetRequired(previousProfileID, session.ExecutionProfileID) {
+	if !DynamicCandidateSelectionResetRequired(session, previousProfileID) {
 		return s.repo.UpdateTaskSession(ctx, session)
 	}
 	changed, err := s.PersistDynamicCandidateSwitch(ctx, session, expectedState, expectedUpdatedAt)
@@ -72,6 +113,9 @@ func (s *Service) persistDynamicCandidateRuntimeReset(
 		return false, err
 	}
 	session.Metadata = cloneSessionMetadata(session.Metadata)
+	if rejected := rejectedDynamicRuntimeExecution(session); rejected != "" {
+		session.Metadata[rejectedRuntimeSettingsExecution] = rejected
+	}
 	delete(session.Metadata, models.SessionMetaKeyRuntimeConfig)
 	delete(session.Metadata, models.SessionMetaKeySessionMode)
 	if mode != "" {

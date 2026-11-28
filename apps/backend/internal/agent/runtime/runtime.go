@@ -30,6 +30,8 @@ import (
 type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
+type ProviderTurnRequest = lifecycle.ProviderTurnRequest
+type ProviderTurnAdmission = lifecycle.ProviderTurnAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
@@ -41,6 +43,7 @@ func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, pr
 }
 
 type AgentExecution = lifecycle.AgentExecution
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type DeliveryRecordEvidenceRequest = lifecycle.DeliveryRecordEvidenceRequest

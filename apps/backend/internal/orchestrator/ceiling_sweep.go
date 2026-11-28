@@ -142,6 +142,7 @@ func (s *Service) stopCeilingSweeper() {
 // Start (or after Stop) simply has nothing listening, which is harmless
 // because nothing is waiting on it either.
 func (s *Service) signalCeilingSweep() {
+	s.sessionCeiling.notifyInferenceWaiters()
 	if s.ceilingSweeper == nil {
 		return
 	}
@@ -152,6 +153,7 @@ func (s *Service) signalCeilingSweep() {
 // backstop and AC-15/AC-17a's retry driver, because AC-50 states they are
 // one component sharing one goroutine.
 func (s *Service) ceilingSweepTick(ctx context.Context) {
+	s.refreshInferenceCapacity(ctx)
 	if s.sessionCeiling != nil {
 		s.sessionCeiling.expireStaleReservations()
 	}

@@ -36,6 +36,7 @@ func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHand
 	delete(created, models.MetaKeyInterruptedAt)
 	delete(created, models.MetaKeyInterruptedSessions)
 	delete(created, models.MetaKeyLegacyInterruptedAt)
+	delete(created, models.MetaKeyReviewSource)
 	if !trustedHandoff {
 		delete(created, models.MetaKeyHandoffSource)
 		delete(created, models.MetaKeyHandoffs)
