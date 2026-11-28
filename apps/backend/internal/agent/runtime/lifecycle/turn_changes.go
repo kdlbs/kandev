@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/turnchanges"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -58,17 +59,29 @@ type TurnChangeSummaryProcessor interface {
 	ProcessTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
 }
 
-func turnChangeCheckoutsFromWorkspaceRepositories(repositories []WorkspaceRepositorySpec) []TurnChangeCheckout {
+func turnChangeCheckoutsFromWorkspaceRepositories(repositories []WorkspaceRepositorySpec, executorType string) []TurnChangeCheckout {
 	if len(repositories) == 0 {
 		return nil
 	}
 	checkouts := make([]TurnChangeCheckout, 0, len(repositories))
-	for _, repository := range repositories {
+	for index, repository := range repositories {
+		repositorySubpath := repository.RepositorySubpath
+		repositorySubpathKnown := repository.RepositorySubpathKnown
+		if executorType == string(models.ExecutorTypePluginRemote) {
+			key, err := launchRepositoryProjectionKey(&LaunchRequest{ExecutorType: executorType}, RepoLaunchSpec{
+				RepoName: repository.RepoName, BaseBranch: repository.BaseBranch,
+				CheckoutBranch: repository.CheckoutBranch, BranchSlug: repository.BranchSlug,
+			}, index)
+			if err == nil {
+				repositorySubpath = key
+				repositorySubpathKnown = true
+			}
+		}
 		checkouts = append(checkouts, TurnChangeCheckout{
 			ID: repository.TaskEnvironmentRepoID, EnvironmentRepoID: repository.TaskEnvironmentRepoID,
 			TaskRepositoryID: repository.TaskRepositoryID, RepositoryID: repository.RepositoryID,
 			WorktreeID: repository.WorktreeID, DisplayName: repository.RepoName,
-			RepositorySubpath: repository.RepositorySubpath, RepositorySubpathKnown: repository.RepositorySubpathKnown,
+			RepositorySubpath: repositorySubpath, RepositorySubpathKnown: repositorySubpathKnown,
 		})
 	}
 	return checkouts

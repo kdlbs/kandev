@@ -71,7 +71,11 @@ func (m *Manager) populateLaunchTurnChangeCheckouts(ctx context.Context, executi
 			zap.String("task_environment_id", execution.TaskEnvironmentID))
 		return
 	}
-	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
+	executorType := info.ExecutorType
+	if executorType == "" {
+		executorType = execution.ExecutorType
+	}
+	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories, executorType)
 }
 
 func (m *Manager) failTurnChangeDispatch(ctx context.Context, execution *AgentExecution, generation uint64, dispatchErr error) {

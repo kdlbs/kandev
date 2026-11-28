@@ -13,8 +13,9 @@ import (
 const GitPushPreflightHistoryUpdateRequired = "history_update_required"
 
 const (
-	gitPushPreflightTimeout = 2 * time.Minute
-	gitStatusDetailsReady   = "ready"
+	gitPushPreflightTimeout    = 2 * time.Minute
+	gitStatusDetailsReady      = "ready"
+	gitStatusErrorNoRepository = "repository_unavailable"
 )
 
 // GitOperationResult represents the result of a git operation.
@@ -751,8 +752,24 @@ func (c *Client) GetGitStatusFresh(ctx context.Context) (*GitStatusResult, error
 // GetGitStatusWithDetails returns a fresh snapshot after file diffs and
 // secondary Git statistics settle under the caller's deadline.
 func (c *Client) GetGitStatusWithDetails(ctx context.Context) (*GitStatusResult, error) {
+	result, err := c.getGitStatusWithDetails(ctx, "")
+	if err == nil || result == nil || result.ErrorCode != gitStatusErrorNoRepository {
+		return result, err
+	}
+	scope, ok := c.soleNonRootRepositoryScope(ctx)
+	if !ok {
+		return result, err
+	}
+	return c.getGitStatusWithDetails(ctx, scope)
+}
+
+func (c *Client) getGitStatusWithDetails(ctx context.Context, repo string) (*GitStatusResult, error) {
+	path := "/api/v1/git/status?fresh=true&details=wait"
+	if repo != "" {
+		path += "&repo=" + url.QueryEscape(repo)
+	}
 	var result GitStatusResult
-	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status?fresh=true&details=wait", &result)
+	status, err := c.fetchJSONResult(ctx, path, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -763,6 +780,18 @@ func (c *Client) GetGitStatusWithDetails(ctx context.Context) (*GitStatusResult,
 		return &result, fmt.Errorf("git status details unavailable: %s", result.ErrorCode)
 	}
 	return &result, nil
+}
+
+func (c *Client) soleNonRootRepositoryScope(ctx context.Context) (string, bool) {
+	var result struct {
+		Scopes []string `json:"scopes"`
+	}
+	status, err := c.fetchJSONResult(ctx, "/api/v1/git/turn-changes/scopes", &result)
+	if err != nil || status < http.StatusOK || status >= http.StatusMultipleChoices ||
+		len(result.Scopes) != 1 || result.Scopes[0] == "" {
+		return "", false
+	}
+	return result.Scopes[0], true
 }
 
 // PerRepoGitStatus pairs a repository_name with its status. Mirrors the
