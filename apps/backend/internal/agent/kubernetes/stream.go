@@ -28,8 +28,11 @@ type PodExecutor interface {
 }
 
 type PortForwardRequest struct {
-	Namespace    string
-	Pod          string
+	Namespace string
+	Pod       string
+	// Container names the container that runs the agentctl bridge for the
+	// exec transport. The port-forward transport ignores it.
+	Container    string
 	LocalAddress string
 	LocalPort    uint16
 	RemotePort   uint16
@@ -53,6 +56,20 @@ type StreamOperations struct {
 
 func NewStreamOperations(executor PodExecutor, forwarder PortForwarder) *StreamOperations {
 	return &StreamOperations{executor: executor, forwarder: forwarder}
+}
+
+// ContainerScopedForwarder is implemented by forwarders that run a bridge in
+// one container and so need PortForwardRequest.Container. A wrapping
+// forwarder should delegate it.
+type ContainerScopedForwarder interface {
+	RequiresContainer() bool
+}
+
+// ForwardsOverExec reports whether Forward carries connections over pods/exec,
+// which needs the agentctl container in every PortForwardRequest.
+func (s *StreamOperations) ForwardsOverExec() bool {
+	scoped, ok := s.forwarder.(ContainerScopedForwarder)
+	return ok && scoped.RequiresContainer()
 }
 
 func (s *StreamOperations) Exec(ctx context.Context, request ExecRequest) error {
@@ -107,6 +124,9 @@ func validateForwardRequest(forwarder PortForwarder, request *PortForwardRequest
 	}
 	if len(validation.IsDNS1123Subdomain(request.Pod)) > 0 {
 		return fieldError("port_forward.pod", "must be a valid Pod name")
+	}
+	if request.Container != "" && len(validation.IsDNS1123Label(request.Container)) > 0 {
+		return fieldError("port_forward.container", "must be a valid container name")
 	}
 	if request.LocalAddress == "" {
 		request.LocalAddress = loopbackAddress

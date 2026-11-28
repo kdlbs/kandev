@@ -199,6 +199,7 @@ var trustedExecutorConfigKeys = map[string]bool{
 	MetadataKeyKubernetesKubeContext:           true,
 	MetadataKeyKubernetesConfigNamespace:       true,
 	MetadataKeyKubernetesRequestTimeoutSeconds: true,
+	MetadataKeyKubernetesTransport:             true,
 }
 
 func isTrustedExecutorConfigKey(k string) bool { return trustedExecutorConfigKeys[k] }
@@ -220,6 +221,7 @@ var kubernetesConnectionMetadataKeys = [...]string{
 	MetadataKeyKubernetesKubeContext,
 	MetadataKeyKubernetesConfigNamespace,
 	MetadataKeyKubernetesRequestTimeoutSeconds,
+	MetadataKeyKubernetesTransport,
 }
 
 // applyAuthoritativeKubernetesProfileConfig replaces fresh-launch Pod and

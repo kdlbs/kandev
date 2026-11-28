@@ -90,7 +90,9 @@ material in the Pod spec and does not expose agentctl through a cluster Service.
   mutation, fixed namespace scope, prominent warnings, and cluster admission
   policy.
 - Port-forward and exec streaming are required capabilities; API discovery
-  alone is insufficient for connection validation.
+  alone is insufficient for connection validation. An executor that opts into
+  the [exec stream transport](2026-11-27-kubernetes-exec-stream-transport.md)
+  requires only exec streaming.
 - Workload images must contain the documented POSIX bootstrap tools and allow
   Kandev's reserved mounts.
 - Profile edits do not alter existing or replacement Pods for retained

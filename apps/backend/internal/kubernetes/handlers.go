@@ -75,10 +75,11 @@ type StreamingProbe func(
 ) error
 
 type Handler struct {
-	repo           ResourceRepository
-	access         AccessChecker
-	clients        ClientFactory
-	probeStreaming StreamingProbe
+	repo               ResourceRepository
+	access             AccessChecker
+	clients            ClientFactory
+	probeStreaming     StreamingProbe
+	probeExecStreaming StreamingProbe
 }
 
 type TestRequest struct {
@@ -121,7 +122,7 @@ func NewHandler(repo ResourceRepository, access AccessChecker, clients ClientFac
 	}
 	return &Handler{
 		repo: repo, access: access, clients: clients,
-		probeStreaming: probeStreamingTransport,
+		probeStreaming: probeStreamingTransport, probeExecStreaming: probeExecStreamingTransport,
 	}
 }
 
@@ -340,14 +341,8 @@ func (h *Handler) testConnection(ctx context.Context, request TestRequest) *Test
 			)
 		}
 	}
-	streamingPermissions := []requiredPermission{
-		{verb: verbGet, resource: resourcePods, subresource: "exec"},
-		{verb: verbCreate, resource: resourcePods, subresource: "exec"},
-		{verb: verbGet, resource: resourcePods, subresource: "portforward"},
-		{verb: verbCreate, resource: resourcePods, subresource: "portforward"},
-	}
 	streamingStep := h.runStreamingStep(
-		testCtx, client, config.Namespace, streamingPermissions,
+		testCtx, client, config.Namespace, config.EffectiveTransport(),
 		profile, rbacStep.Success && admissionSuccess,
 	)
 	result.Steps = append(result.Steps, streamingStep)

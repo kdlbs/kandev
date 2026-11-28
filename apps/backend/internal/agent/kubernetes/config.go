@@ -32,12 +32,36 @@ const (
 	AuthModeInCluster  AuthMode = "in_cluster"
 )
 
+// StreamTransport selects how the backend carries loopback connections to
+// agentctl inside a session Pod. Both transports keep agentctl bound to Pod
+// loopback and present a process-local 127.0.0.1 listener to the backend.
+type StreamTransport string
+
+const (
+	// StreamTransportPortForward uses pods/portforward (the default).
+	StreamTransportPortForward StreamTransport = "port_forward"
+	// StreamTransportExec carries each connection over its own pods/exec
+	// stream into `agentctl tcp-stdio`. It serves runtimes without CRI
+	// PortForward support, such as Kata Containers and gVisor.
+	StreamTransportExec StreamTransport = "exec"
+)
+
 type ExecutorConfig struct {
-	AuthMode              AuthMode `json:"auth_mode"`
-	KubeconfigPath        string   `json:"kubeconfig_path,omitempty"`
-	KubeContext           string   `json:"kube_context,omitempty"`
-	Namespace             string   `json:"namespace"`
-	RequestTimeoutSeconds int      `json:"request_timeout_seconds"`
+	AuthMode              AuthMode        `json:"auth_mode"`
+	KubeconfigPath        string          `json:"kubeconfig_path,omitempty"`
+	KubeContext           string          `json:"kube_context,omitempty"`
+	Namespace             string          `json:"namespace"`
+	RequestTimeoutSeconds int             `json:"request_timeout_seconds"`
+	Transport             StreamTransport `json:"transport,omitempty"`
+}
+
+// EffectiveTransport returns the configured stream transport, treating an
+// unset value as port-forward so existing executors keep their behavior.
+func (c ExecutorConfig) EffectiveTransport() StreamTransport {
+	if c.Transport == "" {
+		return StreamTransportPortForward
+	}
+	return c.Transport
 }
 
 func (c ExecutorConfig) Validate() error {
@@ -62,6 +86,11 @@ func (c ExecutorConfig) Validate() error {
 	if c.RequestTimeoutSeconds < 1 || c.RequestTimeoutSeconds > MaxRequestTimeoutSeconds {
 		return fieldError("config.request_timeout_seconds", "must be between 1 and 300")
 	}
+	switch c.EffectiveTransport() {
+	case StreamTransportPortForward, StreamTransportExec:
+	default:
+		return fieldError("config.transport", "must be port_forward or exec")
+	}
 	return nil
 }
 
@@ -76,6 +105,7 @@ func ParseExecutorConfig(values map[string]string) (ExecutorConfig, error) {
 		KubeContext:           strings.TrimSpace(values["kube_context"]),
 		Namespace:             strings.TrimSpace(values["namespace"]),
 		RequestTimeoutSeconds: timeout,
+		Transport:             StreamTransport(strings.TrimSpace(values["transport"])),
 	}
 	if err := cfg.Validate(); err != nil {
 		return ExecutorConfig{}, err

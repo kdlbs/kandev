@@ -125,7 +125,7 @@ kubectl apply -f k8s/executor-rbac.yaml
 The Role grants exactly:
 
 - `get`, `create`, `delete`, and `watch` on Pods;
-- `get` and `create` on `pods/exec` and `pods/portforward`; and
+- `get` and `create` on `pods/exec` and `pods/portforward` (an executor with `transport: exec` never uses `pods/portforward`); and
 - `get`, `create`, and `delete` on PVCs for the starter `managed_pvc` mode.
 
 Tailor the PVC rule to the profiles that use this identity:
@@ -176,6 +176,17 @@ Open **Settings > Executors > Kubernetes** and set one connection mode:
 
 Set the exact executor namespace and a request timeout from 1 to 300 seconds; the UI defaults to `default` and 30 seconds. Kubeconfig bytes and resolved credentials are never copied into executor JSON or a session Pod. The saved path, context, namespace, auth mode, and timeout are connection configuration, so anyone who can mutate them can redirect the backend's cluster access.
 
+### Choose the stream transport
+
+The backend reaches agentctl through a process-local `127.0.0.1` listener in every mode; agentctl stays bound to Pod loopback and no Service is created. The API-only executor field `transport` selects how bytes reach the Pod:
+
+- `port_forward` (default, also used when the field is absent) opens `pods/portforward`.
+- `exec` carries each connection over its own `pods/exec` stream into `/opt/kandev/agentctl tcp-stdio --port <port>`, which dials only `127.0.0.1` inside the Pod. Use it for runtimes without CRI port-forward support, such as Kata Containers and gVisor. It needs only the `pods/exec` permissions, and each new connection costs one exec round trip.
+
+With `exec`, each stream opens in the profile's main container, the one that runs the Kandev bootstrap, even when sidecars such as a service-mesh proxy or a Docker engine come first in the Pod. The two directions of a connection end independently: when the backend finishes sending, the bridge half-closes its TCP write side and keeps relaying agentctl's response until agentctl closes the connection, with no drain deadline. (containerd's port-forward instead closes both directions about one second after either one ends.) Each connection runs one short-lived `agentctl tcp-stdio` process in the main container, about 14 MB of memory counted against that container's limit, and appears as one `pods/exec` event in the API server audit log, so exec-alerting rules see one event per connection.
+
+Set it with the executor API, for example `"transport": "exec"` in the executor `config`. The settings form does not show the field yet, so saving the connection from the UI resets it to the default; re-apply it through the API after such an edit. With `exec`, **Test Kubernetes** checks only exec permissions and proves the data path by sending random bytes through an exec stream and comparing the echo, instead of the handshake-only port-forward check.
+
 ### Create and test a profile
 
 The create flow saves one executor plus its first profile. A profile sets:
@@ -191,7 +202,7 @@ Run **Test Kubernetes** before Save and after changing cluster, namespace, templ
 2. It discovers the API server version. The namespace step reports the configured namespace; it does not list or get a Namespace object.
 3. It submits self-access reviews for the exact Pod, streaming, and conditional PVC permissions.
 4. With a profile, it dry-runs the composed Pod and, for `managed_pvc`, the PVC. For `existing_claim`, it reads the exact named claim.
-5. It creates one disposable `emptyDir` probe Pod from the profile, waits for the main container, verifies exec and port-forward transport, and deletes that exact Pod with a UID precondition.
+5. It creates one disposable `emptyDir` probe Pod from the profile, waits for the main container, verifies the selected stream transport, and deletes that exact Pod with a UID precondition.
 
 No diagnostic PVC is retained. The streaming probe is a real temporary Pod, so quota, scheduling, image pulls, admission, and Pod billing can apply. A cleanup failure makes the test fail; inspect `kandev-stream-probe-*` in the configured namespace before retrying. Kandev returns sanitized errors and template-policy warnings, but do not place secrets in a template or error-producing field.
 
