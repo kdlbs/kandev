@@ -117,6 +117,20 @@ describe("task creation receipt identity", () => {
     expect(next.repositories?.[1]).toMatchObject({ base_branch: "dev" });
     expect(next.repositories?.[1]).not.toHaveProperty("consented_dirty_files");
   });
+
+  it("renews discard consent on the fresh-branch source without changing source order", () => {
+    const sources = [
+      { kind: "folder", local_path: "/work/assets" },
+      { kind: "repository", repository_id: "repo-1", fresh_branch: true, base_branch: "main" },
+    ] as const;
+    const original = payload({ workspace_sources: [...sources] });
+    const next = withRenewedDiscardConsent(original, ["a.ts"]);
+
+    expect(next.workspace_sources).toEqual([
+      sources[0],
+      { ...sources[1], confirm_discard: true, consented_dirty_files: ["a.ts"] },
+    ]);
+  });
 });
 
 describe("task creation receipt persistence", () => {

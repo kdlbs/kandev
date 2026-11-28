@@ -124,6 +124,10 @@ vi.mock("@/components/task-create-dialog-state", () => ({
       compatibleAgentProfiles: [],
       workspaceDefaults: {},
       isLocalExecutor: false,
+      executorSourcePolicy: {
+        capabilities: { requiresCloneableLocalRepository: false },
+        incompatible: false,
+      },
       isPassthroughProfile: false,
       agentProfileOptions: [],
       noCompatibleAgent: mocks.blocked,

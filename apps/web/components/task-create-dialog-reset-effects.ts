@@ -1,6 +1,10 @@
 import { useEffect } from "react";
-import type { TaskCreateDialogInitialValues, TaskRemoteRepoRow } from "./task-create-dialog-types";
-import { resetTaskForm, type FormResetters } from "./task-create-dialog-form-reset";
+import type { TaskCreateDialogInitialValues } from "./task-create-dialog-types";
+import {
+  resetTaskForm,
+  seededRemoteRepositories,
+  type FormResetters,
+} from "./task-create-dialog-form-reset";
 import { getTaskCreateDraft } from "@/lib/local-storage";
 import { createDebugLogger } from "@/lib/debug/log";
 import { clampTaskTitleInput, truncateRemoteTaskTitle } from "@/lib/task-title";
@@ -143,62 +147,12 @@ function resolveDefaultsSource(
   return "empty";
 }
 
-function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
-  return values.find((value) => value !== undefined);
-}
-
-function definedOr<T>(fallback: T, ...values: Array<T | undefined>): T {
-  return firstDefined(...values) ?? fallback;
-}
-
-function remoteRepositoryFullName(
-  inspection: TaskCreateDialogInitialValues["remoteRepository"],
-): string | undefined {
-  return inspection ? `${inspection.ownerOrProject}/${inspection.repositoryName}` : undefined;
-}
-
-function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemoteRepoRow[] {
-  const initial: Partial<TaskCreateDialogInitialValues> = iv ?? {};
-  const inspection = initial.remoteRepository;
-  const repository: Partial<NonNullable<TaskCreateDialogInitialValues["remoteRepository"]>> =
-    inspection ?? {};
-  const remoteUrl = definedOr("", initial.remoteUrl, initial.githubUrl, repository.cloneUrl);
-  if (!remoteUrl) return [];
-  // Seed a pre-filled URL and preserve its PR head when one is provided.
-  const seededBranch = definedOr(
-    "",
-    initial.checkoutBranch,
-    initial.branch,
-    repository.headBranch,
-    repository.defaultBranch,
-  );
-  return [
-    {
-      key: "remote-0",
-      url: remoteUrl,
-      branch: seededBranch,
-      source: "paste",
-      prNumber: firstDefined(initial.prNumber, repository.pullRequest?.number),
-      prBaseBranch: firstDefined(initial.prBaseBranch, repository.baseBranch),
-      prHeadBranch: firstDefined(initial.checkoutBranch, repository.headBranch),
-      remoteUrl: repository.cloneUrl,
-      provider: repository.providerId,
-      providerHost: repository.providerHost,
-      providerScope: repository.providerScope,
-      providerRepoId: repository.repositoryId,
-      providerOwner: repository.ownerOrProject,
-      providerName: repository.repositoryName,
-      fullName: remoteRepositoryFullName(inspection),
-    },
-  ];
-}
-
 function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
   const remoteRepositories = seededRemoteRepositories(iv);
   resetters.setDiscoveredRepositories([]);
   resetters.setDiscoverReposLoaded(false);
   resetters.setUseRemote(remoteRepositories.length > 0);
-  resetters.setRemoteRepos(remoteRepositories);
+  if (!resetters.resetRepositorySelections) resetters.setRemoteRepos(remoteRepositories);
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");

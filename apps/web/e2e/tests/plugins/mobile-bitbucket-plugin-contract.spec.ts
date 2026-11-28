@@ -4,8 +4,10 @@ import { expect, test } from "../../fixtures/test-base";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
+const FIXTURE_PROVIDER = "fixture-source-control";
 const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
@@ -43,13 +45,12 @@ test.describe("mobile Bitbucket plugin contract", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileFab.tap();
-    await testPage.getByTestId("source-mode-remote").tap();
-    await testPage.getByTestId("remote-repo-chip-trigger").first().tap();
+    await openTaskRepositoryPicker(testPage, { mobile: true, provider: FIXTURE_PROVIDER });
     const repositoryOption = testPage
-      .getByTestId("remote-repo-option")
+      .getByTestId("task-repository-remote-option")
       .filter({ hasText: "TEAM/fixture" });
     await expect(repositoryOption).toBeVisible();
-    await repositoryOption.tap();
+    await repositoryOption.dispatchEvent("click");
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "TEAM/fixture",
     );
@@ -57,7 +58,7 @@ test.describe("mobile Bitbucket plugin contract", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
-    await testPage.getByRole("button", { name: "Cancel" }).tap();
+    await testPage.getByTestId("mobile-repository-done").dispatchEvent("click");
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

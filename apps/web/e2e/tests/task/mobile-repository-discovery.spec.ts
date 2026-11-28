@@ -26,7 +26,11 @@ test.describe("Mobile repository discovery consent", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
 
-    await dialog.getByTestId("repo-chip-trigger").first().tap();
+    await dialog.getByTestId("mobile-repository-manager").tap();
+    const management = testPage.getByTestId("mobile-repository-management");
+    const repositoryChip = management.getByTestId("repo-chip-trigger").first();
+    await expect(repositoryChip).toBeVisible();
+    await repositoryChip.tap();
     const settingsButton = testPage.getByTestId("repository-discovery-settings-button");
     await expect(settingsButton).toBeVisible();
     await settingsButton.tap();
@@ -67,7 +71,17 @@ test.describe("Mobile repository discovery consent", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("repo-chip-trigger").first().tap();
+    await dialog.getByTestId("mobile-repository-manager").tap();
+    const repositorySheet = testPage.getByTestId("mobile-repository-sheet-content").locator("..");
+    await expect(repositorySheet).toBeVisible();
+    await waitForFiniteAnimations(repositorySheet);
+    const management = testPage.getByTestId("mobile-repository-management");
+    const repositoryChip = management.getByTestId("repo-chip-trigger").first();
+    await expect(repositoryChip).toBeVisible();
+    await repositoryChip.tap();
+    const repositoryPicker = testPage.getByRole("dialog", { name: "Repository" });
+    await expect(repositoryPicker).toBeVisible();
+    await waitForFiniteAnimations(repositoryPicker);
 
     await expect(testPage.getByTestId("discovery-root-controls")).toHaveCount(0);
     await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
@@ -88,9 +102,11 @@ test.describe("Mobile repository discovery consent", () => {
       viewport!.height,
     );
     await availableRepository.tap();
-    await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("healthy-project");
+    await expect(repositoryChip).toContainText("healthy-project");
 
-    await dialog.getByTestId("repo-chip-trigger").first().tap();
+    await repositoryChip.tap();
+    await expect(repositoryPicker).toBeVisible();
+    await waitForFiniteAnimations(repositoryPicker);
     const refreshResponse = testPage.waitForResponse(
       (response) =>
         /\/api\/v1\/workspaces\/[^/]+\/repositories$/.test(new URL(response.url()).pathname) &&

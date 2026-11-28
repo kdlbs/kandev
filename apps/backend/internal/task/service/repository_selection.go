@@ -78,7 +78,11 @@ func (s *Service) preflightRepositoryInputs(
 	ctx context.Context, workspaceID string, inputs []TaskRepositoryInput,
 ) error {
 	for index, input := range inputs {
-		resolved, err := s.preflightRepositoryInput(ctx, workspaceID, input)
+		resolved, err := s.resolveRemoteOriginInput(ctx, workspaceID, input)
+		if err != nil {
+			return err
+		}
+		resolved, err = s.preflightRepositoryInput(ctx, workspaceID, resolved)
 		if err != nil {
 			return err
 		}

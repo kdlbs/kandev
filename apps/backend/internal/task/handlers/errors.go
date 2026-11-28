@@ -397,6 +397,8 @@ func isTaskCreateValidationError(err error) bool {
 		return false
 	}
 	return isValidationError(err) ||
+		errors.Is(err, service.ErrInvalidWorkspaceSource) ||
+		errors.Is(err, service.ErrWorkspaceSourceConflict) ||
 		strings.Contains(strings.ToLower(err.Error()), "workflow not found")
 }
 

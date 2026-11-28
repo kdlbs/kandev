@@ -311,6 +311,11 @@ export function withRenewedDiscardConsent(
 ): CreateTaskParams {
   return {
     ...payload,
+    workspace_sources: payload.workspace_sources?.map((source) =>
+      source.kind === "repository" && source.fresh_branch
+        ? { ...source, confirm_discard: true, consented_dirty_files: consentedDirtyFiles }
+        : source,
+    ),
     repositories: payload.repositories?.map((repository) => ({
       ...repository,
       ...(repository.fresh_branch

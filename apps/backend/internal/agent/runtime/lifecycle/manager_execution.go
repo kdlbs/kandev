@@ -170,6 +170,10 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info.TaskEnvironmentID != taskEnvironmentID {
 		return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
 	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
 	}
@@ -455,6 +459,10 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	} else if info.TaskID == "" || info.TaskID != taskID {
 		return nil, fmt.Errorf("session %s is not owned by task %s", sessionID, taskID)
 	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
 		return nil, err
 	}
@@ -537,7 +545,19 @@ func validateWorkspaceInfo(ctx context.Context, info *WorkspaceInfo, deferManage
 }
 
 func validateWorkspaceInfoWithAdoption(ctx context.Context, info *WorkspaceInfo, deferManagedCloneMismatch bool, manager *worktree.Manager) error {
-	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+	if info == nil {
+		return nil
+	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return err
+	}
+	if models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return nil
+	}
+	if err := validateWorkspaceFolderTargets(info.WorkspacePath, info.WorkspaceFolders); err != nil {
+		return err
+	}
+	if len(info.WorkspaceRepositories) == 0 {
 		return nil
 	}
 	// The default local executor is persisted with an empty type, so ownership
@@ -578,6 +598,12 @@ func validateWorkspaceRepositoryInfo(
 		}
 	}
 	expected := localWorkspaceExpectedRepository(info, repository)
+	if workspaceRepositoryLinksSupported(info.ExecutorType) &&
+		workspaceSourceLinkLayout(info.WorkspaceLayout, len(info.WorkspaceRepositories), info.WorkspaceFolders) == workspaceLayoutTaskRoot &&
+		len(info.WorkspaceFolders) > 0 && repository.WorkspaceRelativePath == "" {
+		// Reconciliation verifies or recreates owned entries before agentctl starts.
+		candidate = expected
+	}
 	err := validateLocalRepositoryWorkspace(ctx, candidate, expected)
 	if err == nil || managedCloneMismatchCanDefer(ctx, info, repository, candidate, deferManagedCloneMismatch) {
 		return nil
@@ -825,6 +851,10 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("get workspace info for session %s: %w", sessionID, err)
 	}
 
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path configured", ErrSessionWorkspaceNotReady, sessionID)
 	}
@@ -1189,12 +1219,17 @@ type executionEnvironmentPreparation struct {
 }
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
-	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
+	owner := workspaceLinkOwner(taskID, info.TaskDirName)
 	if err := reconcileWorkspaceSourcesAtLayout(ctx, info.WorkspacePath, info.WorkspaceLayout, info.WorkspaceFolders, owner); err != nil {
 		return err
 	}
-	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositoriesAtLayout(info.WorkspacePath, info.WorkspaceLayout, info.WorkspaceRepositories, m.logger, owner); err != nil {
+	if workspaceRepositoryLinksSupported(info.ExecutorType) {
+		layout := workspaceSourceLinkLayout(info.WorkspaceLayout, len(info.WorkspaceRepositories), info.WorkspaceFolders)
+		if err := reconcileWorkspaceRepositoriesAtLayout(info.WorkspacePath, layout, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
 	}

@@ -1,14 +1,13 @@
 package service
 
 import (
-	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
-
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/admission"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Request types
@@ -36,6 +35,8 @@ type TaskRepositoryInput struct {
 	ProviderRepoID          string                            `json:"provider_repo_id,omitempty"`
 	ProviderOwner           string                            `json:"provider_owner,omitempty"`
 	ProviderName            string                            `json:"provider_name,omitempty"`
+	CheckoutSource          string                            `json:"checkout_source,omitempty"`
+	ExpectedOrigin          string                            `json:"expected_origin,omitempty"`
 
 	// PreserveBaseBranch keeps an effective branch produced after policy
 	// resolution (for example, the branch created by the local fresh-branch
@@ -94,6 +95,10 @@ type CreateTaskRequest struct {
 	Priority       string                `json:"priority"`
 	State          *v1.TaskState         `json:"state,omitempty"`
 	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	// WorkspaceSources is presence-aware. A nil pointer preserves legacy
+	// repository/workspace-path behavior; a non-nil pointer, including an empty
+	// slice, is the complete ordered workspace contents selected by the caller.
+	WorkspaceSources *[]WorkspaceSourceInput `json:"workspace_sources,omitempty"`
 	// projectRepositoryDefaults marks the source list read from a root task's
 	// Office project. Only these automatic selections deduplicate aliases after
 	// each source has passed normal repository resolution.

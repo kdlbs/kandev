@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RefObject } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -22,17 +22,16 @@ import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-su
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
-import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
+import type { Executor, ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import {
-  defaultSubtaskWorkspaceMode,
-  type SubtaskWorkspaceMode,
-  useSubtaskFormState,
-} from "./new-subtask-form-state";
+import { type SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
+import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
+import { computeHasAllBranches } from "@/components/task-create-dialog-prop-builders";
+import { useSubtaskExecutorSourceState } from "./new-subtask-source-state";
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
-import { useSubtaskParentDefaults } from "./use-subtask-parent-defaults";
+import { useInitialWorkspaceMode, useSubtaskParentDefaults } from "./use-subtask-parent-defaults";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
@@ -234,32 +233,6 @@ function useExecutorDefault(
   }, [allProfiles, executorProfileId, lastUsedExecutorProfileId, setExecutorProfileId]);
 }
 
-function useInitialWorkspaceMode(
-  worktreeBranch: string | null,
-  contextReady: boolean,
-  sourceTouched: boolean,
-) {
-  const [mode, setMode] = useState<SubtaskWorkspaceMode>(() =>
-    defaultSubtaskWorkspaceMode(worktreeBranch),
-  );
-  const seededOrTouched = useRef(false);
-  useEffect(() => {
-    if (seededOrTouched.current) return;
-    if (sourceTouched) {
-      seededOrTouched.current = true;
-      return;
-    }
-    if (!contextReady) return;
-    seededOrTouched.current = true;
-    setMode(defaultSubtaskWorkspaceMode(worktreeBranch));
-  }, [contextReady, worktreeBranch, sourceTouched]);
-  const onChange = (value: SubtaskWorkspaceMode) => {
-    seededOrTouched.current = true;
-    setMode(value);
-  };
-  return [mode, onChange] as const;
-}
-
 /**
  * Centralizes the Context selector's branching logic (Blank / Copy parent
  * prompt / Summarize session N) so the form component stays under the
@@ -344,7 +317,7 @@ type SubtaskFormProps = {
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
-  executors: Array<{ id: string; type: ExecutorType; name: string; profiles?: ExecutorProfile[] }>;
+  executors: Executor[];
   workspaceId: string | null;
   workflowId: string | null;
   /** The parent task's repository — used as the default for the subtask. */
@@ -392,19 +365,22 @@ function NewSubtaskForm({
   const [workspaceMode, setWorkspaceMode] = useInitialWorkspaceMode(
     worktreeBranch,
     parentContextReady,
-    fs.repositoriesDirty || fs.useRemote || fs.remoteRepos.length > 0,
+    fs.repositoriesDirty,
   );
-  const sharedHandlers = useDialogHandlers(fs, availableRepositories);
+  const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
+  const sharedHandlers = useDialogHandlers(fs, availableRepositories, {
+    workspaceId,
+    executors,
+    upsertWorkspaceRepository,
+  });
   const parentProfile = useSubtaskParentDefaults({
     parentRepositoryId,
     baseBranch,
     defaultProfileId,
     repositoriesDirty: fs.repositoriesDirty,
-    hasRepositorySelection: Boolean(
-      fs.repositories.length || fs.useRemote || fs.remoteRepos.length,
-    ),
+    hasRepositorySelection: Boolean(fs.repositorySelections.length),
     agentProfileId: fs.agentProfileId,
-    setRepositories: fs.setRepositories,
+    setRepositories: fs.hydrateRepositories ?? fs.setRepositories,
     setAgentProfileId: fs.setAgentProfileId,
     onAgentProfileChange: sharedHandlers.handleAgentProfileChange,
   });
@@ -416,18 +392,30 @@ function NewSubtaskForm({
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
-  const selectedExecutorProfile = executorProfileOptions.find(
-    (profile) => profile.value === fs.executorProfileId,
+  const selectedExecutorProfile = allExecutorProfiles.find(
+    (profile) => profile.id === fs.executorProfileId,
   );
+  const selectedExecutorType = selectedExecutorProfile?.executor_type;
   const isLocalExecutor = Boolean(
-    selectedExecutorProfile?.executorType === "local" ||
-    selectedExecutorProfile?.executorType === "local_pc",
+    selectedExecutorType === "local" || selectedExecutorType === "local_pc",
   );
+  const selections = resolveRepositorySelections(fs);
+  const selectedSources = useMemo(() => selections.filter(hasSelectedSourceValue), [selections]);
+  const sourceState = useSubtaskExecutorSourceState({
+    fs,
+    workspaceId,
+    executorType: selectedExecutorType,
+    selectedSources,
+    repositories: availableRepositories,
+  });
+  const hasAllBranches =
+    workspaceMode === "inherit_parent" ||
+    (computeHasAllBranches(fs) && !sourceState.executorSourcePolicy.incompatible);
   const freshBranchAvailable =
     workspaceMode === "new_workspace" &&
-    !fs.useRemote &&
     isLocalExecutor &&
-    fs.repositories.length === 1;
+    selections.length === 1 &&
+    selections[0]?.kind === "local";
   const promptZone = useSubtaskPromptZone({
     parentTaskId,
     workspaceId,
@@ -462,6 +450,10 @@ function NewSubtaskForm({
     autoTitle,
     autopilot: fs.autopilot,
     isLocalExecutor,
+    remoteOriginMode:
+      sourceState.executorSourcePolicy.capabilities.requiresCloneableLocalRepository,
+    sourcePolicyInvalid:
+      workspaceMode === "new_workspace" && sourceState.executorSourcePolicy.incompatible,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -490,6 +482,13 @@ function NewSubtaskForm({
     },
     isLocalExecutor,
     freshBranchAvailable,
+    executorSourcePolicy: sourceState.executorSourcePolicy,
+    executorSourceNotice: sourceState.executorSourceNotice,
+    folderDisabledReason: sourceState.folderDisabledReason,
+    sourcePolicyReason: sourceState.sourcePolicyReason,
+    remoteOriginStates: sourceState.remoteOriginStates,
+    onRefreshRemoteOrigins: sourceState.refreshRemoteOrigins,
+    hasAllBranches,
     contextValue,
     onContextChange: handleContextChange,
     hasInitialPrompt: !!initialPrompt,
@@ -514,6 +513,14 @@ function NewSubtaskForm({
     onClose,
     onSubmit: handleSubmit,
   });
+}
+
+function hasSelectedSourceValue(
+  selection: ReturnType<typeof resolveRepositorySelections>[number],
+): boolean {
+  if (selection.kind === "remote") return Boolean(selection.url.trim());
+  if (selection.kind === "folder") return Boolean(selection.localPath.trim());
+  return Boolean(selection.repositoryId || selection.localPath);
 }
 
 type RenderArgs = Omit<React.ComponentProps<typeof SubtaskFormBody>, "promptZone"> & {

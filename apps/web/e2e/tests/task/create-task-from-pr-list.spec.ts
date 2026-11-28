@@ -7,7 +7,7 @@ test.describe("Create task from GitHub PR list", () => {
   // Cold-start backend boots can race on the first test in a worker.
   test.describe.configure({ retries: 1 });
 
-  test("starting a task from a PR opens Remote mode with the PR URL and head branch", async ({
+  test("starting a task from a PR opens an ordered remote row with its head branch", async ({
     testPage,
     apiClient,
     seedData,
@@ -78,11 +78,11 @@ test.describe("Create task from GitHub PR list", () => {
 
     const prURL = `https://github.com/${ownerSlug}/${repoSlug}/pull/77`;
 
-    // The create-task dialog should open in Remote mode with the PR URL and
-    // head branch pre-filled.
+    // The create-task dialog should open with the remote URL and head branch
+    // pre-filled, without a task-wide source switch.
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("source-mode-remote")).toHaveAttribute("aria-checked", "true");
+    await expect(dialog.getByTestId("source-mode-remote")).toHaveCount(0);
     await expect(dialog.getByTestId("remote-repo-chip")).toHaveAttribute("data-remote-url", prURL);
     await expect(dialog.getByTestId("remote-repo-chip-trigger")).toContainText("pull/77");
     await expect(dialog.getByTestId("remote-branch-chip-trigger")).toContainText(

@@ -3,6 +3,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 const FIXTURE_PROVIDER = "fixture-source-control";
 const FIXTURE_REPOSITORY_ID = "fixture-repository";
@@ -42,19 +43,23 @@ async function removeFixtureRepositories(apiClient: ApiClient, workspaceId: stri
 }
 
 async function selectFixtureRepository(page: Page): Promise<void> {
-  await page.getByTestId("source-mode-remote").click();
-  const repositoryTrigger = page.getByTestId("remote-repo-chip-trigger");
-  await expect(repositoryTrigger).toHaveCount(1);
-  await repositoryTrigger.click();
+  const removeButtons = page.getByTestId("remove-repo-chip");
+  while ((await removeButtons.count()) > 0) {
+    await removeButtons.first().click();
+  }
+  const remoteRemoveButtons = page.getByTestId("remote-chip-remove");
+  while ((await remoteRemoveButtons.count()) > 0) {
+    await remoteRemoveButtons.first().click();
+  }
+  await openTaskRepositoryPicker(page, { provider: FIXTURE_PROVIDER });
   const repositoryOption = page
-    .getByTestId("remote-repo-option")
+    .getByTestId("task-repository-remote-option")
     .filter({ hasText: "TEAM/fixture" });
   await expect(repositoryOption).toHaveCount(1);
   await expect(repositoryOption).toBeVisible({ timeout: 15_000 });
   await repositoryOption.click();
-  await expect(repositoryTrigger).toContainText("TEAM/fixture");
-  await expect(page.getByTestId("remote-repo-popover-content")).toHaveCount(0);
-  await expect(repositoryTrigger).toBeFocused();
+  await expect(page.getByTestId("remote-repo-chip-trigger")).toHaveCount(1);
+  await expect(page.getByTestId("remote-repo-chip-trigger")).toContainText("TEAM/fixture");
 }
 
 async function selectFixtureBranch(page: Page): Promise<void> {
@@ -164,9 +169,11 @@ test.describe("first-use plugin repository task creation", () => {
 
     const disable = await apiClient.rawRequest("POST", `/api/plugins/${PLUGIN_ID}/disable`);
     expect(disable.ok, await disable.text()).toBe(true);
-    const response = await createWithoutAgent(testPage);
-    expect(response.status()).toBe(503);
     await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("submit-start-agent")).toBeDisabled();
+    await expect(dialog.getByTestId("submit-start-agent-chevron")).toBeDisabled();
+    await expect(dialog.getByTestId("remote-repo-chip-trigger")).toContainText("TEAM/fixture");
+    await expect(dialog.getByTestId("remote-branch-chip-trigger")).toContainText(FIXTURE_BRANCH);
     await expect(
       testPage.getByText(
         "The repository provider is unavailable. Check the connection and try again.",
@@ -175,6 +182,26 @@ test.describe("first-use plugin repository task creation", () => {
         },
       ),
     ).toBeVisible();
+    const response = await apiClient.rawRequest("POST", "/api/v1/tasks", {
+      workspace_id: seedData.workspaceId,
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      title,
+      workspace_sources: [
+        {
+          kind: "repository",
+          remote_url: FIXTURE_REPOSITORY_URL,
+          provider: FIXTURE_PROVIDER,
+          provider_repo_id: FIXTURE_REPOSITORY_ID,
+          provider_owner: "TEAM",
+          provider_name: "fixture",
+          provider_host: "bitbucket.example.test",
+          base_branch: "main",
+          checkout_branch: FIXTURE_BRANCH,
+        },
+      ],
+    });
+    expect(response.status, await response.text()).toBe(503);
     const tasks = await apiClient.listTasks(seedData.workspaceId);
     expect(tasks.tasks.some((task) => task.title === title)).toBe(false);
     expect(await fixtureRepositories(apiClient, seedData.workspaceId)).toHaveLength(0);

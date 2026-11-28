@@ -201,6 +201,7 @@ func TestRegisterRepositoryRoutesWiresHTTPAndWS(t *testing.T) {
 	requireActions(t, dispatcher,
 		ws.ActionRepositoryList, ws.ActionRepositoryCreate, ws.ActionRepositoryGet,
 		ws.ActionRepositoryUpdate, ws.ActionRepositoryValidateRemoteURL, ws.ActionRepositoryDelete,
+		ws.ActionRepositoryCloneSourceInspect,
 		ws.ActionRepositoryScriptList, ws.ActionRepositoryScriptCreate,
 		ws.ActionRepositoryScriptGet, ws.ActionRepositoryScriptUpdate,
 		ws.ActionRepositoryScriptDelete,

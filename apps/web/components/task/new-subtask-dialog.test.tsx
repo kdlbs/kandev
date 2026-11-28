@@ -32,7 +32,7 @@ vi.mock("@/components/task-create-dialog-effects", () => ({
 }));
 vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
   useBranchesByURL: () => ({
-    branches: () => [],
+    branches: () => [{ name: "main" }],
     loading: () => false,
     error: () => null,
     ensure: vi.fn(),
@@ -109,6 +109,7 @@ vi.mock("@/components/task-create-dialog-options", async (importOriginal) => {
 const PARENT_PROFILE_LABEL = "Parent profile";
 const CHOSEN_PROFILE_LABEL = "Chosen profile";
 const SECONDARY_PROFILE_ID = agentProfileId("secondary-profile");
+const PARENT_REPOSITORY_ID = "parent-repo";
 const PARENT_REPOSITORY_LABEL = "Parent repository";
 const AGENT_SELECTOR_ID = "agent-profile-selector";
 const REPO_CHIP_ID = "repo-chip-trigger";
@@ -119,7 +120,7 @@ const PARENT_BRANCH = "parent-branch";
 const EMPTY_SESSIONS: TaskSession[] = [];
 const repositories = [PARENT_REPOSITORY_LABEL, "Chosen repository", "Active repository"].map(
   (name, index) => ({
-    id: ["parent-repo", "chosen-repo", "active-repo"][index],
+    id: [PARENT_REPOSITORY_ID, "chosen-repo", "active-repo"][index],
     name,
     workspace_id: "workspace",
     source_type: "local",
@@ -132,14 +133,14 @@ const parent = {
   title: "Selected parent",
   primarySessionId: "primary",
   workflowId: "workflow",
-  repositories: [{ repository_id: "parent-repo", base_branch: "release", position: 0 }],
+  repositories: [{ repository_id: PARENT_REPOSITORY_ID, base_branch: "release", position: 0 }],
 } as TaskOverview;
 const primary = {
   id: "primary",
   task_id: "parent",
   is_primary: true,
   agent_profile_id: "parent-profile",
-  repository_id: "parent-repo",
+  repository_id: PARENT_REPOSITORY_ID,
   base_branch: "main",
   started_at: "2026-10-14T12:00:00Z",
 } as TaskSession;
@@ -364,21 +365,23 @@ describe("untouched defaults and usable missing context", () => {
     await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createTask).mock.calls[0][0]).toMatchObject({
       workspace_mode: "new_workspace",
-      repositories: [],
+      workspace_sources: [],
     });
   });
   it("preserves an explicit repository selection before late parent repository context", async () => {
     openDialog({ noRepository: true });
     fireEvent.click(screen.getByTestId("add-repository"));
-    fireEvent.click(screen.getByTestId(REPO_CHIP_ID));
-    fireEvent.click(screen.getByRole("option", { name: /^Chosen repository/ }));
+    fireEvent.click(screen.getByTestId("workspace-source-menu-repository"));
+    fireEvent.click(screen.getByRole("button", { name: /^Chosen repository/ }));
     enterWork();
     deliver([{ ...primary, worktree_branch: PARENT_BRANCH }]);
     fireEvent.click(screen.getByRole("button", { name: CREATE_SUBTASK_LABEL }));
     await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createTask).mock.calls[0][0]).toMatchObject({
       workspace_mode: "new_workspace",
-      repositories: [expect.objectContaining({ repository_id: "chosen-repo" })],
+      workspace_sources: [
+        expect.objectContaining({ kind: "repository", repository_id: "chosen-repo" }),
+      ],
     });
     expect(screen.getByTestId(NEW_MODE_ID).getAttribute(CHECKED_ATTRIBUTE)).toBe("true");
     expect(screen.getByTestId(REPO_CHIP_ID).textContent).toContain("Chosen repository");
@@ -426,9 +429,9 @@ describe("explicit remote subtask source", () => {
   it("keeps a pasted remote source through late primary worktree data", async () => {
     openDialog();
     enterWork();
-    fireEvent.click(screen.getByTestId("source-mode-remote"));
-    fireEvent.click(screen.getByTestId("remote-repo-chip-trigger"));
-    const input = screen.getByTestId("remote-repo-input");
+    fireEvent.click(screen.getByTestId("add-repository"));
+    fireEvent.click(screen.getByTestId("workspace-source-menu-repository"));
+    const input = screen.getByTestId("task-repository-picker-input");
     fireEvent.paste(input, { clipboardData: { getData: () => "https://github.com/acme/chosen" } });
     fireEvent.keyDown(input, { key: "Enter" });
     deliver([{ ...primary, worktree_branch: PARENT_BRANCH }]);
@@ -436,7 +439,13 @@ describe("explicit remote subtask source", () => {
     await waitFor(() => expect(createTask).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createTask).mock.calls[0][0]).toMatchObject({
       workspace_mode: "new_workspace",
-      repositories: [expect.objectContaining({ github_url: "https://github.com/acme/chosen" })],
+      workspace_sources: [
+        expect.objectContaining({ kind: "repository", repository_id: PARENT_REPOSITORY_ID }),
+        expect.objectContaining({
+          kind: "repository",
+          github_url: "https://github.com/acme/chosen",
+        }),
+      ],
     });
     expect(screen.getByTestId(NEW_MODE_ID).getAttribute(CHECKED_ATTRIBUTE)).toBe("true");
   });

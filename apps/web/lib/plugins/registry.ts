@@ -14,6 +14,7 @@
 import { useSyncExternalStore } from "react";
 import type { SidebarGroupingProvider } from "@kdlbs/plugin-sdk";
 import { i18n } from "@/lib/i18n";
+import { invalidateIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 import type {
   FileViewerRegistration,
   NavItem,
@@ -340,6 +341,7 @@ class PluginRegistryStore {
     if (byWorkspace.get(workspaceId) === enabled) return;
     byWorkspace.set(workspaceId, enabled);
     this.notify();
+    invalidateIntegrationAvailability();
   }
 
   getIntegrationEnabled(integrationId: string, workspaceId: string): boolean | undefined {

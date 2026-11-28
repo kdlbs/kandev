@@ -1,3 +1,4 @@
+import { defaultSubtaskWorkspaceMode, type SubtaskWorkspaceMode } from "./new-subtask-form-state";
 import { useEffect, useRef, useState } from "react";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 
@@ -45,4 +46,30 @@ export function useSubtaskParentDefaults({
       onAgentProfileChange(value);
     },
   };
+}
+
+export function useInitialWorkspaceMode(
+  worktreeBranch: string | null,
+  contextReady: boolean,
+  sourceTouched: boolean,
+) {
+  const [mode, setMode] = useState<SubtaskWorkspaceMode>(() =>
+    defaultSubtaskWorkspaceMode(worktreeBranch),
+  );
+  const seededOrTouched = useRef(false);
+  useEffect(() => {
+    if (seededOrTouched.current) return;
+    if (sourceTouched) {
+      seededOrTouched.current = true;
+      return;
+    }
+    if (!contextReady) return;
+    seededOrTouched.current = true;
+    setMode(defaultSubtaskWorkspaceMode(worktreeBranch));
+  }, [contextReady, worktreeBranch, sourceTouched]);
+  const onChange = (value: SubtaskWorkspaceMode) => {
+    seededOrTouched.current = true;
+    setMode(value);
+  };
+  return [mode, onChange] as const;
 }

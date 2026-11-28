@@ -18,6 +18,8 @@ type RepositoryAutoPickDecision = {
 type RepositoryAutoSelectSettings = {
   lastUsedRepositoryId?: string | null;
   userSettingsLoaded?: boolean;
+  repositoriesLoaded?: boolean;
+  hasWorkspaceSourcesSnapshot?: boolean;
 };
 
 export function useRepositoryAutoSelectEffect(
@@ -27,15 +29,33 @@ export function useRepositoryAutoSelectEffect(
   repositories: Repository[],
   settings: RepositoryAutoSelectSettings = {},
 ) {
-  // On open, ensure there's always at least one chip rendered: prefer the
-  // user's last-used repo (or the workspace's only repo) so the chip lands
-  // pre-filled, but fall back to an empty row so the picker is visible
-  // instead of just the "+" button. URL mode is excluded - that flow swaps
-  // the chip row for a URL input.
-  const { repositories: rows, useRemote, setRepositories } = fs;
-  const { lastUsedRepositoryId, userSettingsLoaded = true } = settings;
+  // On open, seed a row only when a valid last-used repository or the
+  // workspace's sole repository is available. An empty catalog enters scratch
+  // mode after loading so the picker stays visible without an identity-free chip.
+  const { repositories: rows, useRemote } = fs;
+  const hydrateRepositories = fs.hydrateRepositories ?? fs.setRepositories;
+  const hasRemoteSelection = fs.repositorySelections
+    ? fs.repositorySelections.some((selection) => selection.kind === "remote")
+    : useRemote;
+  const {
+    lastUsedRepositoryId,
+    userSettingsLoaded = true,
+    repositoriesLoaded = true,
+    hasWorkspaceSourcesSnapshot = false,
+  } = settings;
   useEffect(() => {
-    if (!open || !workspaceId || useRemote) return;
+    if (
+      shouldSkipRepositoryAutoSelect({
+        open,
+        workspaceId,
+        fs,
+        hasRemoteSelection,
+        hasWorkspaceSourcesSnapshot,
+        repositoriesLoaded,
+      })
+    )
+      return;
+    if (!workspaceId) return;
     const decision = decideRepositoryAutoPick(
       repositories,
       lastUsedRepositoryId,
@@ -43,26 +63,65 @@ export function useRepositoryAutoSelectEffect(
     );
     logRepositoryAutoPick(workspaceId, repositories.length, decision);
     if (decision.defer) return;
+    if (!decision.pickId) {
+      if (
+        fs.repositorySelections &&
+        fs.repositorySelections.length === 0 &&
+        rows.length === 0 &&
+        repositories.length === 0
+      ) {
+        fs.setNoRepository?.(true);
+      }
+      return;
+    }
     const { pickId } = decision;
     if (rows.length > 0 && !canReplaceEmptyRepositoryPlaceholder(rows, pickId)) return;
     void Promise.resolve().then(() => {
-      setRepositories((prev) => {
+      hydrateRepositories((prev) => {
         if (prev.length > 0) return replaceSeededRepositoryRows(prev, pickId);
-        return [
-          pickId ? buildRepositoryAutoPickRow("row-0", pickId) : { key: "row-0", branch: "" },
-        ];
+        return [buildRepositoryAutoPickRow("row-0", pickId)];
       });
     });
   }, [
     open,
     repositories,
     rows,
-    useRemote,
+    hasRemoteSelection,
+    fs.noRepository,
+    fs.repositorySelectionsTouched,
     workspaceId,
-    setRepositories,
+    hydrateRepositories,
     lastUsedRepositoryId,
     userSettingsLoaded,
+    repositoriesLoaded,
+    hasWorkspaceSourcesSnapshot,
   ]);
+}
+
+function shouldSkipRepositoryAutoSelect({
+  open,
+  workspaceId,
+  fs,
+  hasRemoteSelection,
+  hasWorkspaceSourcesSnapshot,
+  repositoriesLoaded,
+}: {
+  open: boolean;
+  workspaceId: string | null;
+  fs: DialogFormState;
+  hasRemoteSelection: boolean;
+  hasWorkspaceSourcesSnapshot: boolean;
+  repositoriesLoaded: boolean;
+}): boolean {
+  return (
+    !open ||
+    !workspaceId ||
+    fs.noRepository ||
+    hasRemoteSelection ||
+    fs.repositorySelectionsTouched ||
+    hasWorkspaceSourcesSnapshot ||
+    !repositoriesLoaded
+  );
 }
 
 function replaceSeededRepositoryRows(rows: TaskRepoRow[], pickId: string | null): TaskRepoRow[] {
@@ -99,7 +158,7 @@ function decideRepositoryAutoPick(
     });
   }
   return buildRepositoryAutoPickDecision(
-    repositories.length === 1 ? "single-workspace-repo" : "empty-row",
+    repositories.length === 1 ? "single-workspace-repo" : "no-repository-candidate",
     repositories.length === 1 ? repositories[0].id : null,
     { settingsRepoId, settingsValid },
   );

@@ -95,7 +95,7 @@ Choose a workspace mode:
 | Mode                         | Default and inheritance                                                                                                                                                                    | Use it when                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | **Inherit parent workspace** | Default when the parent has an active worktree. Normally reuses the parent's materialized workspace, repositories, worktrees, branch, and current files. If a new launch selects a different non-Kubernetes executor, Kandev creates a separate child-owned workspace; uncommitted parent changes are not copied. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
-| **Create new workspace**     | Default when the parent has no active worktree branch. Lets you choose another configured/discovered repository, folder, remote URL, branch, and executor.                                 | The child needs isolation, a different branch, or a different repository. |
+| **Create new workspace**     | Default when the parent has no active worktree branch. Lets you choose local repositories, provider repositories, folders, and supported URLs with a branch and executor.                                 | The child needs isolation, a different branch, or a different repository. |
 
 The context choices are **Blank**, **Copy initial prompt**, and, when a utility agent is configured, **Summarize session**. Context supplies background; it does not create a shared conversation. Attachments and prompt enhancement are also available.
 
@@ -233,7 +233,7 @@ For a human gate, use **On Turn Complete → Do nothing (wait for user)** and re
 
 ### Create a multi-repository task
 
-In **New Task**, add more **Repo** or **Remote** rows and select a base branch for each. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains gated while its initial-launch path cannot project sibling repositories, and Remote Docker is not implemented. Kandev scopes Changes, review, and pull-request surfaces by repository.
+In **New Task**, use the repository picker to add more local or provider-backed rows and select a base branch for each. Rows can mix local folders, registered workspace repositories, provider repositories, and supported URLs. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains gated while its initial-launch path cannot project sibling repositories, and Remote Docker is not implemented. Kandev scopes Changes, review, and pull-request surfaces by repository.
 
 Before starting, document:
 

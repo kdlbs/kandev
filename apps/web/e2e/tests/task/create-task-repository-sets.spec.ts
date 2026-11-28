@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
@@ -9,7 +10,6 @@ import { useRegularMode } from "../../helpers/regular-mode";
 // with the office feature disabled.
 useRegularMode();
 
-const SETS_TRIGGER = "repository-sets-trigger";
 const SET_OPTION = "repository-set-option";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
 const SECOND_REPO_NAME = "Repository Sets Target";
@@ -18,6 +18,14 @@ const SET_NAME = "Full-stack";
 type TaskWithRepos = {
   repositories?: Array<{ repository_id: string; base_branch?: string }>;
 };
+
+async function openRepositorySetPicker(testPage: Page, dialog: Locator) {
+  await dialog.getByTestId("add-repository").click();
+  const menu = testPage.getByTestId("workspace-source-menu-options");
+  await expect(menu).toBeVisible();
+  await menu.getByTestId("workspace-source-menu-set").click();
+  await expect(testPage.getByTestId("workspace-source-set-picker")).toBeVisible();
+}
 
 /**
  * Seeds a second workspace repository plus a set containing both, and returns
@@ -82,11 +90,22 @@ test.describe("Task creation with repository sets", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // The Sets control is present because the workspace has one set.
-    await dialog.getByTestId(SETS_TRIGGER).click();
+    // Repository sets are available from the unified Add menu.
+    await openRepositorySetPicker(testPage, dialog);
     const options = testPage.getByTestId(SET_OPTION);
     await expect(options).toHaveCount(1);
     await expect(options.first()).toContainText(SET_NAME);
+    await expect(options.first()).toHaveCSS("font-size", "12px");
+    await expect(options.first()).toHaveCSS("min-height", "28px");
+    await expect(options.first().getByText(SET_NAME, { exact: true })).toHaveCSS(
+      "font-size",
+      "12px",
+    );
+    await expect(
+      testPage
+        .getByTestId("workspace-source-view-set")
+        .getByText("Repository Set", { exact: true }),
+    ).toHaveCSS("font-size", "12px");
     await options.first().click();
 
     // One row per member, in set order.
@@ -143,14 +162,16 @@ test.describe("Task creation with repository sets", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    await dialog.getByTestId(SETS_TRIGGER).click();
+    while ((await dialog.getByTestId(REPO_CHIP_TRIGGER).count()) > 0) {
+      await dialog.getByTestId("remove-repo-chip").first().click();
+    }
+    await expect(dialog.getByTestId(REPO_CHIP_TRIGGER)).toHaveCount(0);
+    await openRepositorySetPicker(testPage, dialog);
     await testPage.getByTestId(SET_OPTION).first().click();
     await expect(dialog.getByTestId(REPO_CHIP_TRIGGER)).toHaveCount(2);
 
-    await dialog.getByTestId(SETS_TRIGGER).click();
+    await openRepositorySetPicker(testPage, dialog);
     const option = testPage.getByTestId(SET_OPTION).first();
-    // The menu says up front that applying again would change nothing.
-    await expect(option).toHaveAttribute("data-fully-applied", "true");
     await option.click();
 
     await expect(dialog.getByTestId(REPO_CHIP_TRIGGER)).toHaveCount(2);
@@ -167,12 +188,12 @@ test.describe("Task creation with repository sets", () => {
 
     // The control stays reachable so the first set can be defined from the flow
     // that just chose the repositories, but it lists no sets to apply.
-    await dialog.getByTestId(SETS_TRIGGER).click();
+    await openRepositorySetPicker(testPage, dialog);
     await expect(testPage.getByTestId("repository-set-save-action")).toBeVisible();
     await expect(testPage.getByTestId(SET_OPTION)).toHaveCount(0);
   });
 
-  test("the Sets control survives a Remote/None round trip without a disabled reason", async ({
+  test("the Sets control stays available after the last row is removed", async ({
     testPage,
     apiClient,
     seedData,
@@ -187,27 +208,20 @@ test.describe("Task creation with repository sets", () => {
     await testPage.getByTestId("create-task-button").first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    const trigger = dialog.getByTestId(SETS_TRIGGER);
+    const add = dialog.getByTestId("add-repository");
     const row = dialog.getByTestId("repo-chips-row");
-    await expect(trigger).toBeEnabled();
+    await expect(add).toBeEnabled();
 
-    // Sets select workspace repositories, so they are not offered in the modes
-    // that select something else.
-    await dialog.getByTestId("source-mode-scratch").click();
-    await expect(trigger).toHaveCount(0);
-    await dialog.getByTestId("source-mode-remote").click();
-    await expect(trigger).toHaveCount(0);
-
-    // Returning to Repo leaves the executor on Local, because No repository moved
-    // it off worktree. The control must come back usable rather than greyed out:
-    // gating it on executor capability once wedged a full sentence into this row,
-    // and the menu opened anyway because DropdownMenuTrigger owns its own pointer
-    // handlers.
-    await dialog.getByTestId("source-mode-workspace").click();
-    await expect(trigger).toBeEnabled();
+    // Sets remain available for an empty editable draft. Removing the final
+    // row must not make the Add menu disappear or restore a row asynchronously.
+    while ((await dialog.getByTestId(REPO_CHIP_TRIGGER).count()) > 0) {
+      await dialog.getByTestId("remove-repo-chip").first().click();
+    }
+    await expect(dialog.getByTestId(REPO_CHIP_TRIGGER)).toHaveCount(0);
+    await expect(add).toBeEnabled();
     await expect(row).not.toContainText("Multi-repo tasks are unavailable");
 
-    await trigger.click();
+    await openRepositorySetPicker(testPage, dialog);
     await expect(testPage.getByTestId(SET_OPTION).first()).toBeVisible();
     await testPage.getByTestId(SET_OPTION).first().click();
     await expect(dialog.getByTestId(REPO_CHIP_TRIGGER)).toHaveCount(2);
@@ -231,7 +245,7 @@ test.describe("Task creation with repository sets", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId(REPO_CHIP_TRIGGER).first()).toBeVisible();
 
-    await dialog.getByTestId(SETS_TRIGGER).click();
+    await openRepositorySetPicker(testPage, dialog);
     await testPage.getByTestId("repository-set-save-action").click();
 
     const savedName = `Saved selection ${Date.now()}`;

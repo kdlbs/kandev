@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 const TaskCreateDialogPopoverContainerContext = createContext<HTMLElement | null>(null);
 
@@ -20,4 +21,10 @@ export function TaskCreateDialogPopoverContainerProvider({
 
 export function useTaskCreateDialogPopoverContainer() {
   return useContext(TaskCreateDialogPopoverContainerContext);
+}
+
+export function useTaskCreateDialogPortalContainer() {
+  const dialogPopoverContainer = useTaskCreateDialogPopoverContainer();
+  const touchDrawer = useTouchDrawer();
+  return touchDrawer ? null : dialogPopoverContainer;
 }

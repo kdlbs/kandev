@@ -182,6 +182,7 @@
   "files": "Ficheiros",
   "folderName": "Nome da pasta",
   "folders": "Pastas",
+  "go": "Abrir",
   "hiddenFolders": "Pastas ocultas",
   "forwardStdinStdoutStraightToThe": "Encaminha o stdin/stdout diretamente para o subprocesso da CLI. Desativa o ACP.",
   "getStarted": "Começar",

@@ -1070,6 +1070,12 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	if req.RepositoryPath != "" && workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
+	if workspacePath == "" && req.RepositoryPath == "" && len(req.WorkspaceFolders) == 1 {
+		// A single selected folder is already the live workspace. Keep its
+		// direct path even when the session is being resumed so no generated
+		// root or self-referential folder link is introduced.
+		workspacePath = req.WorkspaceFolders[0].LocalPath
+	}
 	if workspacePath == "" && req.ACPSessionID != "" {
 		if resolved := m.resolveWorkspaceFromProvider(ctx, req); resolved != "" {
 			return resolved, "", "", ""
@@ -2418,16 +2424,16 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
+	if err := validateWorkspaceFolderExecutor(req.ExecutorType, req.WorkspaceFolders); err != nil {
+		return nil, err
+	}
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
 	if err := validateLaunchWorkspaceAdmissionWithAdoption(ctx, req, workspacePath, m.worktreeMgr); err != nil {
 		return nil, err
 	}
-	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
-	if err := reconcileWorkspaceSourcesAtLayout(ctx, workspacePath, req.WorkspaceLayout, req.WorkspaceFolders, owner); err != nil {
-		return nil, err
-	}
-	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositoriesAtLayout(workspacePath, req.WorkspaceLayout, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
+	managedSources := workspaceSourcesNeedManagedRoot(req)
+	if !managedSources {
+		if err := m.reconcileWorkspaceSourcesForLaunch(ctx, req, workspacePath); err != nil {
 			return nil, err
 		}
 	}
@@ -2486,6 +2492,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			maps.Copy(metadata, reqWithWorktree.Metadata)
 			metadata[MetadataKeyWorktreePath] = prepResult.WorktreePath
 			reqWithWorktree.Metadata = metadata
+		}
+	}
+	if managedSources {
+		workspacePath, err = m.prepareManagedWorkspaceSources(ctx, &reqWithWorktree, prepResult, workspacePath)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -2623,7 +2635,13 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 }
 
 func validateLaunchWorkspaceAdmissionWithAdoption(ctx context.Context, req *LaunchRequest, workspacePath string, manager *worktree.Manager) error {
-	if req == nil || workspacePath == "" || models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
+	if req == nil {
+		return nil
+	}
+	if err := validateWorkspaceFolderExecutor(req.ExecutorType, req.WorkspaceFolders); err != nil {
+		return err
+	}
+	if workspacePath == "" || models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
 		return nil
 	}
 	if req.ExecutorType != string(models.ExecutorTypeLocal) &&
@@ -2633,6 +2651,17 @@ func validateLaunchWorkspaceAdmissionWithAdoption(ctx context.Context, req *Laun
 	}
 	repositories := workspaceRepositorySpecsFromLaunch(req)
 	if len(repositories) == 0 {
+		return nil
+	}
+	if workspaceSourcesNeedManagedRoot(req) && workspaceRepositoryLinksSupported(req.ExecutorType) {
+		// The launch may still be rooted at the primary checkout before local
+		// preparation creates the task root. Validate the durable sources here;
+		// the managed root and its links are materialized immediately afterward.
+		for _, repository := range repositories {
+			if err := validateLocalRepositoryWorkspace(ctx, repository.RepositoryPath, repository.RepositoryPath); err != nil {
+				return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, err)
+			}
+		}
 		return nil
 	}
 	for index, repository := range repositories {

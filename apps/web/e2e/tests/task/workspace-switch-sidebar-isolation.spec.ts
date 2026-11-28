@@ -229,7 +229,8 @@ test.describe("Sidebar — cross-workspace isolation", () => {
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("source-mode-scratch").click();
+    await dialog.getByTestId("remove-repo-chip").first().click();
+    await expect(dialog.getByTestId("repo-chip-trigger")).toHaveCount(0);
     await dialog.getByTestId("task-title-input").fill(createdTitle);
     await dialog
       .getByTestId("task-description-input")

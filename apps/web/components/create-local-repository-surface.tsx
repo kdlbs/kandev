@@ -344,6 +344,10 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const handleOpenChange = (open: boolean) => props.onOpenChange(open);
+  const handleEscapeKeyDown = (event: KeyboardEvent) => {
+    event.preventDefault();
+    requestAnimationFrame(() => handleOpenChange(false));
+  };
   const form = <CreateRepositoryForm {...props} onDismiss={() => handleOpenChange(false)} />;
 
   if (isMobile) {
@@ -351,6 +355,7 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
       <Drawer open={props.open} onOpenChange={handleOpenChange}>
         <DrawerContent
           data-testid="create-local-repository-drawer"
+          onEscapeKeyDown={handleEscapeKeyDown}
           className="h-[88dvh] max-h-[88dvh] min-w-0 overflow-hidden pb-0"
         >
           <DrawerHeader className="shrink-0 border-b border-border text-left">

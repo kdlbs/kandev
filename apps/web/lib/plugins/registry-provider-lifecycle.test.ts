@@ -25,6 +25,32 @@ afterEach(() => {
 });
 
 describe("pluginRegistry — repository provider result lifecycle", () => {
+  it("aborts in-flight availability work when its owner unloads", async () => {
+    const aborted = vi.fn();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const provider = repositoryProvider({
+      getAvailability: ({ signal }) =>
+        new Promise(() => {
+          markStarted();
+          signal.addEventListener("abort", aborted, { once: true });
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    const requestController = new AbortController();
+    const request = pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .getAvailability!({ workspaceId: WORKSPACE_ID, signal: requestController.signal });
+    await started;
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+
+    expect(aborted).toHaveBeenCalledOnce();
+    requestController.abort();
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("binds repository inspection identity to the registered provider", async () => {
     const spoofed = {
       providerId: "spoofed-provider",
@@ -82,7 +108,9 @@ describe("pluginRegistry — repository provider result lifecycle", () => {
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(aborted).toHaveBeenCalledOnce();
   });
+});
 
+describe("pluginRegistry — repository provider request guards", () => {
   it("rejects stale results from a provider that ignores cancellation", async () => {
     let resolveRequest!: (
       value: Awaited<ReturnType<RepositoryProviderRegistration["listRepositories"]>>,

@@ -1,5 +1,21 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { pasteTaskRepositoryURL } from "../../helpers/task-repository-picker";
+
+async function openRemoteAndPasteURL(page: Page, url: string): Promise<void> {
+  const manager = page.getByTestId("mobile-repository-manager");
+  if ((await manager.count()) > 0 && (await manager.isVisible().catch(() => false))) {
+    await manager.tap();
+    for (const testId of ["remove-repo-chip", "remote-chip-remove"]) {
+      const removeButtons = page.getByTestId(testId);
+      while ((await removeButtons.count()) > 0) {
+        await removeButtons.first().tap();
+      }
+    }
+  }
+  await pasteTaskRepositoryURL(page, url, { mobile: true });
+}
 
 test("remote checkout settings use a phone drawer with reachable actions", async ({
   testPage,
@@ -21,11 +37,9 @@ test("remote checkout settings use a phone drawer with reachable actions", async
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileFab.click();
-  await testPage.getByTestId("source-mode-remote").click();
-  await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
-  await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  await testPage.getByTestId("remote-repo-input").fill("https://github.com/checkout-options/repo");
-  await testPage.getByTestId("remote-repo-input").press("Enter");
+  await openRemoteAndPasteURL(testPage, "https://github.com/checkout-options/repo");
+  await testPage.getByTestId("mobile-repository-manager").tap();
+  await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(1);
   const trigger = testPage.getByTestId("repository-options-trigger");
   expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await trigger.click();

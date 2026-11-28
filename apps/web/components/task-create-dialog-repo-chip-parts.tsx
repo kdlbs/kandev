@@ -238,6 +238,7 @@ export function RepoChipRepositoryPill({
   onRefreshRepositories,
   repositoriesRefreshing,
   popoverHeader,
+  disabled,
   ariaDescribedBy,
 }: {
   repoLabel: string;
@@ -251,6 +252,7 @@ export function RepoChipRepositoryPill({
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
   popoverHeader?: React.ReactNode;
+  disabled?: boolean;
   ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
@@ -289,10 +291,13 @@ export function RepoChipRepositoryPill({
       placeholder={t("task:repository")}
       options={repoOptions}
       onSelect={onRepositoryChange}
+      disabled={disabled}
+      disabledReason={disabled ? t("task:repositoryLocked") : undefined}
       searchPlaceholder={t("task:searchRepositories")}
       emptyMessage={emptyMessage}
       testId="repo-chip-trigger"
       tooltip={repoTooltip}
+      mobileTitle={t("common:repository")}
       actions={actions.length > 0 ? actions : undefined}
       onRefresh={onRefreshRepositories}
       refreshing={repositoriesRefreshing}
@@ -345,6 +350,7 @@ export function RepoChipBranchPill({
       emptyMessage={t("task:noBranches")}
       testId="branch-chip-trigger"
       tooltip={computeBranchTooltip(branchIntent)}
+      mobileTitle={t("task:branch")}
       onRefresh={refreshBranches}
       refreshing={branchesLoading}
       filter={scoreBranch}
@@ -360,6 +366,7 @@ export function RepoChipBaseBranchPill({
   defaultBranch,
   hasRepo,
   branchesLoading,
+  branchLocked,
   onSelect,
   refreshBranches,
   ariaDescribedBy,
@@ -369,6 +376,7 @@ export function RepoChipBaseBranchPill({
   defaultBranch: string;
   hasRepo: boolean;
   branchesLoading: boolean;
+  branchLocked?: boolean;
   onSelect: (value: string) => void;
   refreshBranches?: () => void;
   ariaDescribedBy?: string;
@@ -385,12 +393,13 @@ export function RepoChipBaseBranchPill({
       placeholder={valueLabel}
       options={options}
       onSelect={onSelect}
-      disabled={!hasRepo || branchesLoading || options.length === 0}
-      disabledReason={disabledReason}
+      disabled={branchLocked || !hasRepo || branchesLoading || options.length === 0}
+      disabledReason={branchLocked ? t("task:branchLocked") : disabledReason}
       searchPlaceholder={t("task:searchBranches")}
       emptyMessage={t("task:noBranches")}
       testId="repo-chip-base-branch"
       tooltip={t("workspaces:repositorySetsBaseBranchLabel")}
+      mobileTitle={t("task:branch")}
       onRefresh={refreshBranches}
       refreshing={branchesLoading}
       filter={scoreBranch}

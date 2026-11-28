@@ -31,6 +31,8 @@ import { TaskAutopilotToggle } from "@/components/task-autopilot-toggle";
 import { TaskCreateRelatedSelector } from "@/components/task-create-dialog-relationship-selectors";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
+import type { ExecutorSourcePolicy } from "@/components/task-create-dialog-executor-source-policy";
+import type { RepositoryCloneSourceState } from "@/hooks/domains/repositories/use-repository-clone-source";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
   const { t } = useTranslation();
@@ -221,6 +223,12 @@ type WorkspaceSectionProps = {
   worktreeBranch: string | null;
   isLocalExecutor: boolean;
   freshBranchAvailable: boolean;
+  executorSourcePolicy?: ExecutorSourcePolicy;
+  executorSourceNotice?: string | null;
+  folderDisabledReason?: string;
+  sourcePolicyReason?: string | null;
+  remoteOriginStates?: Record<string, RepositoryCloneSourceState>;
+  onRefreshRemoteOrigins?: () => void;
 };
 
 /**
@@ -238,6 +246,12 @@ function WorkspaceSection({
   worktreeBranch,
   isLocalExecutor,
   freshBranchAvailable,
+  executorSourcePolicy,
+  executorSourceNotice,
+  folderDisabledReason,
+  sourcePolicyReason,
+  remoteOriginStates,
+  onRefreshRemoteOrigins,
 }: WorkspaceSectionProps) {
   // Hooks before the early return: a subtask that inherits the parent workspace
   // renders no picker, but the rules of hooks do not care.
@@ -247,6 +261,7 @@ function WorkspaceSection({
     repositories: availableRepositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
+    setNoRepository: fs.setNoRepository,
   });
   if (inheritParent) {
     return <WorktreeBadge show={!!worktreeBranch} branch={worktreeBranch} />;
@@ -269,8 +284,26 @@ function WorkspaceSection({
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={fs.setFreshBranchEnabled}
         isLocalExecutor={isLocalExecutor}
+        executorSourcePolicy={executorSourcePolicy}
+        folderDisabledReason={folderDisabledReason}
+        remoteOriginStates={remoteOriginStates}
+        onRefreshRemoteOrigins={onRefreshRemoteOrigins}
+        onFolderSelectionAdded={handlers.onFolderSelectionAdded}
+        onRepositorySelectionAdded={handlers.onRepositorySelectionAdded}
+        onAllWorkspaceSourcesRemoved={handlers.onAllWorkspaceSourcesRemoved}
+        onRepositorySelectionRemoved={handlers.onRepositorySelectionRemoved}
         repositorySets={{ sets, onApply: onApplyRepositorySet }}
       />
+      {executorSourceNotice ? (
+        <p className="text-xs text-muted-foreground" role="status">
+          {executorSourceNotice}
+        </p>
+      ) : null}
+      {sourcePolicyReason ? (
+        <p className="text-xs text-destructive" role="status">
+          {sourcePolicyReason}
+        </p>
+      ) : null}
     </>
   );
 }
@@ -287,6 +320,13 @@ type SubtaskFormBodyProps = {
   worktreeBranch: string | null;
   isLocalExecutor: boolean;
   freshBranchAvailable: boolean;
+  executorSourcePolicy?: ExecutorSourcePolicy;
+  executorSourceNotice?: string | null;
+  folderDisabledReason?: string;
+  sourcePolicyReason?: string | null;
+  remoteOriginStates?: Record<string, RepositoryCloneSourceState>;
+  onRefreshRemoteOrigins?: () => void;
+  hasAllBranches: boolean;
   profileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   agentProfileId: string;
@@ -423,6 +463,13 @@ export function SubtaskFormBody({
   worktreeBranch,
   isLocalExecutor,
   freshBranchAvailable,
+  executorSourcePolicy,
+  executorSourceNotice,
+  folderDisabledReason,
+  sourcePolicyReason,
+  remoteOriginStates,
+  onRefreshRemoteOrigins,
+  hasAllBranches,
   profileOptions,
   executorProfileOptions,
   agentProfileId,
@@ -482,6 +529,12 @@ export function SubtaskFormBody({
         worktreeBranch={worktreeBranch}
         isLocalExecutor={isLocalExecutor}
         freshBranchAvailable={freshBranchAvailable}
+        executorSourcePolicy={executorSourcePolicy}
+        executorSourceNotice={executorSourceNotice}
+        folderDisabledReason={folderDisabledReason}
+        sourcePolicyReason={sourcePolicyReason}
+        remoteOriginStates={remoteOriginStates}
+        onRefreshRemoteOrigins={onRefreshRemoteOrigins}
       />
       <SelectorsRow
         profileOptions={profileOptions}
@@ -537,7 +590,13 @@ export function SubtaskFormBody({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt || (!autoTitle && !title.trim())}
+          disabled={
+            isCreating ||
+            isSummarizing ||
+            !hasPrompt ||
+            (!autoTitle && !title.trim()) ||
+            !hasAllBranches
+          }
           className="cursor-pointer"
         >
           {isCreating ? t("task:creatingEllipsis") : t("task:createSubtask")}

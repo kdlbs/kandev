@@ -2,10 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -101,6 +102,7 @@ type wsCreateTaskRequest struct {
 	ExecutionGrade         string                                `json:"execution_grade,omitempty"`
 	State                  *v1.TaskState                         `json:"state,omitempty"`
 	Repositories           []httpTaskRepositoryInput             `json:"repositories,omitempty"`
+	WorkspaceSources       *[]json.RawMessage                    `json:"workspace_sources,omitempty"`
 	Position               int                                   `json:"position,omitempty"`
 	Metadata               map[string]interface{}                `json:"metadata,omitempty"`
 	MCPServerIDs           []string                              `json:"mcp_server_ids,omitempty"`
@@ -133,6 +135,17 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.StartAgent && req.AgentProfileID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "agent_profile_id is required to start agent", nil)
 	}
+	var workspaceSources *[]service.WorkspaceSourceInput
+	if req.WorkspaceSources != nil {
+		if len(req.Repositories) > 0 {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_sources cannot be combined with repositories", nil)
+		}
+		parsed, parseErr := parseHTTPWorkspaceSources(*req.WorkspaceSources)
+		if parseErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, parseErr.Error(), nil)
+		}
+		workspaceSources = &parsed
+	}
 
 	// Convert repositories
 	var repos []dto.TaskRepositoryInput
@@ -158,6 +171,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			ProviderRepoID:  r.ProviderRepoID,
 			ProviderOwner:   r.ProviderOwner,
 			ProviderName:    r.ProviderName,
+			CheckoutSource:  r.CheckoutSource,
+			ExpectedOrigin:  r.ExpectedOrigin,
 		})
 	}
 
@@ -204,6 +219,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutionGrade:              req.ExecutionGrade,
 		State:                       req.State,
 		Repositories:                convertTaskRepositories(req.Repositories != nil, repos),
+		WorkspaceSources:            workspaceSources,
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
 		MCPServerIDs:                req.MCPServerIDs,
@@ -223,6 +239,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
+		}
+		if errors.Is(err, service.ErrInvalidWorkspaceSource) || errors.Is(err, service.ErrWorkspaceSourceConflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), taskErrorDetails(err))
 		}
 		if errors.Is(err, service.ErrWIPLimitExceeded) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
@@ -259,7 +278,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		AgentProfileID:    req.AgentProfileID,
 		ExecutorProfileID: req.ExecutorProfileID,
 		Repositories:      req.Repositories,
-	}, repos)
+		WorkspaceSources:  req.WorkspaceSources,
+	}, repos, workspaceSources)
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
@@ -361,6 +381,8 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				ProviderRepoID:  r.ProviderRepoID,
 				ProviderOwner:   r.ProviderOwner,
 				ProviderName:    r.ProviderName,
+				CheckoutSource:  r.CheckoutSource,
+				ExpectedOrigin:  r.ExpectedOrigin,
 			})
 		}
 	}

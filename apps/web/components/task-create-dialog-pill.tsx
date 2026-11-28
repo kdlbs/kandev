@@ -2,15 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Command, CommandInput } from "@kandev/ui/command";
-import { BranchRefreshButton } from "@/components/branch-refresh-button";
-import { PillCommandList } from "@/components/task-create-dialog-pill-command-list";
-import { controlSizingClassName } from "@kandev/ui/control-sizing";
-import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
+import { useTaskCreateDialogPortalContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { usePillTooltipSuppression } from "@/hooks/use-pill-tooltip-suppression";
 import { useTooltipMountGate } from "@/hooks/use-tooltip-mount-gate";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { PillDrawer, PillPopover } from "@/components/task-create-dialog-pill-surfaces";
 
 export type PillOption = {
   value: string;
@@ -37,7 +34,7 @@ export type PillAction = {
  * correct. Contextual controls can use `popoverHeader`, which renders outside
  * `Command`; mixed searchable content still needs a custom `Popover`.
  */
-type PillProps = {
+export type PillProps = {
   icon: React.ReactNode;
   value: string;
   /** Option value used for selected-first ordering when the trigger label differs. */
@@ -81,6 +78,8 @@ type PillProps = {
   actions?: PillAction[];
   /** Optional contextual controls rendered above the searchable list. */
   popoverHeader?: React.ReactNode;
+  /** Title used by the mobile picker sheet. */
+  mobileTitle?: string;
 };
 
 /** Returns the active-state hover classes for the pill trigger button. */
@@ -93,9 +92,15 @@ function pillActiveClass(flat: boolean): string {
  * Builds the className for the pill trigger button. Extracted so the inline
  * trigger JSX stays compact (the Pill function is right at the complexity cap).
  */
-function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): string {
+function pillTriggerClass(
+  disabled: boolean,
+  flat: boolean,
+  hasValue: boolean,
+  touchTarget: boolean,
+): string {
   return cn(
     "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs",
+    touchTarget && "min-h-11",
     flat ? "bg-transparent" : "border border-border/60 bg-muted/30",
     disabled ? "opacity-50 cursor-not-allowed" : pillActiveClass(flat),
     !hasValue && "text-muted-foreground",
@@ -127,161 +132,6 @@ function DisabledPillTooltip({
   );
 }
 
-function PillPopoverContent({
-  filter,
-  searchPlaceholder,
-  onRefresh,
-  refreshing,
-  refreshLabel,
-  options,
-  value,
-  onSelect,
-  onPointerSelect,
-  setOpen,
-  emptyMessage,
-  portalContainer,
-  action,
-  actions,
-  popoverHeader,
-  dropdownTestId,
-}: {
-  filter?: PillProps["filter"];
-  searchPlaceholder: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  refreshLabel?: string;
-  options: PillOption[];
-  value: string;
-  onSelect: (value: string) => void;
-  onPointerSelect: (pointerType: string) => void;
-  setOpen: (open: boolean) => void;
-  emptyMessage: React.ReactNode;
-  portalContainer: HTMLElement | null;
-  action?: PillAction;
-  actions?: PillAction[];
-  popoverHeader?: React.ReactNode;
-  dropdownTestId?: string;
-}) {
-  const renderedActions = actions ?? (action ? [action] : []);
-  return (
-    <PopoverContent
-      className="w-[min(480px,calc(100vw-2rem))] p-0"
-      align="start"
-      portalContainer={portalContainer}
-      data-testid={dropdownTestId}
-    >
-      {popoverHeader}
-      <Command filter={filter}>
-        <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
-          <div className="min-w-0 flex-1">
-            <CommandInput placeholder={searchPlaceholder} className="h-9 w-full" />
-          </div>
-          {onRefresh ? (
-            <BranchRefreshButton
-              onRefresh={onRefresh}
-              refreshing={refreshing}
-              label={refreshLabel}
-              testId={refreshLabel === "repositories" ? "repo-refresh-button" : undefined}
-              touchTarget
-            />
-          ) : null}
-          {renderedActions.map((act, index) => (
-            <Tooltip key={act.label || index}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={act.label}
-                  data-testid={act.testId ?? "create-local-repository-button"}
-                  onClick={() => {
-                    act.onSelect();
-                    setOpen(false);
-                  }}
-                  className={`${controlSizingClassName("icon")} max-md:min-h-12 max-md:min-w-12 [@media(pointer:coarse)]:min-h-12 [@media(pointer:coarse)]:min-w-12 inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer`}
-                >
-                  {act.icon}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{act.label}</TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
-        <PillCommandList
-          options={options}
-          value={value}
-          onSelect={onSelect}
-          onPointerSelect={onPointerSelect}
-          setOpen={setOpen}
-          emptyMessage={emptyMessage}
-        />
-      </Command>
-    </PopoverContent>
-  );
-}
-
-function PillPopover({
-  open,
-  setOpen,
-  triggerButton,
-  filter,
-  searchPlaceholder,
-  onRefresh,
-  refreshing,
-  refreshLabel,
-  options,
-  value,
-  onSelect,
-  onPointerSelect,
-  emptyMessage,
-  portalContainer,
-  action,
-  actions,
-  popoverHeader,
-  dropdownTestId,
-}: {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  triggerButton: React.ReactElement;
-  filter?: PillProps["filter"];
-  searchPlaceholder: string;
-  onRefresh?: () => void;
-  refreshing?: boolean;
-  refreshLabel?: string;
-  options: PillOption[];
-  value: string;
-  onSelect: (value: string) => void;
-  onPointerSelect: (pointerType: string) => void;
-  emptyMessage: React.ReactNode;
-  portalContainer: HTMLElement | null;
-  action?: PillAction;
-  actions?: PillAction[];
-  popoverHeader?: React.ReactNode;
-  dropdownTestId?: string;
-}) {
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
-      <PillPopoverContent
-        filter={filter}
-        searchPlaceholder={searchPlaceholder}
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        refreshLabel={refreshLabel}
-        options={options}
-        value={value}
-        onSelect={onSelect}
-        onPointerSelect={onPointerSelect}
-        setOpen={setOpen}
-        emptyMessage={emptyMessage}
-        portalContainer={portalContainer}
-        action={action}
-        actions={actions}
-        popoverHeader={popoverHeader}
-        dropdownTestId={dropdownTestId}
-      />
-    </Popover>
-  );
-}
-
 type PillPopoverShellProps = {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -307,6 +157,8 @@ type PillPopoverShellProps = {
   suppressTooltipRef: { current: boolean };
   handlePillTooltipOpenChange: (open: boolean) => void;
   suppressForSelection: () => void;
+  usesTouchDrawer: boolean;
+  mobileTitle: string;
 };
 
 function renderPillPopover({
@@ -334,8 +186,35 @@ function renderPillPopover({
   suppressTooltipRef,
   handlePillTooltipOpenChange,
   suppressForSelection,
+  usesTouchDrawer,
+  mobileTitle,
 }: PillPopoverShellProps): React.ReactElement {
-  const popover = (
+  const handleSelect = (selectedValue: string) => {
+    if (tooltip) suppressForSelection();
+    onSelect(selectedValue);
+  };
+  const surface = usesTouchDrawer ? (
+    <PillDrawer
+      open={open}
+      setOpen={setOpen}
+      triggerButton={triggerButton}
+      filter={filter}
+      searchPlaceholder={searchPlaceholder}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      refreshLabel={refreshLabel}
+      options={options}
+      value={value}
+      onPointerSelect={onPointerSelect}
+      onSelect={handleSelect}
+      emptyMessage={emptyMessage}
+      action={action}
+      actions={actions}
+      popoverHeader={popoverHeader}
+      dropdownTestId={dropdownTestId}
+      mobileTitle={mobileTitle}
+    />
+  ) : (
     <PillPopover
       open={open}
       setOpen={setOpen}
@@ -348,10 +227,7 @@ function renderPillPopover({
       options={options}
       value={value}
       onPointerSelect={onPointerSelect}
-      onSelect={(selectedValue) => {
-        if (tooltip) suppressForSelection();
-        onSelect(selectedValue);
-      }}
+      onSelect={handleSelect}
       emptyMessage={emptyMessage}
       portalContainer={portalContainer}
       action={action}
@@ -361,13 +237,13 @@ function renderPillPopover({
     />
   );
 
-  if (!tooltip) return popover;
+  if (!tooltip || usesTouchDrawer) return surface;
 
   const tooltipOpen =
     open || suppressTooltip || suppressTooltipRef.current ? false : tooltipOpenState;
   return (
     <Tooltip open={tooltipOpen} onOpenChange={handlePillTooltipOpenChange}>
-      {popover}
+      {surface}
       <TooltipContent className="max-w-[calc(100vw-2rem)] break-all">{tooltip}</TooltipContent>
     </Tooltip>
   );
@@ -385,6 +261,8 @@ function renderPillTriggerButton({
   ariaLabel,
   ariaDescribedBy,
   prefix,
+  touchTarget,
+  onClick,
   onPointerEnter,
   onPointerLeave,
   onBlur,
@@ -402,6 +280,8 @@ function renderPillTriggerButton({
   | "prefix"
 > & {
   hasValue: boolean;
+  touchTarget: boolean;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
   onPointerEnter?: React.PointerEventHandler<HTMLButtonElement>;
   onPointerLeave?: React.PointerEventHandler<HTMLButtonElement>;
   onBlur?: React.FocusEventHandler<HTMLButtonElement>;
@@ -414,7 +294,11 @@ function renderPillTriggerButton({
       aria-label={ariaLabel}
       aria-describedby={ariaDescribedBy}
       data-testid={testId}
-      className={cn(pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue), triggerClassName)}
+      className={cn(
+        pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue, touchTarget),
+        triggerClassName,
+      )}
+      onClick={onClick}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onBlur={onBlur}
@@ -468,10 +352,35 @@ function useTooltipOpenChange(
   );
 }
 
+function pillTriggerSurface(
+  triggerButton: React.ReactElement,
+  usesTouchDrawer: boolean,
+  tooltip?: string,
+): React.ReactElement {
+  if (!usesTouchDrawer && tooltip) return <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>;
+  return triggerButton;
+}
+
+function renderDisabledPill(
+  open: boolean,
+  onOpenChange: (open: boolean) => void,
+  triggerButton: React.ReactNode,
+  disabledReason: string,
+): React.ReactElement {
+  return (
+    <DisabledPillTooltip
+      open={open}
+      onOpenChange={onOpenChange}
+      triggerButton={triggerButton}
+      disabledReason={disabledReason}
+    />
+  );
+}
+
 function usePillState(onOpenChange?: (open: boolean) => void) {
   const [open, setOpenState] = useState(false);
   const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
-  const portalContainer = useTaskCreateDialogPopoverContainer();
+  const portalContainer = useTaskCreateDialogPortalContainer();
   const {
     suppressTooltip,
     suppressTooltipRef,
@@ -487,12 +396,12 @@ function usePillState(onOpenChange?: (open: boolean) => void) {
     onOpenChange,
   );
   const handleTooltipChange = useTooltipOpenChange(suppressTooltipRef, handleTooltipOpenChange);
-
   return {
     open,
     setOpen,
-    portalContainer,
     tooltipOpenState,
+    handleTooltipOpenChange,
+    portalContainer,
     suppressTooltip,
     suppressTooltipRef,
     handlePointerEnter,
@@ -536,7 +445,9 @@ export function Pill({
   action,
   actions,
   popoverHeader,
+  mobileTitle,
 }: PillProps) {
+  const usesTouchDrawer = useTouchDrawer();
   const state = usePillState(onOpenChange);
   const triggerButton = renderPillTriggerButton({
     icon,
@@ -550,30 +461,24 @@ export function Pill({
     ariaLabel,
     ariaDescribedBy,
     prefix,
+    touchTarget: usesTouchDrawer,
+    onClick: usesTouchDrawer ? () => state.setOpen(true) : undefined,
     onPointerEnter: tooltip ? state.handlePointerEnter : undefined,
     onPointerLeave: tooltip ? state.handlePointerLeave : undefined,
     onBlur: tooltip ? state.handleBlur : undefined,
   });
-  // Disabled buttons swallow events, so the wrapper owns tooltip focus.
-  if (disabled && disabledReason && !state.open) {
-    return (
-      <DisabledPillTooltip
-        open={state.tooltipOpenState}
-        onOpenChange={state.handleTooltipChange}
-        triggerButton={triggerButton}
-        disabledReason={disabledReason}
-      />
+  if (disabled && disabledReason && !state.open)
+    return renderDisabledPill(
+      state.tooltipOpenState,
+      state.handleTooltipOpenChange,
+      triggerButton,
+      disabledReason,
     );
-  }
 
   return renderPillPopover({
     open: state.open,
     setOpen: state.setOpen,
-    triggerButton: tooltip ? (
-      <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
-    ) : (
-      triggerButton
-    ),
+    triggerButton: pillTriggerSurface(triggerButton, usesTouchDrawer, tooltip),
     filter,
     searchPlaceholder,
     onRefresh,
@@ -595,5 +500,7 @@ export function Pill({
     suppressTooltipRef: state.suppressTooltipRef,
     handlePillTooltipOpenChange: state.handleTooltipChange,
     suppressForSelection: state.suppressForSelection,
+    usesTouchDrawer,
+    mobileTitle: mobileTitle ?? placeholder,
   });
 }

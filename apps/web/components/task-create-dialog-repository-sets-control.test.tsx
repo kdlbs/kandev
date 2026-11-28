@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 
+const touchDrawer = vi.hoisted(() => ({ enabled: true }));
+
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchDrawer.enabled,
+}));
+
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
 import {
@@ -142,6 +148,25 @@ describe("RepositorySetsControl trigger", () => {
     // The chip row is crowded; the control contributes its own label and nothing
     // else.
     expect(container.textContent?.trim()).toBe("Sets");
+  });
+
+  it("opens a touch menu from the click after pointerdown", () => {
+    render(
+      <RepositorySetsControl
+        sets={SETS}
+        repositories={AVAILABLE}
+        rows={[PLACEHOLDER_ROW]}
+        onApply={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByTestId(TRIGGER_TESTID);
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId(OPTION_TESTID)).toHaveLength(2);
   });
 });
 

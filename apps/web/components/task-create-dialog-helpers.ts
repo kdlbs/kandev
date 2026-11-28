@@ -1,3 +1,4 @@
+import { resolveLegacySelections } from "./task-create-dialog-repository-payload";
 import { t } from "@/lib/i18n";
 import type { BuiltinMCPCreateDraft } from "@/lib/types/builtin-mcp";
 import type { useRouter } from "@/lib/routing/client-router";
@@ -5,8 +6,6 @@ import type {
   Task,
   Branch,
   Executor,
-  LocalRepository,
-  Repository,
   TaskPriority,
   InitialWorkspaceLayout,
 } from "@/lib/types/http";
@@ -16,9 +15,10 @@ import type {
   StepType,
   TaskRemoteRepoRow,
   TaskRepoRow,
+  TaskWorkspaceSelection,
   InitialWorkspaceLayoutMode,
 } from "@/components/task-create-dialog-types";
-import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { branchOptionValue } from "@/components/branch-picker-options";
@@ -26,17 +26,11 @@ import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
-import { createTask } from "@/lib/api";
+import type { createTask } from "@/lib/api";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
-type CreateTaskRepositoryPayload = NonNullable<CreateTaskParams["repositories"]>[number];
-type RemoteRepoPRMetadata = {
-  headBranch?: string;
-  baseBranch?: string;
-  number?: number;
-};
 const selectionDebug = createDebugLogger("task-create:selection");
 const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
@@ -212,6 +206,8 @@ export type BuildCreatePayloadArgs = {
   trimmedDescription: string;
   autoTitle?: boolean;
   repositoriesPayload: CreateTaskParams["repositories"];
+  /** Presence-aware ordered source payload. `[]` represents explicit scratch. */
+  workspaceSourcesPayload?: CreateTaskParams["workspace_sources"];
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
@@ -245,15 +241,6 @@ function nonEmptyRecord<T extends Record<string, string>>(value?: T): T | undefi
   return value && Object.keys(value).length > 0 ? value : undefined;
 }
 
-type CreateTaskTitleFields =
-  | { title: string; auto_title?: false }
-  | { title?: never; auto_title: true };
-
-function buildCreateTaskTitle(args: BuildCreatePayloadArgs): CreateTaskTitleFields {
-  if (args.autoTitle) return { auto_title: true };
-  return { title: args.trimmedTitle };
-}
-
 type CreateTaskStateFields = {
   state: "IN_PROGRESS" | "CREATED";
   start_agent?: boolean;
@@ -284,7 +271,9 @@ function buildOptionalCreateTaskFields(args: BuildCreatePayloadArgs): OptionalCr
     plan_mode: args.planMode || undefined,
     attachments: args.attachments,
     parent_id: optionalString(args.parentId),
-    workspace_path: optionalString(args.workspacePath),
+    ...(args.workspaceSourcesPayload === undefined
+      ? { workspace_path: optionalString(args.workspacePath) }
+      : {}),
     autopilot: args.autopilot || undefined,
   };
 }
@@ -293,12 +282,11 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
   if (args.builtinMCPPreferences && args.builtinMCPPreferences.workspaceId !== args.workspaceId) {
     throw new Error(t("settings:builtinMcp.scopeChanged"));
   }
-  return {
+  const commonPayload = {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    ...buildCreateTaskTitle(args),
     description: args.trimmedDescription,
-    repositories: args.repositoriesPayload,
+    ...createTaskSourceFields(args),
     ...buildCreateTaskState(args.withAgent),
     ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
@@ -314,6 +302,24 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
       ? { builtin_mcp_preferences: args.builtinMCPPreferences.preferences }
       : {}),
   };
+  if (args.autoTitle) return { ...commonPayload, auto_title: true };
+  return { ...commonPayload, title: args.trimmedTitle };
+}
+
+function createTaskSourceFields(
+  args: BuildCreatePayloadArgs,
+): Pick<CreateTaskParams, "workspace_sources" | "repositories" | "workspace_path"> {
+  if (args.workspaceSourcesPayload !== undefined) {
+    return { workspace_sources: args.workspaceSourcesPayload };
+  }
+  return {
+    repositories: args.repositoriesPayload,
+    workspace_path: optionalTaskValue(args.workspacePath),
+  };
+}
+
+function optionalTaskValue<T>(value: T | null | undefined): T | undefined {
+  return value || undefined;
 }
 
 const PARENT_WORKSPACE_EXECUTOR_TYPES: ReadonlySet<Executor["type"]> = new Set(["worktree"]);
@@ -376,16 +382,26 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
+  /** Ordered mixed rows from the current draft. */
+  selections?: TaskWorkspaceSelection[];
   /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
   remoteRepos?: TaskRemoteRepoRow[];
+  /** Readiness for provider-backed picker rows. Pasted URLs do not use this gate. */
+  remoteProviderReadiness?: import("@/components/task-create-dialog-remote-provider-readiness").TaskRemoteProviderReadinessMap;
   agentProfileId: string;
   noRepository?: boolean;
+  sourcePolicyInvalid?: boolean;
 }): boolean {
-  const hasRemoteRepo = (inputs.remoteRepos ?? []).some((r) => r.url.trim() !== "");
-  const hasRepo =
-    inputs.noRepository ||
-    inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    hasRemoteRepo;
+  const selections =
+    inputs.selections ?? resolveLegacySelections(inputs.repositories, inputs.remoteRepos ?? []);
+  const hasRepo = Boolean(inputs.noRepository || selections.some(selectionHasValue));
+  if (
+    !inputs.noRepository &&
+    hasUnavailablePickerRemoteProvider(selections, inputs.remoteProviderReadiness)
+  ) {
+    return false;
+  }
+  if (inputs.sourcePolicyInvalid) return false;
   return Boolean(
     (inputs.autoTitle ? inputs.trimmedDescription : inputs.trimmedTitle) &&
     inputs.workspaceId &&
@@ -393,6 +409,12 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     hasRepo,
   );
+}
+
+function selectionHasValue(selection: TaskWorkspaceSelection): boolean {
+  if (selection.kind === "remote") return selection.url.trim() !== "";
+  if (selection.kind === "folder") return Boolean(selection.localPath.trim());
+  return Boolean(selection.repositoryId || selection.localPath);
 }
 
 /**
@@ -448,249 +470,8 @@ export function findUnresolvedProviderRemote(
  *   can leave an unfinished chip without blocking submit; duplicate
  *   detection happens on the backend.
  */
-export function buildRepositoriesPayload(opts: {
-  /** True when the form is in GitHub Remote (URL) mode. */
-  useRemote: boolean;
-  /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
-  remoteRepos: TaskRemoteRepoRow[];
-  /**
-   * Per-URL PR-info cache. Consulted for each remote row whose URL is a PR
-   * URL: if the row's branch equals the PR head (auto-fill or user-confirmed
-   * default), the payload anchors `base_branch` to the PR's actual target
-   * from the API so origin can resolve it even when the head only lives on
-   * a fork. Optional — non-Remote call sites can omit it.
-   */
-  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
-  repositories: TaskRepoRow[];
-  /** Used to look up `default_branch` for `localPath` rows. */
-  discoveredRepositories: LocalRepository[];
-  /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
-  workspaceRepositories?: Repository[];
-  /**
-   * For the local executor (no worktree), the chip's branch field represents
-   * the working branch on disk, not the parent integration branch. Send it as
-   * `checkout_branch` so the session's `base_branch` stays anchored to the
-   * repo's `default_branch` (which is what git log / cumulative diff use as
-   * the merge-base reference). Without this, "new branch on local executor"
-   * collapses the merge-base recomputation to HEAD and the changes panel
-   * goes empty after a refresh.
-   */
-  isLocalExecutor?: boolean;
-  /**
-   * Optional fresh-branch metadata. The UI gates this to single-row + local
-   * executor; when present we apply it to every row (which is at most one).
-   */
-  freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
-}): NonNullable<CreateTaskParams["repositories"]> {
-  if (opts.useRemote) {
-    return buildRemoteRepoPayload(opts);
-  }
-  const fresh = opts.freshBranch
-    ? {
-        fresh_branch: true,
-        confirm_discard: opts.freshBranch.confirmDiscard,
-        consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
-      }
-    : {};
-  // Fresh-branch flow inverts the chip's semantics: instead of "the working
-  // branch I'm on", row.branch becomes "the base I want to fork from". The
-  // backend then creates a new branch and rewrites repos[i].BaseBranch to it.
-  // Splitting here would force `base_branch=default_branch, checkout_branch=
-  // <picked-base>` and the backend would fork from the wrong base. Skip the
-  // split entirely when fresh-branch is active.
-  const isLocalExecutor = !!opts.isLocalExecutor && !opts.freshBranch;
-  return opts.repositories
-    .filter((row) => row.repositoryId || row.localPath)
-    .map((row) => {
-      const defaultBranch = resolveRowDefaultBranch(row, opts);
-      const branches = splitLocalExecutorBranches({
-        rowBranch: row.branch,
-        defaultBranch,
-        // Fresh-branch mode uses row.branch as the fork base. A saved set base
-        // is checkout metadata for the ordinary local-executor flow and must
-        // not override the branch the user picked to fork from.
-        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
-        isLocalExecutor,
-      });
-      if (row.repositoryId) {
-        return {
-          repository_id: row.repositoryId,
-          ...(row.branchPolicyId ? { branch_policy_id: row.branchPolicyId } : {}),
-          base_branch: branches.base_branch,
-          checkout_branch: branches.checkout_branch,
-          ...fresh,
-        };
-      }
-      return {
-        repository_id: "",
-        base_branch: branches.base_branch,
-        checkout_branch: branches.checkout_branch,
-        local_path: row.localPath,
-        default_branch: defaultBranch || undefined,
-        ...fresh,
-      };
-    });
-}
 
-/**
- * Builds the `repos: [{ github_url, branch }]` payload from the remote-URL
- * rows. Rows with an empty URL are dropped silently — they're partially
- * filled rows the user hasn't completed yet.
- *
- * Per-row PR-info inference: if a row's URL is a PR URL and the row's
- * branch equals the PR's head branch (auto-selected by the chip or
- * user-confirmed via "leave default"), the payload anchors `base_branch`
- * to the PR's actual target from the GitHub API and surfaces the PR head
- * as `checkout_branch`. This keeps fork PRs resolvable on `origin` (their
- * head doesn't live there, but the base does). When the user overrides
- * the branch to something other than the PR head, we treat their pick as
- * the base and drop `checkout_branch`.
- */
-function buildRemoteRepoPayload(opts: {
-  remoteRepos: TaskRemoteRepoRow[];
-  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
-}): NonNullable<CreateTaskParams["repositories"]> {
-  const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
-  if (nonEmpty.length === 0) return [];
-  return nonEmpty.map((row) => buildRemoteRepoPayloadRow(row, opts.prInfoByUrl));
-}
-
-function buildRemoteRepoPayloadRow(
-  row: TaskRemoteRepoRow,
-  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
-): CreateTaskRepositoryPayload {
-  const url = row.url.trim();
-  const metadata = remoteRepoPRMetadata(row, url, prInfoByUrl);
-  const payload = metadata
-    ? buildRemoteRepoPRPayload(row, url, metadata)
-    : buildPlainRemoteRepoPayload(row, url);
-  return row.checkoutOptions ? { ...payload, checkout_options: row.checkoutOptions } : payload;
-}
-
-function remoteRepoPRMetadata(
-  row: TaskRemoteRepoRow,
-  url: string,
-  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
-): RemoteRepoPRMetadata | null {
-  // The cache is keyed on the trimmed URL (ensure() also trims), so we
-  // must look it up with the trimmed value too. Passing `row.url` directly
-  // would miss the cache when the user has stray whitespace around their
-  // URL and silently lose the PR base-branch anchoring.
-  const prInfo = prInfoByUrl?.info(url);
-  const number = prInfo?.prNumber ?? row.prNumber;
-  if (!prInfo && !number) return null;
-  return {
-    headBranch: prInfo?.prHeadBranch ?? row.prHeadBranch,
-    baseBranch: prInfo?.prBaseBranch ?? row.prBaseBranch,
-    number,
-  };
-}
-
-function buildRemoteRepoPRPayload(
-  row: TaskRemoteRepoRow,
-  url: string,
-  metadata: RemoteRepoPRMetadata,
-): CreateTaskRepositoryPayload {
-  const isPrAutoSelection = !!metadata.headBranch && row.branch === metadata.headBranch;
-  const baseBranch = isPrAutoSelection ? metadata.baseBranch || undefined : row.branch || undefined;
-  return {
-    repository_id: "",
-    base_branch: baseBranch,
-    checkout_branch: isPrAutoSelection ? metadata.headBranch || undefined : undefined,
-    pr_number: isPrAutoSelection ? metadata.number || undefined : undefined,
-    ...remoteRepositoryLocator(row, url),
-  };
-}
-
-function buildPlainRemoteRepoPayload(
-  row: TaskRemoteRepoRow,
-  url: string,
-): CreateTaskRepositoryPayload {
-  return {
-    repository_id: "",
-    base_branch: row.branch || undefined,
-    checkout_branch: undefined,
-    ...remoteRepositoryLocator(row, url),
-  };
-}
-
-function remoteRepositoryLocator(
-  row: TaskRemoteRepoRow,
-  url: string,
-): Pick<
-  CreateTaskRepositoryPayload,
-  | "github_url"
-  | "remote_url"
-  | "provider"
-  | "provider_host"
-  | "provider_scope"
-  | "provider_repo_id"
-  | "provider_owner"
-  | "provider_name"
-> {
-  if (!row.provider || row.provider === "github") {
-    return { github_url: url };
-  }
-  return {
-    remote_url: row.remoteUrl?.trim() || url,
-    provider: row.provider,
-    provider_host: row.providerHost,
-    provider_scope: row.providerScope,
-    provider_repo_id: row.providerRepoId,
-    provider_owner: row.providerOwner,
-    provider_name: row.providerName,
-  };
-}
-
-function resolveRowDefaultBranch(
-  row: TaskRepoRow,
-  opts: {
-    discoveredRepositories: LocalRepository[];
-    workspaceRepositories?: Repository[];
-  },
-): string | undefined {
-  if (row.repositoryId) {
-    return opts.workspaceRepositories?.find((r) => r.id === row.repositoryId)?.default_branch;
-  }
-  return opts.discoveredRepositories.find((d) => d.path === row.localPath)?.default_branch;
-}
-
-/**
- * For the local executor: return `base_branch=defaultBranch`,
- * `checkout_branch=rowBranch` so the session anchors merge-base to the repo's
- * integration branch while the preparer still checks out the user's working
- * branch. When `rowBranch === defaultBranch` we omit checkout_branch — the
- * preparer treats matching values as "use current state" and skips git ops.
- *
- * For non-local executors (worktree-based): keep the historical shape where
- * `base_branch=rowBranch` (the worktree creates a new branch off of it).
- */
-function splitLocalExecutorBranches(args: {
-  rowBranch?: string;
-  defaultBranch?: string;
-  baseBranch?: string;
-  isLocalExecutor: boolean;
-}): { base_branch: string | undefined; checkout_branch: string | undefined } {
-  // Without a known default_branch we can't anchor base_branch to the
-  // integration ref — and using rowBranch as a stand-in reproduces the
-  // exact bug this PR fixes (changes panel collapses to HEAD on refresh).
-  // Fall through to the legacy non-split shape: a workspace repo with an
-  // unset default_branch is no worse off than before, and the backend's
-  // resolveRepoInput probe will populate it on the next CreateRepository
-  // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor) {
-    return {
-      base_branch: args.baseBranch || args.rowBranch || undefined,
-      checkout_branch: undefined,
-    };
-  }
-  if (!args.defaultBranch) {
-    return {
-      base_branch: args.baseBranch || args.rowBranch || undefined,
-      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
-    };
-  }
-  const base = args.baseBranch || args.defaultBranch;
-  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
-  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
-}
+export {
+  buildRepositoriesPayload,
+  buildWorkspaceSourcesPayload,
+} from "./task-create-dialog-repository-payload";

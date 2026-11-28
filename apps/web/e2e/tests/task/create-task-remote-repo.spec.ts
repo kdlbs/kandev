@@ -2,15 +2,13 @@ import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
-// E2E coverage for the multi-row chip-based Remote tab in the create-task
-// dialog. Tests cover: picker selection, paste URL, mixed picker+paste
-// rows, add/remove rows, the "GitHub not configured" banner, and mode-switch
-// preservation. Modeled on create-task-github-url.spec.ts but exercises the
-// new chip-popover UI (testids: source-mode-remote, remote-repo-chip,
-// remote-repo-chip-trigger, remote-repo-input, remote-add-row,
-// remote-chip-remove, remote-repo-option).
+// E2E coverage for provider rows in the shared task repository picker. Tests
+// cover provider selection, paste URL, mixed rows, add/remove rows, and
+// provider readiness behavior.
 
 type TaskRepoAPI = {
   repositories?: Array<{
@@ -103,9 +101,15 @@ async function waitForCreateDialogAgent(
 }
 
 async function clickRemoteMode(testPage: Page): Promise<void> {
-  const remoteBtn = testPage.getByTestId("source-mode-remote");
-  await expect(remoteBtn).toBeVisible();
-  await remoteBtn.click();
+  const removeButtons = testPage.getByTestId("remove-repo-chip");
+  while ((await removeButtons.count()) > 0) {
+    await removeButtons.first().click();
+  }
+  const remoteRemoveButtons = testPage.getByTestId("remote-chip-remove");
+  while ((await remoteRemoveButtons.count()) > 0) {
+    await remoteRemoveButtons.first().click();
+  }
+  await openTaskRepositoryPicker(testPage, { provider: "github" });
 }
 
 async function seedAccessibleRepos(apiClient: ApiClient): Promise<void> {
@@ -126,6 +130,15 @@ async function seedAccessibleRepos(apiClient: ApiClient): Promise<void> {
 }
 
 async function pickRepoInChip(testPage: Page, repoFullName: string, chipIndex = 0): Promise<void> {
+  const sharedPicker = testPage.getByTestId("task-repository-picker");
+  if (await sharedPicker.isVisible().catch(() => false)) {
+    const option = testPage
+      .getByTestId("task-repository-remote-option")
+      .filter({ hasText: repoFullName });
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.first().click();
+    return;
+  }
   const triggers = testPage.getByTestId("remote-repo-chip-trigger");
   await triggers.nth(chipIndex).click();
   // Pick by repo full_name instead of relying on list order — the picker's
@@ -139,6 +152,14 @@ async function pickRepoInChip(testPage: Page, repoFullName: string, chipIndex = 
 }
 
 async function pasteUrlInChip(testPage: Page, url: string, chipIndex = 0): Promise<void> {
+  const sharedPicker = testPage.getByTestId("task-repository-picker");
+  if (await sharedPicker.isVisible().catch(() => false)) {
+    const input = testPage.getByTestId("task-repository-picker-input");
+    await expect(input).toBeVisible();
+    await input.fill(url);
+    await input.press("Enter");
+    return;
+  }
   const triggers = testPage.getByTestId("remote-repo-chip-trigger");
   await triggers.nth(chipIndex).click();
   // The chip-popover content is rendered inline with `portal=false`; when
@@ -153,7 +174,10 @@ async function pasteUrlInChip(testPage: Page, url: string, chipIndex = 0): Promi
 
 async function expectPopoverFitsDialog(testPage: Page): Promise<void> {
   const dialogBox = await testPage.getByTestId("create-task-dialog").boundingBox();
-  const popoverBox = await testPage.getByTestId("remote-repo-popover-content").boundingBox();
+  const popover = testPage.getByTestId("workspace-source-menu");
+  await expect(popover).toBeVisible();
+  await waitForFiniteAnimations(popover);
+  const popoverBox = await popover.boundingBox();
   expect(dialogBox).not.toBeNull();
   expect(popoverBox).not.toBeNull();
   expect(popoverBox!.y + popoverBox!.height).toBeLessThanOrEqual(
@@ -202,19 +226,14 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
       .toBe(0);
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
 
-    const popover = testPage.getByTestId("remote-repo-popover-content");
-    const input = testPage.getByTestId("remote-repo-input");
-    await expect(testPage.getByTestId("remote-repo-picker-loading")).toBeVisible();
+    const popover = testPage.getByTestId("workspace-source-menu");
+    const input = testPage.getByTestId("task-repository-picker-input");
+    await expect(testPage.getByTestId("task-repository-picker-results")).toBeVisible();
     // Measure the loading state after the finite popover entrance animation.
     // Otherwise its scale transform makes the first box a few pixels smaller
     // than the loaded-state box even though the layout itself never shifts.
-    await popover.evaluate(async (element) => {
-      await Promise.all(
-        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
-      );
-    });
+    await waitForFiniteAnimations(popover);
     const [loadingPopoverBox, loadingInputBox] = await Promise.all([
       popover.boundingBox(),
       input.boundingBox(),
@@ -222,7 +241,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     releaseRepos();
     await expect(
-      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
+      testPage.getByTestId("task-repository-remote-option").filter({ hasText: "mock-user/alpha" }),
     ).toBeVisible();
     const [loadedPopoverBox, loadedInputBox] = await Promise.all([
       popover.boundingBox(),
@@ -357,9 +376,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
 
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
     await expectPopoverFitsDialog(testPage);
-    const pasteInput = testPage.getByTestId("remote-repo-input").last();
+    const pasteInput = testPage.getByTestId("task-repository-picker-input");
     await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
     await pasteInput.press("Enter");
 
@@ -414,7 +432,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     // Add row 1 and paste a repo URL. Trigger label is middle-truncated
     // (e.g. "github.com/pas…ner/paste-repo"), so assert on the trailing
     // repo name.
-    await testPage.getByTestId("remote-add-row").click();
+    await testPage.getByTestId("add-repository").click();
+    await testPage.getByTestId("workspace-source-menu-repository").click();
     await pasteUrlInChip(testPage, "https://github.com/paste-owner/paste-repo", 1);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
       "paste-repo",
@@ -422,7 +441,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     );
 
     // Add row 2 and paste a PR URL.
-    await testPage.getByTestId("remote-add-row").click();
+    await testPage.getByTestId("add-repository").click();
+    await testPage.getByTestId("workspace-source-menu-repository").click();
     await pasteUrlInChip(testPage, "https://github.com/pr-owner/pr-repo/pull/42", 2);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(2)).toContainText("pull/42", {
       timeout: 5_000,
@@ -475,8 +495,13 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     await pickRepoInChip(testPage, "mock-user/alpha", 0);
 
-    // Add a second row, then remove it via the per-chip × button.
-    await testPage.getByTestId("remote-add-row").click();
+    // Add a second row through the shared picker, then remove it via the
+    // per-chip × button.
+    await openTaskRepositoryPicker(testPage, { provider: "github" });
+    await testPage
+      .getByTestId("task-repository-remote-option")
+      .filter({ hasText: "mock-user/beta" })
+      .click();
     await expect(testPage.getByTestId("remote-repo-chip")).toHaveCount(2);
 
     await testPage.getByTestId("remote-chip-remove").nth(1).click();
@@ -495,42 +520,34 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
   });
 
-  test("scenario 5: no repository provider shows banner, paste still works", async ({
+  test("scenario 5: provider errors leave paste recovery available", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(60_000);
 
-    // Flip the mock so /api/v1/github/repos responds with 503
-    // `github_not_configured`. Paste-URL paths (branch fetch) still work —
-    // the GET /repos/:owner/:repo/branches endpoint uses the mock client's
-    // ListRepoBranches, which we leave unaffected by the toggle.
+    // Keep the provider connection eligible, but make repository listing fail.
+    // A ready provider remains visible so the user can retry or paste a URL.
     await apiClient.mockGitHubSetReposUnavailable(true);
     await apiClient.mockGitHubAddBranches("banner-owner", "banner-repo", [{ name: "main" }]);
 
     const kanban = new KanbanPage(testPage);
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
-
-    // Open the chip popover — picker section should show the provider-neutral
-    // CTA pointing at the integrations settings page.
-    const trigger = testPage.getByTestId("remote-repo-chip-trigger").first();
-    await trigger.click();
-
-    const banner = testPage.getByText("Connect a source control provider", { exact: false });
-    await expect(banner).toBeVisible({ timeout: 10_000 });
-
-    const settingsLink = testPage.locator('a[href="/settings/integrations"]');
-    await expect(settingsLink).toBeVisible();
+    await expect(testPage.getByTestId("task-repository-source-github")).toBeVisible();
+    await expect(testPage.getByText(/Could not load repositories/i)).toBeVisible();
 
     // The paste input is still rendered and usable — paste a URL.
-    const pasteInput = testPage.getByTestId("remote-repo-input");
+    const pasteInput = testPage.getByTestId("task-repository-picker-input");
     await expect(pasteInput).toBeVisible();
     await pasteInput.fill("https://github.com/banner-owner/banner-repo");
     await pasteInput.press("Enter");
 
-    await expect(trigger).toContainText("banner-repo", { timeout: 5_000 });
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "banner-repo",
+      { timeout: 5_000 },
+    );
 
     await testPage.getByTestId("task-title-input").fill("Banner paste fallback");
     await testPage.getByTestId("task-description-input").fill("test");
@@ -555,7 +572,10 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     expect(repoRow.provider_name).toBe("banner-repo");
   });
 
-  test("scenario 6: mode-switch preserves remote rows", async ({ testPage, apiClient }) => {
+  test("scenario 6: reopening the picker preserves remote rows", async ({
+    testPage,
+    apiClient,
+  }) => {
     await seedAccessibleRepos(apiClient);
     await apiClient.mockGitHubAddBranches("paste-owner", "paste-repo", [{ name: "main" }]);
 
@@ -564,18 +584,16 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await clickRemoteMode(testPage);
 
     await pickRepoInChip(testPage, "mock-user/alpha", 0);
-    await testPage.getByTestId("remote-add-row").click();
+    await testPage.getByTestId("add-repository").click();
+    await testPage.getByTestId("workspace-source-menu-repository").click();
     await pasteUrlInChip(testPage, "https://github.com/paste-owner/paste-repo", 1);
 
     await expect(testPage.getByTestId("remote-repo-chip")).toHaveCount(2);
 
-    // Switch to workspace mode (Repo) and back to Remote — both chips
-    // should still be present with their selections intact.
-    await testPage.getByTestId("source-mode-workspace").click();
-    // Remote chips should not be rendered in workspace mode.
-    await expect(testPage.getByTestId("remote-repo-chip")).toHaveCount(0);
-
-    await clickRemoteMode(testPage);
+    // Opening and dismissing the shared picker does not change the ordered
+    // selection list or either row's branch data.
+    await openTaskRepositoryPicker(testPage, { provider: "github" });
+    await testPage.keyboard.press("Escape");
     await expect(testPage.getByTestId("remote-repo-chip")).toHaveCount(2);
 
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(0)).toContainText(
@@ -592,11 +610,8 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     seedData,
     prCapture,
   }) => {
-    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
-      source: "legacy_shared",
-      status: "active",
-    });
     await seedAccessibleRepos(apiClient);
+    await apiClient.mockGitHubDeleteWorkspaceConnection(seedData.workspaceId);
     let gitLabProjectRequests = 0;
     await testPage.route("**/api/v1/gitlab/projects?*", async (route) => {
       gitLabProjectRequests += 1;
@@ -605,22 +620,13 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     const kanban = new KanbanPage(testPage);
     await openCreateDialog(testPage, kanban);
-    await clickRemoteMode(testPage);
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+    await openTaskRepositoryPicker(testPage);
 
-    await expect(
-      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByTestId("task-repository-source-github")).toHaveCount(0);
     await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
     expect(gitLabProjectRequests).toBe(0);
     await prCapture.screenshot("remote-repository-picker-desktop", {
       caption: "Desktop remote picker with an unconfigured provider hidden",
     });
-
-    await testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }).click();
-    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
-      "mock-user/alpha",
-    );
   });
 });

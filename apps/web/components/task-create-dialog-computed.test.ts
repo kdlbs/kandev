@@ -116,6 +116,15 @@ describe("computeSelectedRepoCount", () => {
     expect(computeSelectedRepoCount(fsStub({ repositories: [{ branch: "main" }] }))).toBe(0);
   });
 
+  it("does not count local folders as repositories", () => {
+    expect(
+      computeSelectedRepoCount({
+        ...fsStub({}),
+        repositorySelections: [{ kind: "folder", key: "folder-1", localPath: "/work/docs" }],
+      }),
+    ).toBe(0);
+  });
+
   it("Remote mode: counts non-empty URL rows only", () => {
     // Two remote URLs — without the local rows, this alone trips the gate.
     expect(

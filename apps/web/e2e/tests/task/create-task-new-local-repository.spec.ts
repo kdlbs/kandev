@@ -28,6 +28,28 @@ type PersistedRepository = {
   source_type: string;
 };
 
+async function restoreSingleRepositoryLastUsed(
+  apiClient: ApiClient,
+  workspaceId: string,
+  repositoryId: string,
+): Promise<void> {
+  await apiClient.saveUserSettings({
+    workspace_id: workspaceId,
+    task_create_last_used: {
+      workspace_sources_by_workspace: {
+        [workspaceId]: [
+          {
+            kind: "repository",
+            repository_id: repositoryId,
+            base_branch: "main",
+            checkout_branch: "main",
+          },
+        ],
+      },
+    },
+  });
+}
+
 async function listRepositories(
   apiClient: ApiClient,
   workspaceId: string,
@@ -48,7 +70,7 @@ async function openCreateTask(page: Page): Promise<void> {
 }
 
 async function openRepositoryCreation(page: Page): Promise<void> {
-  await page.getByTestId("repo-chip-trigger").click();
+  await page.getByTestId("repo-chip-trigger").first().click();
   const search = page.getByPlaceholder("Search repositories...");
   const refresh = page.getByTestId("repo-refresh-button");
   const action = page.getByTestId("create-local-repository-button");
@@ -171,6 +193,7 @@ test.describe("Create task with a new local repository", () => {
       "a direct local executor profile is required by the fixture",
     ).toBeDefined();
 
+    await restoreSingleRepositoryLastUsed(apiClient, seedData.workspaceId, seedData.repositoryId);
     await openCreateTask(testPage);
     await testPage.getByTestId("task-title-input").fill("Task on a new local repository");
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
@@ -187,7 +210,9 @@ test.describe("Create task with a new local repository", () => {
     await createRepository(testPage, repositoryName, repositoryPath);
     expect(fs.statSync(path.dirname(repositoryPath)).isDirectory()).toBe(true);
 
-    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
+    await expect(
+      testPage.getByTestId("repo-chip-trigger").filter({ hasText: repositoryName }),
+    ).toBeVisible();
     await branchesLoaded;
     // No budget from here on: the cause has landed, so anything left is a render.
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
@@ -244,6 +269,7 @@ test.describe("Create task with a new local repository", () => {
     fs.writeFileSync(sentinelPath, "do not modify\n");
     const repositoriesBefore = await listRepositories(apiClient, seedData.workspaceId);
 
+    await restoreSingleRepositoryLastUsed(apiClient, seedData.workspaceId, seedData.repositoryId);
     await openCreateTask(testPage);
     await openRepositoryCreation(testPage);
     const nameInput = testPage.getByRole("textbox", { name: "Repository name" });
@@ -261,7 +287,9 @@ test.describe("Create task with a new local repository", () => {
 
     await nameInput.fill(retryName);
     await createRepository(testPage, retryName, retryPath);
-    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(retryName);
+    await expect(
+      testPage.getByTestId("repo-chip-trigger").filter({ hasText: retryName }),
+    ).toBeVisible();
     expectMainRepository(retryPath);
   });
 });

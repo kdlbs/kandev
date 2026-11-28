@@ -277,7 +277,7 @@ Scripts execute in agent workspaces and therefore belong to the trust boundary. 
 
 Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
-**Add repository > Remote repository** registers a provider-hosted repository without creating a task. The picker is the same one the **Remote** tab in **New Task** uses: search configured GitHub and GitLab repositories, repositories from a connected plugin provider, or paste a supported provider URL, then choose the default base branch. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+**Add repository > Remote repository** registers a provider-hosted repository without creating a task. Search configured GitHub and GitLab repositories or a connected plugin provider. You can also paste a supported provider URL. Choose a default base branch before saving. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 
@@ -305,7 +305,11 @@ Use the example below with a test repository that has no `kandev-first-task.txt`
    Edit only this file. Leave the change uncommitted.
    ```
 
-3. Under **Repo**, select the workspace repository and base branch. To start a new project, open the repository selector, choose **Create new repository**, enter one folder name, and select its parent folder. Kandev creates an empty `main` repository with one empty initial commit and no project files. Select **None** only for work that genuinely needs a plain workspace directory.
+3. Open **Repositories**, select the test repository, and choose its base branch.
+   The picker also supports multiple local and remote repositories with separate branch settings.
+   To start a new project, choose **Create new repository** in the picker.
+   Enter a folder name and select its parent folder. Kandev initializes `main` with one empty commit.
+   Leave the picker empty for a task that needs only a scratch workspace.
 4. Choose the Development workflow and an agent profile. For an existing repository, choose the Worktree executor profile. For a newly initialized repository, keep the Local profile that Kandev selects automatically. Kandev remembers compatible recent choices, so re-check them after changing repository, agent, or trust boundary.
 5. Select **Start task**. Its menu also offers **Start task in plan mode** and **Create without starting agent**. On an empty description, the primary action is **Start Plan Mode**.
 

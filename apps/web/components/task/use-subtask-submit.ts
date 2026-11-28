@@ -6,7 +6,7 @@ import { linkToTask } from "@/lib/links";
 import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import {
-  buildRepositoriesPayload,
+  buildWorkspaceSourcesPayload,
   hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
@@ -14,6 +14,9 @@ import { useToast } from "@/components/toast-provider";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import type { Repository } from "@/lib/types/http";
+import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
+import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
+import type { TaskWorkspaceSelection } from "@/components/task-create-dialog-types";
 import type { SubtaskWorkspaceMode, useSubtaskFormState } from "./new-subtask-form-state";
 import { toContextItems, useDialogAttachments } from "./session-dialog-shared";
 import { t } from "@/lib/i18n";
@@ -37,6 +40,10 @@ type UseSubtaskSubmitOpts = {
   relatedTaskIds?: string[];
   /** Whether the selected executor profile runs directly on the local clone. */
   isLocalExecutor?: boolean;
+  /** True when local repositories must be resolved from their remote origin. */
+  remoteOriginMode?: boolean;
+  /** Shared executor/source compatibility gate from the dialog. */
+  sourcePolicyInvalid?: boolean;
 };
 
 type CreateSubtaskArgs = {
@@ -54,11 +61,29 @@ type CreateSubtaskArgs = {
   workspaceMode: SubtaskWorkspaceMode;
   relatedTaskIds: string[];
   isLocalExecutor: boolean;
+  remoteOriginMode: boolean;
   freshBranchEnabled: boolean;
   onClose: () => void;
   navigate: NavigateToChild;
   setActiveSession: (taskId: string, sessionId: string) => void;
 };
+
+export function shouldSubmitFreshBranch({
+  selections,
+  freshBranchEnabled,
+  workspaceMode,
+  isLocalExecutor,
+}: {
+  selections: TaskWorkspaceSelection[];
+  freshBranchEnabled: boolean;
+  workspaceMode: SubtaskWorkspaceMode;
+  isLocalExecutor: boolean;
+}): boolean {
+  if (!freshBranchEnabled || workspaceMode !== "new_workspace" || !isLocalExecutor) return false;
+  if (selections.length !== 1) return false;
+  const selection = selections[0];
+  return selection.kind === "local" && Boolean(selection.repositoryId || selection.localPath);
+}
 
 type NavigateToChild = (href: string, options: { scroll: false; onNavigated: () => void }) => void;
 
@@ -77,15 +102,17 @@ async function createSubtask({
   workspaceMode,
   relatedTaskIds,
   isLocalExecutor,
+  remoteOriginMode,
   freshBranchEnabled,
   onClose,
   navigate,
   setActiveSession,
 }: CreateSubtaskArgs) {
-  const repositories =
+  const workspaceSources =
     workspaceMode === "inherit_parent"
       ? undefined
-      : buildRepositoriesPayload({
+      : buildWorkspaceSourcesPayload({
+          selections: fs.repositorySelections,
           useRemote: fs.useRemote,
           remoteRepos: fs.remoteRepos,
           prInfoByUrl: fs.prInfoByUrl,
@@ -93,6 +120,7 @@ async function createSubtask({
           discoveredRepositories: fs.discoveredRepositories,
           workspaceRepositories: availableRepositories,
           isLocalExecutor,
+          remoteOriginMode,
           freshBranch: freshBranchEnabled
             ? { confirmDiscard: false, consentedDirtyFiles: [] }
             : undefined,
@@ -102,7 +130,7 @@ async function createSubtask({
     workflow_id: workflowId,
     ...(autoTitle ? { auto_title: true } : { title: trimmedTitle }),
     description: prompt,
-    repositories,
+    ...(workspaceSources !== undefined ? { workspace_sources: workspaceSources } : {}),
     start_agent: true,
     agent_profile_id: fs.agentProfileId || defaultProfileId || undefined,
     executor_profile_id:
@@ -127,11 +155,43 @@ async function createSubtask({
   });
 }
 
+function canStartSubtaskSubmission({
+  fs,
+  trimmedTitle,
+  prompt,
+  autoTitle,
+  workspaceId,
+  workflowId,
+  attachments,
+  workspaceMode,
+  sourcePolicyInvalid,
+}: {
+  fs: UseSubtaskSubmitOpts["fs"];
+  trimmedTitle: string;
+  prompt: string;
+  autoTitle: boolean;
+  workspaceId: string | null;
+  workflowId: string | null;
+  attachments: UseSubtaskSubmitOpts["attachments"];
+  workspaceMode: SubtaskWorkspaceMode;
+  sourcePolicyInvalid: boolean;
+}): boolean {
+  if ((!autoTitle && !trimmedTitle) || !prompt || !workspaceId || !workflowId) return false;
+  if (hasPendingAttachmentUploads(attachments)) return false;
+  if (workspaceMode !== "inherit_parent" && sourcePolicyInvalid) return false;
+  if (workspaceMode === "inherit_parent") return true;
+  return !hasUnavailablePickerRemoteProvider(
+    resolveRepositorySelections(fs),
+    fs.remoteProviderReadiness,
+  );
+}
+
 /**
  * Encapsulates the subtask creation flow: builds the repositories payload,
  * calls createTask, and activates the new session. Returns `handleSubmit`
  * so the surrounding component stays under the per-function complexity cap.
  */
+// eslint-disable-next-line max-lines-per-function -- the hook owns one atomic submit lifecycle.
 export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   const {
     fs,
@@ -150,25 +210,34 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     workspaceMode,
     relatedTaskIds = [],
     isLocalExecutor = false,
+    remoteOriginMode = false,
+    sourcePolicyInvalid = false,
   } = opts;
-  const freshBranchEnabled = fs.freshBranchEnabled;
   const { toast } = useToast();
   const router = useRouter();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  // Synchronous guard: setIsCreating(true) won't reflect into the disabled
-  // submit button until React commits, so a fast double-submit (Enter + click,
-  // double-click) can re-enter handleSubmit and call createTask twice.
   const isSubmittingRef = useRef(false);
-
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (isSubmittingRef.current) return;
       const trimmedTitle = title.trim();
       const prompt = resolvePrompt().trim();
-      if ((!autoTitle && !trimmedTitle) || !prompt || !workspaceId || !workflowId) return;
-      if (hasPendingAttachmentUploads(attachments)) return;
-
+      if (
+        !canStartSubtaskSubmission({
+          fs,
+          trimmedTitle,
+          prompt,
+          autoTitle,
+          workspaceId,
+          workflowId,
+          attachments,
+          workspaceMode,
+          sourcePolicyInvalid,
+        })
+      )
+        return;
+      if (!workspaceId || !workflowId) return;
       isSubmittingRef.current = true;
       setIsCreating(true);
       try {
@@ -187,7 +256,13 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
           workspaceMode,
           relatedTaskIds,
           isLocalExecutor,
-          freshBranchEnabled,
+          remoteOriginMode,
+          freshBranchEnabled: shouldSubmitFreshBranch({
+            selections: resolveRepositorySelections(fs),
+            freshBranchEnabled: fs.freshBranchEnabled,
+            workspaceMode,
+            isLocalExecutor,
+          }),
           onClose,
           navigate: router.replace,
           setActiveSession,
@@ -220,7 +295,8 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       workspaceMode,
       relatedTaskIds,
       isLocalExecutor,
-      freshBranchEnabled,
+      remoteOriginMode,
+      sourcePolicyInvalid,
       setIsCreating,
       onClose,
       toast,

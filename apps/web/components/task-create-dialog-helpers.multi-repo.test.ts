@@ -3,8 +3,6 @@ import { buildRepositoriesPayload, findDuplicateRemoteRepo } from "./task-create
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 
-const FRONT_REPOSITORY_ID = "repo-front";
-
 /** Minimal TaskRemoteRepoRow builder for the dedup tests. */
 function remoteRow(key: string, url: string, branch = ""): TaskRemoteRepoRow {
   return { key, url, branch, source: "paste" };
@@ -18,81 +16,6 @@ function prInfoStub(map: Record<string, PRInfo>) {
     info: (url: string) => map[url],
   };
 }
-
-describe("buildRepositoriesPayload — unified rows", () => {
-  it("maps each row in order, dropping empty ones silently", () => {
-    const payload = buildRepositoriesPayload({
-      useRemote: false,
-      remoteRepos: [],
-      repositories: [
-        { key: "r0", repositoryId: FRONT_REPOSITORY_ID, branch: "main" },
-        { key: "r1", repositoryId: "repo-back", branch: "develop" },
-        { key: "r2", branch: "" }, // no repo picked yet — dropped
-        { key: "r3", repositoryId: "repo-shared", branch: "" },
-      ],
-      discoveredRepositories: [],
-    });
-    expect(payload).toEqual([
-      {
-        repository_id: FRONT_REPOSITORY_ID,
-        base_branch: "main",
-        checkout_branch: undefined,
-      },
-      { repository_id: "repo-back", base_branch: "develop", checkout_branch: undefined },
-      { repository_id: "repo-shared", base_branch: undefined, checkout_branch: undefined },
-    ]);
-  });
-
-  it("submits a selected branch policy id without deriving identity from its label", () => {
-    const payload = buildRepositoriesPayload({
-      useRemote: false,
-      remoteRepos: [],
-      repositories: [
-        {
-          key: "r0",
-          repositoryId: FRONT_REPOSITORY_ID,
-          branch: "develop",
-          branchPolicyId: "policy-hotfix",
-        },
-      ],
-      discoveredRepositories: [],
-    });
-
-    expect(payload).toEqual([
-      {
-        repository_id: FRONT_REPOSITORY_ID,
-        base_branch: "develop",
-        checkout_branch: undefined,
-        branch_policy_id: "policy-hotfix",
-      },
-    ]);
-  });
-
-  it("emits local_path + default_branch for discovered (on-machine) rows", () => {
-    const payload = buildRepositoriesPayload({
-      useRemote: false,
-      remoteRepos: [],
-      repositories: [
-        { key: "r0", localPath: "/home/me/projects/local-project", branch: "trunk" },
-        { key: "r1", repositoryId: "repo-back", branch: "main" },
-      ],
-      discoveredRepositories: [
-        { path: "/home/me/projects/local-project", default_branch: "trunk" },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ] as any,
-    });
-    expect(payload).toEqual([
-      {
-        repository_id: "",
-        base_branch: "trunk",
-        checkout_branch: undefined,
-        local_path: "/home/me/projects/local-project",
-        default_branch: "trunk",
-      },
-      { repository_id: "repo-back", base_branch: "main", checkout_branch: undefined },
-    ]);
-  });
-});
 
 // Regression for the "new branch on local executor" bug: the chip's branch
 // is the working branch on disk (e.g. "feature/x"), not the integration

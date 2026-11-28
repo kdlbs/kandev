@@ -41,6 +41,7 @@ import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentUpdateJob } from "@/lib/api";
 import type { RuntimeUpdateBatchState } from "@/lib/agents/runtime-update-batch";
+import type { TaskCreateLastUsedSourceApi } from "@/lib/types/http-user-settings";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -517,6 +518,7 @@ export type TaskCreateLastUsedState = {
   agentProfileId: string | null;
   executorProfileId: string | null;
   workflowIdsByWorkspace: Record<string, string>;
+  workspaceSourcesByWorkspace?: Record<string, TaskCreateLastUsedSourceApi[]>;
   synced?: boolean;
 };
 

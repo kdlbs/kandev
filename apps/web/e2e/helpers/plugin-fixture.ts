@@ -24,5 +24,7 @@ export async function installFixturePlugin(page: Page): Promise<void> {
   // transition as the fixture's readiness boundary before navigating to a
   // surface that consumes the plugin's registrations.
   await expect(page.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
-  await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 30_000 });
+  const row = page.getByTestId(`plugin-row-${PLUGIN_ID}`);
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row.getByText("Active", { exact: true })).toBeVisible({ timeout: 30_000 });
 }

@@ -21,10 +21,10 @@ import type {
   TaskCreateDialogInitialValues,
   DialogFormState,
 } from "@/components/task-create-dialog-types";
+import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
 import {
   useRemoteReposSeedEffect,
-  useRemoteReposState,
-  useRepositoriesState,
+  useRepositorySelectionState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
 import { useTaskCreateWorkflowSteps } from "@/hooks/use-task-create-workflow-steps";
@@ -173,6 +173,12 @@ function useFormStateValues(workflowId: string | null) {
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
+  const [executorChoiceTouched, setExecutorChoiceTouched] = useState(false);
+  const [automaticExecutorRestore, setAutomaticExecutorRestore] = useState<{
+    executorId: string;
+    executorProfileId: string;
+  } | null>(null);
+  const [folderOnlyExecutorNotice, setFolderOnlyExecutorNotice] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
   const [workflowAgentOverrides, setWorkflowAgentOverrides] = useState<Record<string, string>>({});
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
@@ -186,6 +192,8 @@ function useFormStateValues(workflowId: string | null) {
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [remoteProviderReadiness, setRemoteProviderReadiness] =
+    useState<TaskRemoteProviderReadinessMap>({});
   const [initialWorkspaceLayout, setInitialWorkspaceLayout] =
     useState<InitialWorkspaceLayout>("repository");
   return {
@@ -206,6 +214,12 @@ function useFormStateValues(workflowId: string | null) {
     setExecutorId,
     executorProfileId,
     setExecutorProfileId,
+    executorChoiceTouched,
+    setExecutorChoiceTouched,
+    automaticExecutorRestore,
+    setAutomaticExecutorRestore,
+    folderOnlyExecutorNotice,
+    setFolderOnlyExecutorNotice,
     selectedWorkflowId,
     setSelectedWorkflowId,
     workflowAgentOverrides,
@@ -231,6 +245,8 @@ function useFormStateValues(workflowId: string | null) {
     setAutopilot,
     priority,
     setPriority,
+    remoteProviderReadiness,
+    setRemoteProviderReadiness,
     initialWorkspaceLayout,
     setInitialWorkspaceLayout,
   };
@@ -265,8 +281,8 @@ export function useDialogFormState(
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
-  const repos = useRepositoriesState();
-  const remoteRepos = useRemoteReposState();
+  const repos = useRepositorySelectionState();
+  useRemoteReposSeedEffect(ghUrl.useRemote, repos.remoteRepos, repos.setRemoteRepos);
   const freshBranch = useFreshBranchState();
   const dependencies = useTaskDependencyState();
   const mcpSelections = useTaskMCPSelectionState();
@@ -284,48 +300,22 @@ export function useDialogFormState(
     prevDialogRef: form.prevDialogRef,
     lockedWorkflow,
     resetters: {
-      setBlockedBy: dependencies.setBlockedBy,
-      setSelectedParentTaskId: dependencies.setSelectedParentTaskId,
-      setRelatedTaskIds: dependencies.setRelatedTaskIds,
-      setBuiltinMCPPreferences: mcpSelections.setBuiltinMCPPreferences,
-      setMcpServerIds: mcpSelections.setMcpServerIds,
-      setMcpServerIdsDirty: mcpSelections.setMcpServerIdsDirty,
-      setTaskName: form.setTaskName,
-      setHasTitle: form.setHasTitle,
-      setHasDescription: form.setHasDescription,
-      setHasPendingAttachmentUploads: form.setHasPendingAttachmentUploads,
-      setRepositories: repos.setRepositories,
-      setRepositoriesDirty: repos.setRepositoriesDirty,
-      setRemoteRepos: remoteRepos.setRemoteRepos,
-      setAgentProfileId: form.setAgentProfileId,
-      setExecutorId: form.setExecutorId,
-      setExecutorProfileId: form.setExecutorProfileId,
-      setSelectedWorkflowId: form.setSelectedWorkflowId,
-      setWorkflowAgentOverrides: form.setWorkflowAgentOverrides,
-      setFetchedSteps: form.setFetchedSteps,
-      setDiscoveredRepositories: discovery.setDiscoveredRepositories,
-      setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
-      setUseRemote: ghUrl.setUseRemote,
-      setGitHubUrlError: ghUrl.setGitHubUrlError,
-      setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
-      setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
-      setNoRepository: form.setNoRepository,
-      setPreferLocalExecutor: form.setPreferLocalExecutor,
-      setWorkspacePath: form.setWorkspacePath,
-      setAutopilot: form.setAutopilot,
-      setPriority: form.setPriority,
-      setInitialWorkspaceLayout: form.setInitialWorkspaceLayout,
+      ...dependencies,
+      ...mcpSelections,
+      ...form,
+      ...repos,
+      ...discovery,
+      ...ghUrl,
+      ...freshBranch,
     },
   });
-
-  useRemoteReposSeedEffect(ghUrl.useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
 
   // Title autofill follows the first populated remote-repo row. Empty
   // placeholders do not prevent a later pasted PR or issue from suggesting
   // its title.
-  const primaryRemoteUrl = remoteRepos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
+  const primaryRemoteUrl = repos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
   useTitleAutofillFromPrimaryGitHubInfo({
-    open: open && ghUrl.useRemote,
+    open: open && primaryRemoteUrl.length > 0,
     primaryRemoteUrl,
     prInfoByUrl,
     taskName: form.taskName,
@@ -352,7 +342,6 @@ export function useDialogFormState(
     ...ghUrl,
     ...wfAgent,
     ...repos,
-    ...remoteRepos,
     ...freshBranch,
     ...dependencies,
     ...mcpSelections,
@@ -552,6 +541,7 @@ export function useTaskCreateDialogData({
   const {
     repositories,
     isLoading: repositoriesLoading,
+    isLoaded: repositoriesLoaded,
     refresh: refreshRepositories,
   } = useRepositories(workspaceId, open);
   // Per-repo branch loading lives in each chip now (RepoChipsRow). No
@@ -602,6 +592,7 @@ export function useTaskCreateDialogData({
     snapshots,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     refreshRepositories,
     branchesLoading,
     taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,

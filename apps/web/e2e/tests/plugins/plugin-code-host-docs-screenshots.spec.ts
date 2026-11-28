@@ -12,6 +12,7 @@ import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 import { SessionPage } from "../../pages/session-page";
 import {
   CODE_HOST_PULL_REQUEST as PULL_REQUEST,
@@ -175,10 +176,9 @@ test.describe("Plugin code-host docs screenshots", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
-    await testPage.getByTestId("source-mode-remote").click();
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+    await openTaskRepositoryPicker(testPage, { provider: "fixture-source-control" });
     const repository = testPage
-      .getByTestId("remote-repo-option")
+      .getByTestId("task-repository-remote-option")
       .filter({ hasText: "northstar-labs/relay" });
     await expect(repository).toBeVisible();
     await focusedShot(testPage, "repository-picker", [testPage.getByRole("dialog"), repository]);

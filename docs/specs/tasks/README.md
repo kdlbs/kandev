@@ -11,14 +11,12 @@ owners:
 
 ## Purpose
 
-Owns durable work items, task relationships, execution lifecycle, workflow
-steps, queued launches, and task process contracts.
+Owns durable tasks, their workflows, and their execution lifecycle.
 
 ## Ownership
 
 Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
-documents, attachments, hierarchy, creation, launch, runtime state, workflows,
-completion, and scheduling.
+documents, attachments, relationships, creation, launch, and completion.
 
 Turn change sets bind immutable repository intervals to capture policy,
 history, and transcript anchors. Workspaces own checkout identity; runtime owns
@@ -49,6 +47,7 @@ ordered executor access.
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
 - [Task removal navigation](requirements/removal-navigation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
+- [Mixed repository selection](requirements/mixed-repository-selection.md)
 - [Task Autopilot Mode](requirements/autopilot-mode.md)
 - [Blocked Task Escalation](requirements/blocked-task-escalation.md)
 - [Board priority sort and filter](requirements/board-priority-sort-filter.md)
@@ -170,6 +169,7 @@ ordered executor access.
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Workspace root files](system-design/workspace-root-files.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
+- [Mixed repository selection](system-design/mixed-repository-selection.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
 - [Detached Workspace Continuity](system-design/detached-workspace-continuity.md)
 - [Quick Chat Agent Titles](system-design/quick-chat-agent-titles.md)
@@ -237,8 +237,7 @@ ordered executor access.
 
 ## Migration record
 
-Migration remains in progress. Files that retain migration wrappers still need
-extraction before this system can return to a complete migration state.
+Files with migration wrappers still need extraction.
 
 ## Related systems
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- the setup hook owns one dialog lifecycle boundary. */
 "use client";
 
 /* eslint-disable max-lines -- the setup module owns the task dialog's complete hook and submit wiring. */
@@ -44,6 +45,8 @@ import {
   buildWorkflowAgentOverrideValidation,
   type WorkflowAgentOverrideValidation,
 } from "@/components/task-create-dialog-workflow-agent-override-validation";
+import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
+import { hasLastUsedWorkspaceSnapshot } from "@/components/task-create-dialog-workspace-defaults";
 import { useRepositorySetsForTaskCreateDialog } from "@/components/task-create-dialog-repository-sets-setup";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 import {
@@ -170,6 +173,20 @@ function useRecoveryForSubmit(props: TaskCreateDialogProps, isCreateMode: boolea
   });
 }
 
+function repositorySubmitWiring(fs: DialogFormState, workspaceRepositories: Repository[]) {
+  return {
+    repositories: fs.repositories,
+    repositorySelections: fs.repositorySelections,
+    repositoriesDirty: fs.repositoriesDirty,
+    remoteProviderReadiness: fs.remoteProviderReadiness,
+    discoveredRepositories: fs.discoveredRepositories,
+    workspaceRepositories,
+    useRemote: fs.useRemote,
+    remoteRepos: fs.remoteRepos,
+    prInfoByUrl: fs.prInfoByUrl,
+  };
+}
+
 function useSubmitHandlersWiring({
   props,
   fs,
@@ -209,13 +226,7 @@ function useSubmitHandlersWiring({
     workspaceId,
     workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
-    repositories: fs.repositories,
-    repositoriesDirty: fs.repositoriesDirty,
-    discoveredRepositories: fs.discoveredRepositories,
-    workspaceRepositories,
-    useRemote: fs.useRemote,
-    remoteRepos: fs.remoteRepos,
-    prInfoByUrl: fs.prInfoByUrl,
+    ...repositorySubmitWiring(fs, workspaceRepositories),
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -237,6 +248,7 @@ function useSubmitHandlersWiring({
     setTaskName: fs.setTaskName,
     setRepositories: fs.setRepositories,
     setRemoteRepos: fs.setRemoteRepos,
+    resetRepositorySelections: fs.resetRepositorySelections,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setMcpServerIds: fs.setMcpServerIds,
@@ -247,6 +259,8 @@ function useSubmitHandlersWiring({
     clearDraft: fs.clearDraft,
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
+    remoteOriginMode: computed.executorSourcePolicy.capabilities.requiresCloneableLocalRepository,
+    sourcePolicyInvalid: computed.executorSourcePolicy?.incompatible ?? false,
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
@@ -270,8 +284,9 @@ function useSubmitHandlersWiring({
 }
 
 function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository[]): string {
-  if (fs.repositories.length !== 1) return "";
-  const row = fs.repositories[0];
+  const selections = resolveRepositorySelections(fs);
+  if (selections.length !== 1 || selections[0]?.kind !== "local") return "";
+  const row = selections[0];
   if (row.localPath) return row.localPath;
   if (row.repositoryId)
     return repositories.find((r) => r.id === row.repositoryId)?.local_path ?? "";
@@ -292,7 +307,8 @@ function resolveDialogMode(
 }
 
 function canUseFreshBranch(fs: DialogFormState, isLocalExecutor: boolean): boolean {
-  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+  const selections = resolveRepositorySelections(fs);
+  return isLocalExecutor && selections.length === 1 && selections[0]?.kind === "local";
 }
 
 export function hasUnavailableSavedBase(
@@ -398,6 +414,7 @@ function useDialogSetupData(
     executors,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     taskCreateLastUsed,
     userSettingsLoaded,
     computed,
@@ -408,6 +425,7 @@ function useDialogSetupData(
     effectiveWorkflowId: computed.effectiveWorkflowId,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     agentProfiles,
     compatibleAgentProfiles: computed.compatibleAgentProfiles,
     authLoaded: computed.authLoaded,
@@ -417,6 +435,15 @@ function useDialogSetupData(
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
     lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
+    workspaceSourcesByWorkspace: taskCreateLastUsed.workspaceSourcesByWorkspace,
+    hasWorkspaceSourcesSnapshot:
+      userSettingsLoaded &&
+      hasLastUsedWorkspaceSnapshot(
+        taskCreateLastUsed.workspaceSourcesByWorkspace ?? {},
+        workspaceId,
+      ),
+    restoreWorkspaceContents: props.mode !== "edit" && props.mode !== "session",
+    initialValues,
     userSettingsLoaded,
     lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
     lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
@@ -578,7 +605,8 @@ export function useTaskCreateDialogSetup(
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
       workflowAgentOverridesBlockedReason ??
-      data.executorOwnershipBlockedReason,
+      data.executorOwnershipBlockedReason ??
+      (computed.executorSourcePolicy.incompatible ? computed.sourcePolicyReason : null),
     recoveryBlocksSubmit || (!isTaskStarted && computed.noCompatibleAgent),
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);

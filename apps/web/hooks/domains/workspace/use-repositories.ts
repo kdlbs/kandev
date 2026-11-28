@@ -127,5 +127,5 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     workspaceId,
   ]);
 
-  return { repositories, isLoading, refresh };
+  return { repositories, isLoading, isLoaded, refresh };
 }

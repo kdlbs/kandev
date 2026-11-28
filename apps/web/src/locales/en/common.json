@@ -184,6 +184,7 @@
   "files": "Files",
   "folderName": "Folder name",
   "folders": "Folders",
+  "go": "Go",
   "hiddenFolders": "Hidden folders",
   "forwardStdinStdoutStraightToThe": "Forward stdin/stdout straight to the CLI subprocess. Disables ACP.",
   "getStarted": "Get Started",

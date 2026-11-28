@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 import {
   MobileConfirmationHost,
   MobileConfirmationHostBody,
@@ -25,6 +25,9 @@ type MobilePickerSheetProps = {
   /** Replace the picker content with a confirmation step in this same drawer. */
   confirmationHost?: boolean;
   onCloseAutoFocus?: (event: Event) => void;
+  onPointerDownOutside?: ComponentProps<typeof DrawerContent>["onPointerDownOutside"];
+  onFocusOutside?: ComponentProps<typeof DrawerContent>["onFocusOutside"];
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
   /** Fixed content above the single scrolling picker region. */
   fixedContent?: ReactNode;
   children: ReactNode;
@@ -44,6 +47,9 @@ export function MobilePickerSheet({
   headerAction,
   confirmationHost = false,
   onCloseAutoFocus,
+  onPointerDownOutside,
+  onFocusOutside,
+  onEscapeKeyDown,
   fixedContent,
   children,
 }: MobilePickerSheetProps) {
@@ -60,27 +66,50 @@ export function MobilePickerSheet({
       <div
         className="flex-1 min-h-0 max-h-[70dvh] overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]"
         data-testid={contentTestId}
+        data-vaul-no-drag
       >
         {children}
       </div>
     </>
   );
-
   if (confirmationHost)
     return (
       <MobileConfirmationHost open={open} surface="drawer">
-        {({ contentProps }) => (
-          <Drawer open={open} onOpenChange={onOpenChange}>
-            <DrawerContent onCloseAutoFocus={onCloseAutoFocus} {...contentProps}>
-              <MobileConfirmationHostBody>{content}</MobileConfirmationHostBody>
-            </DrawerContent>
-          </Drawer>
-        )}
+        {({ contentProps }) => {
+          const hostedEscape = contentProps.onEscapeKeyDown;
+          const handleHostedEscape =
+            hostedEscape && onEscapeKeyDown
+              ? (event: KeyboardEvent) => {
+                  hostedEscape(event);
+                  if (!event.defaultPrevented) onEscapeKeyDown(event);
+                }
+              : (hostedEscape ?? onEscapeKeyDown);
+          return (
+            <Drawer open={open} onOpenChange={onOpenChange}>
+              <DrawerContent
+                {...contentProps}
+                onCloseAutoFocus={onCloseAutoFocus}
+                onPointerDownOutside={onPointerDownOutside}
+                onFocusOutside={onFocusOutside}
+                onEscapeKeyDown={handleHostedEscape}
+              >
+                <MobileConfirmationHostBody>{content}</MobileConfirmationHostBody>
+              </DrawerContent>
+            </Drawer>
+          );
+        }}
       </MobileConfirmationHost>
     );
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent onCloseAutoFocus={onCloseAutoFocus}>{content}</DrawerContent>
+      <DrawerContent
+        onCloseAutoFocus={onCloseAutoFocus}
+        onPointerDownOutside={onPointerDownOutside}
+        onFocusOutside={onFocusOutside}
+        onEscapeKeyDown={onEscapeKeyDown}
+      >
+        {content}
+      </DrawerContent>
     </Drawer>
   );
 }

@@ -336,10 +336,9 @@ func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	)`
 	args := []any{string(settingsPayload)}
 	if patch != nil {
-		patchArgs := makeTaskCreateLastUsedJSONSetArgs(*patch)
-		if len(patchArgs) > 0 {
-			placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(patchArgs)/2), ", ")
-			settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
+		patchSQL, patchArgs := makeTaskCreateLastUsedJSONSetSQL(*patch)
+		if patchSQL != "" {
+			settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, patchSQL)
 			args = append(args, patchArgs...)
 		}
 	}
@@ -420,8 +419,8 @@ func buildTaskCreateLastUsedUpdate(driver string, patch models.TaskCreateLastUse
 }
 
 func buildSQLiteTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any, []any, bool) {
-	patchArgs := makeTaskCreateLastUsedJSONSetArgs(patch)
-	if len(patchArgs) == 0 {
+	patchSQL, patchArgs := makeTaskCreateLastUsedJSONSetSQL(patch)
+	if patchSQL == "" {
 		return "", nil, nil, false
 	}
 	base := "CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END"
@@ -430,8 +429,7 @@ func buildSQLiteTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (strin
 		base,
 		base,
 	)
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ?, ", len(patchArgs)/2), ", ")
-	settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, placeholders)
+	settingsExpr = fmt.Sprintf("json_set(%s, %s)", settingsExpr, patchSQL)
 	diffExpr, diffArgs := makeTaskCreateLastUsedDifferenceSQLite(patch)
 	query := fmt.Sprintf(`
 		UPDATE users
@@ -447,45 +445,40 @@ func buildSQLiteTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (strin
 // as the same choice.
 func makeTaskCreateLastUsedDifferenceSQLite(patch models.TaskCreateLastUsed) (string, []any) {
 	base := "CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}' ELSE settings END"
-	clauses := []string{}
-	args := []any{}
-	add := func(path, value string) {
-		clauses = append(clauses, fmt.Sprintf("COALESCE(json_extract(%s, '%s'), '') IS NOT ?", base, path))
-		args = append(args, value)
-	}
-	if patch.RepositoryID != "" {
-		add("$.task_create_last_used.repository_id", patch.RepositoryID)
-	}
-	if patch.Branch != "" || patch.RepositoryID != "" {
-		add("$.task_create_last_used.branch", patch.Branch)
-	}
-	if patch.AgentProfileID != "" {
-		add("$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
-	}
-	if patch.ExecutorProfileID != "" {
-		add("$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
-	}
-	for _, workspaceID := range safeTaskCreateWorkspaceKeys(patch) {
-		add("$.task_create_last_used.workflow_ids_by_workspace."+workspaceID, patch.WorkflowIDsByWorkspace[workspaceID])
+	pairs := makeTaskCreateLastUsedJSONSetPairs(patch)
+	clauses := make([]string, 0, len(pairs))
+	args := make([]any, 0, len(pairs)*2)
+	for _, pair := range pairs {
+		clauses = append(clauses, fmt.Sprintf("COALESCE(json_extract(%s, ?), '') IS NOT ?", base))
+		args = append(args, pair.path, pair.value)
 	}
 	return strings.Join(clauses, " OR "), args
 }
 
-// makeTaskCreateLastUsedJSONSetArgs flattens the patch into JSON1 json_set
-// path/value arguments, skipping empty fields and unsafe workspace path keys.
-func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
-	args := []any{}
+type taskCreateLastUsedJSONSetPair struct {
+	path    string
+	value   any
+	rawJSON bool
+}
+
+// makeTaskCreateLastUsedJSONSetPairs converts the patch into JSON1 path/value
+// pairs, skipping empty fields and unsafe workspace path keys.
+func makeTaskCreateLastUsedJSONSetPairs(patch models.TaskCreateLastUsed) []taskCreateLastUsedJSONSetPair {
+	pairs := []taskCreateLastUsedJSONSetPair{}
+	appendPair := func(path string, value any) {
+		pairs = append(pairs, taskCreateLastUsedJSONSetPair{path: path, value: value})
+	}
 	if patch.RepositoryID != "" {
-		args = append(args, "$.task_create_last_used.repository_id", patch.RepositoryID)
+		appendPair("$.task_create_last_used.repository_id", patch.RepositoryID)
 	}
 	if patch.Branch != "" || patch.RepositoryID != "" {
-		args = append(args, "$.task_create_last_used.branch", patch.Branch)
+		appendPair("$.task_create_last_used.branch", patch.Branch)
 	}
 	if patch.AgentProfileID != "" {
-		args = append(args, "$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
+		appendPair("$.task_create_last_used.agent_profile_id", patch.AgentProfileID)
 	}
 	if patch.ExecutorProfileID != "" {
-		args = append(args, "$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
+		appendPair("$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
 	}
 	workflowIDs := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
 	for workspaceID := range patch.WorkflowIDsByWorkspace {
@@ -500,12 +493,49 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 		// Workspace IDs are generated UUIDs. SQLite JSON1 does not support
 		// PostgreSQL-style parameterized path segments, so reject punctuation
 		// rather than interpolating a key that could change the JSON path.
-		args = append(args,
-			"$.task_create_last_used.workflow_ids_by_workspace."+workspaceID,
-			workflowID,
-		)
+		appendPair("$.task_create_last_used.workflow_ids_by_workspace."+workspaceID, workflowID)
+	}
+	for _, pair := range taskCreateLastUsedSourcePairs(patch) {
+		pairs = append(pairs, taskCreateLastUsedJSONSetPair{
+			path:    "$.task_create_last_used.workspace_sources_by_workspace." + pair.workspaceID,
+			value:   pair.json,
+			rawJSON: true,
+		})
+	}
+	return pairs
+}
+
+// makeTaskCreateLastUsedJSONSetArgs flattens the patch into JSON1 json_set
+// path/value arguments. It remains useful to test path filtering independently
+// from the SQL expression that marks source arrays as raw JSON.
+func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
+	pairs := makeTaskCreateLastUsedJSONSetPairs(patch)
+	args := make([]any, 0, len(pairs)*2)
+	for _, pair := range pairs {
+		args = append(args, pair.path, pair.value)
 	}
 	return args
+}
+
+// makeTaskCreateLastUsedJSONSetSQL builds the JSON1 argument list. Values
+// containing a serialized source array must pass through json(?) so SQLite
+// stores an array/object instead of a quoted string.
+func makeTaskCreateLastUsedJSONSetSQL(patch models.TaskCreateLastUsed) (string, []any) {
+	pairs := makeTaskCreateLastUsedJSONSetPairs(patch)
+	if len(pairs) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, 0, len(pairs))
+	args := make([]any, 0, len(pairs)*2)
+	for _, pair := range pairs {
+		valuePlaceholder := "?"
+		if pair.rawJSON {
+			valuePlaceholder = "json(?)"
+		}
+		placeholders = append(placeholders, "?, "+valuePlaceholder)
+		args = append(args, pair.path, pair.value)
+	}
+	return strings.Join(placeholders, ", "), args
 }
 
 // isSafeTaskCreateWorkspacePathKey reports whether a workspace id can be
@@ -583,6 +613,13 @@ func makeTaskCreateLastUsedDifferencePostgres(patch models.TaskCreateLastUsed) (
 	for _, workspaceID := range safeTaskCreateWorkspaceKeys(patch) {
 		addWorkspace(workspaceID, patch.WorkflowIDsByWorkspace[workspaceID])
 	}
+	for _, pair := range taskCreateLastUsedSourcePairs(patch) {
+		clauses = append(clauses, fmt.Sprintf(
+			"%s #> ARRAY['task_create_last_used','workspace_sources_by_workspace',?]::text[] IS DISTINCT FROM ?::jsonb",
+			base,
+		))
+		args = append(args, pair.workspaceID, pair.json)
+	}
 	return strings.Join(clauses, " OR "), args
 }
 
@@ -622,7 +659,7 @@ func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.T
 }
 
 // normalizePostgresTaskCreateLastUsedExpr builds the jsonb expression that
-// reads (or defaults) the task_create_last_used object and its workflow map.
+// reads (or defaults) the task_create_last_used object and its workspace maps.
 func normalizePostgresTaskCreateLastUsedExpr(base string) string {
 	taskCreate := fmt.Sprintf("COALESCE(%s->'task_create_last_used', '{}'::jsonb)", base)
 	workflowMap := fmt.Sprintf(
@@ -630,10 +667,20 @@ func normalizePostgresTaskCreateLastUsedExpr(base string) string {
 		taskCreate,
 		taskCreate,
 	)
-	return fmt.Sprintf(
+	sourcesMap := fmt.Sprintf(
+		"CASE WHEN jsonb_typeof(%s->'workspace_sources_by_workspace') = 'object' THEN %s->'workspace_sources_by_workspace' ELSE '{}'::jsonb END",
+		taskCreate,
+		taskCreate,
+	)
+	workflowNormalized := fmt.Sprintf(
 		"jsonb_set(%s, '{workflow_ids_by_workspace}', %s, true)",
 		taskCreate,
 		workflowMap,
+	)
+	return fmt.Sprintf(
+		"jsonb_set(%s, '{workspace_sources_by_workspace}', %s, true)",
+		workflowNormalized,
+		sourcesMap,
 	)
 }
 
@@ -672,7 +719,41 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 		)
 		args = append(args, workspaceID, workflowID)
 	}
+	for _, pair := range taskCreateLastUsedSourcePairs(patch) {
+		expr = fmt.Sprintf(
+			"jsonb_set(%s, ARRAY['task_create_last_used','workspace_sources_by_workspace',?::text], ?::jsonb, true)",
+			expr,
+		)
+		args = append(args, pair.workspaceID, pair.json)
+	}
 	return expr, args
+}
+
+type taskCreateLastUsedSourcePair struct {
+	workspaceID string
+	json        string
+}
+
+func taskCreateLastUsedSourcePairs(patch models.TaskCreateLastUsed) []taskCreateLastUsedSourcePair {
+	ids := make([]string, 0, len(patch.WorkspaceSourcesByWorkspace))
+	for workspaceID := range patch.WorkspaceSourcesByWorkspace {
+		if isSafeTaskCreateWorkspacePathKey(workspaceID) {
+			ids = append(ids, workspaceID)
+		}
+	}
+	sort.Strings(ids)
+	pairs := make([]taskCreateLastUsedSourcePair, 0, len(ids))
+	for _, workspaceID := range ids {
+		sources := patch.WorkspaceSourcesByWorkspace[workspaceID]
+		if sources == nil {
+			sources = []models.TaskCreateLastUsedSource{}
+		}
+		encoded, err := json.Marshal(sources)
+		if err == nil {
+			pairs = append(pairs, taskCreateLastUsedSourcePair{workspaceID: workspaceID, json: string(encoded)})
+		}
+	}
+	return pairs
 }
 
 // marshalUserSettingsPayload serializes the settings model to the stored JSON

@@ -5,6 +5,7 @@ import type {
   DialogFormState,
   useTaskCreateDialogData,
 } from "@/components/task-create-dialog-state";
+import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
 import { useRepositorySets } from "@/hooks/domains/workspace/use-repository-sets";
 import { useApplyRepositorySet } from "@/components/task-create-dialog-repository-sets-apply";
 import { selectedRepositoryIdsForSet } from "@/components/task-create-dialog-repository-sets";
@@ -17,11 +18,15 @@ export function useRepositorySetsForTaskCreateDialog(
   userSettingsLoaded: boolean,
 ) {
   const { sets } = useRepositorySets(props.workspaceId ?? null, props.open);
+  const selections = resolveRepositorySelections(fs);
   const onApply = useApplyRepositorySet({
     rows: fs.repositories,
     repositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
+    setNoRepository: fs.setNoRepository,
+    selections,
+    setRepositorySelections: fs.resetRepositorySelections,
   });
   const [saveOpen, setSaveOpen] = useState(false);
   const canSave =
@@ -31,6 +36,8 @@ export function useRepositorySetsForTaskCreateDialog(
   return {
     sets,
     onApply,
+    rows: fs.repositories,
+    repositories,
     save:
       canSave && props.workspaceId
         ? {
@@ -39,6 +46,7 @@ export function useRepositorySetsForTaskCreateDialog(
             repositories,
             isLocalExecutor: computed.isLocalExecutor,
             freshBranchEnabled: fs.freshBranchEnabled,
+            selections,
             open: saveOpen,
             setOpen: setSaveOpen,
           }

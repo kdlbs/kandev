@@ -94,7 +94,6 @@ test("edits saved-prompt chips and submits their aliases on mobile", async ({
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
-    await dialog.getByTestId("source-mode-scratch").tap();
     await dialog.getByTestId("task-title-input").fill("Mobile prompt reference task");
 
     const editor = dialog.getByTestId("task-description-input");
